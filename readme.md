@@ -25,18 +25,16 @@ The command table is as follows;
 The data write word is not used.
 
 ## Spi memory mapping
-The memory is initiated with the value 10 in register 0 and the value 20 in register 20.
-As before, Raspberry pi sends two words over SPI. The first word is the command word. The second word is the data write word.
+The memory is initiated with the value 10 in register 0 and the value 20 in register 1.
+As before, Raspberry pi sends two words over SPI. The first word is the command word. 
+The second word is the data write word.
 The command table is as follows;
-    command 1 --> write value in register 0
-    command 2 --> write value in register 1
-    command 3 --> obtain the result of the sum of register 0 and 1.
-    else      --> reply with 0
+command 1 --> self.write value in register 0 and obtain 0
+command 2 --> self.write value in register 1 and obtain 0
+command 3 --> obtain the result of the sum of register 0 and 1.
+else      --> reply with 0
 
-
-
-# je moet een reset hebben als er een fout optreed
-
+## Laser scanner
 # de host stuurt een willekeurig woordt, het krijgt ik wil data of ik wil geen data terug
 # als de status is geef data, dan stuurt de raspberry data
 # als de slave voldoende ontvangen heeft, dan leest de slave de data uit, de status wordt ik wil geen data

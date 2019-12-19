@@ -36,12 +36,6 @@ class TestSPI(unittest.TestCase):
                             ).Elif(command == 2,
                                     spislave.miso.eq(8)
                             ).Else(spislave.miso.eq(0))
-# stel je done counter kan alleen 0 of 1 zijn
-# op elke done rise doe je dan nog steeds de done counter verhogen, deze flipt dus tussen
-# 0 en 1.
-# maar als done counter is nul dan is het signaal wat je ontvangt het commando
-# het commando is on default 0 maar dit wordt dus meteen geupdate na een rise
-# het probleem bij deze is dat als er iets mis gaat, 
                 self.done_counter = Signal()
                 self.sync += \
                     If(done_rise,
@@ -52,9 +46,10 @@ class TestSPI(unittest.TestCase):
                         command.eq(spislave.mosi)
                     )
 
+
         def master_generator(dut):
-            for i in range(0,2):
-                yield dut.master.mosi.eq(0xaf)
+            def transaction(data_sent, data_received):
+                yield dut.master.mosi.eq(data_sent)
                 yield dut.master.length.eq(8)
                 yield dut.master.start.eq(1)
                 yield
@@ -62,51 +57,30 @@ class TestSPI(unittest.TestCase):
                 yield
                 while (yield dut.master.done) == 0:
                     yield
-                self.assertEqual((yield dut.master.miso), i)
+                self.assertEqual((yield dut.master.miso), data_received)
+            yield from transaction(1, 0)
+            yield from transaction(1, 2)
+            yield from transaction(2, 2)
+            yield from transaction(2, 8)
+
 
         def slave_generator(dut):
-            for i in range(0,2):
-                self.assertEqual((yield dut.done_counter),i)
+            def transaction(data_received, done_counter):
+                self.assertEqual((yield dut.done_counter),done_counter)
                 while (yield dut.slave.start) == 0:
                     yield
                 while (yield dut.slave.done) == 0:
                     yield
-                self.assertEqual((yield dut.slave.mosi), 0xaf)
+                self.assertEqual((yield dut.slave.mosi), data_received)
                 self.assertEqual((yield dut.slave.length), 8)
-                self.assertEqual((yield dut.done_counter),i+1)
-
-
-
-        # def master_generator(dut):
-        #     def transaction(data_sent, data_received):
-        #         yield dut.master.mosi.eq(data_sent)
-        #         yield dut.master.length.eq(8)
-        #         yield dut.master.start.eq(1)
-        #         yield
-        #         yield dut.master.start.eq(0)
-        #         yield
-        #         while (yield dut.master.done) == 0:
-        #             yield
-        #         self.assertEqual((yield dut.master.miso), data_received)
-        #     transaction(1, 0)
-        #     transaction(1, 2)
-
-
-        # def slave_generator(dut):
-        #     def transaction(data_received, done_counter):
-        #         self.assertEqual((yield dut.done_counter),done_counter)
-        #         while (yield dut.slave.start) == 0:
-        #             yield
-        #         while (yield dut.slave.done) == 0:
-        #             yield
-        #         self.assertEqual((yield dut.slave.mosi), data_received)
-        #         self.assertEqual((yield dut.slave.length), 8)
-        #         next_count = 0
-        #         if done_counter == 0:
-        #             next_count = 1
-        #         self.assertEqual((yield dut.done_counter), next_count)
-        #     transaction(1, 0)
-        #     transaction(1, 0)
+                next_count = 0
+                if done_counter == 0:
+                    next_count = 1
+                self.assertEqual((yield dut.done_counter), next_count)
+            yield from transaction(1, 0)
+            yield from transaction(1, 1)
+            yield from transaction(2, 0)
+            yield from transaction(2, 1)
 
         dut = DUT()
         run_simulation(dut, [master_generator(dut), slave_generator(dut)])
