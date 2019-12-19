@@ -40,8 +40,6 @@ else      --> reply with 0
 Note that you can flow over the sum, as both arguments and the sum is 8 bit.
 
 
-Just use standard HTML comments:
-
 <!--
 ## Laser scanner
 # de host stuurt een willekeurig woordt, het krijgt ik wil data of ik wil geen data terug
