@@ -3,6 +3,8 @@ from migen.build.generic_platform import Subsignal, Pins, IOStandard
 from migen.build.lattice import LatticePlatform
 from migen.build.lattice.programmer import MyStormProgrammer
 
+# design doc can be found here https://blackmesalabs.wordpress.com/2017/02/07/icezero-fpga-board-for-rasppi/
+# pinout can be found here https://www.dropbox.com/s/gwxz4o7gqaksnoy/ice_zero_hdd.txt?dl=0
 
 _io = [
     ("sram", 0,
@@ -19,11 +21,17 @@ _io = [
     ),
 
     ("clk100", 0, Pins("49"), IOStandard("LVCMOS33")),
-
     ("user_led", 0, Pins("110"), IOStandard("LVCMOS33")),
     ("user_led", 1, Pins("93"), IOStandard("LVCMOS33")),
     ("user_led", 2, Pins("94"), IOStandard("LVCMOS33")),
-
+    ("spi", 0,
+        Subsignal('cs_n',Pins("85")),
+        Subsignal('ce1',Pins("78")),
+        Subsignal('miso',Pins("87")),
+        Subsignal('mosi',Pins("90")),
+        Subsignal('clk',Pins("79")),
+        IOStandard("LVCMOS33"))
+    
 ]
 
 _connectors = []
