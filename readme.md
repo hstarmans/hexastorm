@@ -33,6 +33,7 @@ command 1 --> self.write value in register 0 and obtain 0
 command 2 --> self.write value in register 1 and obtain 0
 command 3 --> obtain the result of the sum of register 0 and 1.
 else      --> reply with 0
+Note that you can flow over the sum, as both arguments and the sum is 8 bit.
 
 ## Laser scanner
 # de host stuurt een willekeurig woordt, het krijgt ik wil data of ik wil geen data terug
