@@ -32,8 +32,8 @@ As before, Raspberry pi sends two words over SPI. The first word is the command 
 The second word is the data write word.
 The command table is as follows;
 ```
-command 1 --> self.write value in register 0 and obtain 0
-command 2 --> self.write value in register 1 and obtain 0
+command 1 --> write value in register 0 and obtain 0
+command 2 --> write value in register 1 and obtain 0
 command 3 --> obtain the result of the sum of register 0 and 1.
 else      --> reply with 0
 ```
