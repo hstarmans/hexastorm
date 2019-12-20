@@ -13,65 +13,68 @@
 """
 import unittest
 from migen import *
-
 from litex.soc.cores.spi import SPIMaster, SPISlave
+
+import sys
+sys.path.append("..") 
+import icezero as board
 
 # stel je doet dit in een statemachine
 # toestand 1 is idle, wacht op start
 # toestand 2 is start ontvangen, wacht op done of na timeout ga naar idle
 # toestand 3 is done ontvangen, verwerk input
-
-
-
-
+class SpiMemmapping(Module):
+    def __init__(self, spi_port, data_width):
+        self.specials.mem = Memory(8, 2, init = [10, 20])
+        spislave = SPISlave(spi_port, data_width=8)
+        self.submodules.slave = spislave
+        self.command = Signal(8)
+        self.sump = Signal(8)
+        self.write = Signal(8)
+        done_d = Signal()
+        done_rise = Signal()
+        self.sync += done_d.eq(spislave.done)
+        self.comb += done_rise.eq(spislave.done & ~done_d)
+        start_d = Signal()
+        start_rise = Signal()
+        self.sync += start_d.eq(spislave.start)
+        self.comb += start_rise.eq(spislave.start & ~start_d)
+        self.comb += self.sump.eq(self.mem[0]+self.mem[1])
+        
+        self.comb += If(self.command == 1,
+                            self.mem[0].eq(self.write)
+                    ).Elif(self.command == 2,
+                            self.mem[1].eq(self.write)
+                    )
+        self.start_counter = Signal()
+        self.sync += \
+            If(start_rise,
+                self.start_counter.eq(1)
+            )
+        self.done_counter = Signal()
+        self.sync += \
+            If((self.start_counter == 1) & (done_rise == 1),
+                self.done_counter.eq(self.done_counter+1),
+                self.start_counter.eq(0),
+                If(self.done_counter == 0,
+                    self.command.eq(spislave.mosi)
+                ).Else(self.write.eq(spislave.mosi))
+            )
+        self.comb += If((self.command == 3) & (self.done_counter == 1) ,
+                            spislave.miso.eq(self.sump)
+                    ).Else(spislave.miso.eq(0)
+                    )
 
 class TestSPI(unittest.TestCase):
     def test_spi_slave_xfer(self):
         class DUT(Module):
             def __init__(self):
-                self.specials.mem = Memory(8, 2, init = [10, 20])
                 pads = Record([("clk", 1), ("cs_n", 1), ("mosi", 1), ("miso", 1)])
                 self.submodules.master = SPIMaster(pads, data_width=8,
                     sys_clk_freq=100e6, spi_clk_freq=5e6,
                     with_csr=False)
-                spislave = SPISlave(pads, data_width=8)
-                self.submodules.slave = spislave
-                self.command = Signal(8)
-                self.sump = Signal(8)
-                self.write = Signal(8)
-                done_d = Signal()
-                done_rise = Signal()
-                self.sync += done_d.eq(spislave.done)
-                self.comb += done_rise.eq(spislave.done & ~done_d)
-                start_d = Signal()
-                start_rise = Signal()
-                self.sync += start_d.eq(spislave.start)
-                self.comb += start_rise.eq(spislave.start & ~start_d)
-                self.comb += self.sump.eq(self.mem[0]+self.mem[1])
-                
-                self.comb += If(self.command == 1,
-                                    self.mem[0].eq(self.write)
-                            ).Elif(self.command == 2,
-                                    self.mem[1].eq(self.write)
-                            )
-                self.start_counter = Signal()
-                self.sync += \
-                    If(start_rise,
-                        self.start_counter.eq(1)
-                    )
-                self.done_counter = Signal()
-                self.sync += \
-                    If((self.start_counter == 1) & (done_rise == 1),
-                        self.done_counter.eq(self.done_counter+1),
-                        self.start_counter.eq(0),
-                        If(self.done_counter == 0,
-                            self.command.eq(spislave.mosi)
-                        ).Else(self.write.eq(spislave.mosi))
-                    )
-                self.comb += If((self.command == 3) & (self.done_counter == 1) ,
-                                    spislave.miso.eq(self.sump)
-                            ).Else(spislave.miso.eq(0)
-                            )
+                self.submodules.spimemmap = SpiMemmapping(pads, 8)
+
 
         def master_generator(dut):
             def transaction(data_sent, data_received):
@@ -94,16 +97,16 @@ class TestSPI(unittest.TestCase):
             
         def slave_generator(dut):
             def transaction(data_received): 
-                while (yield dut.slave.start) == 0:
+                while (yield dut.spimemmap.slave.start) == 0:
                     yield
-                while (yield dut.slave.done) == 0:
+                while (yield dut.spimemmap.slave.done) == 0:
                     yield
-                self.assertEqual((yield dut.slave.mosi), data_received)
-                self.assertEqual((yield dut.slave.length), 8)
-            self.assertEqual((yield dut.done_counter), 0)
+                self.assertEqual((yield dut.spimemmap.slave.mosi), data_received)
+                self.assertEqual((yield dut.spimemmap.slave.length), 8)
+            self.assertEqual((yield dut.spimemmap.done_counter), 0)
             yield from transaction(3)
             yield
-            self.assertEqual((yield dut.done_counter), 1)
+            self.assertEqual((yield dut.spimemmap.done_counter), 1)
             #self.assertEqual((yield dut.command), 3)
             #yield from transaction(3, 1)
 
@@ -112,8 +115,11 @@ class TestSPI(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()
-
+    # unittest.main()
+    plat = board.Platform()
+    spi_port = plat.request("spi")
+    spi_memmapping = SpiMemmapping(spi_port, 8)
+    plat.build(spi_memmapping)
 
 
 

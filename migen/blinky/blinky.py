@@ -8,7 +8,8 @@
 
 from migen.fhdl import *
 from migen import *
-
+import sys
+sys.path.append("..") 
 import icezero as board
 
 class Blinky(Module):
