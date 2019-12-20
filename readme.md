@@ -26,6 +26,10 @@ The command table is as follows;
 ```
 The data write word is not used.
 
+# Blink Mem
+The memory is initialized with 1 or 0.
+The FPGA reads from the memory. If the memory is 1 the led is on and off otherwise.
+
 ## Spi memory mapping
 The memory is initiated with the value 10 in register 0 and the value 20 in register 1.
 As before, Raspberry pi sends two words over SPI. The first word is the command word. 
@@ -42,7 +46,9 @@ Note that you can flow over the sum, as both arguments and the sum is 8 bit.
 
 <!--
 Wat kun je doen?
-  - je kunt testen of dit ook op de FPGA functioneert
+  - de code werkt op een FPGA, maar je memory werkt zo niet.. dit moet anders
+  - zie https://git.p-fb.net/pef/olimex/blob/master/adc.py
+  - maak eerst een blink met memory
   - je kunt de code opruimen en beter leesbaar maken, door het gebruik van een statemachine
   - als ik een pakket verstuurd heb wil ik weten dat ie is aangekomen
   - ik wil een test maken waarin je data stuurt naar de fpga, verwerkt, en dan weer opnieuw stuurt.

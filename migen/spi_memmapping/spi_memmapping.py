@@ -12,6 +12,7 @@
     Rik Starmans
 """
 import unittest
+from migen.fhdl import verilog
 from migen import *
 from litex.soc.cores.spi import SPIMaster, SPISlave
 
@@ -26,6 +27,8 @@ import icezero as board
 class SpiMemmapping(Module):
     def __init__(self, spi_port, data_width):
         self.specials.mem = Memory(8, 2, init = [10, 20])
+        
+        
         spislave = SPISlave(spi_port, data_width=8)
         self.submodules.slave = spislave
         self.command = Signal(8)
@@ -119,7 +122,9 @@ if __name__ == '__main__':
     plat = board.Platform()
     spi_port = plat.request("spi")
     spi_memmapping = SpiMemmapping(spi_port, 8)
-    plat.build(spi_memmapping)
+    print(verilog.convert(spi_memmapping))
+    
+    #plat.build(spi_memmapping)
 
 
 
