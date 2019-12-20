@@ -31,20 +31,29 @@ class TestSPI(unittest.TestCase):
                 done_rise = Signal()
                 self.sync += done_d.eq(spislave.done)
                 self.comb += done_rise.eq(spislave.done & ~done_d)
+                start_d = Signal()
+                start_rise = Signal()
+                self.sync += start_d.eq(spislave.start)
+                self.comb += start_rise.eq(spislave.start & ~start_d)
                 self.comb += If(command == 1,
                                     spislave.miso.eq(2)
                             ).Elif(command == 2,
                                     spislave.miso.eq(8)
                             ).Else(spislave.miso.eq(0))
+                self.start_counter = Signal()
+                self.sync += \
+                    If(start_rise,
+                        self.start_counter.eq(1)
+                    )
                 self.done_counter = Signal()
                 self.sync += \
-                    If(done_rise,
-                        self.done_counter.eq(self.done_counter+1)
-                    )
-                self.sync += \
-                    If(done_rise & self.done_counter ==0,
-                        command.eq(spislave.mosi)
-                    )
+                     If((self.start_counter == 1 ) & (done_rise == 1),
+                         self.done_counter.eq(self.done_counter+1),
+                         self.start_counter.eq(0),
+                         If(self.done_counter == 0,
+                            command.eq(spislave.mosi)
+                         )
+                     )
 
 
         def master_generator(dut):
@@ -76,12 +85,12 @@ class TestSPI(unittest.TestCase):
                 next_count = 0
                 if done_counter == 0:
                     next_count = 1
+                yield
                 self.assertEqual((yield dut.done_counter), next_count)
             yield from transaction(1, 0)
             yield from transaction(1, 1)
             yield from transaction(2, 0)
             yield from transaction(2, 1)
-
         dut = DUT()
         run_simulation(dut, [master_generator(dut), slave_generator(dut)])
 

@@ -41,6 +41,17 @@ Note that you can flow over the sum, as both arguments and the sum is 8 bit.
 
 
 <!--
+Wat kun je doen?
+  - je kunt testen of dit ook op de FPGA functioneert
+  - je kunt de code opruimen en beter leesbaar maken, door het gebruik van een statemachine
+  - als ik een pakket verstuurd heb wil ik weten dat ie is aangekomen
+  - ik wil een test maken waarin je data stuurt naar de fpga, verwerkt, en dan weer opnieuw stuurt.
+         hoe snel kan dit?
+
+Wat is de basis van het apparaat?
+  - je kunt vragen wat is je toestand
+  - je kunt een fout herkennen als die optreedt en krijgt informatie over die fout
+
 ## Laser scanner
 # de host stuurt een willekeurig woordt, het krijgt ik wil data of ik wil geen data terug
 # als de status is geef data, dan stuurt de raspberry data

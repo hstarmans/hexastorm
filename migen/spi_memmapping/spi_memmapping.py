@@ -16,6 +16,15 @@ from migen import *
 
 from litex.soc.cores.spi import SPIMaster, SPISlave
 
+# stel je doet dit in een statemachine
+# toestand 1 is idle, wacht op start
+# toestand 2 is start ontvangen, wacht op done of na timeout ga naar idle
+# toestand 3 is done ontvangen, verwerk input
+
+
+
+
+
 class TestSPI(unittest.TestCase):
     def test_spi_slave_xfer(self):
         class DUT(Module):
@@ -28,14 +37,6 @@ class TestSPI(unittest.TestCase):
                 spislave = SPISlave(pads, data_width=8)
                 self.submodules.slave = spislave
                 self.command = Signal(8)
-                # note can flow over
-                # je hebt ook de start nodig!!
-                # is er een start geweest? ja
-                # is er een start en een done geweest ?
-                      # zet dan is er een start geweest op nul
-                # is er een done geweest
-                # zo ja zet de start dan 0
-
                 self.sump = Signal(8)
                 self.write = Signal(8)
                 done_d = Signal()
