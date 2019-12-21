@@ -1,5 +1,6 @@
 *.asc
 *.bin
 *.blif
+*.vcd
 build*
 __pycache__*

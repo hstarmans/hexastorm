@@ -16,7 +16,7 @@ import icezero as board
 class BlinkMem(Module):
     def __init__(self, led):
         self.led = led
-        self.specials.mem = Memory(1, 8, 8*[0])
+        self.specials.mem = Memory(1, 8, 8*[1])
         val = Signal()
         p1 = self.mem.get_port(write_capable=True)
         p2 = self.mem.get_port(has_re=True)

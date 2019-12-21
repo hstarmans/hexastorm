@@ -1,14 +1,13 @@
 """
     spi_memmapping.py
     The memory is initiated with the value 10 in register 0 and the value 20 in register 1.
-    As before, Raspberry pi sends two words over SPI. The first word is the command word. 
-    The second word is the data write word.
+    As before, Raspberry pi sends one word made up of two bytes over SPI. The first byte is the command. 
+    The second byte is optionally the data or ignored.
     The command table is as follows;
-    command 1 --> self.write value in register 0 and obtain 0
-    command 2 --> self.write value in register 1 and obtain 0
-    command 3 --> obtain the result of the sum of register 0 and 1.
-    else      --> reply with 0
-    
+    command 1 --> write data in register 0 and reply with (0,0)
+    command 2 --> read value from register 1 and reply with (0,value)
+    else --> reply with (0,0)
+
     Rik Starmans
 """
 import unittest
@@ -20,20 +19,46 @@ import sys
 sys.path.append("..") 
 import icezero as board
 
-# stel je doet dit in een statemachine
+
+# Er zijn twee state machines, je zou de verwerker en ontvanger achter elkaar kunnen koppelen
+# in een state machine of je maakt er twee aparte van.
+# Het verschil is niet heel erg groot, de toestanden blijven ze worden alleen anders uitgevoerd
+# De verwerker kan met start en done werken, nu laat je hem werken met aan en uit
+# Een nadeel is dat twee verschillende objecten dan schijven op een object kunnen lezen en schrijven
+
+# Ontvanger
 # toestand 1 is idle, wacht op start
 # toestand 2 is start ontvangen, wacht op done of na timeout ga naar idle
-# toestand 3 is done ontvangen, verwerk input
+# toestand 3 is done ontvangen, verwerk input 
+#            als verwerker klaar is
+#                update data received en word counter
+#                zet miso op antwoord
+#                ga terug naar 1
+
+# Verwerker
+# Toestand 1: is idle, wacht op start
+# Toestand 2: is start ontvangen, maak een beslissing op basis van woordnummer
+# Woordnummer 1 & commando 2
+#                lees data uit en zet antwoord op uitgelezen data
+#                geef aan input verwerkt en ga terug naar 1
+# Woordnummer 2 & commando 1 
+#                schrijf data en zet antwoord op nul
+#                geef aan input verwerkt en ga terug naar 1
+# Anders
+#                zet antwoord op nul
+#                geef aan input verwerkt en ga terug naar 1
+  
 class SpiMemmapping(Module):
     def __init__(self, spi_port, data_width):
-        self.specials.mem = Memory(8, 2, init = [10, 20])
-        
-        
-        spislave = SPISlave(spi_port, data_width=8)
+        # Memory element
+        self.specials.mem = Memory(data_width, 2, init = [10, 20])
+        p1 = self.mem.get_port(write_capable=True)
+        p2 = self.mem.get_port(has_re=True)
+        self.specials += p1, p2
+        self.ios = {p1.adr, p1.dat_w, p1.we, p2.dat_r, p2.adr, p2.re}
+        # Receiver state machine
+        spislave = SPISlave(spi_port, data_width)
         self.submodules.slave = spislave
-        self.command = Signal(8)
-        self.sump = Signal(8)
-        self.write = Signal(8)
         done_d = Signal()
         done_rise = Signal()
         self.sync += done_d.eq(spislave.done)
@@ -42,31 +67,51 @@ class SpiMemmapping(Module):
         start_rise = Signal()
         self.sync += start_d.eq(spislave.start)
         self.comb += start_rise.eq(spislave.start & ~start_d)
-        self.comb += self.sump.eq(self.mem[0]+self.mem[1])
-        
-        self.comb += If(self.command == 1,
-                            self.mem[0].eq(self.write)
-                    ).Elif(self.command == 2,
-                            self.mem[1].eq(self.write)
-                    )
-        self.start_counter = Signal()
-        self.sync += \
+        self.submodules.receiver = FSM(reset_state = "IDLE")
+        self.bytecounter = Signal()
+        self.receiver.act("IDLE",
             If(start_rise,
-                self.start_counter.eq(1)
+                NextState("WAITFORDONE")))
+        #TODO: add a timeout and fail
+        self.receiver.act("WAITFORDONE",
+            If(done_rise,
+                NextState("PROCESSINPUT")))
+        command = Signal(data_width)
+        self.receiver.act("PROCESSINPUT",
+            NextValue(self.bytecounter, self.bytecounter+1),
+            If(self.bytecounter == 0,
+                NextValue(command, spislave.mosi),
+                If(spislave.mosi == 2,    
+                    NextValue(p2.adr, 0),
+                    NextValue(p2.re,1),
+                    NextState("READ")
+                ).
+                Else(NextValue(spislave.miso,0),
+                    NextState("IDLE")
+                )
+            ).
+            Elif((self.bytecounter == 1) & (command == 1),
+                NextValue(p1.adr, 0),
+                NextValue(p1.dat_w, spislave.mosi),
+                NextValue(p1.we, 1),
+                NextState("WRITE")
+            ).
+            Else(
+                NextValue(spislave.miso, 0),
+                NextState("IDLE")
             )
-        self.done_counter = Signal()
-        self.sync += \
-            If((self.start_counter == 1) & (done_rise == 1),
-                self.done_counter.eq(self.done_counter+1),
-                self.start_counter.eq(0),
-                If(self.done_counter == 0,
-                    self.command.eq(spislave.mosi)
-                ).Else(self.write.eq(spislave.mosi))
-            )
-        self.comb += If((self.command == 3) & (self.done_counter == 1) ,
-                            spislave.miso.eq(self.sump)
-                    ).Else(spislave.miso.eq(0)
-                    )
+        )
+        self.receiver.act("READ",
+            NextValue(p2.re, 0),
+            NextValue(spislave.miso, p2.dat_r),
+            NextState("IDLE")
+        )
+        self.receiver.act("WRITE",
+            NextValue(p1.we, 0),
+            NextValue(spislave.miso, 0),
+            NextState("IDLE")
+        )
+
 
 class TestSPI(unittest.TestCase):
     def test_spi_slave_xfer(self):
@@ -90,13 +135,12 @@ class TestSPI(unittest.TestCase):
                 while (yield dut.master.done) == 0:
                     yield
                 self.assertEqual((yield dut.master.miso), data_received)
-            yield from transaction(3, 0)
-            yield from transaction(3, 30)
+            yield from transaction(2, 0)
+            yield from transaction(2, 10)
             yield from transaction(1, 0)
-            yield from transaction(1, 0)
-            yield from transaction(3, 0)
-            yield from transaction(3, 21)
-
+            yield from transaction(15, 0)
+            yield from transaction(2, 0)
+            yield from transaction(2, 15)
             
         def slave_generator(dut):
             def transaction(data_received): 
@@ -106,10 +150,10 @@ class TestSPI(unittest.TestCase):
                     yield
                 self.assertEqual((yield dut.spimemmap.slave.mosi), data_received)
                 self.assertEqual((yield dut.spimemmap.slave.length), 8)
-            self.assertEqual((yield dut.spimemmap.done_counter), 0)
-            yield from transaction(3)
-            yield
-            self.assertEqual((yield dut.spimemmap.done_counter), 1)
+            self.assertEqual((yield dut.spimemmap.bytecounter), 0)
+            yield from transaction(2)
+            while (yield dut.spimemmap.bytecounter) == 0:
+                yield
             #self.assertEqual((yield dut.command), 3)
             #yield from transaction(3, 1)
 
@@ -118,13 +162,13 @@ class TestSPI(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    # unittest.main()
+    #unittest.main()
     plat = board.Platform()
     spi_port = plat.request("spi")
     spi_memmapping = SpiMemmapping(spi_port, 8)
-    print(verilog.convert(spi_memmapping))
+    # print(verilog.convert(spi_memmapping))
     
-    #plat.build(spi_memmapping)
+    plat.build(spi_memmapping)
 
 
 
