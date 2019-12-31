@@ -4,15 +4,16 @@
     As before, Raspberry pi sends one word made up of two bytes over SPI. The first byte is the command. 
     The second byte is optionally the data or ignored.
     The command table is as follows;
-    command 1 --> write data in register 0 and reply with (0,0)
+    command 1 --> write data in register 0 and reply with (0,1)
     command 2 --> read value from register 1 and reply with (0,value)
-    command 3 --> change address
+    command 3 --> change address and reply with (0,3)
     else --> reply with (0,0)
 
     Rik Starmans
 """
 import unittest
 from migen.fhdl import verilog
+from migen.fhdl.tools import list_special_ios
 from migen import *
 from litex.soc.cores.spi import SPIMaster, SPISlave
 
@@ -20,51 +21,14 @@ import sys
 sys.path.append("..") 
 import icezero as board
 
-
 class SpiMemmapping(Module):
-    def __init__(self, spi_port, sram, data_width, clk_pin):
-        
-        sram_dout = Signal(16)
-        sram_din = Signal(16)
-        sram_adr = Signal(19)
-        # https://github.com/cliffordwolf/icestorm/blob/master/icefuzz/tests/sb_io.v
-        self.specials += Instance("SB_IO", name = 'sram_dio [15:0]',
-                            p_PIN_TYPE=0b101001,
-                            p_PULLUP=0b0,
-                            io_PACKAGE_PIN=sram.dat,
-                            i_OUTPUT_ENABLE=sram.oe,
-                            i_D_OUT_0 = sram_dout,
-                            o_D_IN_0 = sram_din
-                            )
-        pll_lock = Signal()
-        cd_pll = ClockDomain('sync')
-        # https://freenode.irclog.whitequark.org/m-labs/2019-09-08
-        # https://gist.github.com/cr1901/5de5b276fca539b66fe7f4493a5bfe7d
-        # https://github.com/m-labs/migen/blob/master/doc/fhdl.rst
-        # https://github.com/kbob/nmigen-examples/blob/master/nmigen_lib/pll.py
-        self.specials += Instance("SB_PLL40_PAD", name='pll',
-                            p_FEEDBACK_PATH='SIMPLE',
-                            p_DELAY_ADJUSTMENT_MODE_FEEDBACK='FIXED',
-                            p_DELAY_ADJUST_MODE_RELATIVE='FIXED',
-                            p_PLLOUT_SELECT='GENCLK',
-                            p_FDA_FEEDBACK=0b1111,
-                            p_FDA_RELATIVE=0b1111,
-                            p_DIVR=0b0011,
-                            p_DIVF=0b0101000,
-                            p_DIVQ=0b110,
-                            p_FILTER_RANGE=0b010,
-                            i_PACKAGE_PIN = clk_pin,
-                            o_PLLOUTGLOBAL = cd_pll.clk,
-                            o_LOCK = pll_lock,
-                            i_BYPASS = 0b0,
-                            i_RESETB = 0b1
-        )
-
-        # dit doe je altijd
-        self.sync.cd_pll += sram.adr.eq(sram_adr)
-        self.sync.cd_pll += sram.lb.eq(0)
-        self.sync.cd_pll += sram.ub.eq(0)
-        self.sync.cd_pll += sram.cs.eq(0)
+    def __init__(self, spi_port, data_width):
+        # Memory element
+        self.specials.mem = Memory(8, 512, init = [10,20])
+        p1 = self.mem.get_port(write_capable=True, mode = READ_FIRST)
+        p2 = self.mem.get_port(has_re=True)
+        self.specials += p1, p2
+        self.ios = {p1.adr, p1.dat_w, p1.we, p2.dat_r, p2.adr, p2.re}
         
         # Receiver state machine
         spislave = SPISlave(spi_port, data_width)
@@ -80,8 +44,8 @@ class SpiMemmapping(Module):
         self.submodules.receiver = FSM(reset_state = "IDLE")
         self.bytecounter = Signal()
         self.receiver.act("IDLE",
-            NextValue(sram.oe, 1),
-            NextValue(sram.we, 1),
+            NextValue(p2.adr,2),
+            NextValue(p1.adr,2),
             If(start_rise,
                 NextState("WAITFORDONE")))
         #TODO: add a timeout and fail
@@ -93,8 +57,9 @@ class SpiMemmapping(Module):
             NextValue(self.bytecounter, self.bytecounter+1),
             If(self.bytecounter == 0,
                 NextValue(command, spislave.mosi),
-                If(spislave.mosi == 2,    
-                    NextValue(sram.oe,0),
+                If(spislave.mosi == 2,  
+                    NextValue(p2.re,1),
+                    NextValue(p2.adr, 1),
                     NextState("READ")
                 ).
                 Elif(spislave.mosi == 1,    
@@ -110,12 +75,14 @@ class SpiMemmapping(Module):
                 )
             ).
             Elif((self.bytecounter == 1) & (command == 1),
-                NextValue(sram_dout, spislave.mosi),
-                NextValue(sram.we, 1),
+                NextValue(p1.dat_w, spislave.mosi),
+                NextValue(p1.we, 1),
                 NextState("WRITE")
             ).
             Elif((self.bytecounter == 1) & (command == 3),
-                NextValue(sram_adr, spislave.mosi),
+                NextValue(p2.adr, 0),
+                #NextValue(p1.adr, spislave.mosi),
+                #NextValue(p2.re, 1),
                 NextValue(spislave.miso,0),
                 NextState("IDLE")
             ).
@@ -125,25 +92,93 @@ class SpiMemmapping(Module):
             )
         )
         self.receiver.act("READ",
-            NextValue(sram.oe, 0),
-            NextValue(spislave.miso, sram_din),
+            NextValue(p2.re,0),
+            NextState("READST2")
+        )
+        self.receiver.act("READST2",
+            NextValue(spislave.miso, p2.dat_r),
             NextState("IDLE")
         )
         self.receiver.act("WRITE",
-            NextValue(sram.we, 0),
+            NextValue(p1.we, 0),
             NextValue(spislave.miso, 0),
             NextState("IDLE")
         )
 
+
+class TestSPI(unittest.TestCase):
+    def test_spi_slave_xfer(self):
+        class DUT(Module):
+            def __init__(self):
+                pads = Record([("clk", 1), ("cs_n", 1), ("mosi", 1), ("miso", 1)])
+                self.submodules.master = SPIMaster(pads, data_width=8,
+                    sys_clk_freq=100e6, spi_clk_freq=5e6,
+                    with_csr=False)
+                self.submodules.spimemmap = SpiMemmapping(pads, 8)
+
+
+        def master_generator(dut):
+            def transaction(data_sent, data_received):
+                yield dut.master.mosi.eq(data_sent)
+                yield dut.master.length.eq(8)
+                yield dut.master.start.eq(1)
+                yield
+                yield dut.master.start.eq(0)
+                yield
+                while (yield dut.master.done) == 0:
+                    yield
+                self.assertEqual((yield dut.master.miso), data_received)
+            # yield from transaction(3, 0)
+            # yield from transaction(1, 3)
+            yield from transaction(2, 0)
+            # # this is wrong
+            yield from transaction(2, 20)
+            # change address to 2
+            # yield from transaction(3, 0)
+            # yield from transaction(2, 3)
+            # # # write data 
+            # yield from transaction(1, 0)
+            # yield from transaction(5, 1)
+            # # # change address to 1
+            # yield from transaction(3, 0)
+            # yield from transaction(1, 3)
+            # # # read data at 1
+            # yield from transaction(2, 0)
+            # yield from transaction(2, 10)
+            # yield from transaction(1, 0)
+            # yield from transaction(4, 1)
+            
+        def slave_generator(dut):
+            def transaction(data_received): 
+                while (yield dut.spimemmap.slave.start) == 0:
+                    yield
+                while (yield dut.spimemmap.slave.done) == 0:
+                    yield
+                self.assertEqual((yield dut.spimemmap.slave.mosi), data_received)
+                self.assertEqual((yield dut.spimemmap.slave.length), 8)
+            self.assertEqual((yield dut.spimemmap.bytecounter), 0)
+            yield from transaction(2)
+            # yield from transaction(2)
+            #yield from transaction(3, 1)
+
+        dut = DUT()
+        run_simulation(dut, [master_generator(dut), slave_generator(dut)])
+
+
+
+
 if __name__ == '__main__':
-    plat = board.Platform()
-    spi_port = plat.request("spi")
-    sram = plat.request("sram")
-    clk_pin = plat.request("clk100")
-    spi_memmapping = SpiMemmapping(spi_port, sram, 8, clk_pin)
-    # print(verilog.convert(spi_memmapping))
-    
-    plat.build(spi_memmapping)
+    unittest.main()
+    # import sys
+    # if len(sys.argv)>1:
+    #     if sys.argv[1] == 'sim':
+    #         print("draai dit")
+            
+    # else:
+    #     plat = board.Platform()
+    #     spi_port = plat.request("spi")
+    #     spi_memmapping = SpiMemmapping(spi_port, 8)
+    #     plat.build(spi_memmapping)
 
 
 
