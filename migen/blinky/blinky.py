@@ -34,7 +34,7 @@ led = plat.request("user_led")
 my_Blinky = Blinky(led, int(100E6))
 
 # build
-plat.build(my_Blinky)
+plat.build(my_Blinky, build_name = 'blinky')
 
 # # flash
 # prog = board.IceStormProgrammer()

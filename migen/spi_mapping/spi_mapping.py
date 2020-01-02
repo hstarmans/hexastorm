@@ -110,7 +110,7 @@ if __name__ == '__main__':
             plat = board.Platform()
             spi_port = plat.request("spi")
             spi_mapping = SpiMapping(spi_port, 8)
-            plat.build(spi_mapping)         
+            plat.build(spi_mapping,build_name = 'spi_mapping')         
     else:
         unittest.main()
 

@@ -166,6 +166,6 @@ if __name__ == '__main__':
             plat = board.Platform()
             spi_port = plat.request("spi")
             spi_memmapping = SpiMemmapping(spi_port, 8)
-            plat.build(spi_memmapping)
+            plat.build(spi_memmapping, build_name = 'spi_memmapping')
     else:
         unittest.main()

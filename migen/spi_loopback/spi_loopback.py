@@ -28,7 +28,7 @@ spi_port = plat.request("spi")
 my_SpiSlave = SPISlave(spi_port, 8)
 my_SpiSlave.comb += my_SpiSlave.loopback.eq(1)
 
-plat.build(my_SpiSlave)
+plat.build(my_SpiSlave, build_name = 'spi_loopback')
 
 
 
