@@ -1,7 +1,7 @@
 """
     spi_memmapping.py
     The memory is initiated with the value 10 in register 0 and the value 20 in register 1.
-    As before, Raspberry pi sends one word made up of two bytes over SPI. The first byte is the command. 
+    The linux host sends one word made up of two bytes over SPI. The first byte is the command. 
     The second byte is optionally the data or ignored.
     The command table is as follows;
     command 1 --> write data in register 0 and reply with (0,1)
@@ -29,7 +29,6 @@ class SpiMemmapping(Module):
         p2 = self.mem.get_port(has_re=True)
         self.specials += p1, p2
         self.ios = {p1.adr, p1.dat_w, p1.we, p2.dat_r, p2.adr, p2.re}
-        
         # Receiver state machine
         spislave = SPISlave(spi_port, data_width)
         self.submodules.slave = spislave
@@ -44,8 +43,8 @@ class SpiMemmapping(Module):
         self.submodules.receiver = FSM(reset_state = "IDLE")
         self.bytecounter = Signal()
         self.receiver.act("IDLE",
-            NextValue(p2.adr,2),
-            NextValue(p1.adr,2),
+            NextValue(p1.we, 0),
+            NextValue(p2.re, 1),
             If(start_rise,
                 NextState("WAITFORDONE")))
         #TODO: add a timeout and fail
@@ -57,9 +56,8 @@ class SpiMemmapping(Module):
             NextValue(self.bytecounter, self.bytecounter+1),
             If(self.bytecounter == 0,
                 NextValue(command, spislave.mosi),
-                If(spislave.mosi == 2,  
-                    NextValue(p2.re,1),
-                    NextValue(p2.adr, 1),
+                If(spislave.mosi == 2,
+                    NextValue(p2.re,0),  
                     NextState("READ")
                 ).
                 Elif(spislave.mosi == 1,    
@@ -80,9 +78,8 @@ class SpiMemmapping(Module):
                 NextState("WRITE")
             ).
             Elif((self.bytecounter == 1) & (command == 3),
-                NextValue(p2.adr, 0),
-                #NextValue(p1.adr, spislave.mosi),
-                #NextValue(p2.re, 1),
+                NextValue(p2.adr, spislave.mosi),
+                NextValue(p1.adr, spislave.mosi),
                 NextValue(spislave.miso,0),
                 NextState("IDLE")
             ).
@@ -92,10 +89,6 @@ class SpiMemmapping(Module):
             )
         )
         self.receiver.act("READ",
-            NextValue(p2.re,0),
-            NextState("READST2")
-        )
-        self.receiver.act("READST2",
             NextValue(spislave.miso, p2.dat_r),
             NextState("IDLE")
         )
@@ -116,7 +109,6 @@ class TestSPI(unittest.TestCase):
                     with_csr=False)
                 self.submodules.spimemmap = SpiMemmapping(pads, 8)
 
-
         def master_generator(dut):
             def transaction(data_sent, data_received):
                 yield dut.master.mosi.eq(data_sent)
@@ -128,26 +120,31 @@ class TestSPI(unittest.TestCase):
                 while (yield dut.master.done) == 0:
                     yield
                 self.assertEqual((yield dut.master.miso), data_received)
-            # yield from transaction(3, 0)
-            # yield from transaction(1, 3)
+            # read from address 0, check equal to 10
             yield from transaction(2, 0)
-            # # this is wrong
+            yield from transaction(2, 10)
+            # change address to 1
+            yield from transaction(3, 0)
+            yield from transaction(1, 3)
+            # read from address 1, check equal to 20
+            yield from transaction(2, 0)
             yield from transaction(2, 20)
-            # change address to 2
-            # yield from transaction(3, 0)
-            # yield from transaction(2, 3)
-            # # # write data 
-            # yield from transaction(1, 0)
-            # yield from transaction(5, 1)
-            # # # change address to 1
-            # yield from transaction(3, 0)
-            # yield from transaction(1, 3)
-            # # # read data at 1
-            # yield from transaction(2, 0)
-            # yield from transaction(2, 10)
-            # yield from transaction(1, 0)
-            # yield from transaction(4, 1)
-            
+            # write 5 to address 1
+            yield from transaction(1, 0)
+            yield from transaction(5, 1)
+            # change address to 0
+            yield from transaction(3, 0)
+            yield from transaction(0, 3)
+            # read from address 0, check equal to 10
+            yield from transaction(2, 0)
+            yield from transaction(2, 10)
+            # change address to 1
+            yield from transaction(3, 0)
+            yield from transaction(1, 3)
+            # read from address 1, check equal to 5 
+            yield from transaction(2, 0)
+            yield from transaction(2, 5)
+
         def slave_generator(dut):
             def transaction(data_received): 
                 while (yield dut.spimemmap.slave.start) == 0:
@@ -158,29 +155,17 @@ class TestSPI(unittest.TestCase):
                 self.assertEqual((yield dut.spimemmap.slave.length), 8)
             self.assertEqual((yield dut.spimemmap.bytecounter), 0)
             yield from transaction(2)
-            # yield from transaction(2)
-            #yield from transaction(3, 1)
-
         dut = DUT()
         run_simulation(dut, [master_generator(dut), slave_generator(dut)])
 
 
-
-
 if __name__ == '__main__':
-    unittest.main()
-    # import sys
-    # if len(sys.argv)>1:
-    #     if sys.argv[1] == 'sim':
-    #         print("draai dit")
-            
-    # else:
-    #     plat = board.Platform()
-    #     spi_port = plat.request("spi")
-    #     spi_memmapping = SpiMemmapping(spi_port, 8)
-    #     plat.build(spi_memmapping)
-
-
-
-
-
+    import sys
+    if len(sys.argv)>1:
+        if sys.argv[1] == 'build':
+            plat = board.Platform()
+            spi_port = plat.request("spi")
+            spi_memmapping = SpiMemmapping(spi_port, 8)
+            plat.build(spi_memmapping)
+    else:
+        unittest.main()

@@ -106,13 +106,13 @@ class TestSPI(unittest.TestCase):
 if __name__ == '__main__':
     import sys
     if len(sys.argv)>1:
-        if sys.argv[1] == 'sim':
-            unittest.main()
+        if sys.argv[1] == 'build':
+            plat = board.Platform()
+            spi_port = plat.request("spi")
+            spi_mapping = SpiMapping(spi_port, 8)
+            plat.build(spi_mapping)         
     else:
-        plat = board.Platform()
-        spi_port = plat.request("spi")
-        spi_mapping = SpiMapping(spi_port, 8)
-        plat.build(spi_mapping)
+        unittest.main()
 
 
 

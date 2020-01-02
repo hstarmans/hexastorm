@@ -1,54 +1,48 @@
-# Install Notes
+# Migen Test
+
+The repository includes several code examples for m]igen. 
+The goal of these test is to replace the microcontroller of [ldgraphy](https://github.com/hstarmans/ldgraphy) with a FPGA.
+
+## Install Notes
 Install migen
 ```python
 pip3 install -e 'git+http://github.com/m-labs/migen.git#egg=migen'
 ```
-The idea is to use the Litex cores.
 
-The following examples exist;
+## Examples
 
-## Blinky
+### Blinky
 Blinks a led at the IceZero boards.
 
-## Spi loopback
+### Spi loopback
 A SPI slave with loop back is created; MISO equals MOSI. Bytes sent from the Raspberry equal those received.
 
-## Spi counter
+### Spi counter
 The max length a word the Raspberry Pi driver can sent is 8 bit. If you want to receive longer words, you will need to count. In this example, a word is sent and the count is replied.
 
-## Spi mapping
-The Raspberry pi sends two words over SPI. The first word is the command word. The second word is the data write word.
+### Spi mapping
+The Raspberry pi sends two words over SPI. The first word is the command word. The second word is the data write word. The data write word is not used.
 The command table is as follows;
 ```
  command 1 --> reply with 2
  command 2 --> reply with 8
  else      --> reply with 0
 ```
-The data write word is not used.
 
-## Blink Mem
-The memory is initialized with 1 or 0.
-The FPGA reads from the memory. If the memory is 1 the led is on and off otherwise.
-This example contains a mistake. The memory is not synthesized.
+### Memtest 
+A simple code example to check if I can trigger yosys to create an sram block. 
+If you check the output of Icezero you see that a block is created.
 
-## Memtest 
-Same as above alone now the memory is also synthesized. If you check the output of Icezero you see that 
-a block is created.
-
-
-## Spi memory mapping
+### Spi memory mapping
 The memory is initiated with the value 10 in register 0 and the value 20 in register 1.
-As before, Raspberry pi sends two words over SPI. The first word is the command word. 
-The second word is the data write word.
-The command table is as follows;
+The linux host sends one word made up out of two bytes over SPI. The first byte is the command. 
+The second byte is optionally the data or ignored. The command table is as follows;
 ```
-command 1 --> write value in register 0 and obtain 0
-command 2 --> write value in register 1 and obtain 0
-command 3 --> obtain the result of the sum of register 0 and 1.
-else      --> reply with 0
+    command 1 --> write data in register 0 and reply with (0,1)
+    command 2 --> read value from register 1 and reply with (0,value)
+    command 3 --> change address and reply with (0,3)
+    else --> reply with (0,0)
 ```
-Note that you can flow over the sum, as both arguments and the sum is 8 bit.
-
 
 <!--
 Planning;

@@ -13,3 +13,5 @@ class Memtest(Module):
 led = Signal()
 memtest = Memtest(led)
 print(verilog.convert(memtest, ios={led}))
+# check output of yosys -p "synth_ice40" mem.v
+# you should see ICESTORM RAM 1/32

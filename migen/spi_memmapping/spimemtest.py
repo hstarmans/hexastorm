@@ -11,30 +11,27 @@ address1 = [0x01]
 address2 = [0x02]
 data1 = [0x03]
 data2 = [0x05]
-# change addres to 1
-assert spi.xfer([0x03]) == [0]
-assert spi.xfer([0x01]) == [0x03]
-# read data at 1
-assert spi.xfer([0x02]) == [0]
-print("Data at address 1 {}".format(spi.xfer(get_mem)))
-# write data to 1 
-assert spi.xfer([0x01]) == [0]
-assert spi.xfer([0x03]) == [0x01]
-# change addres to 2
-assert spi.xfer([0x03]) == [0]
-assert spi.xfer([0x02]) == [0x03]
-# read data at 2
-assert spi.xfer([0x02]) == [0]
-print("Data at address 2 {}".format(spi.xfer([0x02])))
-# write data to 2
-assert spi.xfer([0x01]) == [0]
-assert spi.xfer([0x05]) == [0x01]
-# read data at 2
-assert spi.xfer([0x02]) == [0]
-print("Data at address 22 {}".format(spi.xfer([0x02])))
-# change addres to 1
-assert spi.xfer([0x03]) == [0]
-assert spi.xfer([0x01]) == [0x03]
-# request data
-assert spi.xfer([0x02]) == [0]
-assert spi.xfer([0x02]) == [0x03]
+# read from address 0, check equal to 10
+assert spi.xfer([2]) == [0]
+assert spi.xfer([2]) == [10]
+# change address to 1
+assert spi.xfer([3]) == [0]
+assert spi.xfer([1]) == [3]
+# read from address 1, check equal to 10
+assert spi.xfer([2]) == [0]
+assert spi.xfer([2]) == [20]
+# write 5 to address 1 
+assert spi.xfer([1]) == [0]
+assert spi.xfer([5]) == [1]
+# change address to 0
+assert spi.xfer([3]) == [0]
+assert spi.xfer([0]) == [3]
+# read data at 0, check equal to 10
+assert spi.xfer([2]) == [0]
+assert spi.xfer([2]) == [10]
+# change address to 1
+assert spi.xfer([3]) == [0]
+assert spi.xfer([1]) == [3]
+# read from address 1, check equal to 5
+assert spi.xfer([2]) == [0]
+assert spi.xfer([2]) == [5]
