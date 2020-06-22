@@ -8,6 +8,11 @@ Install migen
 ```python
 pip3 install -e 'git+http://github.com/m-labs/migen.git#egg=migen'
 ```
+On the Pi install pigpio and enable the daemon upon boot.
+```
+sudo apt install pigpio
+sudo systemctl enable pigpiod
+```
 
 ## Examples
 
