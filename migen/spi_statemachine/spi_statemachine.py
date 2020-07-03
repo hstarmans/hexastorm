@@ -1,13 +1,7 @@
 """
-    spi_memmapping.py
-    The memory is initiated with the value 10 in register 0 and the value 20 in register 1.
-    The linux host sends one word made up of two bytes over SPI. The first byte is the command. 
-    The second byte is optionally the data or ignored.
-    The command table is as follows;
-    command 1 --> write data in register 0 and reply with (0,1)
-    command 2 --> read value from register 1 and reply with (0,value)
-    command 3 --> change address and reply with (0,3)
-    else --> reply with (0,0)
+    spi_statemachine.py
+    Example for laser scanner
+    Has a lot of the complexity present in laser scanner but works with a simple LED.
 
     Rik Starmans
 """
@@ -23,113 +17,144 @@ import sys
 sys.path.append("..") 
 import hexa as board
 
+#TODO: not all these variables needed for simple example
+#      reduce variable to LED blinking speed and move this to other file
 
-VARIABLES = {'RPM':2400,'SPINUP_TICKS':1.5,'MAX_WAIT_STABLE_TICKS':1.125,
-        'FACETS':4,'SCANLINE_DATA_SIZE':790,'TICKS_PER_PRISM_FACET':12500, 'TICKS_START':4375, 'SINGLE_FACET':0,
-        'DIRECTION':0, 'JITTER_ALLOW':300, 'JITTER_THRESH':400}
+VARIABLES = {'RPM':2400,'SPINUP_TICKS':1.5,'MAX_WAIT_STABLE_TICKS':1.125, 'FACETS':4,
+            'SCANLINE_DATA_SIZE':790,'TICKS_PER_PRISM_FACET':12500, 'TICKS_START':4375,
+             'SINGLE_FACET':0, 'DIRECTION':0, 'JITTER_ALLOW':300, 'JITTER_THRESH':400}
 
-class SpiMemmapping(Module):
+
+class SpiStateMachine(Module):
     def __init__(self, spi_port, data_width):
+        # three submodules; SPI receiver, memory and laser state machine
+
+        # full byte state
+        state      =  Signal(3)   # state laser module
+        error      =  Signal(4)   # error state
+        memoryfull =  Signal()
+        
+        debug = Signal(8)   # optional 
+
         # Memory element
-        self.specials.mem = Memory(8, 512, init = [10,20])
+        # Current idea: memory continiously repeats cycle;  idle --> read --> write
+        # Rules:
+        #        read cannot be set equal to write address  --> reading a line not written yet
+        #        write cannot be set equal to read address  --> writing on a line which is still in use
+        # Nextwrite and nextread addres used to know when writing is finished
+        # writebyte, current byte written to
+        # sram memory is 32 blocks... each block has to be handled seperately
+        # one block 16*256 = 4096 bytes
+        WIDTH = 16
+        DEPTH = 256
+        LINES = (WIDTH*DEPTH)//VARIABLES['SCANLINE_DATA_SIZE']
+        self.specials.mem = Memory(width=WIDTH, depth=DEPTH, init = [10,20])
         p1 = self.mem.get_port(write_capable=True, mode = READ_FIRST)
         p2 = self.mem.get_port(has_re=True)
         self.specials += p1, p2
         self.ios = {p1.adr, p1.dat_w, p1.we, p2.dat_r, p2.adr, p2.re}
-        # there are three submodules; receiver, memory en laser state machine
-        # receiver
-        # geeft antwoorden op commandos en zet opdrachten door naar andere statemachines
-        # memory
-        # je geheugen is veel sneller dan je laser
-        # je laat je geheugen loopen en steeds het getal van de read cursor lezen en data naar de write cursor schrijven
-        # laser statemachine loopt gewoon
+        self.submodules.memory = FSM(reset_state = "IDLE")
+        nextreadaddress = Signal(max=DEPTH)
+        nextwriteaddress = Signal(max=DEPTH)
+        self.writebyte = Signal(max=WIDTH)
+       
+        self.comb = memoryfull.eq(nextwriteaddress==p2.adr)
 
-
-        # Receiver state machine
+        self.memory.act("IDLE",
+            NextState("READ"),
+            # read address set by laser scanner state machine
+            NextValue(p1.we, 0),
+            NextValue(p2.re, 1)
+        )
+        self.memory.act("READ",
+            # data read out by laser scanner state machine
+            # write address and data set by spi state machine
+            NextValue(nextreadaddress, p2.adr+1),
+            NextValue(p2.re, 0),
+            NextValue(p1.we, 1),
+            NextState("WRITE")
+        )
+        self.memory.act("WRITE",
+            NextValue(nextwriteaddress, p1.adr+1),
+            NextValue(p1.we, 0),
+            NextState("IDLE"),
+        )
+        # Receiver State Machine
+        # Consists out of component from litex and own custom component
+        # Detects wether new command is available
         spislave = SPISlave(spi_port, data_width)
         self.submodules.slave = spislave
-        # done detector
-        done_d = Signal()
-        done_rise = Signal()
-        self.sync += done_d.eq(spislave.done)
-        self.comb += done_rise.eq(spislave.done & ~done_d)
-        
-        # start detector (could be refactored)
-        start_d = Signal()
-        start_rise = Signal()
-        self.sync += start_d.eq(spislave.start)
-        self.comb += start_rise.eq(spislave.start & ~start_d)
-       
-        
-        # constants:
-        SCANLINE_HEADER_SIZE = 1
-        SCANLINE_DATA_SIZE = 8
-        SCANLINE_ITEM_SIZE = SCANLINE_HEADER_SIZE + SCANLINE_DATA_SIZE
-        #
 
-        # STATES
+        # COMMANDS  --> TODO: could be moved to DICT
         STATUS = 1
         START = 2
         STOP = 3
         READ_D = 4
         WRITE_L = 5
         READ_L = 6
-
-        # variables associated with receiver
-        self.bytecounter = Signal(max=SCANLINE_ITEM_SIZE)
-
-        # variables associated with the laser module
-        state = Signal(4)
-        error = Signal(4)
-        debug = Signal(8)
-        memoryfull=Signal()
-        towrite = Signal(SCANLINE_DATA_SIZE*8)
-    
+        # The command variable contains command which will be executed
+        # Often this is the recvcommand, cannot be set externally
+        RECVCOMMAND = 0
+        command = Signal(max=6) # max is READ_L
+        # Done detector
+        done_d = Signal()
+        done_rise = Signal()
+        self.sync += done_d.eq(spislave.done)
+        self.comb += done_rise.eq(spislave.done & ~done_d)
+        # Start detector (could be refactored)
+        start_d = Signal()
+        start_rise = Signal()
+        self.sync += start_d.eq(spislave.start)
+        self.comb += start_rise.eq(spislave.start & ~start_d)
+        # Custom Receiver
         self.submodules.receiver = FSM(reset_state = "IDLE")
         self.receiver.act("IDLE",
+            NextValue(spislave.miso, Cat(state+error+memoryfull)),
             If(start_rise,
                 NextState("WAITFORDONE")))
-        #TODO: add a timeout and fail
         self.receiver.act("WAITFORDONE",
             If(done_rise,
                 NextState("PROCESSINPUT")))
-        command = Signal(data_width)
         self.receiver.act("PROCESSINPUT",
-            NextValue(self.bytecounter, self.bytecounter+1),
             NextState("IDLE"),
-            # process command
-            If(self.bytecounter == 0,
-                NextValue(command, spislave.mosi),
-                If(spislave.mosi == STATUS,
-                    NextValue(spislave.miso, Cat(state+error))
-                ).
-                Elif(spislave.mosi == STOP,
-                    NextValue(state, 0),
-                    NextValue(spislave.miso, 0)
+            # Read Header
+            If(command == RECVCOMMAND,
+                If(spislave.mosi == STOP,
+                    NextValue(state, 0)
                 ).
                 Elif(spislave.mosi == START,
-                    NextValue(state, 1),
-                    NextValue(spislave.miso, 0)
+                    NextValue(state, 1)
                 ).
                 Elif(spislave.mosi == READ_D,
+                    NextValue(command, READ_D),
                     NextValue(spislave.miso, debug)
                 ).
-                Elif(spislave.mosi == WRITE_L,
-                    NextValue(spislave.miso, memoryfull)
-                ).
-                Else(NextValue(spislave.miso,0))
-            ).
-            Else(
-                If(command == STATUS,
-                    NextValue(spislave.miso, self.bytecounter+1)
-                ).
-                Elif(spislave.mosi == WRITE_L,
-                    If(memoryfull==1,
-                        NextValue(towrite[self.bytecounter-1:self.bytecounter+7], self.bytecounter+1)
-                    ),
+                Elif(spislave.mosi == WRITE_L & memoryfull == 0,
+                    NextValue(command, WRITE_L),
                     NextValue(spislave.miso, 0)
+                )
+            ).
+            # Read data after header; only applicable for debug or write line
+            Else(
+                If(command == READ_D,
+                    NextValue(command, RECVCOMMAND),
                 ).
-                Else(NextValue(spislave.miso, 0))
+                # command must be WRITE_L
+                Else(
+                    # all bytes are received
+                    If(self.writebyte>=WIDTH,
+                        NextValue(self.writebyte,0),
+                        # Not done writing, so can't move to next address, raise error
+                        NextValue(error[0], p1.adr==nextwriteaddress),
+                        NextValue(p1.adr, p1.adr+1),
+                        NextValue(command, RECVCOMMAND)
+                    ).
+                    Else(
+                        NextValue(p1.dat_w[self.writebyte:], spislave.mosi),
+                        NextValue(self.writebyte, self.writebyte+1),
+                        NextValue(spislave.miso, 0)
+                    )
+                )
             )
         )
 
@@ -187,7 +212,7 @@ class TestSPI(unittest.TestCase):
                     yield
                 self.assertEqual((yield dut.spimemmap.slave.mosi), data_received)
                 self.assertEqual((yield dut.spimemmap.slave.length), 8)
-            self.assertEqual((yield dut.spimemmap.bytecounter), 0)
+            self.assertEqual((yield dut.spimemmap.writebyte), 0)
             yield from transaction(2)
         dut = DUT()
         run_simulation(dut, [master_generator(dut), slave_generator(dut)])
