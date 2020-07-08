@@ -19,19 +19,23 @@ import hexa as board
 
 #TODO: not all these variables needed for simple example
 #      reduce variable to LED blinking speed and move this to other file
-
-VARIABLES = {'RPM':2400,'SPINUP_TICKS':1.5,'MAX_WAIT_STABLE_TICKS':1.125, 'FACETS':4,
-            'SCANLINE_DATA_SIZE':790,'TICKS_PER_PRISM_FACET':12500, 'TICKS_START':4375,
-             'SINGLE_FACET':0, 'DIRECTION':0, 'JITTER_ALLOW':300, 'JITTER_THRESH':400}
-
-# TODO: ugly
-commands = ('RECVCOMMAND', 'STATUS', 'START', 'STOP', 'READ_D', 'WRITE_L')
-Commands = namedtuple('Commands', commands, defaults=tuple(range(len(commands))))
-COMMANDS = Commands()
+# VARIABLES = {'RPM':2400,'SPINUP_TICKS':1.5,'MAX_WAIT_STABLE_TICKS':1.125, 'FACETS':4,
+#             'SCANLINE_DATA_SIZE':790,'TICKS_PER_PRISM_FACET':12500, 'TICKS_START':4375,
+#              'SINGLE_FACET':0, 'DIRECTION':0, 'JITTER_ALLOW':300, 'JITTER_THRESH':400}
+# # lines that can be in memory
+# LINES = (LEDPROGRAM.MEMWIDTH*LEDPROGRAM.MEMDEPTH)//VARIABLES['SCANLINE_DATA_SIZE']
 
 
-class SpiStateMachine(Module):
-    
+class LEDProgram(Module):
+    @staticmethod
+    def commands():
+        commands = ('RECVCOMMAND', 'STATUS', 'START', 'STOP', 'READ_D', 'WRITE_L')
+        Commands = namedtuple('Commands', commands, defaults=tuple(range(len(commands))))
+        return Commands()
+
+    COMMANDS = commands.__func__()
+    MEMWIDTH = 16
+    MEMDEPTH = 256
 
     def __init__(self, spi_port, led):
         # three submodules; SPI receiver, memory and laser state machine
@@ -51,18 +55,15 @@ class SpiStateMachine(Module):
         # writebyte, current byte written to
         # sram memory is 32 blocks... each block has its own ports
         # one block 16*256 = 4096 bytes currently used
-        WIDTH = 16
-        DEPTH = 256
-        LINES = (WIDTH*DEPTH)//VARIABLES['SCANLINE_DATA_SIZE']
-        self.specials.mem = Memory(width=WIDTH, depth=DEPTH, init = [10,20])
+        self.specials.mem = Memory(width=self.MEMWIDTH, depth=self.MEMDEPTH, init = [10,20])
         writeport = self.mem.get_port(write_capable=True, mode = READ_FIRST)
         readport = self.mem.get_port(has_re=True)
         self.specials += writeport, readport
         self.ios = {writeport.adr, writeport.dat_w, writeport.we, readport.dat_r, readport.adr, readport.re}
         self.submodules.memory = FSM(reset_state = "IDLE")
-        nextreadaddress = Signal(max=DEPTH)
-        nextwriteaddress = Signal(max=DEPTH)
-        self.writebyte = Signal(max=WIDTH)
+        nextreadaddress = Signal(max=self.MEMDEPTH)
+        nextwriteaddress = Signal(max=self.MEMDEPTH)
+        self.writebyte = Signal(max=self.MEMWIDTH)
        
         self.comb += memoryfull.eq(nextwriteaddress==readport.adr)
 
@@ -94,7 +95,7 @@ class SpiStateMachine(Module):
         # COMMANDS 
         # The command variable contains command to be executed
         # typically the recvcommand, cannot be set externally
-        command = Signal(max=len(COMMANDS))
+        command = Signal(max=len(self.COMMANDS))
         # Done detector
         done_d = Signal()
         done_rise = Signal()
@@ -121,37 +122,37 @@ class SpiStateMachine(Module):
         self.receiver.act("PROCESSINPUT",
             NextState("IDLE"),
             # Read Header
-            If(command == COMMANDS.RECVCOMMAND,
-                If(spislave.mosi == COMMANDS.STOP,
+            If(command == self.COMMANDS.RECVCOMMAND,
+                If(spislave.mosi == self.COMMANDS.STOP,
                     NextValue(ledstate, 0)
                 ).
-                Elif(spislave.mosi == COMMANDS.START,
+                Elif(spislave.mosi == self.COMMANDS.START,
                     NextValue(ledstate, 1)
                 ).
-                Elif(spislave.mosi == COMMANDS.READ_D,
-                    NextValue(command, COMMANDS.READ_D),
+                Elif(spislave.mosi == self.COMMANDS.READ_D,
+                    NextValue(command, self.COMMANDS.READ_D),
                     NextValue(spislave.miso, debug)
                 ).
-                Elif((spislave.mosi == COMMANDS.WRITE_L) & (memoryfull == 0),
-                    NextValue(command, COMMANDS.WRITE_L),
+                Elif((spislave.mosi == self.COMMANDS.WRITE_L) & (memoryfull == 0),
+                    NextValue(command, self.COMMANDS.WRITE_L),
                     NextValue(spislave.miso, 0)
                 )
                 # Else; Command invalid or memory full nothing happens
             ).
             # Read data after header; only applicable for debug or write line
             Else(
-                If(command == COMMANDS.READ_D,
-                    NextValue(command, COMMANDS.RECVCOMMAND),
+                If(command == self.COMMANDS.READ_D,
+                    NextValue(command, self.COMMANDS.RECVCOMMAND),
                 ).
                 # command must be WRITE_L
                 Else(
                     # all bytes are received
-                    If(self.writebyte>=WIDTH,
+                    If(self.writebyte>=self.MEMWIDTH,
                         NextValue(self.writebyte,0),
                         # If not done writing raise error
                         NextValue(error[0], writeport.adr==nextwriteaddress),
                         NextValue(writeport.adr, writeport.adr+1),
-                        NextValue(command, COMMANDS.RECVCOMMAND)
+                        NextValue(command, self.COMMANDS.RECVCOMMAND)
                     ).
                     Else(
                         NextValue(writeport.dat_w[self.writebyte.variable:], spislave.mosi),
@@ -179,39 +180,45 @@ class SpiStateMachine(Module):
 
 
 class TestSPIStateMachine(unittest.TestCase):
-    def test_getstate(self):
+    def setUp(self):
         class DUT(Module):
-            def __init__(self):
-                pads = Record([("clk", 1), ("cs_n", 1), ("mosi", 1), ("miso", 1)])
-                self.submodules.master = SPIMaster(pads, data_width=8,
-                        sys_clk_freq=100e6, spi_clk_freq=5e6,
-                        with_csr=False)
-                self.led = Signal()
-                self.submodules.spi_statemachine = SpiStateMachine(pads, self.led)
+                def __init__(self):
+                    pads = Record([("clk", 1), ("cs_n", 1), ("mosi", 1), ("miso", 1)])
+                    self.submodules.master = SPIMaster(pads, data_width=8,
+                            sys_clk_freq=100e6, spi_clk_freq=5e6,
+                            with_csr=False)
+                    self.led = Signal()
+                    self.submodules.spi_statemachine = LEDProgram(pads, self.led)
+        self.dut = DUT()
 
-        def master_generator(dut):
-            def transaction(data_sent, data_received):
-                yield dut.master.mosi.eq(data_sent)
-                yield dut.master.length.eq(8)
-                yield dut.master.start.eq(1)
-                yield
-                yield dut.master.start.eq(0)
-                yield
-                while (yield dut.master.done) == 0:
-                    yield
-                self.assertEqual((yield dut.master.miso), data_received)
+    def transaction(self, data_sent, data_received):
+        ''' 
+        helper function to test transaction from raspberry pi side
+        '''
+        yield self.dut.master.mosi.eq(data_sent)
+        yield self.dut.master.length.eq(8)
+        yield self.dut.master.start.eq(1)
+        yield
+        yield self.dut.master.start.eq(0)
+        yield
+        while (yield self.dut.master.done) == 0:
+            yield
+        self.assertEqual((yield self.dut.master.miso), data_received)
+
+    def test_ledturnon(self):
+        def raspberry_side(dut):
             # get the initial status
-            yield from transaction(COMMANDS.STATUS, 0)
+            yield from self.transaction(LEDProgram.COMMANDS.STATUS, 0)
             # turn on the LED, status should still be zero
-            yield from transaction(COMMANDS.START, 0)
+            yield from self.transaction(LEDProgram.COMMANDS.START, 0)
             # check wether the led is on
-            yield from transaction(COMMANDS.STATUS, 1)
+            yield from self.transaction(LEDProgram.COMMANDS.STATUS, 1)
             # turn OFF the led
-            yield from transaction(COMMANDS.STOP, 1)
+            yield from self.transaction(LEDProgram.COMMANDS.STOP, 1)
             # LED should be off
-            yield from transaction(COMMANDS.STATUS, 0)
+            yield from self.transaction(LEDProgram.COMMANDS.STATUS, 0)
 
-        def slave_generator(dut):
+        def fpga_side(dut):
             timeout = 0
             # LED should be off on the start
             self.assertEqual((yield dut.led), 0)
@@ -232,8 +239,31 @@ class TestSPIStateMachine(unittest.TestCase):
                 yield
             # LED should be off now
             self.assertEqual((yield dut.led), 0)
-        dut = DUT()
-        run_simulation(dut, [master_generator(dut), slave_generator(dut)])
+        run_simulation(self.dut, [raspberry_side(self.dut), fpga_side(self.dut)])
+    
+
+    def test_writedata(self):
+        def raspberry_side(dut):
+            # write data to the memory
+            # initiate write
+            yield from self.transaction(LEDProgram.COMMANDS.WRITE_L, 0)
+            # write one line of ones and zeros to memory
+            for _ in range(LEDProgram.MEMWIDTH):
+                data_byte = int('10101010',2)
+                yield from self.transaction(data_byte, 0)
+            # memory is tested in litex
+            for i in range(LEDProgram.MEMWIDTH):
+                value = yield dut.mem[i]
+                print(value)
+    # for this to work you need a modifiable memwidth and depth and freq of your led
+    #
+    
+    # what tests do you need?
+    #   -- memory full, can't write  --> you get an error when trying to write
+    #   -- memory empty, can't read  --> led doesn't turn on
+    #   -- memory full, can read --> up to some point
+
+
 
 
 if __name__ == '__main__':
@@ -243,7 +273,7 @@ if __name__ == '__main__':
             plat = board.Platform()
             spi_port = plat.request("spi")
             led = plat.request("user_led")
-            spi_statemachine = SpiStateMachine(spi_port, led)
+            spi_statemachine = LEDProgram(spi_port, led)
             plat.build(spi_statemachine, led, build_name = 'spi_statemachine')
     else:
         unittest.main()
