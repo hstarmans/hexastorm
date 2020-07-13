@@ -34,8 +34,9 @@ class LEDProgram(Module):
         return Commands()
 
     COMMANDS = commands.__func__()
-    MEMWIDTH = 16
-    MEMDEPTH = 256
+    CHUNKSIZE = 8 # you write in chunks of 8 bytes
+    MEMWIDTH = 8  # must be 8, as you receive in terms of eight
+    MEMDEPTH = 512
 
     def __init__(self, spi_port, led):
         # three submodules; SPI receiver, memory and laser state machine
@@ -54,19 +55,21 @@ class LEDProgram(Module):
         # Nextwrite and nextread addres used to know when writing is finished
         # writebyte, current byte written to
         # sram memory is 32 blocks... each block has its own ports
-        # one block 16*256 = 4096 bytes currently used
+        # one block 8*512 = 4096 bytes currently used
         self.specials.mem = Memory(width=self.MEMWIDTH, depth=self.MEMDEPTH, init = [10,20])
         writeport = self.mem.get_port(write_capable=True, mode = READ_FIRST)
         readport = self.mem.get_port(has_re=True)
         self.specials += writeport, readport
         self.ios = {writeport.adr, writeport.dat_w, writeport.we, readport.dat_r, readport.adr, readport.re}
-        self.submodules.memory = FSM(reset_state = "IDLE")
+        self.submodules.memory = FSM(reset_state = "RESET")
         nextreadaddress = Signal(max=self.MEMDEPTH)
         nextwriteaddress = Signal(max=self.MEMDEPTH)
-        self.writebyte = Signal(max=self.MEMWIDTH)
-       
-        self.comb += memoryfull.eq(nextwriteaddress==readport.adr)
-
+        self.writebyte = Signal(max=self.MEMDEPTH)
+        self.comb += memoryfull.eq(nextwriteaddress+self.CHUNKSIZE==readport.adr)
+        self.memory.act("RESET",
+                NextValue(writeport.adr, self.MEMDEPTH-1),
+                NextState("IDLE")
+        )
         self.memory.act("IDLE",
             NextState("READ"),
             # read address set by laser scanner state machine
@@ -146,23 +149,23 @@ class LEDProgram(Module):
                 ).
                 # command must be WRITE_L
                 Else(
-                    # all bytes are received
-                    If(self.writebyte>=self.MEMWIDTH,
-                        NextValue(self.writebyte,0),
+                    # written chunksize # of bytes
+                    If(self.writebyte>=self.CHUNKSIZE-1,
                         # If not done writing raise error
+                        NextValue(self.writebyte, 0),
                         NextValue(error[0], writeport.adr==nextwriteaddress),
-                        NextValue(writeport.adr, writeport.adr+1),
                         NextValue(command, self.COMMANDS.RECVCOMMAND)
                     ).
                     Else(
-                        NextValue(writeport.dat_w[self.writebyte.variable:], spislave.mosi),
+                        NextValue(writeport.dat_w, spislave.mosi),
+                        NextValue(writeport.adr, writeport.adr+1),
                         NextValue(self.writebyte, self.writebyte+1),
+                        #TODO: some sort of confirmation of the write could be nice
                         NextValue(spislave.miso, 0)
                     )
                 )
             )
         )
-    
         # LED State machine
         self.submodules.ledfsm = FSM(reset_state = "OFF")
         self.ledfsm.act("OFF",
@@ -182,13 +185,13 @@ class LEDProgram(Module):
 class TestSPIStateMachine(unittest.TestCase):
     def setUp(self):
         class DUT(Module):
-                def __init__(self):
-                    pads = Record([("clk", 1), ("cs_n", 1), ("mosi", 1), ("miso", 1)])
-                    self.submodules.master = SPIMaster(pads, data_width=8,
-                            sys_clk_freq=100e6, spi_clk_freq=5e6,
-                            with_csr=False)
-                    self.led = Signal()
-                    self.submodules.spi_statemachine = LEDProgram(pads, self.led)
+            def __init__(self):
+                pads = Record([("clk", 1), ("cs_n", 1), ("mosi", 1), ("miso", 1)])
+                self.submodules.master = SPIMaster(pads, data_width=8,
+                        sys_clk_freq=100e6, spi_clk_freq=5e6,
+                        with_csr=False)
+                self.led = Signal()
+                self.submodules.ledprogram = LEDProgram(pads, self.led)
         self.dut = DUT()
 
     def transaction(self, data_sent, data_received):
@@ -206,7 +209,7 @@ class TestSPIStateMachine(unittest.TestCase):
         self.assertEqual((yield self.dut.master.miso), data_received)
 
     def test_ledturnon(self):
-        def raspberry_side(dut):
+        def raspberry_side():
             # get the initial status
             yield from self.transaction(LEDProgram.COMMANDS.STATUS, 0)
             # turn on the LED, status should still be zero
@@ -218,43 +221,47 @@ class TestSPIStateMachine(unittest.TestCase):
             # LED should be off
             yield from self.transaction(LEDProgram.COMMANDS.STATUS, 0)
 
-        def fpga_side(dut):
+        def fpga_side():
             timeout = 0
             # LED should be off on the start
-            self.assertEqual((yield dut.led), 0)
+            self.assertEqual((yield self.dut.led), 0)
             # wait till led state changes
-            while (yield dut.led) == 0:
+            while (yield self.dut.led) == 0:
                 timeout += 1
                 if timeout>1000:
                     raise Exception("Led doesn't turn on.")
                 yield
             timeout = 0
             # LED should be on now
-            self.assertEqual((yield dut.led), 1)
+            self.assertEqual((yield self.dut.led), 1)
             # wait till led state changes
-            while (yield dut.led) == 1:
+            while (yield self.dut.led) == 1:
                 timeout += 1
                 if timeout>1000:
                     raise Exception("Led doesn't turn off.")
                 yield
             # LED should be off now
-            self.assertEqual((yield dut.led), 0)
-        run_simulation(self.dut, [raspberry_side(self.dut), fpga_side(self.dut)])
-    
+            self.assertEqual((yield self.dut.led), 0)
+        run_simulation(self.dut, [raspberry_side(), fpga_side()])
 
     def test_writedata(self):
         def raspberry_side(dut):
-            # write data to the memory
-            # initiate write
-            yield from self.transaction(LEDProgram.COMMANDS.WRITE_L, 0)
             # write one line of ones and zeros to memory
-            for _ in range(LEDProgram.MEMWIDTH):
-                data_byte = int('10101010',2)
+            for i in range(10):
+                data_byte = i%256 # bytes can't be larger than 255
+                # initiate write
+                if i%LEDProgram.CHUNKSIZE==0:
+                    print(i)
+                    yield from self.transaction(LEDProgram.COMMANDS.WRITE_L, 0)
+                val = (yield dut.ledprogram.writebyte)
                 yield from self.transaction(data_byte, 0)
             # memory is tested in litex
-            for i in range(LEDProgram.MEMWIDTH):
-                value = yield dut.mem[i]
-                print(value)
+            in_memory = []
+            for i in range(10):
+                value = (yield dut.ledprogram.mem[i])
+                in_memory.append(value)
+            print(in_memory)
+        run_simulation(self.dut, [raspberry_side(self.dut)])
     # for this to work you need a modifiable memwidth and depth and freq of your led
     #
     
