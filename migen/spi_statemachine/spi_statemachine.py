@@ -36,14 +36,15 @@ class LEDProgram(Module):
     COMMANDS = commands.__func__()
     CHUNKSIZE = 8 # you write in chunks of 8 bytes
     MEMWIDTH = 8  # must be 8, as you receive in terms of eight
-    MEMDEPTH = 512
+    
 
-    def __init__(self, spi_port, led):
+    def __init__(self, spi_port, led, memdepth=512):
+        self.MEMDEPTH = memdepth
         # three submodules; SPI receiver, memory and laser state machine
         # full byte state
-        ledstate   =  Signal(3)   # state laser module
-        error      =  Signal(4)   # error state
-        memoryfull =  Signal()
+        ledstate   =  Signal(3)   # state laser module 6-8 byte
+        error      =  Signal(4)   # error state  1-5 byte
+                                  # memory full  0 byte
         
         debug = Signal(8)   # optional 
 
@@ -54,6 +55,7 @@ class LEDProgram(Module):
         #        write cannot be set equal to read address  --> writing on a line which is still in use
         # Nextwrite and nextread addres used to know when writing is finished
         # writebyte, current byte written to
+        # written to detect if already information is written to memory
         # sram memory is 32 blocks... each block has its own ports
         # one block 8*512 = 4096 bytes currently used
         self.specials.mem = Memory(width=self.MEMWIDTH, depth=self.MEMDEPTH, init = [10,20])
@@ -62,11 +64,13 @@ class LEDProgram(Module):
         self.specials += writeport, readport
         self.ios = {writeport.adr, writeport.dat_w, writeport.we, readport.dat_r, readport.adr, readport.re}
         self.submodules.memory = FSM(reset_state = "RESET")
-        nextreadaddress = Signal(max=self.MEMDEPTH)
-        nextwriteaddress = Signal(max=self.MEMDEPTH)
+        self.nextreadaddress = Signal(max=self.MEMDEPTH)
+        self.nextwriteaddress = Signal(max=self.MEMDEPTH)
         self.writebyte = Signal(max=self.MEMDEPTH)
-        self.comb += memoryfull.eq(nextwriteaddress+self.CHUNKSIZE==readport.adr)
+        written = Signal()
         self.memory.act("RESET",
+                NextValue(written, 0),
+                NextValue(readport.adr, 0),
                 NextValue(writeport.adr, self.MEMDEPTH-1),
                 NextState("IDLE")
         )
@@ -79,13 +83,13 @@ class LEDProgram(Module):
         self.memory.act("READ",
             # data read out by laser scanner state machine
             # write address and data set by spi state machine
-            NextValue(nextreadaddress, readport.adr+1),
+            NextValue(self.nextreadaddress, readport.adr+1),
             NextValue(readport.re, 0),
             NextValue(writeport.we, 1),
             NextState("WRITE")
         )
         self.memory.act("WRITE",
-            NextValue(nextwriteaddress, writeport.adr+1),
+            NextValue(self.nextwriteaddress, writeport.adr+1),
             NextValue(writeport.we, 0),
             NextState("IDLE"),
         )
@@ -112,7 +116,10 @@ class LEDProgram(Module):
         # Custom Receiver
         self.submodules.receiver = FSM(reset_state = "IDLE")
         self.receiver.act("IDLE",
-                NextValue(spislave.miso, Cat(ledstate+error+memoryfull)),
+                NextValue(spislave.miso, Cat(ledstate+error+0)),
+            If((self.nextwriteaddress==readport.adr)&(written==1),
+                NextValue(spislave.miso[0],1)
+            ),
             If(start_rise,
                 NextState("WAITFORDONE")
             )
@@ -134,11 +141,13 @@ class LEDProgram(Module):
                 ).
                 Elif(spislave.mosi == self.COMMANDS.READ_D,
                     NextValue(command, self.COMMANDS.READ_D),
+                    #NOTE THIS DOESN'T WORK!
                     NextValue(spislave.miso, debug)
                 ).
-                Elif((spislave.mosi == self.COMMANDS.WRITE_L) & (memoryfull == 0),
+                Elif((spislave.mosi == self.COMMANDS.WRITE_L) & (self.memoryfull == 0),
                     NextValue(command, self.COMMANDS.WRITE_L),
-                    NextValue(spislave.miso, 0)
+                    # no effect
+                    #NextValue(spislave.miso, 3)
                 )
                 # Else; Command invalid or memory full nothing happens
             ).
@@ -149,19 +158,15 @@ class LEDProgram(Module):
                 ).
                 # command must be WRITE_L
                 Else(
-                    # written chunksize # of bytes
+                    NextValue(written, 1),
+                    NextValue(writeport.dat_w, spislave.mosi),
+                    NextValue(writeport.adr, writeport.adr+1),
                     If(self.writebyte>=self.CHUNKSIZE-1,
-                        # If not done writing raise error
                         NextValue(self.writebyte, 0),
-                        NextValue(error[0], writeport.adr==nextwriteaddress),
+                        NextValue(error[0], writeport.adr==self.nextwriteaddress),
                         NextValue(command, self.COMMANDS.RECVCOMMAND)
                     ).
-                    Else(
-                        NextValue(writeport.dat_w, spislave.mosi),
-                        NextValue(writeport.adr, writeport.adr+1),
-                        NextValue(self.writebyte, self.writebyte+1),
-                        #TODO: some sort of confirmation of the write could be nice
-                        NextValue(spislave.miso, 0)
+                    Else(NextValue(self.writebyte, self.writebyte+1)
                     )
                 )
             )
@@ -191,7 +196,7 @@ class TestSPIStateMachine(unittest.TestCase):
                         sys_clk_freq=100e6, spi_clk_freq=5e6,
                         with_csr=False)
                 self.led = Signal()
-                self.submodules.ledprogram = LEDProgram(pads, self.led)
+                self.submodules.ledprogram = LEDProgram(pads, self.led, memdepth=16)
         self.dut = DUT()
 
     def transaction(self, data_sent, data_received):
@@ -246,27 +251,28 @@ class TestSPIStateMachine(unittest.TestCase):
 
     def test_writedata(self):
         def raspberry_side(dut):
-            # write one line of ones and zeros to memory
-            for i in range(10):
+            # write lines to memory
+            for i in range(dut.ledprogram.MEMDEPTH+1):
                 data_byte = i%256 # bytes can't be larger than 255
-                # initiate write
-                if i%LEDProgram.CHUNKSIZE==0:
-                    print(i)
-                    yield from self.transaction(LEDProgram.COMMANDS.WRITE_L, 0)
-                val = (yield dut.ledprogram.writebyte)
+                if i%(LEDProgram.CHUNKSIZE)==0:
+                    if (i>0)&((i%dut.ledprogram.MEMDEPTH)==0):
+                        # check if memory is full
+                        yield from self.transaction(LEDProgram.COMMANDS.WRITE_L, 1)
+                        continue
+                    else:
+                        yield from self.transaction(LEDProgram.COMMANDS.WRITE_L, 0)
                 yield from self.transaction(data_byte, 0)
             # memory is tested in litex
             in_memory = []
-            for i in range(10):
+            loops = 10
+            for i in range(loops):
                 value = (yield dut.ledprogram.mem[i])
                 in_memory.append(value)
-            print(in_memory)
+            self.assertEqual(list(range(loops)),in_memory)
         run_simulation(self.dut, [raspberry_side(self.dut)])
-    # for this to work you need a modifiable memwidth and depth and freq of your led
-    #
     
     # what tests do you need?
-    #   -- memory full, can't write  --> you get an error when trying to write
+    #   
     #   -- memory empty, can't read  --> led doesn't turn on
     #   -- memory full, can read --> up to some point
 
