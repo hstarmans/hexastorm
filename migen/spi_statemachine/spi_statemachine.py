@@ -42,8 +42,9 @@ class LEDProgram(Module):
         self.MEMDEPTH = memdepth
         # three submodules; SPI receiver, memory and laser state machine
         # full byte state
-        ledstate   =  Signal(3)   # state laser module 6-8 byte
-        error      =  Signal(4)   # error state  1-5 byte
+        self.ledstate   =  Signal(3)   # state laser module 6-8 byte
+        error      =  Signal(4)   # error state  1-5 byte, 
+                                  #     -- bit 0 read error
                                   # memory full  0 byte
         
         debug = Signal(8)   # optional 
@@ -55,6 +56,8 @@ class LEDProgram(Module):
         #        write cannot be set equal to read address  --> writing on a line which is still in use
         # Nextwrite and nextread addres used to know when writing is finished
         # writebyte, current byte written to
+        # readbit, current bit read
+        # readaddress, current address read
         # written to detect if already information is written to memory
         # sram memory is 32 blocks... each block has its own ports
         # one block 8*512 = 4096 bytes currently used
@@ -66,6 +69,7 @@ class LEDProgram(Module):
         self.submodules.memory = FSM(reset_state = "RESET")
         self.nextreadaddress = Signal(max=self.MEMDEPTH)
         self.nextwriteaddress = Signal(max=self.MEMDEPTH)
+        readbit = Signal(max = self.MEMWIDTH)
         self.writebyte = Signal(max=self.MEMDEPTH)
         written = Signal()
         self.memory.act("RESET",
@@ -116,7 +120,7 @@ class LEDProgram(Module):
         # Custom Receiver
         self.submodules.receiver = FSM(reset_state = "IDLE")
         self.receiver.act("IDLE",
-                NextValue(spislave.miso, Cat(ledstate+error+0)),
+                NextValue(spislave.miso, Cat(self.ledstate+error+0)),
             If((self.nextwriteaddress==readport.adr)&(written==1),
                 NextValue(spislave.miso[0],1)
             ),
@@ -134,17 +138,17 @@ class LEDProgram(Module):
             # Read Header
             If(command == self.COMMANDS.RECVCOMMAND,
                 If(spislave.mosi == self.COMMANDS.STOP,
-                    NextValue(ledstate, 0)
+                    NextValue(self.ledstate, 0)
                 ).
                 Elif(spislave.mosi == self.COMMANDS.START,
-                    NextValue(ledstate, 1)
+                    NextValue(self.ledstate, 1)
                 ).
                 Elif(spislave.mosi == self.COMMANDS.READ_D,
                     NextValue(command, self.COMMANDS.READ_D),
-                    #NOTE THIS DOESN'T WORK!
+                    #NOTE doesn't work as you jump to idle where miso is changed
                     NextValue(spislave.miso, debug)
                 ).
-                Elif((spislave.mosi == self.COMMANDS.WRITE_L) & (self.memoryfull == 0),
+                Elif(spislave.mosi == self.COMMANDS.WRITE_L,
                     NextValue(command, self.COMMANDS.WRITE_L),
                     # no effect
                     #NextValue(spislave.miso, 3)
@@ -172,19 +176,61 @@ class LEDProgram(Module):
             )
         )
         # LED State machine
+        # A led blinks every so many cycles.
+        # The blink rate of the LED can be limited via a counter
+        maxperiod = 3
+        counter = Signal(max=maxperiod+1)
+        # you can't bitshift on the dat_r as it is refreshed
+        dat_r_temp = Signal()
         self.submodules.ledfsm = FSM(reset_state = "OFF")
         self.ledfsm.act("OFF",
             NextValue(led, 0),
-            If(ledstate==1,
+            NextValue(readbit,0),
+            If(self.ledstate==1,
                  NextState("ON")
             )
         )
+        read = Signal()  # to indicate wether you have read
         self.ledfsm.act("ON",
-            NextValue(led, 1),
-            If(ledstate==0,
-                NextState("OFF")
+            If(counter == maxperiod-1,
+               # if there is no data, led off and report error
+               # actually your readport addr is the next address
+               # you read out the address before increasing it, you don't use the dual port fully
+               If((readport.adr==writeport.adr) and written,
+                    NextValue(read, 0), # you nead to read again, wrong value
+                    NextValue(led, 0),
+                    NextValue(error[0], 1)
+               ).
+               Else(
+                NextValue(error[0], 0),
+                NextValue(dat_r_temp, dat_r_temp>>1),
+                NextValue(led, dat_r_temp[0]),
+                NextValue(readbit, readbit+1),
+                # you need to read again!
+                # move to next addres if end is reached
+                If(readbit==self.MEMWIDTH-1,
+                    NextValue(read, 0),
+                    NextValue(readport.adr, readport.adr+1)
+                )
+               )
+            ),
+            NextValue(counter, counter-1),
+            If(self.ledstate==0,
+               NextState("OFF")
+            ),
+            If(read==0,
+               NextState("READ"),
+               NextValue(readport.re, 1)
             )
         )
+        #NOTE: you r not decreasing the counter
+        self.ledfsm.act("READ",
+            NextValue(dat_r_temp, readport.dat_r),
+            NextValue(readport.re, 0),
+            NextValue(read, 1),
+            NextState("ON")
+        )
+
 
 
 class TestSPIStateMachine(unittest.TestCase):
@@ -229,24 +275,24 @@ class TestSPIStateMachine(unittest.TestCase):
         def fpga_side():
             timeout = 0
             # LED should be off on the start
-            self.assertEqual((yield self.dut.led), 0)
+            self.assertEqual((yield self.dut.ledprogram.ledstate), 0)
             # wait till led state changes
-            while (yield self.dut.led) == 0:
+            while (yield self.dut.ledprogram.ledstate) == 0:
                 timeout += 1
                 if timeout>1000:
                     raise Exception("Led doesn't turn on.")
                 yield
             timeout = 0
             # LED should be on now
-            self.assertEqual((yield self.dut.led), 1)
+            self.assertEqual((yield self.dut.ledprogram.ledstate), 1)
             # wait till led state changes
-            while (yield self.dut.led) == 1:
+            while (yield self.dut.ledprogram.ledstate) == 1:
                 timeout += 1
                 if timeout>1000:
                     raise Exception("Led doesn't turn off.")
                 yield
             # LED should be off now
-            self.assertEqual((yield self.dut.led), 0)
+            self.assertEqual((yield self.dut.ledprogram.ledstate), 0)
         run_simulation(self.dut, [raspberry_side(), fpga_side()])
 
     def test_writedata(self):
@@ -272,7 +318,6 @@ class TestSPIStateMachine(unittest.TestCase):
         run_simulation(self.dut, [raspberry_side(self.dut)])
     
     # what tests do you need?
-    #   
     #   -- memory empty, can't read  --> led doesn't turn on
     #   -- memory full, can read --> up to some point
 
