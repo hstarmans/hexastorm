@@ -43,10 +43,9 @@ class LEDProgram(Module):
         # three submodules; SPI receiver, memory and laser state machine
         # full byte state
         self.ledstate   =  Signal(3)   # state laser module 6-8 byte
-        error      =  Signal(4)   # error state  1-5 byte, 
-                                  #     -- bit 0 read error
-                                  # memory full  0 byte
-        
+        error =  Signal(4)  # error state  1-5 byte, 
+                            #     -- bit 0 read error
+                            # memory full  0 byte
         debug = Signal(8)   # optional 
 
         # Memory element
@@ -131,7 +130,7 @@ class LEDProgram(Module):
                     NextValue(spislave.miso, debug)
                 ).
                 Elif(spislave.mosi == self.COMMANDS.WRITE_L,
-                    NextValue(command, self.COMMANDS.WRITE_L),
+                    NextValue(command, self.COMMANDS.WRITE_L)
                     # no effect
                     #NextValue(spislave.miso, 3)
                 )
@@ -146,7 +145,6 @@ class LEDProgram(Module):
                 Else(
                     NextValue(written, 1),
                     NextValue(writeport.dat_w, spislave.mosi),
-                    NextValue(writeport.adr, writeport.adr+1),
                     NextValue(writeport.we, 1),
                     NextState("WRITE"),
                     If(self.writebyte>=self.CHUNKSIZE-1,
@@ -158,7 +156,8 @@ class LEDProgram(Module):
                 )
             )
         )
-        self.receiver.act("WRITE", 
+        self.receiver.act("WRITE",
+            NextValue(writeport.adr, writeport.adr+1), 
             NextValue(writeport.we, 0),
             NextState("IDLE")
         )
