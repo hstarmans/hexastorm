@@ -43,7 +43,7 @@ class LEDProgram(Module):
         # three submodules; SPI receiver, memory and laser state machine
         # full byte state
         self.ledstate   =  Signal(3)   # state laser module 6-8 byte
-        error =  Signal(4)  # error state  1-5 byte, 
+        self.error =  Signal(4)  # error state  1-5 byte, 
                             #     -- bit 0 read error
                             # memory full  0 byte
         debug = Signal(8)   # optional 
@@ -104,10 +104,13 @@ class LEDProgram(Module):
         self.submodules.receiver = FSM(reset_state = "IDLE")
         self.receiver.act("IDLE",
         #NOTE: simplify with cat
-                NextValue(spislave.miso[1:5], error),
+                NextValue(spislave.miso[1:5], self.error),
                 NextValue(spislave.miso[5:], self.ledstate),
             If((writeport.adr==readport.adr)&(written==1),
                 NextValue(spislave.miso[0],1)
+            ).
+            Else(
+                NextValue(spislave.miso[0],0)
             ),
             If(start_rise,
                 NextState("WAITFORDONE")
@@ -177,6 +180,7 @@ class LEDProgram(Module):
         self.submodules.ledfsm = FSM(reset_state = "OFF")
         self.ledfsm.act("OFF",
             NextValue(led, 0),
+            NextValue(self.error[0], 0), # there is no read error 
             NextValue(readbit,0),
             If(self.ledstate==1,
                  NextState("ON")
@@ -187,13 +191,13 @@ class LEDProgram(Module):
             If(counter == maxperiod-1,
                # if there is no data, led off and report error
                #NOTE: would also make sense to report error if not been written yet and you try to read
-               If((readport.adr==writeport.adr)&written&readstart,
+               If(written==0,
                     NextValue(read, 0), # you nead to read again, wrong value
                     NextValue(led, 0),
-                    NextValue(error[0], 1)
+                    NextValue(self.error[0], 1)
                ).
                Else(
-                    NextValue(error[0], 0),
+                    NextValue(self.error[0], 0),
                     NextValue(readport.dat_r, readport.dat_r>>1),
                     #NextValue(led, readport.dat_r[0]),
                     NextValue(led, 1),
@@ -203,7 +207,14 @@ class LEDProgram(Module):
                     If(readbit==self.MEMWIDTH-1,
                         NextValue(read, 0),
                         NextValue(readport.adr, readport.adr+1),
-                        NextValue(readstart,1)
+                        If(readport.adr+1==writeport.adr,
+                            NextValue(written,0)
+                        ).
+                        #NOTE: count wrap around
+                        Elif((readport.adr+1==self.MEMDEPTH)&(writeport.adr==0),
+                            NextValue(written,0)
+                        )
+
                 )
                )
             ),
@@ -259,10 +270,10 @@ class TestSPIStateMachine(unittest.TestCase):
             # turn on the LED, status should still be zero
             yield from self.transaction(LEDProgram.COMMANDS.START, 0)
             # check wether the led is on
-            # no error is reported as nothing has been written yetS
-            yield from self.transaction(LEDProgram.COMMANDS.STATUS, int('100000',2))
+            # error is reported as nothing has been written yetS
+            yield from self.transaction(LEDProgram.COMMANDS.STATUS, int('100010',2))
             # turn OFF the led state machine
-            yield from self.transaction(LEDProgram.COMMANDS.STOP, int('100000',2))
+            yield from self.transaction(LEDProgram.COMMANDS.STOP, int('100010',2))
             # LED state machine should be off and the led off
             yield from self.transaction(LEDProgram.COMMANDS.STATUS, 0)
 
@@ -316,69 +327,51 @@ class TestSPIStateMachine(unittest.TestCase):
         run_simulation(self.dut, [raspberry_side()])
 
 
-    # def test_ledstatechangepostwrite(self):
-    #     def raspberry_side():
-    #         # get the initial status
-    #         yield from self.transaction(LEDProgram.COMMANDS.STATUS, 0)
-    #         # write lines to memory
-    #         for i in range(self.dut.ledprogram.MEMDEPTH+1):
-    #             data_byte = i%256 # bytes can't be larger than 255
-    #             if i%(LEDProgram.CHUNKSIZE)==0:
-    #                 if (i>0)&((i%self.dut.ledprogram.MEMDEPTH)==0):
-    #                     # check if memory is full
-    #                     yield from self.transaction(LEDProgram.COMMANDS.WRITE_L, 1)
-    #                     continue
-    #                 else:
-    #                     yield from self.transaction(LEDProgram.COMMANDS.WRITE_L, 0)
-    #             yield from self.transaction(data_byte, 0)
-    #         # turn on the LED, status should be one as memory is full
-    #         yield from self.transaction(LEDProgram.COMMANDS.START, 1)
-    #         # ledstate should change
-    #         timeout = 0
-    #         while (yield self.dut.ledprogram.ledstate) == 0:
-    #             timeout += 1
-    #             if timeout>1000:
-    #                 raise Exception("Led state doesnt go on.")
-    #             yield
-    #         # status should be memory full and led on
-    #         yield from self.transaction(LEDProgram.COMMANDS.STATUS, int('100001',2))
-    #         # led should turn on now
-    #         timeout = 0
-    #         while (yield self.dut.led) == 0:
-    #             timeout += 1
-    #             if timeout>1000:
-    #                 raise Exception("Led doesn't turn on.")
-    #             yield
-    #         self.assertEqual((yield self.dut.led), 1)
-    #         # you could count until led is zero and then 1 again as check
-    #         # you could check if you receive error
-
-
-        # def fpga_side():
-        #     timeout = 0
-        #     # LED statemachine should be off on the start
-        #     self.assertEqual((yield self.dut.ledprogram.ledstate), 0)
-        #     # wait till led state changes
-        #     while (yield self.dut.ledprogram.ledstate) == 0:
-        #         timeout += 1
-        #         if timeout>1000:
-        #             raise Exception("Led doesn't turn on.")
-        #         yield
-        #     timeout = 0
-        #     # LED statemachine should be one now
-        #     # Wether LED is on depends on data
-        #     self.assertEqual((yield self.dut.ledprogram.ledstate), 1)
-        #     # LED should be off
-        #     self.assertEqual((yield self.dut.led), 0)
-        #     # wait till led state changes
-        #     while (yield self.dut.ledprogram.ledstate) == 1:
-        #         timeout += 1
-        #         if timeout>1000:
-        #             raise Exception("Led doesn't turn off.")
-        #         yield
-        #     # LED statemachine should be off
-        #     self.assertEqual((yield self.dut.ledprogram.ledstate), 0)
-        # run_simulation(self.dut, [raspberry_side()])
+    def test_ledstatechangepostwrite(self):
+        def raspberry_side():
+            # get the initial status
+            yield from self.transaction(LEDProgram.COMMANDS.STATUS, 0)
+            # write lines to memory
+            for i in range(self.dut.ledprogram.MEMDEPTH+1):
+                data_byte = i%256 # bytes can't be larger than 255
+                if i%(LEDProgram.CHUNKSIZE)==0:
+                    if (i>0)&((i%self.dut.ledprogram.MEMDEPTH)==0):
+                        # check if memory is full
+                        yield from self.transaction(LEDProgram.COMMANDS.WRITE_L, 1)
+                        continue
+                    else:
+                        yield from self.transaction(LEDProgram.COMMANDS.WRITE_L, 0)
+                yield from self.transaction(data_byte, 0)
+            # turn on the LED, status should be one as memory is full
+            yield from self.transaction(LEDProgram.COMMANDS.START, 1)
+            # ledstate should change
+            timeout = 0
+            while (yield self.dut.ledprogram.ledstate) == 0:
+                timeout += 1
+                if timeout>1000:
+                    raise Exception("Led state doesnt go on.")
+                yield
+            # status should be memory full and led on
+            yield from self.transaction(LEDProgram.COMMANDS.STATUS, int('100001',2))
+            # led should turn on now
+            timeout = 0
+            while (yield self.dut.led) == 0:
+                timeout += 1
+                if timeout>1000:
+                    raise Exception("Led doesn't turn on.")
+                yield
+            self.assertEqual((yield self.dut.led), 1)
+            # you could count until led is zero and then 1 again as check
+            # you could check if you receive error
+            while (yield self.dut.ledprogram.error) == 0:
+                timeout += 1
+                if timeout>1000:
+                    raise Exception("Don't receive error.")
+                yield
+            # status should be memory empty, led statemachine on and read error
+            # you do get an error so written must zero
+            yield from self.transaction(LEDProgram.COMMANDS.STATUS, int('100010',2))
+        run_simulation(self.dut, [raspberry_side()])
 
 
 
