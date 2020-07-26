@@ -48,7 +48,6 @@ class LEDProgram(Module):
                             #     -- bit 0 read error
                             # memory full  0 byte
         debug = Signal(8)   # optional 
-
         # Memory element
         # Current idea: memory continiously repeats cycle;  idle --> read --> write
         # Rules:
@@ -187,14 +186,14 @@ class LEDProgram(Module):
                  NextState("ON")
             )
         )
-        read = Signal()  # to indicate wether you have read
         self.ledfsm.act("ON",
             If(counter == maxperiod-1,
                NextValue(counter, 0),
                # if there is no data, led off and report error
                #NOTE: would also make sense to report error if not been written yet and you try to read
                If(written==0,
-                    NextValue(read, 0), # you nead to read again, wrong value
+                    NextState("READ"), # you nead to read again, wrong value
+                    NextValue(readport.re, 0),
                     NextValue(led, 0),
                     NextValue(self.error[0], 1)
                ).
@@ -206,7 +205,8 @@ class LEDProgram(Module):
                     # you need to read again!
                     # move to next addres if end is reached
                     If(readbit==self.MEMWIDTH-1,
-                        NextValue(read, 0),
+                        NextState("READ"), # you nead to read again, wrong value
+                        NextValue(readport.re, 0),
                         NextValue(readport.adr, readport.adr+1),
                         If(readport.adr+1==writeport.adr,
                             NextValue(written,0)
@@ -223,20 +223,12 @@ class LEDProgram(Module):
             ),
             If(self.ledstate==0,
                NextState("OFF")
-            ),
-            #TODO: can't you make this combinatorial
-            If(read==0,
-               NextState("READ"),
-               NextValue(readport.re, 0)
             )
         )
-        
         self.ledfsm.act("READ",
-            #NOTE: counter should be larger than 3
             NextValue(counter, counter+1),
             NextValue(readport.re, 1),
             NextValue(dat_r_temp, readport.dat_r),
-            NextValue(read, 1),
             NextState("ON")
         )
 
@@ -390,8 +382,7 @@ class TestSPIStateMachine(unittest.TestCase):
 
 
     # what tests do you need?
-    #   -- memory empty, can't read  --> led doesn't turn on
-    #   -- memory full, can read --> up to some point
+    #   you must check you receive all bits in depth and width
 
 
 
