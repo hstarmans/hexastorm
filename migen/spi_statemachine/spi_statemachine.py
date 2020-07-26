@@ -38,8 +38,9 @@ class LEDProgram(Module):
     MEMWIDTH = 8  # must be 8, as you receive in terms of eight
     
 
-    def __init__(self, spi_port, led, memdepth=512):
+    def __init__(self, spi_port, led, memdepth=512, maxperiod=5):
         self.MEMDEPTH = memdepth
+        self.MAXPERIOD = maxperiod
         # three submodules; SPI receiver, memory and laser state machine
         # full byte state
         self.ledstate   =  Signal(3)   # state laser module 6-8 byte
@@ -59,8 +60,8 @@ class LEDProgram(Module):
         # readaddress, current address read
         # written to detect if already information is written to memory
         # sram memory is 32 blocks... each block has its own ports
-        # one block 8*512 = 4096 bytes currently used
-        self.specials.mem = Memory(width=self.MEMWIDTH, depth=self.MEMDEPTH, init = [10,20])
+        # one block 8*512 = 4096 bits currently used
+        self.specials.mem = Memory(width=self.MEMWIDTH, depth=self.MEMDEPTH)
         writeport = self.mem.get_port(write_capable=True, mode = READ_FIRST)
         readport = self.mem.get_port(has_re=True)
         self.specials += writeport, readport
@@ -69,10 +70,10 @@ class LEDProgram(Module):
         readbit = Signal(max = self.MEMWIDTH)
         self.writebyte = Signal(max=self.MEMDEPTH)
         written = Signal()
-        readstart = Signal()
+        dat_r_temp = Signal(max= self.MEMWIDTH)
         self.memory.act("RESET",
                 NextValue(written, 0),
-                NextValue(readstart, 0),
+                NextValue(readport.re, 1),
                 NextValue(readport.adr, 0),
                 NextValue(writeport.adr, 0),
                 NextState("IDLE")
@@ -175,8 +176,8 @@ class LEDProgram(Module):
         # LED State machine
         # A led blinks every so many cycles.
         # The blink rate of the LED can be limited via a counter
-        maxperiod = 3
-        counter = Signal(max=maxperiod)
+        counter = Signal(16)
+        #counter = Signal(max=self.MAXPERIOD.bit_length())
         self.submodules.ledfsm = FSM(reset_state = "OFF")
         self.ledfsm.act("OFF",
             NextValue(led, 0),
@@ -189,6 +190,7 @@ class LEDProgram(Module):
         read = Signal()  # to indicate wether you have read
         self.ledfsm.act("ON",
             If(counter == maxperiod-1,
+               NextValue(counter, 0),
                # if there is no data, led off and report error
                #NOTE: would also make sense to report error if not been written yet and you try to read
                If(written==0,
@@ -198,9 +200,8 @@ class LEDProgram(Module):
                ).
                Else(
                     NextValue(self.error[0], 0),
-                    NextValue(readport.dat_r, readport.dat_r>>1),
-                    #NextValue(led, readport.dat_r[0]),
-                    NextValue(led, 1),
+                    NextValue(dat_r_temp, dat_r_temp>>1),
+                    NextValue(led, dat_r_temp[0]),
                     NextValue(readbit, readbit+1),
                     # you need to read again!
                     # move to next addres if end is reached
@@ -214,23 +215,27 @@ class LEDProgram(Module):
                         Elif((readport.adr+1==self.MEMDEPTH)&(writeport.adr==0),
                             NextValue(written,0)
                         )
-
                 )
                )
+            ).
+            Else(
+                NextValue(counter, counter+1)
             ),
-            NextValue(counter, counter+1),
             If(self.ledstate==0,
                NextState("OFF")
             ),
-            # you could also do a read check here
+            #TODO: can't you make this combinatorial
             If(read==0,
                NextState("READ"),
-               NextValue(readport.re, 1)
+               NextValue(readport.re, 0)
             )
         )
-        #NOTE: you r not decreasing the counter
+        
         self.ledfsm.act("READ",
-            NextValue(readport.re, 0),
+            #NOTE: counter should be larger than 3
+            NextValue(counter, counter+1),
+            NextValue(readport.re, 1),
+            NextValue(dat_r_temp, readport.dat_r),
             NextValue(read, 1),
             NextState("ON")
         )
@@ -360,13 +365,21 @@ class TestSPIStateMachine(unittest.TestCase):
                 if timeout>1000:
                     raise Exception("Led doesn't turn on.")
                 yield
-            self.assertEqual((yield self.dut.led), 1)
+            # you know LED is on now
+            # LED should be on for three ticks
+            count = 0
+            while (yield self.dut.led) == 1:
+                count += 1
+                if count>1000:
+                    raise Exception("Led doesn't turn on.")
+                yield
+            self.assertEqual(count, self.dut.ledprogram.MAXPERIOD)
             # you could count until led is zero and then 1 again as check
-            # you could check if you receive error
+            # check if you receive read errorS
             while (yield self.dut.ledprogram.error) == 0:
                 timeout += 1
                 if timeout>1000:
-                    raise Exception("Don't receive error.")
+                    raise Exception("Don't receive read error.")
                 yield
             # status should be memory empty, led statemachine on and read error
             # you do get an error so written must zero
@@ -391,6 +404,6 @@ if __name__ == '__main__':
             spi_port = plat.request("spi")
             led = plat.request("user_led")
             spi_statemachine = LEDProgram(spi_port, led)
-            plat.build(spi_statemachine, led, build_name = 'spi_statemachine')
+            plat.build(spi_statemachine, build_name = 'spi_statemachine')
     else:
         unittest.main()
