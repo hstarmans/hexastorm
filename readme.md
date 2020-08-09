@@ -20,10 +20,11 @@ sudo systemctl enable pigpiod
 Blinks a led at the IceZero boards.
 
 ### Spi loopback
+This doesn't work. Should probaly be removed.
 A SPI slave with loop back is created; MISO equals MOSI. Bytes sent from the Raspberry equal those received.
 
 ### Spi counter
-The max length a word the Raspberry Pi driver can sent is 8 bit. If you want to receive longer words, you will need to count. In this example, a word is sent and the count is replied.
+The max length a word the Raspberry Pi driver can sent is 8 bit. If you want to receive longer words, you will need to count. In this example, a word,  is sent and the count is replied.
 
 ### Spi mapping
 The Raspberry pi sends two words over SPI. The first word is the command word. The second word is the data write word. The data write word is not used.
@@ -49,36 +50,23 @@ The second byte is optionally the data or ignored. The command table is as follo
     else --> reply with (0,0)
 ```
 
+### SPI state machine
+Has a lot of the complexity present in laser scanner but works with a simple LED.
+In short, you can write over SPI to the memory. You can turn on the machine.
+If there is data in the memory, it will start read date in memory sequentially. The led is on if a bit is 1 and off otherwise.
+If there is no data or the memory is full the user is informed by an error.
+
+### SPI laserscanner
+The SPI laserscanner has the following tests; 
+    - spin motor, time out after 10 seconds
+    - spin motor and enable laser, no time out
+    - spin motor, enable laser, if photodiode high end loop or timeout after 10 seconds.
+        ergo; if motor is still on after 4 seconds test probably failed. This is how functioning of diode is tested.
+Furthermore there is a scanmode. 
+
+
+
 <!--
-Planning;
- kijk of je geheugen test werkt
- kijk of je geheugen gebruikt ja
- http://xess.com/static/media/pages/pygmyhdl/examples/4_blockram/block_ram_party.html
-
-
-Je memory test doet het niet;
- schrijf getal 1 naar adres 1
- schrijf getal 2 naar adres 2
- lees van adres 1
- als gelijk aan 1 led aan en draai huidige test
- vergelijk dan met migen code
-
-Wat kun je doen?
-  - de code werkt op een FPGA, maar je memory werkt zo niet.. dit moet anders
-  - zie https://git.p-fb.net/pef/olimex/blob/master/adc.py
-  - maak eerst een blink met memory
-  - je kunt de code opruimen en beter leesbaar maken, door het gebruik van een statemachine
-  - als ik een pakket verstuurd heb wil ik weten dat ie is aangekomen
-  - ik wil een test maken waarin je data stuurt naar de fpga, verwerkt, en dan weer opnieuw stuurt.
-         hoe snel kan dit?
-
-Wat is de basis van het apparaat?
-  - je kunt vragen wat is je toestand
-  - je kunt een fout herkennen als die optreedt en krijgt informatie over die fout
-
-## Laser scanner
-# de host stuurt een willekeurig woordt, het krijgt ik wil data of ik wil geen data terug
-# als de status is geef data, dan stuurt de raspberry data
-# als de slave voldoende ontvangen heeft, dan leest de slave de data uit, de status wordt ik wil geen data
-# als de slave niet voldoende ontvangen heeft, dan zegt de slave ik wil data
+hidden section
+    You still need to add possibility to disable or enable moving.
  -->
