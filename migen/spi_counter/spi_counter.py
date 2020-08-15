@@ -11,7 +11,7 @@ from migen import *
 from litex.soc.cores.spi import SPIMaster, SPISlave
 import sys
 sys.path.append("..") 
-import icezero as board
+import hexa as board
 
 
 class SpiCounter(Module):

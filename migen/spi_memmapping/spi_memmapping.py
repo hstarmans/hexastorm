@@ -19,7 +19,7 @@ from litex.soc.cores.spi import SPIMaster, SPISlave
 
 import sys
 sys.path.append("..") 
-import icezero as board
+import hexa as board
 
 class SpiMemmapping(Module):
     def __init__(self, spi_port, data_width):

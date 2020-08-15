@@ -1,6 +1,6 @@
 # Migen Test
 
-The repository includes several code examples for m]igen. 
+The repository includes several code examples for migen. 
 The goal of these test is to replace the microcontroller of [ldgraphy](https://github.com/hstarmans/ldgraphy) with a FPGA.
 
 ## Install Notes
@@ -15,16 +15,13 @@ sudo systemctl enable pigpiod
 ```
 
 ## Examples
+The examples have been tested with the latest Hexastorm FPGA board.
 
 ### Blinky
 Blinks a led at the IceZero boards.
 
-### Spi loopback
-This doesn't work. Should probaly be removed.
-A SPI slave with loop back is created; MISO equals MOSI. Bytes sent from the Raspberry equal those received.
-
 ### Spi counter
-The max length a word the Raspberry Pi driver can sent is 8 bit. If you want to receive longer words, you will need to count. In this example, a word,  is sent and the count is replied.
+Counts the number of interactions over spi.
 
 ### Spi mapping
 The Raspberry pi sends two words over SPI. The first word is the command word. The second word is the data write word. The data write word is not used.
