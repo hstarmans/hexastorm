@@ -24,8 +24,9 @@ import hexa as board
 class SpiMemmapping(Module):
     def __init__(self, spi_port, data_width):
         # Memory element
+        # NOTE: memory is not synthesiszed with these value!! it is empty
         self.specials.mem = Memory(8, 512, init = [10,20])
-        p1 = self.mem.get_port(write_capable=True, mode = READ_FIRST)
+        p1 = self.mem.get_port(write_capable=True)
         p2 = self.mem.get_port(has_re=True)
         self.specials += p1, p2
         self.ios = {p1.adr, p1.dat_w, p1.we, p2.dat_r, p2.adr, p2.re}
