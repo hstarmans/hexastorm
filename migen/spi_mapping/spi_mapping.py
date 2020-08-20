@@ -20,10 +20,11 @@ import hexa as board
 
 
 class SpiMapping(Module):
-    def __init__(self, spi_port, data_width):
-        spislave = SPISlave(spi_port, data_width=8)
+    def __init__(self, spi_port):
+        data_width = 8
+        spislave = SPISlave(spi_port, data_width = data_width)
         self.submodules.slave = spislave
-        command = Signal(8)
+        command = Signal(data_width)
         done_d = Signal()
         done_rise = Signal()
         self.sync += done_d.eq(spislave.done)
@@ -61,7 +62,7 @@ class TestSPI(unittest.TestCase):
                 self.submodules.master = SPIMaster(pads, data_width=8,
                     sys_clk_freq=100e6, spi_clk_freq=5e6,
                     with_csr=False)
-                self.submodules.spimap = SpiMapping(pads, 8)
+                self.submodules.spimap = SpiMapping(pads)
 
 
         def master_generator(dut):
@@ -109,7 +110,7 @@ if __name__ == '__main__':
         if sys.argv[1] == 'build':
             plat = board.Platform()
             spi_port = plat.request("spi")
-            spi_mapping = SpiMapping(spi_port, 8)
+            spi_mapping = SpiMapping(spi_port)
             plat.build(spi_mapping,build_name = 'spi_mapping')         
     else:
         unittest.main()
