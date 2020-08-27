@@ -10,7 +10,7 @@ _io = [
     ("laser1", 1, Pins("135"), IOStandard("LVCMOS33")),
     ("ph_diode", 1, Pins("137"), IOStandard("LVCMOS33")),
     ("poly_en", 1, Pins("141"), IOStandard("LVCMOS33")),
-    ("poly_ready", 1, Pins("138"), IOStandard("LVCMOS33")),
+    ("poly_ready", 1, Pins("138"), IOStandard("LVCMOS33")),  # not used
     ("poly_pwm", 1, Pins("139"), IOStandard("LVCMOS33")),
     ("spi", 0,
         Subsignal('cs_n',Pins("85")),

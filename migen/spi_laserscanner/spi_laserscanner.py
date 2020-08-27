@@ -20,10 +20,10 @@ import hexa as board
 # LINES = (LEDPROGRAM.MEMWIDTH*LEDPROGRAM.MEMDEPTH)//VARIABLES['SCANLINE_DATA_SIZE']
 
 
-class LEDProgram(Module):
+class Scanhead(Module):
     @staticmethod
     def commands():
-        commands = ('RECVCOMMAND', 'STATUS', 'START', 'STOP',
+        commands = ('RECVCOMMAND', 'STATUS', 'START', 'STOP', 'LASERTEST',
                     'MOTORTEST', 'LINETEST', 'PHOTODIODETEST',
                      'READ_D', 'WRITE_L')
         Commands = namedtuple('Commands', commands, defaults=tuple(range(len(commands))))
@@ -32,7 +32,7 @@ class LEDProgram(Module):
 
     @staticmethod
     def states():
-        states = ('OFF', 'ON', 'MOTORTEST', 'LINETEST', 'PHOTODIODETEST')
+        states = ('STOP', 'START', 'MOTORTEST', 'LASERTEST', 'LINETEST', 'PHOTODIODETEST')
         States = namedtuple('States', states, defaults=tuple(range(len(states))))
         return States()
     STATES = states.__func__()
@@ -44,13 +44,12 @@ class LEDProgram(Module):
     MEMWIDTH = 8  # must be 8, as you receive in terms of eight
     
 
-    def __init__(self, spi_port, led, pwmpin,
-                 memdepth=512, maxperiod=5):
+    def __init__(self, spi_port, laser0, poly_pwm, poly_en,
+                 memdepth=512):
         self.MEMDEPTH = memdepth
-        self.MAXPERIOD = maxperiod
         # three submodules; SPI receiver, memory and laser state machine
         # full byte state
-        self.ledstate = Signal(3)   # state laser module 6-8 byte
+        self.laserfsmstate = Signal(3)    # state laser module 6-8 byte
         self.error = Signal(4)      # error state  1-5 byte, 
                                     #     -- bit 0 read error
                                     # memory full  0 byte
@@ -110,7 +109,7 @@ class LEDProgram(Module):
         self.receiver.act("IDLE",
         #NOTE: simplify with cat
                 NextValue(spislave.miso[1:5], self.error),
-                NextValue(spislave.miso[5:], self.ledstate),
+                NextValue(spislave.miso[5:], self.laserfsmstate),
             If((writeport.adr==readport.adr)&(written==1),
                 NextValue(spislave.miso[0],1)
             ).
@@ -131,19 +130,22 @@ class LEDProgram(Module):
             # Read Header
             If(command == self.COMMANDS.RECVCOMMAND,
                 If(spislave.mosi == self.COMMANDS.STOP,
-                    NextValue(self.ledstate, self.STATES.STOP)
+                    NextValue(self.laserfsmstate, self.STATES.STOP)
                 ).
                 Elif(spislave.mosi == self.COMMANDS.START,
-                    NextValue(self.ledstate, self.STATES.START)
+                    NextValue(self.laserfsmstate, self.STATES.START)
+                ).
+                Elif(spislave.mosi == self.COMMANDS.LASERTEST,
+                    NextValue(self.laserfsmstate, self.STATES.LASERTEST)
                 ).
                 Elif(spislave.mosi == self.COMMANDS.MOTORTEST,
-                    NextValue(self.ledstate, self.STATES.MOTORTEST)
+                    NextValue(self.laserfsmstate, self.STATES.MOTORTEST)
                 ).
                 Elif(spislave.mosi == self.COMMANDS.LINETEST,
-                    NextValue(self.ledstate, self.STATES.LINETEST)
+                    NextValue(self.laserfsmstate, self.STATES.LINETEST)
                 ).
                 Elif(spislave.mosi == self.COMMANDS.PHOTODIODETEST,
-                    NextValue(self.ledstate, self.STATES.PHOTODIODETEST)
+                    NextValue(self.laserfsmstate, self.STATES.PHOTODIODETEST)
                 ).
                 Elif(spislave.mosi == self.COMMANDS.READ_D,
                     NextValue(command, self.COMMANDS.READ_D),
@@ -186,68 +188,85 @@ class LEDProgram(Module):
             NextValue(writeport.we, 0),
             NextState("IDLE")
         )
-        # LED State machine
-        # A led blinks every so many cycles.
+        # 
+        polyperiod = int(self.VARIABLES['CRYSTAL_HZ']*60/self.VARIABLES['RPM'])
+        pwmcounter = Signal(max=polyperiod)
+        self.sync += If(pwmcounter == 0,
+                poly_pwm.eq(~poly_pwm),
+                pwmcounter.eq(int(polyperiod))).Else(
+                pwmcounter.eq(pwmcounter - 1)
+                )
+
+        # Laser FSM
+        # Laser FSM controls the laser, polygon and output to motor
         # The blink rate of the LED can be limited via a counter
-        counter = Signal(16)
-        pwmcounter = Signal(16)
+        bitcounter = Signal(max=self.VARIABLES['SCANLINE_DATA_SIZE'])
         #counter = Signal(max=self.MAXPERIOD.bit_length())
-        self.submodules.ledfsm = FSM(reset_state = "OFF")
-        self.ledfsm.act("OFF",
-            NextValue(pwmcounter, 0),
-            NextValue(counter, 0),
-            NextValue(led, 0),
+        self.submodules.laserfsm = FSM(reset_state = "STOP")
+        self.laserfsm.act("STOP",
+            NextValue(bitcounter, 0),
+            NextValue(laser0, 0),
+            NextValue(poly_en, 1),
             NextValue(self.error[0], 0), # there is no read error 
             NextValue(readbit,0),
-            If(self.ledstate==self.STATES.ON,
-                 NextState("ON")
+            If(self.laserfsmstate==self.STATES.START,
+                 NextState("START")
             ).
-            Elif(self.ledstate==self.STATES.MOTORTEST,
-                NextState("TEST")
+            Elif(self.laserfsmstate==self.STATES.MOTORTEST,
+                NextValue(poly_en, 0),
+                NextState("MOTORTEST")
             ).
-            Elif((self.ledstate==self.states.LINETEST)|(self.ledstate==self.states.PHOTODIODETEST),
-                NextState(led, 1),
-                NextState("TEST")
+            Elif(self.laserfsmstate==self.STATES.LASERTEST,
+                NextValue(laser0, 1),
+                NextState("LASERTEST")
+            ).
+            Elif(self.laserfsmstate==self.STATES.LINETEST,
+                NextValue(laser0, 1),
+                NextValue(poly_en, 0),
+                NextState("LINETEST")
+            ).
+            Elif(self.laserfsmstate==self.STATES.PHOTODIODETEST,
+                NextValue(laser0, 1),
+                NextValue(poly_en, 0),
+                NextState("PHOTODIODETEST")
             )
         )
-        # turn the motor on for 4 seconds
-        self.ledfsm.act("TEST",
-            If(counter >= (self.variables['CRYSTAL_HZ']*60)/self.VARIABLES['RPM'],
-                NextValue(counter, 0),
-                NextValue(pwmcounter, pwmcounter+1),
-                NextValue(pwmpin, ~pwmpin)
-            ).
-            Else(
-                NextValue(counter, counter+1)
-            ),
-            # motor test
-            #   motor off after 4 seconds
-            If((self.ledstate == self.states.MOTORTEST)|(self.ledstate == self.states.PHOTODIODETEST),
-                If(pwmcounter>=(self.VARIABLES['RPM']/60*4),
-                    NextState("OFF"),
-                    NextState(self.ledstate, self.states.OFF)
-                )
-            ),
-            # if states get changed and is any of the other states --> change
-            If((self.ledstate==self.STATES.ON)|(self.ledstate==self.STATES.OFF),
-                 NextState("OFF")
+        self.laserfsm.act("MOTORTEST",
+            If(self.laserfsmstate!=self.STATES.MOTORTEST,
+                 NextState("STOP")
             )
         )
-        self.ledfsm.act("ON",
-            If(counter >= maxperiod-1,
-               NextValue(counter, 0),
+        self.laserfsm.act("LASERTEST",
+            If(self.laserfsmstate!=self.STATES.LASERTEST,
+                 NextState("STOP")
+            )
+        )
+        self.laserfsm.act("LINETEST",
+            If(self.laserfsmstate!=self.STATES.LINETEST,
+                 NextState("STOP")
+            )
+        )
+        #TODO: not correct
+        self.laserfsm.act("PHOTODIODETEST",
+            If(self.laserfsmstate!=self.STATES.PHOTODIODETEST,
+                 NextState("STOP")
+            )
+        )
+        self.laserfsm.act("START",
+            If(bitcounter >= self.VARIABLES['SCANLINE_DATA_SIZE']-1,
+               NextValue(bitcounter, 0),
                # if there is no data, led off and report error
                #NOTE: would also make sense to report error if not been written yet and you try to read
                If(written==0,
                     NextState("READ"), # you nead to read again, wrong value
                     NextValue(readport.re, 0),
-                    NextValue(led, 0),
+                    NextValue(laser0, 0),
                     NextValue(self.error[0], 1)
                ).
                Else(
                     NextValue(self.error[0], 0),
                     NextValue(dat_r_temp, dat_r_temp>>1),
-                    NextValue(led, dat_r_temp[0]),
+                    NextValue(laser0, dat_r_temp[0]),
                     NextValue(readbit, readbit+1),
                     # you need to read again!
                     # move to next addres if end is reached
@@ -266,173 +285,18 @@ class LEDProgram(Module):
                )
             ).
             Else(
-                NextValue(counter, counter+1)
+                NextValue(bitcounter, bitcounter+1)
             ),
-            If(self.ledstate!=self.STATES.ON,
-               NextState("OFF")
+            If(self.laserfsmstate!=self.STATES.START,
+               NextState("STOP")
             )
         )
-        self.ledfsm.act("READ",
-            NextValue(counter, counter+1),
+        self.laserfsm.act("READ",
+            NextValue(bitcounter, bitcounter+1),
             NextValue(readport.re, 1),
             NextValue(dat_r_temp, readport.dat_r),
-            NextState("ON")
+            NextState("START")
         )
-
-
-
-class TestSPIStateMachine(unittest.TestCase):
-    def setUp(self):
-        class DUT(Module):
-            def __init__(self):
-                pads = Record([("clk", 1), ("cs_n", 1), ("mosi", 1), ("miso", 1)])
-                self.submodules.master = SPIMaster(pads, data_width=8,
-                        sys_clk_freq=100e6, spi_clk_freq=5e6,
-                        with_csr=False)
-                self.led = Signal()
-                self.submodules.ledprogram = LEDProgram(pads, self.led, memdepth=16)
-        self.dut = DUT()
-
-    def transaction(self, data_sent, data_received):
-        ''' 
-        helper function to test transaction from raspberry pi side
-        '''
-        yield self.dut.master.mosi.eq(data_sent)
-        yield self.dut.master.length.eq(8)
-        yield self.dut.master.start.eq(1)
-        yield
-        yield self.dut.master.start.eq(0)
-        yield
-        while (yield self.dut.master.done) == 0:
-            yield
-        self.assertEqual((yield self.dut.master.miso), data_received)
-
-    def test_ledstatechange(self):
-        def raspberry_side():
-            # get the initial status
-            yield from self.transaction(LEDProgram.COMMANDS.STATUS, 0)
-            # turn on the LED, status should still be zero
-            yield from self.transaction(LEDProgram.COMMANDS.START, 0)
-            # check wether the led is on
-            # error is reported as nothing has been written yet
-            yield from self.transaction(LEDProgram.COMMANDS.STATUS, int('100010',2))
-            # turn OFF the led state machine
-            yield from self.transaction(LEDProgram.COMMANDS.STOP, int('100010',2))
-            # LED state machine should be off and the led off
-            yield from self.transaction(LEDProgram.COMMANDS.STATUS, 0)
-
-        def fpga_side():
-            timeout = 0
-            # LED statemachine should be off on the start
-            self.assertEqual((yield self.dut.ledprogram.ledstate), 0)
-            # wait till led state changes
-            while (yield self.dut.ledprogram.ledstate) == 0:
-                timeout += 1
-                if timeout>1000:
-                    raise Exception("Led doesn't turn on.")
-                yield
-            timeout = 0
-            # LED statemachine should be one now
-            # Wether LED is on depends on data
-            self.assertEqual((yield self.dut.ledprogram.ledstate), 1)
-            # LED should be off
-            self.assertEqual((yield self.dut.led), 0)
-            # wait till led state changes
-            while (yield self.dut.ledprogram.ledstate) == 1:
-                timeout += 1
-                if timeout>1000:
-                    raise Exception("Led doesn't turn off.")
-                yield
-            # LED statemachine should be off
-            self.assertEqual((yield self.dut.ledprogram.ledstate), 0)
-        run_simulation(self.dut, [raspberry_side(), fpga_side()])
-
-
-    def test_writedata(self):
-        def raspberry_side():
-            # write lines to memory
-            for i in range(self.dut.ledprogram.MEMDEPTH+1):
-                data_byte = i%256 # bytes can't be larger than 255
-                if i%(LEDProgram.CHUNKSIZE)==0:
-                    if (i>0)&((i%self.dut.ledprogram.MEMDEPTH)==0):
-                        # check if memory is full
-                        yield from self.transaction(LEDProgram.COMMANDS.WRITE_L, 1)
-                        continue
-                    else:
-                        yield from self.transaction(LEDProgram.COMMANDS.WRITE_L, 0)
-                yield from self.transaction(data_byte, 0)
-            # memory is tested in litex
-            in_memory = []
-            loops = 10
-            for i in range(loops):
-                value = (yield self.dut.ledprogram.mem[i])
-                in_memory.append(value)
-            self.assertEqual(list(range(loops)),in_memory)
-        run_simulation(self.dut, [raspberry_side()])
-
-
-    def test_ledstatechangepostwrite(self):
-        def raspberry_side():
-            # get the initial status
-            yield from self.transaction(LEDProgram.COMMANDS.STATUS, 0)
-            # write lines to memory
-            for i in range(self.dut.ledprogram.MEMDEPTH+1):
-                data_byte = i%256 # bytes can't be larger than 255
-                if i%(LEDProgram.CHUNKSIZE)==0:
-                    if (i>0)&((i%self.dut.ledprogram.MEMDEPTH)==0):
-                        # check if memory is full
-                        yield from self.transaction(LEDProgram.COMMANDS.WRITE_L, 1)
-                        continue
-                    else:
-                        yield from self.transaction(LEDProgram.COMMANDS.WRITE_L, 0)
-                yield from self.transaction(data_byte, 0)
-            # turn on the LED, status should be one as memory is full
-            yield from self.transaction(LEDProgram.COMMANDS.START, 1)
-            # ledstate should change
-            timeout = 0
-            while (yield self.dut.ledprogram.ledstate) == 0:
-                timeout += 1
-                if timeout>1000:
-                    raise Exception("Led state doesnt go on.")
-                yield
-            # status should be memory full and led on
-            yield from self.transaction(LEDProgram.COMMANDS.STATUS, int('100001',2))
-            # led should turn on now
-            timeout = 0
-            while (yield self.dut.led) == 0:
-                timeout += 1
-                if timeout>1000:
-                    raise Exception("Led doesn't turn on.")
-                yield
-            # you know LED is on now
-            # LED should be on for three ticks
-            count = 0
-            while (yield self.dut.led) == 1:
-                count += 1
-                if count>1000:
-                    raise Exception("Led doesn't turn on.")
-                yield
-            self.assertEqual(count, self.dut.ledprogram.MAXPERIOD)
-            # you could count until led is zero and then 1 again as check
-            # check if you receive read errorS
-            while (yield self.dut.ledprogram.error) == 0:
-                timeout += 1
-                if timeout>1000:
-                    raise Exception("Don't receive read error.")
-                yield
-            # status should be memory empty, led statemachine on and read error
-            # you do get an error so written must zero
-            yield from self.transaction(LEDProgram.COMMANDS.STATUS, int('100010',2))
-        run_simulation(self.dut, [raspberry_side()])
-
-
-
-
-    # what tests do you need?
-    #   you must check you receive all bits in depth and width
-
-
-
 
 if __name__ == '__main__':
     import sys
@@ -440,8 +304,10 @@ if __name__ == '__main__':
         if sys.argv[1] == 'build':
             plat = board.Platform()
             spi_port = plat.request("spi")
-            led = plat.request("user_led")
-            spi_statemachine = LEDProgram(spi_port, led)
+            laser0 = plat.request("laser0")
+            poly_pwm = plat.request("poly_pwm")
+            poly_en = plat.request("poly_en")
+            spi_statemachine = Scanhead(spi_port, laser0, poly_pwm, poly_en)
             plat.build(spi_statemachine, build_name = 'spi_statemachine')
     else:
         unittest.main()

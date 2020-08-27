@@ -1,7 +1,6 @@
 """
     blinky.py
     Basic blinky example for migen. 
-    Tested with icezero board
     
     Rik starmans
 """
