@@ -1,9 +1,9 @@
 import unittest
 
-from spi_statemachine import LEDProgram
-
 from migen import *
 from litex.soc.cores.spi import SPIMaster
+
+from spi_statemachine import LEDProgram
 
 class TestSPIStateMachine(unittest.TestCase):
     def setUp(self):

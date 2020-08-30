@@ -44,7 +44,7 @@ plat = board.Platform()
 poly_en = plat.request("poly_en")
 poly_pwm = plat.request("poly_pwm")
 laser = plat.request("laser1")
-ph_diode = plat.request("ph_diode")
+ph_diode = plat.request("photodiode")
 photodiode = Photodiode(laser, poly_en, poly_pwm, 10, ph_diode)
 plat.build(photodiode, build_name = 'photodiode')
 

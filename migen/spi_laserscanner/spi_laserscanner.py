@@ -4,15 +4,16 @@
 
     Rik Starmans
 """
+import sys
 from collections import namedtuple
 
 import unittest
-from migen.fhdl import verilog
 from migen.fhdl.tools import list_special_ios
 from migen import *
-from litex.soc.cores.spi import SPIMaster, SPISlave
+from litex.soc.cores.spi import SPISlave
 
-import sys
+import laserscanner_test
+
 sys.path.append("..") 
 import hexa as board
 
@@ -42,16 +43,16 @@ class Scanhead(Module):
             'TICKS_START':4375, 'SINGLE_FACET':0, 'DIRECTION':0, 'JITTER_ALLOW':300, 'JITTER_THRESH':400}
     CHUNKSIZE = 8 # you write in chunks of 8 bytes
     MEMWIDTH = 8  # must be 8, as you receive in terms of eight
-    
+    MEMDEPTH = 512
 
     def __init__(self, spi_port, laser0, poly_pwm, poly_en,
-                 memdepth=512):
-        self.MEMDEPTH = memdepth
+                 photodiode):
         # three submodules; SPI receiver, memory and laser state machine
         # full byte state
         self.laserfsmstate = Signal(3)    # state laser module 6-8 byte
         self.error = Signal(4)      # error state  1-5 byte, 
                                     #     -- bit 0 read error
+        #NOTE: sum of eigth is reached with memory full byte
                                     # memory full  0 byte
         debug = Signal(8)   # optional 
         # Memory element
@@ -246,8 +247,11 @@ class Scanhead(Module):
                  NextState("STOP")
             )
         )
-        #TODO: not correct
         self.laserfsm.act("PHOTODIODETEST",
+            If(photodiode == 1,
+               NextValue(laser0, 0),
+               NextValue(poly_en, 1),
+            ),
             If(self.laserfsmstate!=self.STATES.PHOTODIODETEST,
                  NextState("STOP")
             )
@@ -299,7 +303,6 @@ class Scanhead(Module):
         )
 
 if __name__ == '__main__':
-    import sys
     if len(sys.argv)>1:
         if sys.argv[1] == 'build':
             plat = board.Platform()
@@ -307,7 +310,9 @@ if __name__ == '__main__':
             laser0 = plat.request("laser0")
             poly_pwm = plat.request("poly_pwm")
             poly_en = plat.request("poly_en")
-            spi_statemachine = Scanhead(spi_port, laser0, poly_pwm, poly_en)
+            photodiode = plat.request("photodiode")
+            spi_statemachine = Scanhead(spi_port, laser0, poly_pwm, poly_en, photodiode)
             plat.build(spi_statemachine, build_name = 'spi_statemachine')
     else:
-        unittest.main()
+        suite = unittest.TestLoader().loadTestsFromModule(laserscanner_test)
+        unittest.TextTestRunner(verbosity=2).run(suite)
