@@ -20,6 +20,8 @@ import hexa as board
 # lines that can be in memory
 # LINES = (LEDPROGRAM.MEMWIDTH*LEDPROGRAM.MEMDEPTH)//VARIABLES['SCANLINE_DATA_SIZE']
 
+#TODO: you could lower the tick counter
+
 
 class Scanhead(Module):
     @staticmethod
@@ -38,9 +40,9 @@ class Scanhead(Module):
         return States()
     STATES = states.__func__()
 
-    VARIABLES = {'RPM':2400,'SPINUP_TICKS':1.5,'MAX_WAIT_STABLE_TICKS':1.125, 'FACETS':4,
-            'CRYSTAL_HZ':100E6, 'SCANLINE_DATA_SIZE':790,'TICKS_PER_PRISM_FACET':12500, 
-            'TICKS_START':4375, 'SINGLE_FACET':0, 'DIRECTION':0, 'JITTER_ALLOW':300, 'JITTER_THRESH':400}
+    VARIABLES = {'RPM':2400,'SPINUP_TIME':1.5, 'STABLE_TIME':1.125, 'FACETS':4,
+            'CRYSTAL_HZ':100E6, 'SCANLINE_DATA_SIZE':790, 'TICKS_START':4375,
+            'SINGLE_FACET':0, 'DIRECTION':0, 'SYNCSTART':1/400, 'JITTER_THRESH':1/3000}
     CHUNKSIZE = 8 # you write in chunks of 8 bytes
     MEMWIDTH = 8  # must be 8, as you receive in terms of eight
     MEMDEPTH = 512
@@ -50,9 +52,9 @@ class Scanhead(Module):
         # three submodules; SPI receiver, memory and laser state machine
         # full byte state
         self.laserfsmstate = Signal(3)    # state laser module 6-8 byte
-        self.error = Signal(4)      # error state  1-5 byte, 
-                                    #     -- bit 0 read error
-        #NOTE: sum of eigth is reached with memory full byte
+        self.error = Signal(5)      # error state  2-5 byte,
+                                    # time out     2 byte 
+                                    # read error   1 byte
                                     # memory full  0 byte
         debug = Signal(8)   # optional 
         # Memory element
@@ -105,21 +107,18 @@ class Scanhead(Module):
         start_rise = Signal()
         self.sync += start_d.eq(spislave.start)
         self.comb += start_rise.eq(spislave.start & ~start_d)
+        #TODO: NOT CHECKED!!
+        # memory full
+        self.comb += self.error[0].eq((writeport.adr==readport.adr)&(written==1))
         # Custom Receiver
         self.submodules.receiver = FSM(reset_state = "IDLE")
         self.receiver.act("IDLE",
-        #NOTE: simplify with cat
-                NextValue(spislave.miso[1:5], self.error),
+                #NOTE: simplify with cat
+                NextValue(spislave.miso[0:5], self.error),
                 NextValue(spislave.miso[5:], self.laserfsmstate),
-            If((writeport.adr==readport.adr)&(written==1),
-                NextValue(spislave.miso[0],1)
-            ).
-            Else(
-                NextValue(spislave.miso[0],0)
-            ),
-            If(start_rise,
-                NextState("WAITFORDONE")
-            )
+                If(start_rise,
+                    NextState("WAITFORDONE")
+                )
         )
         self.receiver.act("WAITFORDONE",
             If(done_rise,
@@ -200,18 +199,26 @@ class Scanhead(Module):
 
         # Laser FSM
         # Laser FSM controls the laser, polygon and output to motor
-        # The blink rate of the LED can be limited via a counter
-        bitcounter = Signal(max=self.VARIABLES['SCANLINE_DATA_SIZE'])
+        #TODO: volgens mij moet je het maal 8 doen
+        bitcounter = Signal(max=int(self.VARIABLES['SCANLINE_DATA_SIZE']))
+        spinupcounter = Signal(max=int(self.VARIABLES['SPINUP_TIME']*self.VARIABLES['CRYSTAL_HZ']))
+        facetcounter = Signal(max=int(self.VARIABLES['FACETS']))
+        stablecounter = Signal(max=int(self.VARIABLES['STABLE_TIME']*self.VARIABLES['CRYSTAL_HZ']))
+        ticksinfacet = self.VARIABLES['CRYSTAL_HZ']/(self.VARIABLES['RPM']*60*self.VARIABLES['FACETS'])
+        tickcounter = Signal(max=int(ticksinfacet*(1+self.VARIABLES['JITTER_THRESH'])))
+        #tickcounter = Signal()
         #counter = Signal(max=self.MAXPERIOD.bit_length())
         self.submodules.laserfsm = FSM(reset_state = "STOP")
         self.laserfsm.act("STOP",
+            NextValue(spinupcounter, 0),
             NextValue(bitcounter, 0),
             NextValue(laser0, 0),
             NextValue(poly_en, 1),
             NextValue(self.error[0], 0), # there is no read error 
             NextValue(readbit,0),
             If(self.laserfsmstate==self.STATES.START,
-                 NextState("START")
+                 NextValue(poly_en, 0),
+                 NextState("SPINUP")
             ).
             Elif(self.laserfsmstate==self.STATES.MOTORTEST,
                 NextValue(poly_en, 0),
@@ -255,6 +262,48 @@ class Scanhead(Module):
             If(self.laserfsmstate!=self.STATES.PHOTODIODETEST,
                  NextState("STOP")
             )
+        )
+        self.laserfsm.act("SPINUP",
+            NextValue(spinupcounter, spinupcounter + 1),
+            If(spinupcounter>int(self.VARIABLES['SPINUP_TIME']*self.VARIABLES['CRYSTAL_HZ']),
+                NextState("STATE_WAIT_STABLE"),
+                NextValue(spinupcounter, 0),
+            ),
+            If(self.laserfsmstate!=self.STATES.START,
+                 NextState("STOP")
+            )
+        )
+        # Photodiode falling edge detector
+        photodiode_d = Signal()
+        photodiode_fall = Signal()
+        self.sync += photodiode_d.eq(photodiode)
+        self.comb += photodiode_fall.eq(~photodiode & photodiode_d)
+        self.laserfsm.act("STATE_WAIT_STABLE",
+            NextValue(laser0, 1),
+            NextValue(tickcounter, tickcounter+1),
+            NextValue(stablecounter, stablecounter+1),
+            If(photodiode_fall, 
+               NextValue(tickcounter, 0), 
+               If((tickcounter>int(ticksinfacet*(1-self.VARIABLES['JITTER_THRESH'])))&
+                  (tickcounter<int(ticksinfacet*(1+self.VARIABLES['JITTER_THRESH']))),
+                  NextState('WAIT_FOR_DATA_RUN')
+               )
+            ),
+            If(stablecounter>int(self.VARIABLES['STABLE_TIME']*self.VARIABLES['CRYSTAL_HZ']),
+               NextValue(self.error[2], 1),
+               NextState('STOP')
+            ),
+            If(self.laserfsmstate!=self.STATES.START,
+                 NextState("STOP")
+            )  
+        )
+        self.laserfsm.act('WAIT_FOR_DATA_RUN',
+            NextValue(laser0, 0),
+            NextValue(tickcounter, tickcounter+1),
+            If(tickcounter>int(self.VARIABLES['TICKS_START']),
+                #TODO: replace with data run and fix with going back to wait stable
+                NextState('START')
+            ) 
         )
         self.laserfsm.act("START",
             If(bitcounter >= self.VARIABLES['SCANLINE_DATA_SIZE']-1,

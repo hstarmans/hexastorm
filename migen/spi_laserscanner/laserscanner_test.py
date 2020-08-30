@@ -15,7 +15,8 @@ class TestSpiLaserScanner(unittest.TestCase):
                         with_csr=False)
                 self.laser0, self.poly_en, self.poly_pwm = Signal(), Signal(), Signal()
                 self.photodiode = Signal()
-                Scanhead.VARIABLES['RPM'] = Scanhead.VARIABLES['CRYSTAL_HZ']/10*60
+                ticksinfacet = 10
+                Scanhead.VARIABLES['RPM'] = Scanhead.VARIABLES['CRYSTAL_HZ']/(ticksinfacet*60*Scanhead.VARIABLES['FACETS'])
                 Scanhead.MEMDEPTH = 16
                 self.submodules.scanhead = Scanhead(pads,
                                                     self.laser0,
@@ -49,7 +50,7 @@ class TestSpiLaserScanner(unittest.TestCase):
         timeout = 0
         while (yield pin) == value:
             timeout += 1
-            if timeout>1000:
+            if timeout>100:
                 raise Exception(f"Pin doesnt change state")
             yield
 
