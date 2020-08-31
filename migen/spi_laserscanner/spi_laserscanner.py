@@ -189,7 +189,7 @@ class Scanhead(Module):
             NextState("IDLE")
         )
         # 
-        polyperiod = int(self.VARIABLES['CRYSTAL_HZ']*60/self.VARIABLES['RPM'])
+        polyperiod = int(self.VARIABLES['CRYSTAL_HZ']/(self.VARIABLES['RPM']*60))
         pwmcounter = Signal(max=polyperiod)
         self.sync += If(pwmcounter == 0,
                 poly_pwm.eq(~poly_pwm),
@@ -199,7 +199,7 @@ class Scanhead(Module):
 
         # Laser FSM
         # Laser FSM controls the laser, polygon and output to motor
-        #TODO: volgens mij moet je het maal 8 doen
+        #TODO: je hebt hier over bytes --> volgens mij moet je het maal 8 doen
         bitcounter = Signal(max=int(self.VARIABLES['SCANLINE_DATA_SIZE']))
         spinupcounter = Signal(max=int(self.VARIABLES['SPINUP_TIME']*self.VARIABLES['CRYSTAL_HZ']))
         facetcounter = Signal(max=int(self.VARIABLES['FACETS']))

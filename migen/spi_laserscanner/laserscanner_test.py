@@ -99,6 +99,27 @@ class TestSpiLaserScanner(unittest.TestCase):
 
         run_simulation(self.dut, [cpu_side()])
 
+    def checkenterstate(self, fsm, state):
+        timeout  = 0
+        while (fsm.decoding[(yield fsm.state)] != state):
+            timeout += 1
+            if timeout>100:
+                raise Exception(f"State not reached")
+            yield
+
+    def test_scanhead(self):
+        ''' test scanhead
+        '''
+        def cpu_side():
+            # get the initial status
+            yield from self.transaction(Scanhead.COMMANDS.STATUS, self.state(state=Scanhead.STATES.STOP))
+            # turn on laser head
+            yield from self.transaction(Scanhead.COMMANDS.START, self.state(state=Scanhead.STATES.STOP))
+            # check if statemachine goes to spinup state
+            yield from self.checkenterstate(self.dut.scanhead.laserfsm, 'SPINUP')
+            # check if statemachine goes to statewaitstable 
+        run_simulation(self.dut, [cpu_side()])
+
 
 if __name__ == '__main__':
     unittest.main()
