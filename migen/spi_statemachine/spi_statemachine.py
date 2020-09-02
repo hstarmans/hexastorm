@@ -37,8 +37,8 @@ class LEDProgram(Module):
         self.MAXPERIOD = maxperiod
         # three submodules; SPI receiver, memory and laser state machine
         # full byte state
-        self.ledstate   =  Signal(3)   # state laser module 6-8 byte
-        self.error =  Signal(4)  # error state  1-5 byte, 
+        self.ledstate = Signal(3)   # state laser module 6-8 byte
+        self.error = Signal(4)  # error state  1-5 byte, 
                             #     -- bit 0 read error
                             # memory full  0 byte
         debug = Signal(8)   # optional 

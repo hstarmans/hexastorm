@@ -12,7 +12,7 @@ from migen.fhdl.tools import list_special_ios
 from migen import *
 from litex.soc.cores.spi import SPISlave
 
-import laserscanner_test
+#
 
 sys.path.append("..") 
 import hexa as board
@@ -201,16 +201,18 @@ class Scanhead(Module):
         # Laser FSM controls the laser, polygon and output to motor
         #TODO: je hebt hier over bytes --> volgens mij moet je het maal 8 doen
         bitcounter = Signal(max=int(self.VARIABLES['SCANLINE_DATA_SIZE']))
-        spinupcounter = Signal(max=int(self.VARIABLES['SPINUP_TIME']*self.VARIABLES['CRYSTAL_HZ']))
         facetcounter = Signal(max=int(self.VARIABLES['FACETS']))
-        stablecounter = Signal(max=int(self.VARIABLES['STABLE_TIME']*self.VARIABLES['CRYSTAL_HZ']))
+        # stable counter used for both spinup and photo diode stable
+        spinupticks = int(self.VARIABLES['SPINUP_TIME']*self.VARIABLES['CRYSTAL_HZ'])
+        stableticks = int(self.VARIABLES['STABLE_TIME']*self.VARIABLES['CRYSTAL_HZ'])
+        stablecounter = Signal(max=max(spinupticks, stableticks))
         ticksinfacet = self.VARIABLES['CRYSTAL_HZ']/(self.VARIABLES['RPM']*60*self.VARIABLES['FACETS'])
-        tickcounter = Signal(max=int(ticksinfacet*(1+self.VARIABLES['JITTER_THRESH'])))
+        self.tickcounter = Signal(max=int(ticksinfacet*10))
         #tickcounter = Signal()
         #counter = Signal(max=self.MAXPERIOD.bit_length())
         self.submodules.laserfsm = FSM(reset_state = "STOP")
         self.laserfsm.act("STOP",
-            NextValue(spinupcounter, 0),
+            NextValue(stablecounter, 0),
             NextValue(bitcounter, 0),
             NextValue(laser0, 0),
             NextValue(poly_en, 1),
@@ -264,10 +266,10 @@ class Scanhead(Module):
             )
         )
         self.laserfsm.act("SPINUP",
-            NextValue(spinupcounter, spinupcounter + 1),
-            If(spinupcounter>int(self.VARIABLES['SPINUP_TIME']*self.VARIABLES['CRYSTAL_HZ']),
+            NextValue(stablecounter, stablecounter + 1),
+            If(stablecounter>spinupticks-1,
                 NextState("STATE_WAIT_STABLE"),
-                NextValue(spinupcounter, 0),
+                NextValue(stablecounter, 0),
             ),
             If(self.laserfsmstate!=self.STATES.START,
                  NextState("STOP")
@@ -280,16 +282,16 @@ class Scanhead(Module):
         self.comb += photodiode_fall.eq(~photodiode & photodiode_d)
         self.laserfsm.act("STATE_WAIT_STABLE",
             NextValue(laser0, 1),
-            NextValue(tickcounter, tickcounter+1),
+            NextValue(self.tickcounter, self.tickcounter+1),
             NextValue(stablecounter, stablecounter+1),
             If(photodiode_fall, 
-               NextValue(tickcounter, 0), 
-               If((tickcounter>int(ticksinfacet*(1-self.VARIABLES['JITTER_THRESH'])))&
-                  (tickcounter<int(ticksinfacet*(1+self.VARIABLES['JITTER_THRESH']))),
+               NextValue(self.tickcounter, 0),
+               If((self.tickcounter>int(ticksinfacet*(1-self.VARIABLES['JITTER_THRESH'])))&
+                  (self.tickcounter<int(ticksinfacet*(1+self.VARIABLES['JITTER_THRESH']))),
                   NextState('WAIT_FOR_DATA_RUN')
                )
             ),
-            If(stablecounter>int(self.VARIABLES['STABLE_TIME']*self.VARIABLES['CRYSTAL_HZ']),
+            If(stablecounter>stableticks-1,
                NextValue(self.error[2], 1),
                NextState('STOP')
             ),
@@ -299,8 +301,8 @@ class Scanhead(Module):
         )
         self.laserfsm.act('WAIT_FOR_DATA_RUN',
             NextValue(laser0, 0),
-            NextValue(tickcounter, tickcounter+1),
-            If(tickcounter>int(self.VARIABLES['TICKS_START']),
+            NextValue(self.tickcounter, self.tickcounter+1),
+            If(self.tickcounter>int(self.VARIABLES['TICKS_START']),
                 #TODO: replace with data run and fix with going back to wait stable
                 NextState('START')
             ) 
@@ -363,5 +365,6 @@ if __name__ == '__main__':
             spi_statemachine = Scanhead(spi_port, laser0, poly_pwm, poly_en, photodiode)
             plat.build(spi_statemachine, build_name = 'spi_statemachine')
     else:
+        import laserscanner_test
         suite = unittest.TestLoader().loadTestsFromModule(laserscanner_test)
         unittest.TextTestRunner(verbosity=2).run(suite)

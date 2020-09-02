@@ -2,9 +2,11 @@ import unittest
 
 from migen import *
 from litex.soc.cores.spi import SPIMaster
-from spi_laserscanner import Scanhead 
+from spi_laserscanner import Scanhead
+
 
 class TestSpiLaserScanner(unittest.TestCase):
+    
     def setUp(self):
         class DUT(Module):
             def __init__(self):
@@ -15,8 +17,12 @@ class TestSpiLaserScanner(unittest.TestCase):
                         with_csr=False)
                 self.laser0, self.poly_en, self.poly_pwm = Signal(), Signal(), Signal()
                 self.photodiode = Signal()
-                ticksinfacet = 10
-                Scanhead.VARIABLES['RPM'] = Scanhead.VARIABLES['CRYSTAL_HZ']/(ticksinfacet*60*Scanhead.VARIABLES['FACETS'])
+                # you want to alter the clock --> and let the rest stay stable
+                self.ticksinfacet = 10
+                Scanhead.VARIABLES['CRYSTAL_HZ']= self.ticksinfacet*60*Scanhead.VARIABLES['FACETS']*Scanhead.VARIABLES['RPM']
+                Scanhead.VARIABLES['JITTER_THRESH'] = 0.1 # need to have at least one tick play
+                Scanhead.VARIABLES['SPINUP_TIME'] = 10/Scanhead.VARIABLES['CRYSTAL_HZ']
+                Scanhead.VARIABLES['STABLE_TIME'] = 30/Scanhead.VARIABLES['CRYSTAL_HZ']
                 Scanhead.MEMDEPTH = 16
                 self.submodules.scanhead = Scanhead(pads,
                                                     self.laser0,
@@ -117,7 +123,20 @@ class TestSpiLaserScanner(unittest.TestCase):
             yield from self.transaction(Scanhead.COMMANDS.START, self.state(state=Scanhead.STATES.STOP))
             # check if statemachine goes to spinup state
             yield from self.checkenterstate(self.dut.scanhead.laserfsm, 'SPINUP')
-            # check if statemachine goes to statewaitstable 
+            # check if statemachine goes to statewaitstable
+            yield from self.checkenterstate(self.dut.scanhead.laserfsm, 'STATE_WAIT_STABLE')
+            yield from self.checkpin(self.dut.laser0, value = 1)
+            # do some additional to create an undefined starting fase
+            # TODO: check that error is received if not stable
+            #     : and that this error can be reset
+            from random import randrange
+            for _ in range(randrange(10)): yield
+            for _ in range(4):
+                for _ in range(self.dut.ticksinfacet): yield
+                yield self.dut.photodiode.eq(1)
+                yield
+                yield self.dut.photodiode.eq(0)
+            yield from self.checkenterstate(self.dut.scanhead.laserfsm, 'WAIT_FOR_DATA_RUN')
         run_simulation(self.dut, [cpu_side()])
 
 
