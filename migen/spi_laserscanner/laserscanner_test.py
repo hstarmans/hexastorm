@@ -23,6 +23,7 @@ class TestSpiLaserScanner(unittest.TestCase):
                 Scanhead.VARIABLES['JITTER_THRESH'] = 0.1 # need to have at least one tick play
                 Scanhead.VARIABLES['SPINUP_TIME'] = 10/Scanhead.VARIABLES['CRYSTAL_HZ']
                 Scanhead.VARIABLES['STABLE_TIME'] = 30/Scanhead.VARIABLES['CRYSTAL_HZ']
+                Scanhead.VARIABLES['START%'] = 0.3
                 Scanhead.MEMDEPTH = 16
                 self.submodules.scanhead = Scanhead(pads,
                                                     self.laser0,
@@ -146,10 +147,10 @@ class TestSpiLaserScanner(unittest.TestCase):
             yield from self.checkenterstate(self.dut.scanhead.laserfsm, 'STATE_WAIT_STABLE')
             # create an undefined starting fase but now apply a pulse
             # system should reach WAIT_FOR _DATA_RUN
-            from random import randrange
-            for _ in range(randrange(10)): yield
-            for _ in range(4): yield from cycle()
+            for _ in range(2): yield  #TODO: this can't be random number between 0 and 10
+            for _ in range(2): yield from cycle()
             yield from self.checkenterstate(self.dut.scanhead.laserfsm, 'WAIT_FOR_DATA_RUN')
+            yield from self.checkenterstate(self.dut.scanhead.laserfsm, 'DATA_RUN')
         run_simulation(self.dut, [cpu_side()])
 
 

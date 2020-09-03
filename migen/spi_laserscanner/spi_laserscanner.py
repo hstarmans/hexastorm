@@ -54,9 +54,9 @@ class Scanhead(Module):
         return Errors()
     ERRORS = errors.__func__()
 
-
+    #TODO: SYNC START and SINGLE_FACET are not used
     VARIABLES = {'RPM':2400,'SPINUP_TIME':1.5, 'STABLE_TIME':1.125, 'FACETS':4,
-            'CRYSTAL_HZ':100E6, 'SCANLINE_DATA_SIZE':790, 'TICKS_START':4375,
+            'CRYSTAL_HZ':100E6, 'SCANLINE_DATA_SIZE':790, 'START%': 0.35,
             'SINGLE_FACET':0, 'DIRECTION':0, 'SYNCSTART':1/400, 'JITTER_THRESH':1/3000}
     CHUNKSIZE = 8 # you write in chunks of 8 bytes
     MEMWIDTH = 8  # must be 8, as you receive in terms of eight
@@ -314,12 +314,15 @@ class Scanhead(Module):
         self.laserfsm.act('WAIT_FOR_DATA_RUN',
             NextValue(laser0, 0),
             NextValue(self.tickcounter, self.tickcounter+1),
-            If(self.tickcounter>int(self.VARIABLES['TICKS_START']),
-                #TODO: replace with data run and fix with going back to wait stable
-                NextState('START')
-            ) 
+            If(self.tickcounter>int(self.VARIABLES['START%']*ticksinfacet),
+                NextState('DATA_RUN')
+            ),
+            If(self.laserfsmstate!=self.STATES.START,
+                 NextState("STOP")
+            )
         )
-        self.laserfsm.act("START",
+        self.laserfsm.act("DATA_RUN",
+            NextValue(self.tickcounter, self.tickcounter+1),
             If(bitcounter >= self.VARIABLES['SCANLINE_DATA_SIZE']-1,
                NextValue(bitcounter, 0),
                # if there is no data, led off and report error
@@ -359,10 +362,14 @@ class Scanhead(Module):
             )
         )
         self.laserfsm.act("READ",
+            NextValue(self.tickcounter, self.tickcounter+1),
             NextValue(bitcounter, bitcounter+1),
             NextValue(readport.re, 1),
             NextValue(dat_r_temp, readport.dat_r),
-            NextState("START")
+            NextState("DATA_RUN"),
+            If(self.laserfsmstate!=self.STATES.START,
+               NextState("STOP")
+            )
         )
 
 if __name__ == '__main__':
