@@ -40,6 +40,21 @@ class Scanhead(Module):
         return States()
     STATES = states.__func__()
 
+
+    @staticmethod
+    def errors():
+        '''errors
+        Multiple errors can be present at the same time. This is different than state or command
+        this always one.
+        If all bits are zero, there is no error.
+        Returned is the bit which equals the error
+        '''
+        errors = ('MEMFULL', 'MEMREAD', 'NOTSTABLE')
+        Errors = namedtuple('Errors', errors, defaults=tuple(range(len(errors))))
+        return Errors()
+    ERRORS = errors.__func__()
+
+
     VARIABLES = {'RPM':2400,'SPINUP_TIME':1.5, 'STABLE_TIME':1.125, 'FACETS':4,
             'CRYSTAL_HZ':100E6, 'SCANLINE_DATA_SIZE':790, 'TICKS_START':4375,
             'SINGLE_FACET':0, 'DIRECTION':0, 'SYNCSTART':1/400, 'JITTER_THRESH':1/3000}
@@ -52,11 +67,8 @@ class Scanhead(Module):
         # three submodules; SPI receiver, memory and laser state machine
         # full byte state
         self.laserfsmstate = Signal(3)    # state laser module 6-8 byte
-        self.error = Signal(5)      # error state  2-5 byte,
-                                    # time out     2 byte 
-                                    # read error   1 byte
-                                    # memory full  0 byte
-        debug = Signal(8)   # optional 
+        self.error = Signal(5)            # error              0-5 byte
+        debug = Signal(8)                 # optional 
         # Memory element
         # Rules:
         #        read cannot be set equal to write address  --> handled by laser ledfsm
@@ -108,14 +120,11 @@ class Scanhead(Module):
         self.sync += start_d.eq(spislave.start)
         self.comb += start_rise.eq(spislave.start & ~start_d)
         #TODO: NOT CHECKED!!
-        # memory full
-        self.comb += self.error[0].eq((writeport.adr==readport.adr)&(written==1))
+        self.sync += self.error[self.ERRORS.MEMFULL].eq((writeport.adr==readport.adr)&(written==1))
         # Custom Receiver
         self.submodules.receiver = FSM(reset_state = "IDLE")
         self.receiver.act("IDLE",
-                #NOTE: simplify with cat
-                NextValue(spislave.miso[0:5], self.error),
-                NextValue(spislave.miso[5:], self.laserfsmstate),
+                NextValue(spislave.miso, Cat([self.error, self.laserfsmstate])),
                 If(start_rise,
                     NextState("WAITFORDONE")
                 )
@@ -208,17 +217,17 @@ class Scanhead(Module):
         stablecounter = Signal(max=max(spinupticks, stableticks))
         ticksinfacet = self.VARIABLES['CRYSTAL_HZ']/(self.VARIABLES['RPM']*60*self.VARIABLES['FACETS'])
         self.tickcounter = Signal(max=int(ticksinfacet*10))
-        #tickcounter = Signal()
-        #counter = Signal(max=self.MAXPERIOD.bit_length())
         self.submodules.laserfsm = FSM(reset_state = "STOP")
         self.laserfsm.act("STOP",
             NextValue(stablecounter, 0),
             NextValue(bitcounter, 0),
             NextValue(laser0, 0),
             NextValue(poly_en, 1),
-            NextValue(self.error[0], 0), # there is no read error 
+            #TODO: what is this for
+            #NextValue(self.error[0], 0), # there is no read error 
             NextValue(readbit,0),
             If(self.laserfsmstate==self.STATES.START,
+                 NextValue(self.error[self.ERRORS.NOTSTABLE], 0),
                  NextValue(poly_en, 0),
                  NextState("SPINUP")
             ).
@@ -280,6 +289,8 @@ class Scanhead(Module):
         photodiode_fall = Signal()
         self.sync += photodiode_d.eq(photodiode)
         self.comb += photodiode_fall.eq(~photodiode & photodiode_d)
+        
+        #NOTE: in the following states... TICKCOUNTER MUST ALWAYS BE INCREASED
         self.laserfsm.act("STATE_WAIT_STABLE",
             NextValue(laser0, 1),
             NextValue(self.tickcounter, self.tickcounter+1),
@@ -292,7 +303,8 @@ class Scanhead(Module):
                )
             ),
             If(stablecounter>stableticks-1,
-               NextValue(self.error[2], 1),
+               NextValue(self.error[self.ERRORS.NOTSTABLE], 1),
+               NextValue(self.laserfsmstate, self.STATES.STOP),
                NextState('STOP')
             ),
             If(self.laserfsmstate!=self.STATES.START,
@@ -316,10 +328,10 @@ class Scanhead(Module):
                     NextState("READ"), # you nead to read again, wrong value
                     NextValue(readport.re, 0),
                     NextValue(laser0, 0),
-                    NextValue(self.error[0], 1)
+                    #NextValue(self.error[0], 1)
                ).
                Else(
-                    NextValue(self.error[0], 0),
+                    #NextValue(self.error[0], 0),
                     NextValue(dat_r_temp, dat_r_temp>>1),
                     NextValue(laser0, dat_r_temp[0]),
                     NextValue(readbit, readbit+1),

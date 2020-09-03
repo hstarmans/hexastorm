@@ -45,12 +45,15 @@ class TestSpiLaserScanner(unittest.TestCase):
             yield
         self.assertEqual((yield self.dut.master.miso), data_received)
 
-    def state(self, memory_full=False
-                  , error=0, state=Scanhead.STATES.STOP):
+    def state(self, errors=[], state=Scanhead.STATES.STOP):
         ''' 
         helper function to get a state encoding
+        error: list as there can be multiple
         '''
-        return int(memory_full)+(error<<1)+(state<<5)
+        errorstate = 0
+        for error in errors: errorstate += pow(2, error)
+        val = errorstate+(state<<5)
+        return val
 
     def checkpin(self, pin, value=0): 
         timeout = 0
@@ -116,6 +119,13 @@ class TestSpiLaserScanner(unittest.TestCase):
     def test_scanhead(self):
         ''' test scanhead
         '''
+        def cycle():
+            for _ in range(self.dut.ticksinfacet): yield
+            yield self.dut.photodiode.eq(1)
+            yield
+            yield self.dut.photodiode.eq(0)
+
+
         def cpu_side():
             # get the initial status
             yield from self.transaction(Scanhead.COMMANDS.STATUS, self.state(state=Scanhead.STATES.STOP))
@@ -126,16 +136,19 @@ class TestSpiLaserScanner(unittest.TestCase):
             # check if statemachine goes to statewaitstable
             yield from self.checkenterstate(self.dut.scanhead.laserfsm, 'STATE_WAIT_STABLE')
             yield from self.checkpin(self.dut.laser0, value = 1)
-            # do some additional to create an undefined starting fase
-            # TODO: check that error is received if not stable
-            #     : and that this error can be reset
+            # no trigger on photodiode, so starting scanhead fails and machine returns to stop
+            yield from self.checkenterstate(self.dut.scanhead.laserfsm, 'STOP')
+            # check if error is received, again turn on laser head
+            yield from self.transaction(Scanhead.COMMANDS.START, self.state(errors=[Scanhead.ERRORS.NOTSTABLE],
+                                                                            state=Scanhead.STATES.STOP))
+            # TODO: check error gone, after restarting
+            # check if statemachine goes to statewaitstable
+            yield from self.checkenterstate(self.dut.scanhead.laserfsm, 'STATE_WAIT_STABLE')
+            # create an undefined starting fase but now apply a pulse
+            # system should reach WAIT_FOR _DATA_RUN
             from random import randrange
             for _ in range(randrange(10)): yield
-            for _ in range(4):
-                for _ in range(self.dut.ticksinfacet): yield
-                yield self.dut.photodiode.eq(1)
-                yield
-                yield self.dut.photodiode.eq(0)
+            for _ in range(4): yield from cycle()
             yield from self.checkenterstate(self.dut.scanhead.laserfsm, 'WAIT_FOR_DATA_RUN')
         run_simulation(self.dut, [cpu_side()])
 
