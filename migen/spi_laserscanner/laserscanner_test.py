@@ -19,7 +19,9 @@ class TestSpiLaserScanner(unittest.TestCase):
                 self.photodiode = Signal()
                 # you want to alter the clock --> and let the rest stay stable
                 self.ticksinfacet = 10
+                self.laserticks = 2
                 Scanhead.VARIABLES['CRYSTAL_HZ']= self.ticksinfacet*60*Scanhead.VARIABLES['FACETS']*Scanhead.VARIABLES['RPM']
+                Scanhead.VARIABLES['LASER_HZ'] = Scanhead.VARIABLES['CRYSTAL_HZ']/self.laserticks
                 Scanhead.VARIABLES['JITTER_THRESH'] = 0.1 # need to have at least one tick play
                 Scanhead.VARIABLES['SPINUP_TIME'] = 10/Scanhead.VARIABLES['CRYSTAL_HZ']
                 Scanhead.VARIABLES['STABLE_TIME'] = 30/Scanhead.VARIABLES['CRYSTAL_HZ']
@@ -119,6 +121,8 @@ class TestSpiLaserScanner(unittest.TestCase):
 
     def test_scanhead(self):
         ''' test scanhead
+
+        
         '''
         def cycle():
             for _ in range(self.dut.ticksinfacet): yield
@@ -142,7 +146,6 @@ class TestSpiLaserScanner(unittest.TestCase):
             # check if error is received, again turn on laser head
             yield from self.transaction(Scanhead.COMMANDS.START, self.state(errors=[Scanhead.ERRORS.NOTSTABLE],
                                                                             state=Scanhead.STATES.STOP))
-            # TODO: check error gone, after restarting
             # check if statemachine goes to statewaitstable
             yield from self.checkenterstate(self.dut.scanhead.laserfsm, 'STATE_WAIT_STABLE')
             # create an undefined starting fase but now apply a pulse
@@ -151,6 +154,12 @@ class TestSpiLaserScanner(unittest.TestCase):
             for _ in range(2): yield from cycle()
             yield from self.checkenterstate(self.dut.scanhead.laserfsm, 'WAIT_FOR_DATA_RUN')
             yield from self.checkenterstate(self.dut.scanhead.laserfsm, 'DATA_RUN')
+            # data run should raise error cannot read (nothing in memory yet)
+            for _ in range(self.dut.laserticks+1): yield
+            # turn off laser head
+            # checks wether MEMREAD is triggered and ERROR is gone after reading
+            yield from self.transaction(Scanhead.COMMANDS.STOP, self.state(errors=[Scanhead.ERRORS.MEMREAD],
+                                                                           state=Scanhead.STATES.START))
         run_simulation(self.dut, [cpu_side()])
 
 

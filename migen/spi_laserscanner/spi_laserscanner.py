@@ -56,7 +56,8 @@ class Scanhead(Module):
 
     #TODO: SYNC START and SINGLE_FACET are not used
     VARIABLES = {'RPM':2400,'SPINUP_TIME':1.5, 'STABLE_TIME':1.125, 'FACETS':4,
-            'CRYSTAL_HZ':100E6, 'SCANLINE_DATA_SIZE':790, 'START%': 0.35,
+            'CRYSTAL_HZ':100E6, 'LASER_HZ': 100E3,
+            'SCANLINE_BITS': 790*8, 'START%': 0.35,
             'SINGLE_FACET':0, 'DIRECTION':0, 'SYNCSTART':1/400, 'JITTER_THRESH':1/3000}
     CHUNKSIZE = 8 # you write in chunks of 8 bytes
     MEMWIDTH = 8  # must be 8, as you receive in terms of eight
@@ -75,6 +76,7 @@ class Scanhead(Module):
         #        write cannot be set equal to read address  --> handled by receiver statemachne
         # readbit, current bit read
         # written to detect if already information is written to memory
+        #         written can go zero after a write... if the memory is complety read --> it is no longer "written"
         # dat_r_temp , data is shifted after read. It is believed that this is not possible on the memory element
         # As a result data is copied to another element first.
         # sram memory is 32 blocks... each block has its own ports
@@ -209,18 +211,21 @@ class Scanhead(Module):
         # Laser FSM
         # Laser FSM controls the laser, polygon and output to motor
         #TODO: je hebt hier over bytes --> volgens mij moet je het maal 8 doen
-        bitcounter = Signal(max=int(self.VARIABLES['SCANLINE_DATA_SIZE']))
-        facetcounter = Signal(max=int(self.VARIABLES['FACETS']))
+        facetcnt = Signal(max=int(self.VARIABLES['FACETS']))
         # stable counter used for both spinup and photo diode stable
         spinupticks = int(self.VARIABLES['SPINUP_TIME']*self.VARIABLES['CRYSTAL_HZ'])
         stableticks = int(self.VARIABLES['STABLE_TIME']*self.VARIABLES['CRYSTAL_HZ'])
         stablecounter = Signal(max=max(spinupticks, stableticks))
         ticksinfacet = self.VARIABLES['CRYSTAL_HZ']/(self.VARIABLES['RPM']*60*self.VARIABLES['FACETS'])
+        LASERTICKS = int(self.VARIABLES['CRYSTAL_HZ']/self.VARIABLES['LASER_HZ'])
+        lasercnt = Signal(max=LASERTICKS)
+        scanbit = Signal(max=self.VARIABLES['SCANLINE_BITS'])
         self.tickcounter = Signal(max=int(ticksinfacet*10))
         self.submodules.laserfsm = FSM(reset_state = "STOP")
         self.laserfsm.act("STOP",
             NextValue(stablecounter, 0),
-            NextValue(bitcounter, 0),
+            NextValue(scanbit, 0),
+            NextValue(lasercnt, 0),
             NextValue(laser0, 0),
             NextValue(poly_en, 1),
             #TODO: what is this for
@@ -295,7 +300,9 @@ class Scanhead(Module):
             NextValue(laser0, 1),
             NextValue(self.tickcounter, self.tickcounter+1),
             NextValue(stablecounter, stablecounter+1),
-            If(photodiode_fall, 
+            If(photodiode_fall,
+               #TODO: check if wraps around
+               NextValue(facetcnt, facetcnt+1), 
                NextValue(self.tickcounter, 0),
                If((self.tickcounter>int(ticksinfacet*(1-self.VARIABLES['JITTER_THRESH'])))&
                   (self.tickcounter<int(ticksinfacet*(1+self.VARIABLES['JITTER_THRESH']))),
@@ -321,25 +328,36 @@ class Scanhead(Module):
                  NextState("STOP")
             )
         )
+        # tick counter; number of ticks in a facet for the oscillator
+        # laser counter; laser operates at reduced speed this controlled by this counter
+        # readbit counter; current bit position in memory
+        # scanbit counter; current bit positioin along scanline
         self.laserfsm.act("DATA_RUN",
             NextValue(self.tickcounter, self.tickcounter+1),
-            If(bitcounter >= self.VARIABLES['SCANLINE_DATA_SIZE']-1,
-               NextValue(bitcounter, 0),
+            If(lasercnt >= LASERTICKS-1,
+               NextValue(lasercnt, 0),
                # if there is no data, led off and report error
-               #NOTE: would also make sense to report error if not been written yet and you try to read
+               # not "written" aka information in memory, try to read again and report error
                If(written==0,
                     NextState("READ"), # you nead to read again, wrong value
                     NextValue(readport.re, 0),
                     NextValue(laser0, 0),
-                    #NextValue(self.error[0], 1)
+                    NextValue(self.error[self.ERRORS.MEMREAD], 1)
                ).
                Else(
-                    #NextValue(self.error[0], 0),
+                    NextValue(self.error[self.ERRORS.MEMREAD], 0),
                     NextValue(dat_r_temp, dat_r_temp>>1),
                     NextValue(laser0, dat_r_temp[0]),
+                    #NOTE: readbit and scanbit counters can be different
+                    #      readbit is your current position in memory and scanbit your current byte position in scanline
                     NextValue(readbit, readbit+1),
+                    NextValue(scanbit, scanbit+1),
+                    If(scanbit==self.VARIABLES['SCANLINE_BITS']-1,
+                       NextState("STATE_WAIT_STABLE"),
+                       NextValue(scanbit, 0)
+                    ),
                     # you need to read again!
-                    # move to next addres if end is reached
+                    # move to next address, i.e. byte, if end is reached
                     If(readbit==self.MEMWIDTH-1,
                         NextState("READ"), # you nead to read again, wrong value
                         NextValue(readport.re, 0),
@@ -355,7 +373,7 @@ class Scanhead(Module):
                )
             ).
             Else(
-                NextValue(bitcounter, bitcounter+1)
+                NextValue(lasercnt, lasercnt+1)
             ),
             If(self.laserfsmstate!=self.STATES.START,
                NextState("STOP")
@@ -363,7 +381,7 @@ class Scanhead(Module):
         )
         self.laserfsm.act("READ",
             NextValue(self.tickcounter, self.tickcounter+1),
-            NextValue(bitcounter, bitcounter+1),
+            NextValue(lasercnt, lasercnt+1),
             NextValue(readport.re, 1),
             NextValue(dat_r_temp, readport.dat_r),
             NextState("DATA_RUN"),
