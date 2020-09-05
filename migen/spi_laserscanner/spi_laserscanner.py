@@ -20,8 +20,6 @@ import hexa as board
 # lines that can be in memory
 # LINES = (LEDPROGRAM.MEMWIDTH*LEDPROGRAM.MEMDEPTH)//VARIABLES['SCANLINE_DATA_SIZE']
 
-#TODO: you could lower the tick counter
-
 
 class Scanhead(Module):
     @staticmethod

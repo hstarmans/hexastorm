@@ -20,6 +20,7 @@ class TestSpiLaserScanner(unittest.TestCase):
                 # you want to alter the clock --> and let the rest stay stable
                 self.ticksinfacet = 10
                 self.laserticks = 2
+                Scanhead.MEMDEPTH = 16
                 Scanhead.VARIABLES['CRYSTAL_HZ']= self.ticksinfacet*60*Scanhead.VARIABLES['FACETS']*Scanhead.VARIABLES['RPM']
                 Scanhead.VARIABLES['LASER_HZ'] = Scanhead.VARIABLES['CRYSTAL_HZ']/self.laserticks
                 Scanhead.VARIABLES['JITTER_THRESH'] = 0.1 # need to have at least one tick play
@@ -119,10 +120,36 @@ class TestSpiLaserScanner(unittest.TestCase):
                 raise Exception(f"State not reached")
             yield
 
+    def test_writedata(self):
+        def cpu_side():
+            # write lines to memory
+            for i in range(Scanhead.MEMDEPTH+1):
+                data_byte = i%256 # bytes can't be larger than 255
+                if i%(Scanhead.CHUNKSIZE)==0:
+                    if (i>0)&((i%Scanhead.MEMDEPTH)==0):
+                        # check if memory is full
+                        yield from self.transaction(Scanhead.COMMANDS.WRITE_L, 
+                                                    self.state(errors = [Scanhead.ERRORS.MEMFULL],
+                                                               state=Scanhead.STATES.STOP)
+                                                    )
+                        continue
+                    else:
+                        yield from self.transaction(Scanhead.COMMANDS.WRITE_L, 
+                                                    self.state(state=Scanhead.STATES.STOP)
+                                                    )
+                yield from self.transaction(data_byte, self.state(state=Scanhead.STATES.STOP))
+            # memory is tested in litex
+            in_memory = []
+            loops = 10
+            for i in range(loops):
+                value = (yield self.dut.scanhead.mem[i])
+                in_memory.append(value)
+            self.assertEqual(list(range(loops)),in_memory)
+        run_simulation(self.dut, [cpu_side()])
+
+
     def test_scanhead(self):
         ''' test scanhead
-
-        
         '''
         def cycle():
             for _ in range(self.dut.ticksinfacet): yield
