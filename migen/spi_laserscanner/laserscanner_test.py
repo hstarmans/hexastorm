@@ -74,7 +74,7 @@ class TestSpiLaserScanner(unittest.TestCase):
             yield from self.checkpin(self.dut.poly_pwm, value=0)
             yield from self.checkpin(self.dut.poly_pwm, value=1)
         
-        run_simulation(self.dut, [cpu_side()])
+        #run_simulation(self.dut, [cpu_side()])
 
     def test_testmodes(self):
         ''' test all 4 testmodes
@@ -148,16 +148,15 @@ class TestSpiLaserScanner(unittest.TestCase):
         run_simulation(self.dut, [cpu_side()])
 
 
-    def test_scanhead(self):
+    def test_scanlinewithoutwrite(self):
         ''' test scanhead
         '''
         def cycle():
-            for _ in range(self.dut.ticksinfacet): yield
+            for _ in range(self.dut.ticksinfacet-2): yield
             yield self.dut.photodiode.eq(1)
             yield
             yield self.dut.photodiode.eq(0)
-
-
+            
         def cpu_side():
             # get the initial status
             yield from self.transaction(Scanhead.COMMANDS.STATUS, self.state(state=Scanhead.STATES.STOP))
@@ -189,6 +188,46 @@ class TestSpiLaserScanner(unittest.TestCase):
                                                                            state=Scanhead.STATES.START))
         run_simulation(self.dut, [cpu_side()])
 
+    def test_scanlinewithwrite(self):
+        def cycle():
+            for _ in range(self.dut.ticksinfacet-2): yield
+            yield self.dut.photodiode.eq(1)
+            yield
+            yield self.dut.photodiode.eq(0)
+
+        def cpu_side():
+            yield from self.transaction(Scanhead.COMMANDS.WRITE_L, self.state(state=Scanhead.STATES.STOP))
+            for _ in range(Scanhead.CHUNKSIZE): yield from self.transaction(255, self.state(state=Scanhead.STATES.STOP))
+            # quick check if you reached end of chunk
+            yield from self.transaction(255, self.state(state=Scanhead.STATES.STOP))
+            yield from self.transaction(Scanhead.COMMANDS.STATUS, self.state(errors=[Scanhead.ERRORS.INVALID],
+                                                                             state=Scanhead.STATES.STOP))
+            # turn on laser head
+            yield from self.transaction(Scanhead.COMMANDS.START, self.state(state=Scanhead.STATES.STOP))
+            # check if statemachine goes to spinup state
+            yield from self.checkenterstate(self.dut.scanhead.laserfsm, 'SPINUP')
+            # check if statemachine goes to statewaitstable
+            # yield from self.checkenterstate(self.dut.scanhead.laserfsm, 'STATE_WAIT_STABLE')
+            # toggle diode so head stabilizes
+            # for _ in range(2): yield from cycle()
+            # yield from self.checkenterstate(self.dut.scanhead.laserfsm, 'WAIT_FOR_DATA_RUN')
+            # yield from self.checkenterstate(self.dut.scanhead.laserfsm, 'DATA_RUN')
+            # # data run should raise error cannot read (nothing in memory yet)
+            # for _ in range(self.dut.laserticks+1): yield
+            # # turn off laser head
+            # # checks wether MEMREAD is triggered and ERROR is gone after reading
+            # yield from self.transaction(Scanhead.COMMANDS.STOP, self.state(errors=[Scanhead.ERRORS.MEMREAD],
+            #                                                                state=Scanhead.STATES.START))
+        run_simulation(self.dut, [cpu_side()])
+
+
+#OKEY WELKE TESTEN WIL JE NOG
+# schrijf naar geheugen en kijk of laser op juiste tijd aangaat
+# check of laser aangaat voor einde
+
+# onderste twee kun je combineren
+#  check single facet mode
+#  bouw een single line mode
 
 if __name__ == '__main__':
     unittest.main()

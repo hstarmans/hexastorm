@@ -47,16 +47,17 @@ class Scanhead(Module):
         If all bits are zero, there is no error.
         Returned is the bit which equals the error
         '''
-        errors = ('MEMFULL', 'MEMREAD', 'NOTSTABLE')
+        errors = ('MEMFULL', 'MEMREAD', 'NOTSTABLE', 'INVALID')
         Errors = namedtuple('Errors', errors, defaults=tuple(range(len(errors))))
         return Errors()
     ERRORS = errors.__func__()
 
     #TODO: SYNC START and SINGLE_FACET are not used
+    #      SYNC_START timestamp at which you turn on the laser
     VARIABLES = {'RPM':2400,'SPINUP_TIME':1.5, 'STABLE_TIME':1.125, 'FACETS':4,
             'CRYSTAL_HZ':100E6, 'LASER_HZ': 100E3,
-            'SCANLINE_BITS': 790*8, 'START%': 0.35,
-            'SINGLE_FACET':0, 'DIRECTION':0, 'SYNCSTART':1/400, 'JITTER_THRESH':1/3000}
+            'END%': 0.8, 'START%': 0.35,
+            'SINGLE_FACET':0, 'DIRECTION':0, 'SYNCSTART':1/3000, 'JITTER_THRESH':1/400}
     CHUNKSIZE = 8 # you write in chunks of 8 bytes
     MEMWIDTH = 8  # must be 8, as you receive in terms of eight
     MEMDEPTH = 512
@@ -119,7 +120,6 @@ class Scanhead(Module):
         start_rise = Signal()
         self.sync += start_d.eq(spislave.start)
         self.comb += start_rise.eq(spislave.start & ~start_d)
-        #TODO: NOT CHECKED!!
         self.sync += self.error[self.ERRORS.MEMFULL].eq((writeport.adr==readport.adr)&(written==1))
         # Custom Receiver
         self.submodules.receiver = FSM(reset_state = "IDLE")
@@ -139,38 +139,53 @@ class Scanhead(Module):
             # Read Header
             If(command == self.COMMANDS.RECVCOMMAND,
                 If(spislave.mosi == self.COMMANDS.STOP,
+                    NextValue(self.error[self.ERRORS.INVALID], 0),
                     NextValue(self.laserfsmstate, self.STATES.STOP)
                 ).
                 Elif(spislave.mosi == self.COMMANDS.START,
+                    NextValue(self.error[self.ERRORS.INVALID], 0),
                     NextValue(self.laserfsmstate, self.STATES.START)
                 ).
                 Elif(spislave.mosi == self.COMMANDS.LASERTEST,
+                    NextValue(self.error[self.ERRORS.INVALID], 0),
                     NextValue(self.laserfsmstate, self.STATES.LASERTEST)
                 ).
                 Elif(spislave.mosi == self.COMMANDS.MOTORTEST,
+                    NextValue(self.error[self.ERRORS.INVALID], 0),
                     NextValue(self.laserfsmstate, self.STATES.MOTORTEST)
                 ).
                 Elif(spislave.mosi == self.COMMANDS.LINETEST,
+                    NextValue(self.error[self.ERRORS.INVALID], 0),
                     NextValue(self.laserfsmstate, self.STATES.LINETEST)
                 ).
                 Elif(spislave.mosi == self.COMMANDS.PHOTODIODETEST,
+                    NextValue(self.error[self.ERRORS.INVALID], 0),
                     NextValue(self.laserfsmstate, self.STATES.PHOTODIODETEST)
                 ).
                 Elif(spislave.mosi == self.COMMANDS.READ_D,
+                    NextValue(self.error[self.ERRORS.INVALID], 0),
                     NextValue(command, self.COMMANDS.READ_D),
                     #NOTE doesn't work as you jump to idle where miso is changed
                     NextValue(spislave.miso, debug)
                 ).
                 Elif(spislave.mosi == self.COMMANDS.WRITE_L,
                     # only switch to write stage if memory is not full
+                    NextValue(self.error[self.ERRORS.INVALID], 0),
                     If((writeport.adr==readport.adr)&(written==1),
                         NextValue(command, self.COMMANDS.RECVCOMMAND)
                     ).
                     Else(
                         NextValue(command, self.COMMANDS.WRITE_L)
                     )
+                ).
+                Elif(spislave.mosi == self.COMMANDS.STATUS,
+                     NextValue(self.error[self.ERRORS.INVALID], 0)
+                ).
+                Elif(spislave.mosi != 0,
+                    NextValue(self.error[self.ERRORS.INVALID], 1)
                 )
-                # Else; Command invalid or memory full nothing happens
+                # TODO: there seem to be zero commands beeing sent over?
+                # uncaptured
             ).
             # Read data after header; only applicable for debug or write line
             Else(
@@ -205,10 +220,8 @@ class Scanhead(Module):
                 pwmcounter.eq(int(polyperiod))).Else(
                 pwmcounter.eq(pwmcounter - 1)
                 )
-
         # Laser FSM
         # Laser FSM controls the laser, polygon and output to motor
-        #TODO: je hebt hier over bytes --> volgens mij moet je het maal 8 doen
         facetcnt = Signal(max=int(self.VARIABLES['FACETS']))
         # stable counter used for both spinup and photo diode stable
         spinupticks = int(self.VARIABLES['SPINUP_TIME']*self.VARIABLES['CRYSTAL_HZ'])
@@ -216,8 +229,10 @@ class Scanhead(Module):
         stablecounter = Signal(max=max(spinupticks, stableticks))
         ticksinfacet = self.VARIABLES['CRYSTAL_HZ']/(self.VARIABLES['RPM']*60*self.VARIABLES['FACETS'])
         LASERTICKS = int(self.VARIABLES['CRYSTAL_HZ']/self.VARIABLES['LASER_HZ'])
+        BITSINSCANLINE = int((ticksinfacet*(self.VARIABLES['END%']-self.VARIABLES['START%']))/LASERTICKS)
+        if BITSINSCANLINE <= 0: raise Exception("Bits in scanline invalid")            
         lasercnt = Signal(max=LASERTICKS)
-        scanbit = Signal(max=self.VARIABLES['SCANLINE_BITS'])
+        scanbit = Signal(max=BITSINSCANLINE)
         self.tickcounter = Signal(max=int(ticksinfacet*10))
         self.submodules.laserfsm = FSM(reset_state = "STOP")
         self.laserfsm.act("STOP",
@@ -302,8 +317,8 @@ class Scanhead(Module):
                #TODO: check if wraps around
                NextValue(facetcnt, facetcnt+1), 
                NextValue(self.tickcounter, 0),
-               If((self.tickcounter>int(ticksinfacet*(1-self.VARIABLES['JITTER_THRESH'])))&
-                  (self.tickcounter<int(ticksinfacet*(1+self.VARIABLES['JITTER_THRESH']))),
+               If((self.tickcounter+2>int(ticksinfacet*(1-self.VARIABLES['JITTER_THRESH'])))&
+                  (self.tickcounter+2<int(ticksinfacet*(1+self.VARIABLES['JITTER_THRESH']))),
                   NextState('WAIT_FOR_DATA_RUN')
                )
             ),
@@ -350,8 +365,8 @@ class Scanhead(Module):
                     #      readbit is your current position in memory and scanbit your current byte position in scanline
                     NextValue(readbit, readbit+1),
                     NextValue(scanbit, scanbit+1),
-                    If(scanbit==self.VARIABLES['SCANLINE_BITS']-1,
-                       NextState("STATE_WAIT_STABLE"),
+                    If(scanbit==BITSINSCANLINE-1,
+                       NextState("STATE_WAIT_STABLE"), #TODO: SHOULD GO TO OTHER MODE
                        NextValue(scanbit, 0)
                     ),
                     # you need to read again!
