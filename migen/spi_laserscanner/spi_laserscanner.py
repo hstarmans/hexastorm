@@ -171,6 +171,7 @@ class Scanhead(Module):
                 Elif(spislave.mosi == self.COMMANDS.WRITE_L,
                     # only switch to write stage if memory is not full
                     NextValue(self.error[self.ERRORS.INVALID], 0),
+                    #TODO: you can abbreviate this
                     If((writeport.adr==readport.adr)&(written==1),
                         NextValue(command, self.COMMANDS.RECVCOMMAND)
                     ).
@@ -311,16 +312,18 @@ class Scanhead(Module):
         #NOTE: in the following states... TICKCOUNTER MUST ALWAYS BE INCREASED
         self.laserfsm.act("STATE_WAIT_STABLE",
             NextValue(laser0, 1),
-            NextValue(self.tickcounter, self.tickcounter+1),
             NextValue(stablecounter, stablecounter+1),
             If(photodiode_fall,
                #TODO: check if wraps around
                NextValue(facetcnt, facetcnt+1), 
                NextValue(self.tickcounter, 0),
-               If((self.tickcounter+2>int(ticksinfacet*(1-self.VARIABLES['JITTER_THRESH'])))&
-                  (self.tickcounter+2<int(ticksinfacet*(1+self.VARIABLES['JITTER_THRESH']))),
+               If((self.tickcounter+1>int(ticksinfacet*(1-self.VARIABLES['JITTER_THRESH'])))&
+                  (self.tickcounter+1<int(ticksinfacet*(1+self.VARIABLES['JITTER_THRESH']))),
                   NextState('WAIT_FOR_DATA_RUN')
                )
+            ).
+            Else(
+                NextValue(self.tickcounter, self.tickcounter+1)
             ),
             If(stablecounter>stableticks-1,
                NextValue(self.error[self.ERRORS.NOTSTABLE], 1),
@@ -331,10 +334,11 @@ class Scanhead(Module):
                  NextState("STOP")
             )  
         )
+        # NOTE: in the wait for data run you could do a read operation, this ignored for now
         self.laserfsm.act('WAIT_FOR_DATA_RUN',
             NextValue(laser0, 0),
             NextValue(self.tickcounter, self.tickcounter+1),
-            If(self.tickcounter>int(self.VARIABLES['START%']*ticksinfacet),
+            If(self.tickcounter>=int(self.VARIABLES['START%']*ticksinfacet),
                 NextState('DATA_RUN')
             ),
             If(self.laserfsmstate!=self.STATES.START,

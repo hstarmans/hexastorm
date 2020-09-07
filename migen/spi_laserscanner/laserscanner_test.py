@@ -112,8 +112,12 @@ class TestSpiLaserScanner(unittest.TestCase):
 
         run_simulation(self.dut, [cpu_side()])
 
+    def getstate(self, fsm):
+        return fsm.decoding[(yield fsm.state)]
+
     def checkenterstate(self, fsm, state):
         timeout  = 0
+        # NOTE: state state is dangerous notation not the same
         while (fsm.decoding[(yield fsm.state)] != state):
             timeout += 1
             if timeout>100:
@@ -145,7 +149,7 @@ class TestSpiLaserScanner(unittest.TestCase):
                 value = (yield self.dut.scanhead.mem[i])
                 in_memory.append(value)
             self.assertEqual(list(range(loops)),in_memory)
-        run_simulation(self.dut, [cpu_side()])
+        #run_simulation(self.dut, [cpu_side()])
 
 
     def test_scanlinewithoutwrite(self):
@@ -186,31 +190,48 @@ class TestSpiLaserScanner(unittest.TestCase):
             # checks wether MEMREAD is triggered and ERROR is gone after reading
             yield from self.transaction(Scanhead.COMMANDS.STOP, self.state(errors=[Scanhead.ERRORS.MEMREAD],
                                                                            state=Scanhead.STATES.START))
-        run_simulation(self.dut, [cpu_side()])
+        #run_simulation(self.dut, [cpu_side()])
 
     def test_scanlinewithwrite(self):
         def cycle():
-            for _ in range(self.dut.ticksinfacet-2): yield
-            yield self.dut.photodiode.eq(1)
+            #NOTE: yield is a clock cycle and yield signal is not a clock cycle!!
+            # 8 clocks off
+            for _ in range(self.dut.ticksinfacet-3): yield
+            # 2 final clocks create photodiode trigger
+            yield self.dut.photodiode.eq(1)  
             yield
             yield self.dut.photodiode.eq(0)
+            yield  # falling edge
+            yield  # counter reset
 
         def cpu_side():
-            yield from self.transaction(Scanhead.COMMANDS.WRITE_L, self.state(state=Scanhead.STATES.STOP))
-            for _ in range(Scanhead.CHUNKSIZE): yield from self.transaction(255, self.state(state=Scanhead.STATES.STOP))
+            for _ in range(3): 
+                yield from self.transaction(Scanhead.COMMANDS.WRITE_L, self.state(state=Scanhead.STATES.STOP))
+                for _ in range(Scanhead.CHUNKSIZE): yield from self.transaction(255, self.state(state=Scanhead.STATES.STOP))
             # quick check if you reached end of chunk
-            yield from self.transaction(255, self.state(state=Scanhead.STATES.STOP))
-            yield from self.transaction(Scanhead.COMMANDS.STATUS, self.state(errors=[Scanhead.ERRORS.INVALID],
-                                                                             state=Scanhead.STATES.STOP))
-            # turn on laser head
-            yield from self.transaction(Scanhead.COMMANDS.START, self.state(state=Scanhead.STATES.STOP))
-            # check if statemachine goes to spinup state
-            yield from self.checkenterstate(self.dut.scanhead.laserfsm, 'SPINUP')
-            # check if statemachine goes to statewaitstable
+            #yield from self.transaction(255, self.state(state=Scanhead.STATES.STOP))
+            # yield from self.transaction(Scanhead.COMMANDS.STATUS, self.state(errors=[Scanhead.ERRORS.INVALID],
+            #                                                                  state=Scanhead.STATES.STOP))
+            # # turn on laser head
+            # yield from self.transaction(Scanhead.COMMANDS.START, self.state(state=Scanhead.STATES.STOP))
+            # # check if statemachine goes to spinup state
+            # yield from self.checkenterstate(self.dut.scanhead.laserfsm, 'SPINUP')
+            # # check if statemachine goes to statewaitstable
             # yield from self.checkenterstate(self.dut.scanhead.laserfsm, 'STATE_WAIT_STABLE')
-            # toggle diode so head stabilizes
+            # # toggle diode so head stabilizes
             # for _ in range(2): yield from cycle()
-            # yield from self.checkenterstate(self.dut.scanhead.laserfsm, 'WAIT_FOR_DATA_RUN')
+            # # counter should be clean before as it enters "WAIT_FOR_DATA_RUN"
+            # self.assertEqual((yield self.dut.scanhead.tickcounter), 0)
+            # self.assertEqual((yield from self.getstate(self.dut.scanhead.laserfsm)), 'WAIT_FOR_DATA_RUN')
+            # #yield from self.checkenterstate(self.dut.scanhead.laserfsm, 'WAIT_FOR_DATA_RUN')
+            # for _ in range(int(Scanhead.VARIABLES['START%']*self.dut.ticksinfacet)): yield
+            # # wait before line starts
+            # self.assertEqual((yield self.dut.scanhead.tickcounter), int(Scanhead.VARIABLES['START%']*self.dut.ticksinfacet))
+            # yield # at the fourth tick you are in data run S
+            # self.assertEqual((yield from self.getstate(self.dut.scanhead.laserfsm)), 'DATA_RUN')
+            # yield # lezen
+            # yield
+            # self.assertEqual((yield from self.getstate(self.dut.scanhead.laserfsm)), 'READ')
             # yield from self.checkenterstate(self.dut.scanhead.laserfsm, 'DATA_RUN')
             # # data run should raise error cannot read (nothing in memory yet)
             # for _ in range(self.dut.laserticks+1): yield
