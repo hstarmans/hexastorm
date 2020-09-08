@@ -59,8 +59,10 @@ class Scanhead(Module):
             'END%': 0.8, 'START%': 0.35,
             'SINGLE_FACET':0, 'DIRECTION':0, 'SYNCSTART':1/3000, 'JITTER_THRESH':1/400}
     CHUNKSIZE = 8 # you write in chunks of 8 bytes
-    MEMWIDTH = 8  # must be 8, as you receive in terms of eight
+    # one block is 4K bits, there are 32 blocks (officially 20 in HX4K)
+    MEMWIDTH = 8  
     MEMDEPTH = 512
+
 
     def __init__(self, spi_port, laser0, poly_pwm, poly_en,
                  photodiode):
@@ -334,17 +336,21 @@ class Scanhead(Module):
                  NextState("STOP")
             )  
         )
-        # NOTE: in the wait for data run you could do a read operation, this ignored for now
         self.laserfsm.act('WAIT_FOR_DATA_RUN',
             NextValue(laser0, 0),
             NextValue(self.tickcounter, self.tickcounter+1),
-            If(self.tickcounter>=int(self.VARIABLES['START%']*ticksinfacet),
-                NextState('DATA_RUN')
+            If(self.tickcounter>=int(self.VARIABLES['START%']*ticksinfacet-1),
+                NextState('READ')
             ),
             If(self.laserfsmstate!=self.STATES.START,
                  NextState("STOP")
             )
         )
+        # leesfoutdetectie:
+        #   in het begin zijn lees en schrijfadres gelijk
+        #   als er geschreven is dan is het schrijf adres een groter dan lees adres
+        #   als er geschreven is en het volgende adres waarvan je gaat lezen nog niet beschreven is --> lees fout
+        # op het moment kost lezen een tick, dit zou voorkomen kunnen worden
         # tick counter; number of ticks in a facet for the oscillator
         # laser counter; laser operates at reduced speed this controlled by this counter
         # readbit counter; current bit position in memory
@@ -385,7 +391,7 @@ class Scanhead(Module):
                         #NOTE: count wrap around
                         Elif((readport.adr+1==self.MEMDEPTH)&(writeport.adr==0),
                             NextValue(written,0)
-                        )
+                    )
                 )
                )
             ).
