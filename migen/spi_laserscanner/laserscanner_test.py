@@ -20,6 +20,7 @@ class TestSpiLaserScanner(unittest.TestCase):
                 # you want to alter the clock --> and let the rest stay stable
                 self.ticksinfacet = 12
                 self.laserticks = 2
+                Scanhead.VARIABLES['SYNCSTART'] = 0.2
                 Scanhead.VARIABLES['CRYSTAL_HZ']= self.ticksinfacet*60*Scanhead.VARIABLES['FACETS']*Scanhead.VARIABLES['RPM']
                 Scanhead.VARIABLES['LASER_HZ'] = Scanhead.VARIABLES['CRYSTAL_HZ']/self.laserticks
                 Scanhead.VARIABLES['JITTER_THRESH'] = 0.1 # need to have at least one tick play
@@ -27,6 +28,7 @@ class TestSpiLaserScanner(unittest.TestCase):
                 Scanhead.VARIABLES['STABLE_TIME'] = 30/Scanhead.VARIABLES['CRYSTAL_HZ']
                 Scanhead.VARIABLES['START%'] = 2/self.ticksinfacet
                 scanbits = 2
+                Scanhead.VARIABLES['SYNCSTART'] = 2/self.ticksinfacet
                 Scanhead.VARIABLES['END%'] = (self.laserticks*scanbits)/self.ticksinfacet + Scanhead.VARIABLES['START%']
                 # NOTE: if memdepth is not divisable by eight, your code does not work!
                 Scanhead.MEMDEPTH = 32
@@ -226,47 +228,49 @@ class TestSpiLaserScanner(unittest.TestCase):
             self.assertEqual((yield self.dut.scanhead.tickcounter), 0)
             self.assertEqual((yield from self.getstate(self.dut.scanhead.laserfsm)), 'WAIT_FOR_DATA_RUN')
             startwaitticks = int(Scanhead.VARIABLES['START%']*self.dut.ticksinfacet)
-            for _ in range(startwaitticks): yield
-            self.assertEqual((yield self.dut.scanhead.tickcounter), startwaitticks)
+            for _ in range(startwaitticks-1): yield
+            self.assertEqual((yield self.dut.scanhead.tickcounter), startwaitticks-1)
             self.assertEqual((yield from self.getstate(self.dut.scanhead.laserfsm)), 'DATA_RUN')
             self.assertEqual((yield self.dut.laser0), 0)
             self.assertEqual((yield self.dut.scanhead.scanbit),0)
             self.assertEqual((yield self.dut.scanhead.lasercnt), 0)
-            yield
+            # You need one tick to start reading first pixel
             yield
             # Pixel 0
-            self.assertEqual((yield self.dut.scanhead.tickcounter), startwaitticks + self.dut.laserticks)
+            self.assertEqual((yield self.dut.scanhead.tickcounter), startwaitticks)
             self.assertEqual((yield self.dut.laser0), 1)
-            self.assertEqual((yield self.dut.scanhead.lasercnt), 0)
+            self.assertEqual((yield self.dut.scanhead.lasercnt), 1)
             yield
             self.assertEqual((yield self.dut.laser0), 1)
             self.assertEqual((yield self.dut.scanhead.scanbit),1)
-            self.assertEqual((yield self.dut.scanhead.lasercnt), 1)
+            self.assertEqual((yield self.dut.scanhead.lasercnt), 0)
             yield
             # Pixel 1
             self.assertEqual((yield self.dut.scanhead.scanbit),2)
-            self.assertEqual((yield self.dut.scanhead.lasercnt), 0)
+            self.assertEqual((yield self.dut.scanhead.lasercnt), 1)
             self.assertEqual((yield from self.getstate(self.dut.scanhead.laserfsm)), 'DATA_RUN')
-            self.assertEqual((yield self.dut.scanhead.tickcounter), startwaitticks + 2*self.dut.laserticks)
+            self.assertEqual((yield self.dut.scanhead.tickcounter), startwaitticks + self.dut.laserticks)
+            self.assertEqual((yield self.dut.laser0), 0)
+            yield
+            self.assertEqual((yield self.dut.scanhead.lasercnt), 0)
             self.assertEqual((yield self.dut.laser0), 0)
             yield
             self.assertEqual((yield self.dut.scanhead.lasercnt), 1)
-            self.assertEqual((yield self.dut.laser0), 0)
-            yield
-            self.assertEqual((yield self.dut.scanhead.lasercnt), 0)
             self.assertEqual((yield from self.getstate(self.dut.scanhead.laserfsm)), 'WAIT_END')
+            self.assertEqual((yield self.dut.scanhead.tickcounter), int(Scanhead.VARIABLES['END%']*self.dut.ticksinfacet))
             self.assertEqual((yield self.dut.laser0), 0)
+            # check wether it returns to wait state stable
+            yield from self.checkenterstate(self.dut.scanhead.laserfsm, 'STATE_WAIT_STABLE')
+            self.assertEqual((yield self.dut.scanhead.tickcounter), int(self.dut.ticksinfacet*(1-Scanhead.VARIABLES['SYNCSTART'])))
+            yield
+            self.assertEqual((yield self.dut.laser0), 1)
+            print((yield self.dut.scanhead.tickcounter))
 
         run_simulation(self.dut, [cpu_side()])
 
-
-#OKEY WELKE TESTEN WIL JE NOG
-# schrijf naar geheugen en kijk of laser op juiste tijd aangaat
-# check of laser aangaat voor einde
-
-# onderste twee kun je combineren
-#  check single facet mode
-#  bouw een single line mode
+# test code on real scanner
+# add photodiode synt to the end of test with write and also make sure you can write to multiple lines
+# check single facet mode and single line mode
 
 if __name__ == '__main__':
     unittest.main()

@@ -389,7 +389,7 @@ class Scanhead(Module):
         self.laserfsm.act('WAIT_FOR_DATA_RUN',
             NextValue(laser0, 0),
             NextValue(self.tickcounter, self.tickcounter+1),
-            If(self.tickcounter>=int(self.VARIABLES['START%']*ticksinfacet-1),
+            If(self.tickcounter>=int(self.VARIABLES['START%']*ticksinfacet-2),
                 NextState('DATA_RUN')
             ),
             If(self.laserfsmstate!=self.STATES.START,
@@ -398,8 +398,8 @@ class Scanhead(Module):
         )
         self.laserfsm.act("DATA_RUN",
             NextValue(self.tickcounter, self.tickcounter+1),
-            If(self.lasercnt >= LASERTICKS-1,
-                NextValue(self.lasercnt, 0),
+            NextValue(self.lasercnt, self.lasercnt+1),
+            If(self.lasercnt == 0,
                 #NOTE: readbit and scanbit counters can be different
                 #      readbit is your current position in memory and scanbit your current byte position in scanline
                 If(self.scanbit >= BITSINSCANLINE,
@@ -426,9 +426,6 @@ class Scanhead(Module):
                          NextValue(self.scanbit, self.scanbit+1)
                     )
                 )
-            ).
-            Else(
-                NextValue(self.lasercnt, self.lasercnt+1)
             ),
             If(self.laserfsmstate!=self.STATES.START,
                NextState("STOP")
@@ -436,7 +433,7 @@ class Scanhead(Module):
         )
         self.laserfsm.act("WAIT_END",
             NextValue(self.tickcounter, self.tickcounter+1),
-            If(self.tickcounter>=round(self.VARIABLES['END%']*ticksinfacet-1),
+            If(self.tickcounter>=int((1-self.VARIABLES['SYNCSTART'])*ticksinfacet-1),
                NextState("STATE_WAIT_STABLE")
             )
         )
