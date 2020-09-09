@@ -56,8 +56,8 @@ class Scanhead(Module):
     #      SYNC_START timestamp at which you turn on the laser
     VARIABLES = {'RPM':2400,'SPINUP_TIME':1.5, 'STABLE_TIME':1.125, 'FACETS':4,
             'CRYSTAL_HZ':100E6, 'LASER_HZ': 100E3,
-            'END%': 0.8, 'START%': 0.35,
-            'SINGLE_FACET':0, 'DIRECTION':0, 'SYNCSTART':1/3000, 'JITTER_THRESH':1/400}
+            'END%': 0.8, 'START%': 0.35, 'SINGLE_LINE':False,
+            'SINGLE_FACET':False, 'DIRECTION':0, 'SYNCSTART':1/3000, 'JITTER_THRESH':1/400}
     CHUNKSIZE = 8 # you write in chunks of 8 bytes
     # one block is 4K bits, there are 32 blocks (officially 20 in HX4K)
     MEMWIDTH = 8  
@@ -252,7 +252,18 @@ class Scanhead(Module):
             Else(
                 NextValue(readtrig,0),
                 NextValue(readport.re, 1),
-                NextValue(dat_r_new, readport.dat_r)
+                NextValue(dat_r_new, readport.dat_r),
+                # increase address after succesfull read
+                If(self.VARIABLES['SINGLE_LINE']==False,
+                   NextValue(readport.adr, readport.adr+1),
+                   If(readport.adr+1==writeport.adr,
+                      NextValue(written,0)
+                   ).
+                   #NOTE: count wrap around
+                   Elif((readport.adr+1==self.MEMDEPTH)&(writeport.adr==0),
+                        NextValue(written,0)
+                   )
+                )
             ),
             NextState("RESET")
         )
@@ -355,7 +366,12 @@ class Scanhead(Module):
                NextValue(self.tickcounter, 0),
                If((self.tickcounter+1>round(ticksinfacet*(1-self.VARIABLES['JITTER_THRESH'])))&
                   (self.tickcounter+1<round(ticksinfacet*(1+self.VARIABLES['JITTER_THRESH']))),
-                  NextState('WAIT_FOR_DATA_RUN')
+                  If((self.VARIABLES['SINGLE_FACET']==True)&(facetcnt>0),
+                    NextState('WAIT_END')
+                  ).
+                  Else(
+                    NextState('WAIT_FOR_DATA_RUN')
+                  )
                )
             ).
             Else(
@@ -398,16 +414,7 @@ class Scanhead(Module):
                     # final read bit copy memory
                     # move to next address, i.e. byte, if end is reached
                     Elif(readbit==self.MEMWIDTH-1,
-                        NextValue(readport.adr, readport.adr+1),
                         NextValue(dat_r_old, dat_r_new),
-                        If(readport.adr+1==writeport.adr,
-                            #NextValue(self.error[self.ERRORS.MEMREAD], 1),
-                            NextValue(written,0)
-                        ).
-                        #NOTE: count wrap around
-                        Elif((readport.adr+1==self.MEMDEPTH)&(writeport.adr==0),
-                             NextValue(written,0)
-                        )
                     ),
                     NextValue(dat_r_old, dat_r_old>>1),
                     # if there is no data, laser off error should already have been reported
