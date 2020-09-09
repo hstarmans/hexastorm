@@ -87,22 +87,11 @@ class Scanhead(Module):
         readport = self.mem.get_port(has_re=True)
         self.specials += writeport, readport
         self.ios = {writeport.adr, writeport.dat_w, writeport.we, readport.dat_r, readport.adr, readport.re}
-        self.submodules.memory = FSM(reset_state = "RESET")
         readbit = Signal(max = self.MEMWIDTH)
         self.writebyte = Signal(max=self.MEMDEPTH)
         written = Signal()
-        dat_r_temp = Signal(max= self.MEMWIDTH)
-        self.memory.act("RESET",
-                NextValue(written, 0),
-                NextValue(readport.re, 1),
-                NextValue(readport.adr, 0),
-                NextValue(writeport.adr, 0),
-                NextState("IDLE")
-        )
-        # this state is useless
-        self.memory.act("IDLE",
-            NextState("IDLE")
-        )
+        dat_r_new = Signal(max= self.MEMWIDTH)
+        dat_r_old = Signal(max= self.MEMWIDTH)
         # Receiver State Machine
         # Consists out of component from litex and own custom component
         # Detects whether new command is available
@@ -236,7 +225,41 @@ class Scanhead(Module):
         self.lasercnt = Signal(max=LASERTICKS)
         self.scanbit = Signal(max=BITSINSCANLINE+1)
         self.tickcounter = Signal(max=int(ticksinfacet*10))
-        self.submodules.laserfsm = FSM(reset_state = "STOP")
+        self.submodules.laserfsm = FSM(reset_state = "RESET")
+        firststart = Signal()
+        # leesfoutdetectie:
+        #   in het begin zijn lees en schrijfadres gelijk
+        #   als er geschreven is dan is het schrijf adres een groter dan lees adres
+        #   als er geschreven is en het volgende adres waarvan je gaat lezen nog niet beschreven is --> lees fout
+        # op het moment kost lezen een tick, dit zou voorkomen kunnen worden
+        # tick counter; number of ticks in a facet for the oscillator
+        # laser counter; laser operates at reduced speed this controlled by this counter
+        # readbit counter; current bit position in memory
+        # scanbit counter; current bit positioin along scanline
+        readtrig = Signal()
+        self.submodules.readmem= FSM(reset_state = "RESET")
+        self.readmem.act("RESET",
+            NextValue(readport.re, 0),
+            If(readtrig,
+               NextState("READ")
+            )
+        )
+        self.readmem.act("READ",
+            If((readport.adr == writeport.adr)&(written == 0),
+               NextValue(readtrig, 0),
+               NextValue(self.error[self.ERRORS.MEMREAD], 1),
+            ).
+            Else(
+                NextValue(readtrig,0),
+                NextValue(readport.re, 1),
+                NextValue(dat_r_new, readport.dat_r)
+            ),
+            NextState("RESET")
+        )
+        self.laserfsm.act("RESET",
+            NextValue(firststart, 1),
+            NextState("STOP")
+        ) 
         self.laserfsm.act("STOP",
             NextValue(stablecounter, 0),
             NextValue(self.scanbit, 0),
@@ -246,8 +269,15 @@ class Scanhead(Module):
             NextValue(readbit,0),
             If(self.laserfsmstate==self.STATES.START,
                  NextValue(self.error[self.ERRORS.NOTSTABLE], 0),
+                 NextValue(self.error[self.ERRORS.MEMREAD], 0),
                  NextValue(poly_en, 0),
-                 NextState("SPINUP")
+                 If((firststart==1)|(self.error[self.ERRORS.MEMREAD]==1),
+                    NextValue(readtrig, 1),
+                    NextState("WAITREAD")
+                 ).
+                 Else(
+                    NextState("SPINUP")
+                 )
             ).
             Elif(self.laserfsmstate==self.STATES.MOTORTEST,
                 NextValue(poly_en, 0),
@@ -266,6 +296,15 @@ class Scanhead(Module):
                 NextValue(laser0, 1),
                 NextValue(poly_en, 0),
                 NextState("PHOTODIODETEST")
+            )
+        )
+        # if you start laser head for the first time, you need to read
+        # in the first start there is no data in memory yet so you need to copy it
+        self.laserfsm.act("WAITREAD",
+            If(readtrig == 0,
+               NextValue(firststart, 0),
+               NextValue(dat_r_old, dat_r_new),
+               NextState("SPINUP")
             )
         )
         self.laserfsm.act("MOTORTEST",
@@ -307,7 +346,6 @@ class Scanhead(Module):
         photodiode_fall = Signal()
         self.sync += photodiode_d.eq(photodiode)
         self.comb += photodiode_fall.eq(~photodiode & photodiode_d)
-        
         #NOTE: in the following states... TICKCOUNTER MUST ALWAYS BE INCREASED
         self.laserfsm.act("STATE_WAIT_STABLE",
             NextValue(laser0, 1),
@@ -336,76 +374,55 @@ class Scanhead(Module):
             NextValue(laser0, 0),
             NextValue(self.tickcounter, self.tickcounter+1),
             If(self.tickcounter>=int(self.VARIABLES['START%']*ticksinfacet-1),
-                NextState('READ')
+                NextState('DATA_RUN')
             ),
             If(self.laserfsmstate!=self.STATES.START,
                  NextState("STOP")
             )
         )
-        # leesfoutdetectie:
-        #   in het begin zijn lees en schrijfadres gelijk
-        #   als er geschreven is dan is het schrijf adres een groter dan lees adres
-        #   als er geschreven is en het volgende adres waarvan je gaat lezen nog niet beschreven is --> lees fout
-        # op het moment kost lezen een tick, dit zou voorkomen kunnen worden
-        # tick counter; number of ticks in a facet for the oscillator
-        # laser counter; laser operates at reduced speed this controlled by this counter
-        # readbit counter; current bit position in memory
-        # scanbit counter; current bit positioin along scanline
         self.laserfsm.act("DATA_RUN",
             NextValue(self.tickcounter, self.tickcounter+1),
             If(self.lasercnt >= LASERTICKS-1,
-               NextValue(self.lasercnt, 0),
-               # if there is no data, led off and report error
-               # not "written" aka information in memory, try to read again and report error
-               If(written==0,
-                    NextState("READ"), # you nead to read again, wrong value
-                    NextValue(readport.re, 0),
-                    NextValue(laser0, 0),
-                    NextValue(self.error[self.ERRORS.MEMREAD], 1)
-               ).
-               Else(
-                    #NOTE: readbit and scanbit counters can be different
-                    #      readbit is your current position in memory and scanbit your current byte position in scanline
-                    If(self.scanbit >= BITSINSCANLINE,
-                       NextState("WAIT_END"), 
-                       NextValue(self.scanbit, 0)
+                NextValue(self.lasercnt, 0),
+                #NOTE: readbit and scanbit counters can be different
+                #      readbit is your current position in memory and scanbit your current byte position in scanline
+                If(self.scanbit >= BITSINSCANLINE,
+                    NextState("WAIT_END"), 
+                    NextValue(self.scanbit, 0)
+                ).
+                Else(
+                    # if read bit is 0, trigger a read out
+                    If(readbit==0,
+                        NextValue(readtrig, 1),
                     ).
-                    Else(
-                       NextValue(self.error[self.ERRORS.MEMREAD], 0),
-                       NextValue(dat_r_temp, dat_r_temp>>1),
-                       NextValue(laser0, dat_r_temp[0]),
-                       NextValue(readbit, readbit+1),
-                       NextValue(self.scanbit, self.scanbit+1),
-                       # you need to read again!
-                       # move to next address, i.e. byte, if end is reached
-                       If(readbit==self.MEMWIDTH-1,
-                          NextState("READ"), # you nead to read again, wrong value
-                          NextValue(readport.re, 0),
-                          NextValue(readport.adr, readport.adr+1),
-                          If(readport.adr+1==writeport.adr,
+                    # final read bit copy memory
+                    # move to next address, i.e. byte, if end is reached
+                    Elif(readbit==self.MEMWIDTH-1,
+                        NextValue(readport.adr, readport.adr+1),
+                        NextValue(dat_r_old, dat_r_new),
+                        If(readport.adr+1==writeport.adr,
+                            #NextValue(self.error[self.ERRORS.MEMREAD], 1),
                             NextValue(written,0)
-                          ).
-                          #NOTE: count wrap around
-                          Elif((readport.adr+1==self.MEMDEPTH)&(writeport.adr==0),
-                            NextValue(written,0)
-                          )
+                        ).
+                        #NOTE: count wrap around
+                        Elif((readport.adr+1==self.MEMDEPTH)&(writeport.adr==0),
+                             NextValue(written,0)
                         )
-                       )
+                    ),
+                    NextValue(dat_r_old, dat_r_old>>1),
+                    # if there is no data, laser off error should already have been reported
+                    If(written==0,
+                        NextValue(laser0, 0)
+                    ).
+                    Else(NextValue(laser0, dat_r_old[0]),
+                         NextValue(readbit, readbit+1),
+                         NextValue(self.scanbit, self.scanbit+1)
                     )
+                )
             ).
             Else(
                 NextValue(self.lasercnt, self.lasercnt+1)
             ),
-            If(self.laserfsmstate!=self.STATES.START,
-               NextState("STOP")
-            )
-        )
-        self.laserfsm.act("READ",
-            NextValue(self.tickcounter, self.tickcounter+1),
-            NextValue(self.lasercnt, self.lasercnt+1),
-            NextValue(readport.re, 1),
-            NextValue(dat_r_temp, readport.dat_r),
-            NextState("DATA_RUN"),
             If(self.laserfsmstate!=self.STATES.START,
                NextState("STOP")
             )

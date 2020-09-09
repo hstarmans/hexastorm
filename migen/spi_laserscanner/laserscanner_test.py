@@ -154,8 +154,6 @@ class TestSpiLaserScanner(unittest.TestCase):
 
 
     def test_scanlinewithoutwrite(self):
-        ''' test scanhead
-        '''
         def cycle():
             # off
             for _ in range(self.dut.ticksinfacet-3): yield
@@ -179,7 +177,7 @@ class TestSpiLaserScanner(unittest.TestCase):
             # no trigger on photodiode, so starting scanhead fails and machine returns to stop
             yield from self.checkenterstate(self.dut.scanhead.laserfsm, 'STOP')
             # check if error is received, again turn on laser head
-            yield from self.transaction(Scanhead.COMMANDS.START, self.state(errors=[Scanhead.ERRORS.NOTSTABLE],
+            yield from self.transaction(Scanhead.COMMANDS.START, self.state(errors=[Scanhead.ERRORS.MEMREAD,Scanhead.ERRORS.NOTSTABLE],
                                                                             state=Scanhead.STATES.STOP))
             # check if statemachine goes to statewaitstable
             yield from self.checkenterstate(self.dut.scanhead.laserfsm, 'STATE_WAIT_STABLE')
@@ -213,11 +211,11 @@ class TestSpiLaserScanner(unittest.TestCase):
                 yield from self.transaction(Scanhead.COMMANDS.WRITE_L, self.state(state=Scanhead.STATES.STOP))
                 for _ in range(Scanhead.CHUNKSIZE): yield from self.transaction(int('11111101', 2), self.state(state=Scanhead.STATES.STOP))
             # quick check if you reached end of chunk
-            yield from self.transaction(255, self.state(state=Scanhead.STATES.STOP))
+            yield from self.transaction(255, self.state(errors=[Scanhead.ERRORS.MEMFULL], state=Scanhead.STATES.STOP))
             yield from self.transaction(Scanhead.COMMANDS.STATUS, self.state(errors=[Scanhead.ERRORS.INVALID, Scanhead.ERRORS.MEMFULL],
                                                                              state=Scanhead.STATES.STOP))
             # turn on laser head
-            yield from self.transaction(Scanhead.COMMANDS.START, self.state(state=Scanhead.STATES.STOP))
+            yield from self.transaction(Scanhead.COMMANDS.START, self.state(errors=[Scanhead.ERRORS.MEMFULL], state=Scanhead.STATES.STOP))
             # check if statemachine goes to spinup state
             yield from self.checkenterstate(self.dut.scanhead.laserfsm, 'SPINUP')
             # check if statemachine goes to statewaitstable
@@ -230,12 +228,11 @@ class TestSpiLaserScanner(unittest.TestCase):
             startwaitticks = int(Scanhead.VARIABLES['START%']*self.dut.ticksinfacet)
             for _ in range(startwaitticks): yield
             self.assertEqual((yield self.dut.scanhead.tickcounter), startwaitticks)
-            self.assertEqual((yield from self.getstate(self.dut.scanhead.laserfsm)), 'READ')
-            yield
+            self.assertEqual((yield from self.getstate(self.dut.scanhead.laserfsm)), 'DATA_RUN')
             self.assertEqual((yield self.dut.laser0), 0)
             self.assertEqual((yield self.dut.scanhead.scanbit),0)
-            self.assertEqual((yield from self.getstate(self.dut.scanhead.laserfsm)), 'DATA_RUN')
-            self.assertEqual((yield self.dut.scanhead.lasercnt), 1)
+            self.assertEqual((yield self.dut.scanhead.lasercnt), 0)
+            yield
             yield
             # Pixel 0
             self.assertEqual((yield self.dut.scanhead.tickcounter), startwaitticks + self.dut.laserticks)
@@ -260,7 +257,7 @@ class TestSpiLaserScanner(unittest.TestCase):
             self.assertEqual((yield from self.getstate(self.dut.scanhead.laserfsm)), 'WAIT_END')
             self.assertEqual((yield self.dut.laser0), 0)
 
-        #run_simulation(self.dut, [cpu_side()])
+        run_simulation(self.dut, [cpu_side()])
 
 
 #OKEY WELKE TESTEN WIL JE NOG
