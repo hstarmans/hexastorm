@@ -2,10 +2,11 @@ import unittest
 
 from migen import *
 from litex.soc.cores.spi import SPIMaster
-from spi_laserscanner import Scanhead
+
+from hexastorm.core import Scanhead
 
 
-class TestSpiLaserScanner(unittest.TestCase):
+class TestScanhead(unittest.TestCase):
     
     def setUp(self):
         class DUT(Module):
@@ -268,9 +269,6 @@ class TestSpiLaserScanner(unittest.TestCase):
 
         run_simulation(self.dut, [cpu_side()])
 
-# test code on real scanner
-# add photodiode synt to the end of test with write and also make sure you can write to multiple lines
-# check single facet mode and single line mode
 
 if __name__ == '__main__':
     unittest.main()

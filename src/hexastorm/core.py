@@ -1,27 +1,18 @@
-"""
-    spi_laserscanner.py
-    Core module for the laser scanner
-
-    Rik Starmans
-"""
 import sys
 from collections import namedtuple
 
-import unittest
 from migen.fhdl.tools import list_special_ios
 from migen import *
 from litex.soc.cores.spi import SPISlave
 
-#
-
-sys.path.append("..") 
-import hexa as board
-
 # lines that can be in memory
 # LINES = (LEDPROGRAM.MEMWIDTH*LEDPROGRAM.MEMDEPTH)//VARIABLES['SCANLINE_DATA_SIZE']
 
-
 class Scanhead(Module):
+    '''
+    This description can be converted to VHDL or Verilog and then converted to binary
+    and uploaded to the FPGA.
+    '''
     @staticmethod
     def commands():
         commands = ('RECVCOMMAND', 'STATUS', 'START', 'STOP', 'LASERTEST',
@@ -437,22 +428,3 @@ class Scanhead(Module):
                NextState("STATE_WAIT_STABLE")
             )
         )
-
-
-
-
-if __name__ == '__main__':
-    if len(sys.argv)>1:
-        if sys.argv[1] == 'build':
-            plat = board.Platform()
-            spi_port = plat.request("spi")
-            laser0 = plat.request("laser0")
-            poly_pwm = plat.request("poly_pwm")
-            poly_en = plat.request("poly_en")
-            photodiode = plat.request("photodiode")
-            spi_statemachine = Scanhead(spi_port, laser0, poly_pwm, poly_en, photodiode)
-            plat.build(spi_statemachine, build_name = 'spi_statemachine')
-    else:
-        import laserscanner_test
-        suite = unittest.TestLoader().loadTestsFromModule(laserscanner_test)
-        unittest.TextTestRunner(verbosity=2).run(suite)
