@@ -1,6 +1,5 @@
 # Examples
 The folder includes several examples for migen. These examples are used to gain experience with migen.
-The goal of these tests is to replace the microcontroller of [ldgraphy](https://github.com/hstarmans/ldgraphy) with a FPGA.
 
 ### Blinky
 Blinks a led at the Hexastorm board.

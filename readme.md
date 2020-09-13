@@ -2,7 +2,7 @@
 Implementation of a laserscanner on a FPGA. In a high-speed polygon scanner system, the laser is deflected by a rotating prism or reflective mirror. 
 The position of the laser is determined via a sensor such as a photodiode.
 <img src="https://cdn.hackaday.io/images/7106161566426847098.jpg" align="center" height="300"/> <br>
-Code is tested on the system shown in the image above, branded as the [Hexastorm](https://www.hexastorm.com). 
+Code is tested on the system shown in the image above, branded as [Hexastorm](https://www.hexastorm.com). 
 The bill of materials (BOM) and links to FreeCad and PCB designs can be found on [Hackaday](https://hackaday.io/project/21933-open-hardware-fast-high-resolution-laser).
 
 ## Install Notes
