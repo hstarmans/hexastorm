@@ -1,22 +1,11 @@
-"""
-    spi_mapping.py
-    The Raspberry pi sends two words over SPI. The first word is the command word. 
-    The second word is the data write word.
-    The command table is as follows;
-        command 1 --> reply with 2
-        command 2 --> reply with 8
-        else      --> reply with 0
-    The data write word is not used.
-    
-    Rik Starmans
-"""
+
+import sys
 import unittest
 
 from migen import *
 from litex.soc.cores.spi import SPIMaster, SPISlave
-import sys
-sys.path.append("..") 
-import hexa as board
+
+from hexastorm import board
 
 
 class SpiMapping(Module):
@@ -114,9 +103,3 @@ if __name__ == '__main__':
             plat.build(spi_mapping,build_name = 'spi_mapping')         
     else:
         unittest.main()
-
-
-
-
-
-

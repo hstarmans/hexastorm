@@ -1,17 +1,10 @@
-"""
-    spi_counter.py
-    Creates spi slave where spi slave counts number 
-    of messages sent and returns this to master
-    
-    Rik Starmans
-"""
+import sys
 import unittest
 
 from migen import *
 from litex.soc.cores.spi import SPIMaster, SPISlave
-import sys
-sys.path.append("..") 
-import hexa as board
+
+from hexastorm import board
 
 
 class SpiCounter(Module):
@@ -77,9 +70,3 @@ if __name__ == '__main__':
             plat.build(spi_counter, build_name = 'spi_counter')
     else:
         unittest.main()
-    
-
-
-
-
-

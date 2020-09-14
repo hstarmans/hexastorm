@@ -1,16 +1,9 @@
-"""
-    photodiode test
-    Test for checking function of diode 
+import sys
 
-    if spinning doesn't stop --> test failed
-    
-    Rik starmans
-"""
 from migen.fhdl import *
 from migen import *
-import sys
-sys.path.append("..") 
-import hexa as board
+
+from hexastorm import board
 
 class Photodiode(Module):
     def __init__(self, laser, poly_en, poly_pwm, poly_freq, ph_diode):

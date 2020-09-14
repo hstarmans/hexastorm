@@ -1,12 +1,3 @@
-"""
-    spi_statemachine.py
-    Example of led state machine
-
-    Has a lot of the complexity present in laser scanner but works with a simple LED.
-    You can write to the memory and a led blinks accordinly until memory is exhausted.
-
-    @author Rik Starmans
-"""
 from collections import namedtuple
 import unittest
 import sys
@@ -17,8 +8,7 @@ from migen import *
 from litex.soc.cores.spi import SPISlave
 
 import spi_statemachine_test
-sys.path.append("..") 
-import hexa as board
+from hexastorm import board
 
 class LEDProgram(Module):
     @staticmethod

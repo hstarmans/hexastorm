@@ -1,14 +1,9 @@
-"""
-    lasertest
-    Test for turning on laser channel 
-    
-    Rik starmans
-"""
+import sys
+
 from migen.fhdl import *
 from migen import *
-import sys
-sys.path.append("..") 
-import hexa as board
+
+from hexastorm import board
 
 class Blinky(Module):
     def __init__(self, laser, laser_freq):

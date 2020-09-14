@@ -8,7 +8,9 @@ class CDM(Module):
     def __init__(self, platform):
         clk100 = platform.request('clk100')
         self.clock_domains.cd_sys = ClockDomain(reset_less=True)
+        platform.add_period_constraint(self.cd_sys.clk, 10)
         self.clock_domains.cd_slow = ClockDomain(reset_less=True)
+        platform.add_period_constraint(self.cd_slow.clk, 50)
         n = 4
         self.counter = Signal(max=n+1)
         self.test = platform.request('led2')
@@ -63,7 +65,6 @@ if __name__ == '__main__':
         if sys.argv[1] == 'build':
             plat = board.Platform()
             cdm = CDM(plat)
-            # generic platform create clockdomain
             plat.build(cdm, build_name = 'cdm')
     else:
         unittest.main()

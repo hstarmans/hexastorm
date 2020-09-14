@@ -1,13 +1,7 @@
-"""
-    blinky.py
-    Basic blinky example for migen. 
-    
-    Rik starmans
-"""
+import sys
 
 from migen.fhdl import *
 from migen import *
-import sys
 
 from hexastorm import board
 

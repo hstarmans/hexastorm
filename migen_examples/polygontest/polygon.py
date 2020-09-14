@@ -1,19 +1,16 @@
 """
-    polygontest
-    Test for spinning polygon motor 
-    
-    Rik starmans
+    Test for spinning polygon motor
 """
+import sys
+
 from migen.fhdl import *
 from migen import *
-import sys
-sys.path.append("..") 
-import hexa as board
+
+from hexastorm import board
 
 class Polygon(Module):
     def __init__(self, poly_en, poly_pwm, poly_freq):
         '''poly freq is in Hz
-
         '''
         maxperiod = int(100e6/poly_freq)
         counter = Signal(max=maxperiod)

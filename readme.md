@@ -1,7 +1,8 @@
 # Laserscanner
 Implementation of a laserscanner on a FPGA. In a high-speed polygon scanner system, the laser is deflected by a rotating prism or reflective mirror. 
 The position of the laser is determined via a sensor such as a photodiode.
-<img src="https://cdn.hackaday.io/images/7106161566426847098.jpg" align="center" height="300"/> <br>
+<img src="https://cdn.hackaday.io/images/7106161566426847098.jpg" align="center" height="300"/> 
+<br>
 Code is tested on the system shown in the image above, branded as [Hexastorm](https://www.hexastorm.com). 
 The bill of materials (BOM) and links to FreeCad and PCB designs can be found on [Hackaday](https://hackaday.io/project/21933-open-hardware-fast-high-resolution-laser).
 
@@ -10,8 +11,10 @@ Install migen
 ```python
 pip3 install -e 'git+http://github.com/m-labs/migen.git#egg=migen'
 ```
-On the linux host, you need to install smbus. <br>
-Install the FPGA toolchain for ICE40.
+Install [litex](https://github.com/enjoy-digital/litex), make a special folder for this installation
+For setting the power to laser over ic, you need to install smbus. <br>
+Install the FPGA toolchain for [ICE40](http://www.clifford.at/icestorm/).
+An easier way is apio, but nextpnr is deprecated and doesn't support all options.
 ```console
 pip install -U apio
 apio install yosys

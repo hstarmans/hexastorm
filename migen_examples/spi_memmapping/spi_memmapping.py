@@ -1,25 +1,12 @@
-"""
-    spi_memmapping.py
-    The memory is initiated with the value 10 in register 0 and the value 20 in register 1.
-    The linux host sends one word made up of two bytes over SPI. The first byte is the command. 
-    The second byte is optionally the data or ignored.
-    The command table is as follows;
-    command 1 --> write data in register 0 and reply with (0,1)
-    command 2 --> read value from register 1 and reply with (0,value)
-    command 3 --> change address and reply with (0,3)
-    else --> reply with (0,0)
-
-    Rik Starmans
-"""
+import sys
 import unittest
+
 from migen.fhdl import verilog
 from migen.fhdl.tools import list_special_ios
 from migen import *
 from litex.soc.cores.spi import SPIMaster, SPISlave
 
-import sys
-sys.path.append("..") 
-import hexa as board
+from hexastorm import board
 
 class SpiMemmapping(Module):
     def __init__(self, spi_port, data_width):
