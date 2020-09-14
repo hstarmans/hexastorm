@@ -11,14 +11,14 @@ class CDM(Module):
         self.clock_domains.cd_slow = ClockDomain(reset_less=True)
         n = 4
         self.counter = Signal(max=n+1)
-        self.test = Signal()
+        self.test = platform.request('led2')
         self.sync += [self.cd_sys.clk.eq(clk100)]
         self.sync += If(self.counter == 0,
                 self.cd_slow.clk.eq(~self.cd_slow.clk),
                 self.counter.eq(n)).Else(
                 self.counter.eq(self.counter - 1))
         self.sync.slow += self.test.eq(~self.test)
-        self.testfsm = Signal()
+        self.testfsm = platform.request('led3')
         self.submodules.fsm = ClockDomainsRenamer('slow')(FSM(reset_state = "RESET"))
         self.fsm.act("RESET",
                 NextState("IDLE")
