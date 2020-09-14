@@ -38,3 +38,7 @@ Has a lot of the complexity present in laser scanner but works with a simple LED
 In short, you can write over SPI to the memory. You can turn on the machine.
 If there is data in the memory and the machine is turned on, it will read date in the memory sequentially. The led is on if a bit is 1 and off otherwise.
 If there is no data or the memory is full the user is informed by an error.
+
+### Clockdomain
+Example which shows how to use two clock domains in a circuit and simulate the resulting design.
+It would be nicer if the clock of the second circuit is created with a PLL block.

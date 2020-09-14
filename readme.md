@@ -10,8 +10,19 @@ Install migen
 ```python
 pip3 install -e 'git+http://github.com/m-labs/migen.git#egg=migen'
 ```
-You need to install smbus.
-Create a binary via Yosys and the [Icestorm](http://www.clifford.at/icestorm/) flow. Support for other FPGAs is possibly provided by [symbiflow](https://symbiflow.github.io/)
+On the linux host, you need to install smbus. <br>
+Install the FPGA toolchain for ICE40.
+```console
+pip install -U apio
+apio install yosys
+apio install ice40
+```
+Example command
+```console
+apio raw "yosys -q"
+```
+FPGA currently used is ICE40 with [Icestorm](http://www.clifford.at/icestorm/) flow.
+Support for other FPGAs is possibly provided by [symbiflow](https://symbiflow.github.io/)
 
 ## Parameters
 The user has to define the following parameters;

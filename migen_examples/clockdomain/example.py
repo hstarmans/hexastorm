@@ -5,14 +5,17 @@ from migen import *
 from hexastorm import board
 
 class CDM(Module):
-    def __init__(self):
+    def __init__(self, platform):
+        clk100 = platform.request('clk100')
+        self.clock_domains.cd_sys = ClockDomain(reset_less=True)
         self.clock_domains.cd_slow = ClockDomain(reset_less=True)
-        maxcount = 4
-        self.counter = Signal(max=maxcount)
+        n = 4
+        self.counter = Signal(max=n+1)
         self.test = Signal()
+        self.sync += [self.cd_sys.clk.eq(clk100)]
         self.sync += If(self.counter == 0,
                 self.cd_slow.clk.eq(~self.cd_slow.clk),
-                self.counter.eq(maxcount)).Else(
+                self.counter.eq(n)).Else(
                 self.counter.eq(self.counter - 1))
         self.sync.slow += self.test.eq(~self.test)
         self.testfsm = Signal()
@@ -29,7 +32,8 @@ class TestCDM(unittest.TestCase):
     def setUp(self):
         class DUT(Module):
             def __init__(self):
-                self.submodules.cdm = CDM()
+                plat = board.Platform()
+                self.submodules.cdm = CDM(plat)
         self.dut = DUT()
 
     def test_count(self):
@@ -58,7 +62,8 @@ if __name__ == '__main__':
     if len(sys.argv)>1:
         if sys.argv[1] == 'build':
             plat = board.Platform()
-            cdm = CDM()
+            cdm = CDM(plat)
+            # generic platform create clockdomain
             plat.build(cdm, build_name = 'cdm')
     else:
         unittest.main()
