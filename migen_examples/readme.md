@@ -4,6 +4,21 @@ The folder includes several examples for migen. These examples are used to gain 
 ### Blinky
 Blinks a led at the Hexastorm board.
 
+### Clockdomain
+Example which shows how to use two clock domains in a circuit, simulate and build the resulting design.
+It would be nicer if the clock of the second circuit is created with a PLL block
+
+### Laser test
+Blink laser on the board
+
+### Memtest 
+A simple code example to check if I can trigger [yosys](http://www.clifford.at/yosys/) to create an embedded block ram block. 
+If you check the output of Icezero you see that a block is created.
+The specs of the embedded block rams are listed [here](http://www.latticesemi.com/~/media/LatticeSemi/Documents/DataSheets/iCE/iCE40LPHXFamilyDataSheet.pdf)
+
+### Photodiode test
+Enable laser and motor and see if photodiode is triggered.
+
 ### SPI counter
 Counts the number of interactions over SPI.
 
@@ -15,11 +30,6 @@ The command table is as follows;
  command 2 --> reply with 8
  else      --> reply with 0
 ```
-
-### Memtest 
-A simple code example to check if I can trigger [yosys](http://www.clifford.at/yosys/) to create an embedded block ram block. 
-If you check the output of Icezero you see that a block is created.
-The specs of the embedded block rams are listed [here](http://www.latticesemi.com/~/media/LatticeSemi/Documents/DataSheets/iCE/iCE40LPHXFamilyDataSheet.pdf)
 
 ### SPI memory mapping
 The memory is initiated with the value 10 in register 0 and the value 20 in register 1.
@@ -38,7 +48,3 @@ Has a lot of the complexity present in laser scanner but works with a simple LED
 In short, you can write over SPI to the memory. You can turn on the machine.
 If there is data in the memory and the machine is turned on, it will read date in the memory sequentially. The led is on if a bit is 1 and off otherwise.
 If there is no data or the memory is full the user is informed by an error.
-
-### Clockdomain
-Example which shows how to use two clock domains in a circuit and simulate the resulting design.
-It would be nicer if the clock of the second circuit is created with a PLL block.
