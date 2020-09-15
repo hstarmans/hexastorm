@@ -62,7 +62,7 @@ The laser is turned on, only if the bit is equal to one. If the user tries to re
 | READ_D | retrieve debug information, not used |
 <br>
 A typical use case is as follows. The user retrieves the status of the scanhead. This should be stop.
-A motortest is executed. If after a second the status is determined and it does not equal stop; there is a hardware malfunction.
+A photodiode test is executed. If after a second the status is determined and it does not equal stop; there is a hardware malfunction.
 The user uploads data to the memory until the memory is full and the error memory full is returned.
 The user turns on the scanhead and the laser starts writing the information to the substrate.  
 While the head is on, the user keeps pushing data to the memory.
@@ -72,7 +72,7 @@ The whole scanhead can be simulated virtually. As such, a detailed description i
 
 ## Limitations
 Only one of the 32 block rams is used. <br>
-The laser can be pulsed at 100 MHZ but data can only be streamed to the laser scanner at 25 megabits per second. <br>
+The laser can be pulsed at 50 MHZ but data can only be streamed to the laser scanner at 25 megabits per second. <br>
 Parameters can not be changed on the fly. The binary has to be recompiled and uploaded to the scanhead. This is typically fast, i.e. seconds. <br>
 The current implentation is targeted at a system with one laser bundle <br>
 System is for writing to, i.e. exposing, a substrate. Reading should however also be possible to enable optical coherence tomagraphy.<br>
