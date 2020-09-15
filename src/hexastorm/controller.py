@@ -1,24 +1,30 @@
-from sys import platform
-
-if platform == "linux": from smbus2 import SMBus
-
 from hexastorm import board, core
 
 class Scanhead:
     '''
     class used to control a scanhead flashed with binary from core
     '''
-    device_nr = 1
-    address = 0x28
+    ic_dev_nr = 1
+    ic_address = 0x28
     
-    def __init__(self):
-        if platform != "linux": raise Exception("OS not supported")
-        self.bus = SMBus(self.device_nr)
+    def __init__(self, virtual = True):
+        '''
+        virtual: false scanhead is actually used
+        '''
+        self.virtual = virtual
+        if virtual:
+            self._laserpower = 128
+        else:
+            from smbus2 import SMBus
+            self.bus = SMBus(self.ic_dev_nr)
 
     @property
     def laser_power(self):
-        return self.bus.read_byte_data(self.address,0)
-    
+        if self.virtual: 
+            return self._laserpower
+        else:
+            return self.bus.read_byte_data(self.ic_address,0)
+
     @laser_power.setter
     def laser_power(self, val):
         '''
@@ -30,7 +36,10 @@ class Scanhead:
         0-255 at the laser driver chip.
         '''
         if val < 0 or val > 255: raise Exception('Invalid laser power')
-        self.bus.write_byte_data(self.address,0, val)
+        if self.virtual:
+            self._laserpower = val
+        else:
+            self.bus.write_byte_data(self.ic_address, 0, val)
 
     def createbin(self):
         plat = board.Platform()
