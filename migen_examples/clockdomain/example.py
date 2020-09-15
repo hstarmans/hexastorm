@@ -7,13 +7,11 @@ from hexastorm import board
 
 class CDM(Module):
     def __init__(self, platform, test=False):
-        # sys clock
         clk100 = platform.request('clk100')
         self.clock_domains.cd_sys = ClockDomain(reset_less=True)
         self.sync += [self.cd_sys.clk.eq(clk100)]
         platform.add_period_constraint(self.cd_sys.clk, 10)
         #rst_n = platform.request("rst_n")
-        # cd_slow is created without pll
         self.clock_domains.cd_slow = ClockDomain(reset_less=True)
         platform.add_period_constraint(self.cd_slow.clk, 50)
         n = 4
@@ -22,19 +20,15 @@ class CDM(Module):
                 self.cd_slow.clk.eq(~self.cd_slow.clk),
                 self.counter.eq(n)).Else(
                 self.counter.eq(self.counter - 1))
-        # cd_slow_pll is created with pll
         self.clock_domains.cd_slow_pll = ClockDomain(reset_less=True)
         platform.add_period_constraint(self.cd_slow_pll.clk, 50)
-        # pll
         if not test:
             self.submodules.pll = pll = iCE40PLL()
             #self.comb += pll.reset.eq(~rst_n)
             pll.register_clkin(clk100, 100e6)
             pll.create_clkout(self.cd_slow_pll, 20e6)
-        # test of slow wihout pll
         self.test = platform.request('led2')
         self.sync.slow += self.test.eq(~self.test)
-        # test of slow with pll
         self.testfsm = platform.request('led3')
         self.submodules.fsm = ClockDomainsRenamer('slow_pll')(FSM(reset_state = "RESET"))
         self.fsm.act("RESET",

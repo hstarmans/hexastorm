@@ -74,7 +74,9 @@ The whole scanhead can be simulated virtually. As such, a detailed description i
 Only one of the 32 block rams is used. <br>
 The laser can be pulsed at 100 MHZ but data can only be streamed to the laser scanner at 25 megabits per second. <br>
 Parameters can not be changed on the fly. The binary has to be recompiled and uploaded to the scanhead. This is typically fast, i.e. seconds. <br>
-The current implentation is targeted at a system with one laser bundle and for writing to, i.e. exposing, a substrate. Reading should however also be possible.<br>
+The current implentation is targeted at a system with one laser bundle <br>
+System is for writing to, i.e. exposing, a substrate. Reading should however also be possible to enable optical coherence tomagraphy.<br>
+System has no link for LIDAR measurements, circuit can be found [here](https://hackaday.io/project/163501-open-source-lidar-unruly).<br>
 The FPGA controls all the stepper motors. At the moment it is not possible to use GCODE or apply acceleration profiles. <br>
 <br>
 Most of these implementation can be removed by improving the code. The current focus is on a proof of principle and creating a FPGA gcode parser using [beagleg](https://github.com/hzeller/beagleg).

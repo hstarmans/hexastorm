@@ -5,8 +5,8 @@ The folder includes several examples for migen. These examples are used to gain 
 Blinks a led at the Hexastorm board.
 
 ### Clockdomain
-Example which shows how to use two clock domains in a circuit, simulate and build the resulting design.
-It would be nicer if the clock of the second circuit is created with a PLL block
+Example which shows how to use clock domains in a circuit, simulate and build the resulting design.
+The primary clock is used to create two other clocks. One is created via a Phase Locked Loop (PLL), the other is created via a divider.
 
 ### Laser test
 Blink laser on the board
