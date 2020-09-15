@@ -14,7 +14,8 @@ pip3 install -e 'git+http://github.com/m-labs/migen.git#egg=migen'
 Install [litex](https://github.com/enjoy-digital/litex), make a special folder for this installation
 For setting the power to laser over ic, you need to install smbus. <br>
 Install the FPGA toolchain for [ICE40](http://www.clifford.at/icestorm/).
-An easier way is apio, but nextpnr is deprecated and doesn't support all options.
+An easier way is apio, but nextpnr is static linked and comes without gui and python. 
+As a result, you can not use the pre-pack flag.
 ```console
 pip install -U apio
 apio install yosys
@@ -25,7 +26,7 @@ Example command
 apio raw "yosys -q"
 ```
 FPGA currently used is ICE40 with [Icestorm](http://www.clifford.at/icestorm/) flow.
-Support for other FPGAs is possibly provided by [symbiflow](https://symbiflow.github.io/)
+
 
 ## Parameters
 The user has to define the following parameters;
