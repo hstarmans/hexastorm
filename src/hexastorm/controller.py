@@ -43,10 +43,5 @@ class Scanhead:
 
     def createbin(self):
         plat = board.Platform()
-        spi_port = plat.request("spi")
-        laser0 = plat.request("laser0")
-        poly_pwm = plat.request("poly_pwm")
-        poly_en = plat.request("poly_en")
-        photodiode = plat.request("photodiode")
-        spi_statemachine = core.Scanhead(spi_port, laser0, poly_pwm, poly_en, photodiode)
-        plat.build(spi_statemachine, build_name = 'scanhead')
+        hexacore = core.Scanhead(plat)
+        plat.build(hexacore, build_name = 'scanhead')
