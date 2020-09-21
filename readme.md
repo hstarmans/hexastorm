@@ -7,26 +7,11 @@ Code is tested on the system shown in the image above, branded as [Hexastorm](ht
 The bill of materials (BOM) and links to FreeCad and PCB designs can be found on [Hackaday](https://hackaday.io/project/21933-open-hardware-fast-high-resolution-laser).
 
 ## Install Notes
-Install migen
-```python
-pip3 install -e 'git+http://github.com/m-labs/migen.git#egg=migen'
-```
 Install [litex](https://github.com/enjoy-digital/litex), make a special folder for this installation
-For setting the power to laser over ic, you need to install smbus. <br>
-Install the FPGA toolchain for [ICE40](http://www.clifford.at/icestorm/).
-An easier way is apio, but nextpnr is static linked and comes without gui and python. 
-As a result, you can not use the pre-pack flag.
-```console
-pip install -U apio
-apio install yosys
-apio install ice40
-```
-Example command
-```console
-apio raw "yosys -q"
-```
-FPGA currently used is ICE40 with [Icestorm](http://www.clifford.at/icestorm/) flow.
-
+For setting the power to laser over ic, you need to install smbus2. <br>
+Python packages can be installed from apio to enable the toolchain. Apio nextpnr currently comes without python support.
+[yowasp](http://yowasp.org/) comes with python support but only works on a X86 system. Yowasp takes a lot of time to run the first time.
+The FPGA toolchain can be build from source via [ICE40](http://www.clifford.at/icestorm/). 
 
 ## Parameters
 The user has to define the following parameters;

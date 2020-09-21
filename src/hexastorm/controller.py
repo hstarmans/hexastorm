@@ -44,4 +44,24 @@ class Scanhead:
     def createbin(self):
         plat = board.Platform()
         hexacore = core.Scanhead(plat)
+        import platform
+        import os
+        foldername = 'build'
+        if os.path.isdir(foldername):
+            raise Exception("build dir already exists, please remove")
+        if 'arm' in platform.machine():
+            # arm platform: use apio --pre-pack can't be passed as binary is not compiled with python
+            print("Using apio extension with freq 50 MHz")
+            plat.toolchain.nextpnr_build_template = [
+                'apio raw "yosys -q -l {build_name}.rpt {build_name}.ys"',
+                'apio raw "nextpnr-ice40 {pnr_pkg_opts} --pcf {build_name}.pcf --json {build_name}.json --asc {build_name}.txt --freq 50"',
+                'apio raw "icepack {build_name}.txt {build_name}.bin"'
+            ]
         plat.build(hexacore, build_name = 'scanhead')
+        import subprocess
+        proc = subprocess.Popen(['icoprog', '-p'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        with open('build/scanhead.bin', 'rb') as bitstream:
+            _, stderr = proc.communicate(input=bitstream.read())
+        if stderr:  raise Exception("Not able to upload bitstream")
+        import shutil
+        shutil.rmtree('build')

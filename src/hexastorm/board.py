@@ -1,9 +1,11 @@
 """
     constraint file for the Kicad board available at https://github.com/hstarmans/firestarter/tree/master/pi_hat
 """
+import platform
+
 from migen.build.generic_platform import Subsignal, Pins, IOStandard
 from migen.build.lattice import LatticePlatform
-from migen.build.lattice.programmer import MyStormProgrammer
+from migen.build.lattice.programmer import IceStormProgrammer
 
 _io = [
     ("clk100", 0, Pins("61"), IOStandard("LVCMOS33")),
@@ -32,7 +34,7 @@ class Platform(LatticePlatform):
 
     def __init__(self):
         LatticePlatform.__init__(self, "ice40-hx8k-tq144:4k",
-                                 _io, _connectors, toolchain="icestorm")
+                                 _io, _connectors, toolchain="icestorm")        
 
     def create_programmer(self, serial_port="/dev/ttyACM0"):
-        return MyStormProgrammer(serial_port)
+        return IceStormProgrammer()
