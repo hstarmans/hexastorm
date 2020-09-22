@@ -1,7 +1,9 @@
 """
     constraint file for the Kicad board available at https://github.com/hstarmans/firestarter/tree/master/pi_hat
 """
+import subprocess
 import platform
+import shutil
 
 from migen.build.generic_platform import Subsignal, Pins, IOStandard
 from migen.build.lattice import LatticePlatform
@@ -31,10 +33,27 @@ _connectors = []
 class Platform(LatticePlatform):
     default_clk_name = "clk100"
     default_clk_period = 10
+    default_clk_freq = 100 # MHz
 
     def __init__(self):
         LatticePlatform.__init__(self, "ice40-hx8k-tq144:4k",
-                                 _io, _connectors, toolchain="icestorm")        
+                                 _io, _connectors, toolchain="icestorm")
+             
+    def build(self, core, build_name, freq=default_clk_freq):
+        if 'arm' in platform.machine():
+                # arm platform: use apio --pre-pack can't be passed as binary is not compiled with python
+                print(f"Using apio extension with freq {freq} MHz")
+                self.toolchain.nextpnr_build_template = [
+                    'apio raw "yosys -q -l {build_name}.rpt {build_name}.ys"',
+                    'apio raw "nextpnr-ice40 {pnr_pkg_opts} --pcf {build_name}.pcf --json {build_name}.json --asc {build_name}.txt --freq '+str(freq)+'"',
+                    'apio raw "icepack {build_name}.txt {build_name}.bin"'
+                ]  
+        return super().build(core, build_name = build_name)
 
-    def create_programmer(self, serial_port="/dev/ttyACM0"):
-        return IceStormProgrammer()
+    def upload(self, build_name):
+        proc = subprocess.Popen(['icezprog', f'build/{build_name}.bin'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        stdout, stderr = proc.communicate()
+        if stderr or ('Failed' in str(stdout)):  raise Exception("Not able to upload bitstream")
+    
+    def removebuild(self):
+        shutil.rmtree('build')

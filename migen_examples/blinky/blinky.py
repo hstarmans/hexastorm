@@ -15,12 +15,6 @@ class Blinky(Module):
                 counter.eq(counter - 1)
                 )
 
-# print
-led1 = Signal()
-led2 = Signal()
-my_Blinky = Blinky(led1, led2, int(100E6))
-print(verilog.convert(my_Blinky, ios={led1, led2}))
-
 # set up single channel led
 plat = board.Platform()
 led2 = plat.request("led2")
@@ -28,8 +22,9 @@ led3 = plat.request("led3")
 my_Blinky = Blinky(led2, led3, int(100E6))
 
 # build
-plat.build(my_Blinky, build_name = 'blinky')
-
-# # flash
-# prog = board.IceStormProgrammer()
-# prog.flash(0, "build/top.bin")
+build_name = 'blinky'
+plat.build(freq=100, core=my_Blinky, build_name = build_name)
+# upload
+plat.upload(build_name)
+# remove build dir
+plat.removebuild()

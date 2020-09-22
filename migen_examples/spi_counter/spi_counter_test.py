@@ -14,3 +14,4 @@ for i in range(100):
         assert count == (oldcount+2)%256
     except AssertionError:
         print(f"Expected count {oldcount+1} but got {count}")
+        break

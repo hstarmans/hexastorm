@@ -67,6 +67,9 @@ if __name__ == '__main__':
             plat = board.Platform()
             spi_port = plat.request("spi")
             spi_counter = SpiCounter(spi_port, 8)
-            plat.build(spi_counter, build_name = 'spi_counter')
+            build_name = 'spi_counter'
+            plat.build(spi_counter, build_name = build_name)
+            # upload
+            plat.upload(build_name)
     else:
         unittest.main()
