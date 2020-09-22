@@ -93,9 +93,8 @@ This will produce output, here 28 is the address of the I2C device.
 ```
 <!-- 
 TODO:
-  update kicad board
-  try to "add a reset pin" 
   write hardware test case
+  try to "add a reset pin" 
   add photodiode synt to the end of test with write and also make sure you can write to multiple lines
   add virtual test for single line
   single line now keeps stationary at a fixed 8 bit pattern
