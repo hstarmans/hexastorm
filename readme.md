@@ -93,6 +93,7 @@ This will produce output, here 28 is the address of the I2C device.
 ```
 <!-- 
 TODO:
+  trial 2
   write hardware test case
   try to "add a reset pin" 
   add photodiode synt to the end of test with write and also make sure you can write to multiple lines
