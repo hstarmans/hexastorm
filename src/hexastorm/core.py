@@ -34,8 +34,8 @@ class Scanhead(Module):
     @staticmethod
     def errors():
         '''errors
-        Multiple errors can be present at the same time. This is different than state or command
-        this always one.
+        Multiple errors can be present at the same time. This is different from state or command
+        as these can only be equal to one value.
         If all bits are zero, there is no error.
         Returned is the bit which equals the error
         '''
@@ -69,8 +69,8 @@ class Scanhead(Module):
             pll.create_clkout(self.cd_sys, self.VARIABLES['CRYSTAL_HZ'])
         # three submodules; SPI receiver, memory and laser state machine
         # full byte state
-        self.laserfsmstate = Signal(3)    # state laser module 6-8 byte
-        self.error = Signal(5)            # error              0-5 byte
+        self.laserfsmstate = Signal(3)    # state laser module 5-8 bit
+        self.error = Signal(5)            # error              0-5 bit
         debug = Signal(8)                 # optional 
         # Memory element
         # Rules:

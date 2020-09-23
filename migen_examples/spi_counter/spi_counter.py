@@ -71,5 +71,7 @@ if __name__ == '__main__':
             plat.build(spi_counter, build_name = build_name)
             # upload
             plat.upload(build_name)
+            # remove build dir
+            plat.removebuild()
     else:
         unittest.main()
