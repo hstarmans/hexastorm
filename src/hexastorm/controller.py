@@ -1,5 +1,6 @@
 import os
 import spidev
+from time import sleep
 
 from hexastorm import board
 from hexastorm.core import Scanhead
@@ -51,6 +52,9 @@ class Machine:
         else:
             self.bus.write_byte_data(self.ic_address, 0, val)
 
+    def get_state(self):
+        return self.spi.xfer([Scanhead.COMMANDS.STATUS])[0]>>5
+
     def status(self):
         '''
         prints state machine and list of errors
@@ -79,6 +83,12 @@ class Machine:
         '''
         self.spi.xfer([Scanhead.COMMANDS.LASERTEST])
 
+    def test_line(self):
+        '''
+        enable laser and motor and create line
+        '''
+        self.spi.xfer([Scanhead.COMMANDS.LINETEST])
+
     def test_motor(self):
         '''
         enable motor
@@ -92,6 +102,15 @@ class Machine:
         returns False if succesfull and True if unsuccesfull
         '''
         self.spi.xfer([Scanhead.COMMANDS.PHOTODIODETEST])
+        sleep(2)
+        res = True
+        if self.get_state()!=Scanhead.STATES.STOP:
+            print("Test failed, stopping")
+            self.stop()
+        else:
+            res = True
+            print("Test succeeded")
+        return res
 
     def createbin(self, recompile=False, removebuild=False):
         plat = board.Platform()

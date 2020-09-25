@@ -339,12 +339,17 @@ class Scanhead(Module):
                  NextState("STOP")
             )
         )
+        # Photodiode falling edge detector
+        photodiode_d = Signal()
+        photodiode_fall = Signal()
+        self.sync += photodiode_d.eq(self.photodiode)
+        self.comb += photodiode_fall.eq(~self.photodiode & photodiode_d)
         self.laserfsm.act("PHOTODIODETEST",
-            If(self.photodiode == 1,
-               NextValue(self.laser0, 0),
-               NextValue(self.poly_en, 1),
-            ),
-            If(self.laserfsmstate!=self.STATES.PHOTODIODETEST,
+            If(self.photodiode == 0,
+                NextValue(self.laserfsmstate, self.STATES.STOP),
+                NextState("STOP")
+            ).
+            Elif(self.laserfsmstate!=self.STATES.PHOTODIODETEST,
                  NextState("STOP")
             )
         )
@@ -358,11 +363,6 @@ class Scanhead(Module):
                  NextState("STOP")
             )
         )
-        # Photodiode falling edge detector
-        photodiode_d = Signal()
-        photodiode_fall = Signal()
-        self.sync += photodiode_d.eq(self.photodiode)
-        self.comb += photodiode_fall.eq(~self.photodiode & photodiode_d)
         #NOTE: in the following states... TICKCOUNTER MUST ALWAYS BE INCREASED
         self.laserfsm.act("STATE_WAIT_STABLE",
             NextValue(self.laser0, 1),

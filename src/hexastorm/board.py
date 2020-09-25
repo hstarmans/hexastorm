@@ -10,15 +10,19 @@ from migen.build.lattice import LatticePlatform
 from migen.build.lattice.programmer import IceStormProgrammer
 
 _io = [
+    # numbers are for multiple channels, not really used, 
+    # TODO: wrap polygon in one and laser in one
+    ("gpio14", 0, Pins("113"), IOStandard("LVCMOS33")),
+    ("gpio15", 0, Pins("112"), IOStandard("LVCMOS33")),
     ("clk100", 0, Pins("61"), IOStandard("LVCMOS33")),
     ("led2", 0, Pins("8"), IOStandard("LVCMOS33")),
-    ("led3", 1, Pins("3"), IOStandard("LVCMOS33")),
-    ("laser0", 1, Pins("134"), IOStandard("LVCMOS33")),
-    ("laser1", 1, Pins("135"), IOStandard("LVCMOS33")),
-    ("photodiode", 1, Pins("137"), IOStandard("LVCMOS33")),
-    ("poly_en", 1, Pins("141"), IOStandard("LVCMOS33")),
-    ("poly_ready", 1, Pins("138"), IOStandard("LVCMOS33")),  # not used
-    ("poly_pwm", 1, Pins("139"), IOStandard("LVCMOS33")),
+    ("led3", 0, Pins("3"), IOStandard("LVCMOS33")),
+    ("laser0", 0, Pins("134"), IOStandard("LVCMOS33")),
+    ("laser1", 0, Pins("135"), IOStandard("LVCMOS33")),
+    ("photodiode", 0, Pins("137"), IOStandard("LVCMOS33")),
+    ("poly_en", 0, Pins("141"), IOStandard("LVCMOS33")),
+    ("poly_ready", 0, Pins("138"), IOStandard("LVCMOS33")),  # not used
+    ("poly_pwm", 0, Pins("139"), IOStandard("LVCMOS33")),
     ("spi", 0,
         Subsignal('cs_n',Pins("85")),
         Subsignal('miso',Pins("87")),
