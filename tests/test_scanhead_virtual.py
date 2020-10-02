@@ -8,7 +8,8 @@ from hexastorm.controller import board
 
 
 class TestScanhead(unittest.TestCase):
-    
+    ''' Virtual test for scanhead'''
+
     def setUp(self):
         # parameters are recalculated to ensure ticksinfacet and laserticks can be met
         self.ticksinfacet = 12
@@ -29,7 +30,6 @@ class TestScanhead(unittest.TestCase):
         self.scanhead.submodules.master = self.spimaster = SPIMaster(self.scanhead.spi, data_width=8, 
                         sys_clk_freq=100e6, spi_clk_freq=5e6, with_csr=False)
 
-    
     def transaction(self, data_sent, data_received):
         ''' 
         helper function to test transaction from raspberry pi side
@@ -143,7 +143,6 @@ class TestScanhead(unittest.TestCase):
             self.assertEqual(list(range(loops)),in_memory)
         run_simulation(self.scanhead, [cpu_side()])
 
-
     def test_scanlinewithoutwrite(self):
         def cycle():
             # off
@@ -203,6 +202,7 @@ class TestScanhead(unittest.TestCase):
                 for _ in range(Scanhead.CHUNKSIZE): yield from self.transaction(int('11111101', 2), self.state(state=Scanhead.STATES.STOP))
             # quick check if you reached end of chunk
             yield from self.transaction(255, self.state(errors=[Scanhead.ERRORS.MEMFULL], state=Scanhead.STATES.STOP))
+            # the above command is invalid and should be captured
             yield from self.transaction(Scanhead.COMMANDS.STATUS, self.state(errors=[Scanhead.ERRORS.INVALID, Scanhead.ERRORS.MEMFULL],
                                                                              state=Scanhead.STATES.STOP))
             # turn on laser head

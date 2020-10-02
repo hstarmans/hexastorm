@@ -177,7 +177,7 @@ class Scanhead(Module):
                 Elif(spislave.mosi != 0,
                     NextValue(self.error[self.ERRORS.INVALID], 1)
                 )
-                # TODO: there seem to be zero commands beeing sent over?
+                # TODO: there seem to be zero commands being sent over?
                 # uncaptured
             ).
             # Read data after header; only applicable for debug or write line
