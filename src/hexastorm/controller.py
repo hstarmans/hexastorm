@@ -4,8 +4,10 @@ from time import sleep
 
 from gpiozero import LED
 
-from hexastorm import board
-from hexastorm.core import Scanhead
+import hexastorm.controller
+import hexastorm.core
+import hexastorm.board
+import hexastorm as hs
 
 class Machine:
     '''
@@ -55,53 +57,60 @@ class Machine:
             self.bus.write_byte_data(self.ic_address, 0, val)
 
     def get_state(self):
-        return self.spi.xfer([Scanhead.COMMANDS.STATUS])[0]>>5
+        return self.spi.xfer([hs.core.Scanhead.COMMANDS.STATUS])[0]>>5
 
     def status(self):
         '''
         prints state machine and list of errors
         '''
         #TODO: this will not work if the machine is receiving
-        state = self.spi.xfer([Scanhead.COMMANDS.STATUS])[0]
+        state = self.spi.xfer([hs.core.Scanhead.COMMANDS.STATUS])[0]
         if state == 255:
             print("Error; check reset pin is high and binary is correct")
             return
-        errors = [int(i) for i in list('{0:0b}'.format(state&0b1111))]
+        errors = [int(i) for i in list('{0:0b}'.format(state&0b11111))]
+        errors.reverse()
         if max(errors)>0:
             print("Detected errors; ", end='')
             for idx, val in enumerate(errors):
                 if val>0:
-                    error = list(Scanhead.ERRORS._asdict())[idx]
-                    print(error, end='')
+                    error = list(hs.core.Scanhead.ERRORS._asdict())[idx]
+                    print(error, end=' ')
             print() # to endline
-        machinestate = list(Scanhead.STATES._asdict())[state>>5]
+        machinestate = list(hs.core.Scanhead.STATES._asdict())[state>>5]
         print(f"The machine state is {machinestate}")
+
+    def start(self):
+        '''
+        start scanhead
+        '''
+        self.spi.xfer([hs.core.Scanhead.COMMANDS.START])
 
     def stop(self):
         '''
         disables scanhead
         '''
-        self.spi.xfer([Scanhead.COMMANDS.STOP])
+        self.spi.xfer([hs.core.Scanhead.COMMANDS.STOP])
 
     def test_laser(self):
         '''
         enable laser
         '''
-        self.spi.xfer([Scanhead.COMMANDS.LASERTEST])
+        self.spi.xfer([hs.core.Scanhead.COMMANDS.LASERTEST])
 
     def test_line(self):
         '''
         enable laser and motor and create line
         '''
-        self.spi.xfer([Scanhead.COMMANDS.LINETEST])
+        self.spi.xfer([hs.core.Scanhead.COMMANDS.LINETEST])
 
     def test_motor(self):
         '''
         enable motor
         '''
-        self.spi.xfer([Scanhead.COMMANDS.MOTORTEST])
+        self.spi.xfer([hs.core.Scanhead.COMMANDS.MOTORTEST])
 
-    def state(self, errors=[], state=Scanhead.STATES.STOP):
+    def state(self, errors=[], state=hs.core.Scanhead.STATES.STOP):
         ''' 
         given a list of errors and a certain state
         this function returns the state encoding
@@ -121,17 +130,16 @@ class Machine:
         reset_pin.on()
         sleep(1)
 
-
     def test_photodiode(self):
         '''
         enable motor, laser and disable if photodiode is triggered
 
         returns False if succesfull and True if unsuccesfull
         '''
-        self.spi.xfer([Scanhead.COMMANDS.PHOTODIODETEST])
+        self.spi.xfer([hs.core.Scanhead.COMMANDS.PHOTODIODETEST])
         sleep(2)
         res = True
-        if self.get_state()!=Scanhead.STATES.STOP:
+        if self.get_state()!=hs.core.Scanhead.STATES.STOP:
             print("Test failed, stopping")
             self.stop()
         else:
@@ -141,8 +149,11 @@ class Machine:
 
     def flash(self, recompile=False, removebuild=False):
         build_name = 'scanhead'
-        plat = board.Platform()
-        if not recompile and not os.path.isdir('build'): recompile = True
-        if recompile: plat.build(freq=50, core = Scanhead(plat), build_name = build_name)
+        plat = hs.board.Platform()
+        if recompile: 
+            if os.path.isdir('build'):
+                plat.removebuild()
+            plat.build(freq=50, core = hs.core.Scanhead(plat), build_name = build_name)
         plat.upload(build_name)
-        if removebuild: plat.removebuild()
+        if removebuild:
+            plat.removebuild()

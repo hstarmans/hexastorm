@@ -4,7 +4,7 @@ from migen import *
 from litex.soc.cores.spi import SPIMaster
 
 from hexastorm.core import Scanhead
-from hexastorm.controller import board
+import hexastorm.board as board
 
 
 class TestScanhead(unittest.TestCase):

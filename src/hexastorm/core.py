@@ -43,13 +43,11 @@ class Scanhead(Module):
         Errors = namedtuple('Errors', errors, defaults=tuple(range(len(errors))))
         return Errors()
     ERRORS = errors.__func__()
-
-    #TODO: SYNC START and SINGLE_FACET are not used
-    #      SYNC_START timestamp at which you turn on the laser
     VARIABLES = {'RPM':1200,'SPINUP_TIME':1.5, 'STABLE_TIME':1.125, 'FACETS':4,
-            'CRYSTAL_HZ':50E6, 'LASER_HZ': 100E3,
-            'END%': 0.8, 'START%': 0.35, 'SINGLE_LINE':False,
-            'SINGLE_FACET':False, 'DIRECTION':0, 'SYNCSTART':1/3000, 'JITTER_THRESH':1/400}
+                 'CRYSTAL_HZ':50E6, 'LASER_HZ': 100E3,
+                 'END%': 0.7, 'START%': 0.35, 'SINGLE_LINE':False,
+                 'SINGLE_FACET':False, 'DIRECTION':0, 'JITTER_THRESH':1/200}
+    if VARIABLES['END%']>(1-VARIABLES['JITTER_THRESH']): raise Exception("Invalid settings")
     CHUNKSIZE = 8 # you write in chunks of 8 bytes
     # one block is 4K bits, there are 32 blocks (officially 20 in HX4K)
     MEMWIDTH = 8  
@@ -205,8 +203,8 @@ class Scanhead(Module):
             NextValue(writeport.we, 0),
             NextState("IDLE")
         )
-        # 
-        polyperiod = int(self.VARIABLES['CRYSTAL_HZ']/(self.VARIABLES['RPM']/60))
+        # the original motor driver was designed for 6 facets and pulsed for eached facet
+        polyperiod = int(self.VARIABLES['CRYSTAL_HZ']/(self.VARIABLES['RPM']/60)/(6*2))
         pwmcounter = Signal(max=polyperiod)
         self.poly_pwm = platform.request("poly_pwm")
         self.sync += If(pwmcounter == 0,
@@ -242,19 +240,22 @@ class Scanhead(Module):
         readtrig = Signal()
         self.submodules.readmem= FSM(reset_state = "RESET")
         self.readmem.act("RESET",
+            NextValue(written, 0),
+            NextState("WAIT")
+        )
+        self.readmem.act("WAIT",
             NextValue(readport.re, 0),
             If(readtrig,
                NextState("READ")
             )
         )
         self.readmem.act("READ",
+            NextValue(readtrig, 0),
+            NextValue(readport.re, 1),
             If((readport.adr == writeport.adr)&(written == 0),
-               NextValue(readtrig, 0),
                NextValue(self.error[self.ERRORS.MEMREAD], 1),
             ).
             Else(
-                NextValue(readtrig,0),
-                NextValue(readport.re, 1),
                 NextValue(dat_r_new, readport.dat_r),
                 # increase address after succesfull read
                 If(self.VARIABLES['SINGLE_LINE']==False,
@@ -268,7 +269,7 @@ class Scanhead(Module):
                    )
                 )
             ),
-            NextState("RESET")
+            NextState("WAIT")
         )
         self.laserfsm.act("RESET",
             NextValue(firststart, 1),
@@ -363,15 +364,17 @@ class Scanhead(Module):
                  NextState("STOP")
             )
         )
-        #NOTE: in the following states... TICKCOUNTER MUST ALWAYS BE INCREASED
         self.laserfsm.act("STATE_WAIT_STABLE",
             NextValue(self.laser0, 1),
             NextValue(stablecounter, stablecounter+1),
+            #TODO: change stable counter thresh
             If(photodiode_fall,
                NextValue(facetcnt, facetcnt+1), 
                NextValue(self.tickcounter, 0),
                If((self.tickcounter+1>round(ticksinfacet*(1-self.VARIABLES['JITTER_THRESH'])))&
                   (self.tickcounter+1<round(ticksinfacet*(1+self.VARIABLES['JITTER_THRESH']))),
+                  NextValue(stablecounter, 0),
+                  NextValue(self.laser0, 0),
                   If((self.VARIABLES['SINGLE_FACET']==True)&(facetcnt>0),
                     NextState('WAIT_END')
                   ).
@@ -393,7 +396,6 @@ class Scanhead(Module):
             )  
         )
         self.laserfsm.act('WAIT_FOR_DATA_RUN',
-            NextValue(self.laser0, 0),
             NextValue(self.tickcounter, self.tickcounter+1),
             If(self.tickcounter>=int(self.VARIABLES['START%']*ticksinfacet-2),
                 NextState('DATA_RUN')
@@ -404,33 +406,41 @@ class Scanhead(Module):
         )
         self.laserfsm.act("DATA_RUN",
             NextValue(self.tickcounter, self.tickcounter+1),
-            NextValue(self.lasercnt, self.lasercnt+1),
+            NextValue(self.lasercnt, self.lasercnt-1),
             If(self.lasercnt == 0,
+                NextValue(self.lasercnt, LASERTICKS-1),
                 #NOTE: readbit and scanbit counters can be different
                 #      readbit is your current position in memory and scanbit your current byte position in scanline
+                NextValue(readbit, readbit+1),
                 If(self.scanbit >= BITSINSCANLINE,
                     NextState("WAIT_END"), 
                     NextValue(self.scanbit, 0)
                 ).
                 Else(
+                    NextValue(self.scanbit, self.scanbit+1),
+                    # read from memory before the spinup
+                    # it is triggered here again, so fresh data is available once the end is reached
                     # if read bit is 0, trigger a read out
                     If(readbit==0,
                         NextValue(readtrig, 1),
+                        NextValue(readbit, readbit+1)
                     ).
                     # final read bit copy memory
                     # move to next address, i.e. byte, if end is reached
                     Elif(readbit==self.MEMWIDTH-1,
                         NextValue(dat_r_old, dat_r_new),
+                        NextValue(readbit,0)
+                    ).
+                    Else(
+                        NextValue(readbit, readbit+1)
                     ),
                     NextValue(dat_r_old, dat_r_old>>1),
                     # if there is no data, laser off error should already have been reported
                     If(written==0,
                         NextValue(self.laser0, 0)
                     ).
-                    Else(NextValue(self.laser0, dat_r_old[0]),
-                         NextValue(readbit, readbit+1),
-                         NextValue(self.scanbit, self.scanbit+1)
-                    )
+                    # else use the data from the memory
+                    Else(NextValue(self.laser0, dat_r_old[0]))
                 )
             ),
             If(self.laserfsmstate!=self.STATES.START,
@@ -439,7 +449,7 @@ class Scanhead(Module):
         )
         self.laserfsm.act("WAIT_END",
             NextValue(self.tickcounter, self.tickcounter+1),
-            If(self.tickcounter>=int((1-self.VARIABLES['SYNCSTART'])*ticksinfacet-1),
+            If(self.tickcounter>=round((1-self.VARIABLES['JITTER_THRESH'])*ticksinfacet-1),
                NextState("STATE_WAIT_STABLE")
             )
         )

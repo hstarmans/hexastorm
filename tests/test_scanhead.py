@@ -1,4 +1,5 @@
 import unittest
+from time import sleep
 
 from hexastorm.core import Scanhead
 from hexastorm.controller import Machine
@@ -6,13 +7,19 @@ from hexastorm.controller import Machine
 
 class TestScanhead(unittest.TestCase):
     ''' Test on scanhead flashed to FPGA'''
-   
 
     @classmethod
     def setUpClass(cls):
         cls.sh = Machine()
         cls.sh.flash(recompile=True, removebuild=True)
-        pass
+
+    def test_stable(self):
+        self.sh.start()
+        sleep(round(Scanhead.VARIABLES['SPINUP_TIME']+Scanhead.VARIABLES['STABLE_TIME']+2))
+        assert self.sh.spi.xfer([Scanhead.COMMANDS.STATUS]) == self.sh.state(state = Scanhead.STATES.START,
+                                                                             errors=[Scanhead.ERRORS.MEMREAD])
+        self.sh.reset()
+        self.sh.spi.xfer([Scanhead.COMMANDS.STATUS]) == self.sh.state(state=Scanhead.STATES.STOP)
     
     def test_photodiode(self):
         assert self.sh.test_photodiode() == False
