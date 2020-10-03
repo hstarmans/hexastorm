@@ -84,7 +84,8 @@ class TestScanhead(unittest.TestCase):
                       Scanhead.STATES.MOTORTEST,
                       Scanhead.STATES.LINETEST,
                       Scanhead.STATES.PHOTODIODETEST]
-                    
+            # NOTE: on default photodiode is high
+            yield self.scanhead.photodiode.eq(1) 
             for idx, test_command in enumerate(test_commands):
                 # get the initial status
                 yield from self.transaction(Scanhead.COMMANDS.STATUS, self.state(state=Scanhead.STATES.STOP))
@@ -98,12 +99,13 @@ class TestScanhead(unittest.TestCase):
                     yield from self.checkpin(self.scanhead.poly_en, value=1)
                 if test_command == Scanhead.COMMANDS.PHOTODIODETEST:
                     # turn on the photodiode
-                    yield self.scanhead.photodiode.eq(1) 
+                    yield self.scanhead.photodiode.eq(0) 
                     # check if laser and polygon turned off
                     yield from self.checkpin(self.scanhead.laser0, 1)
                     yield from self.checkpin(self.scanhead.poly_en, value=0)
-                # put the scanhead back in OFF mode and check state trigger 
-                yield from self.transaction(Scanhead.COMMANDS.STOP, self.state(state=states[idx]))
+                    yield from self.transaction(Scanhead.COMMANDS.STOP, self.state(state=Scanhead.STATES.STOP))
+                else:
+                    yield from self.transaction(Scanhead.COMMANDS.STOP, self.state(state=states[idx]))
 
         run_simulation(self.scanhead, [cpu_side()])
 

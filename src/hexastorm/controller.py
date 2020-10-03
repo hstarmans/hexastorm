@@ -9,11 +9,10 @@ from hexastorm.core import Scanhead
 
 class Machine:
     '''
-    class used to control a scanhead flashed with binary from core
+    class used to control a laser scanner
     '''
     ic_dev_nr = 1
     ic_address = 0x28
-    reset_gpio = 26
     
     def __init__(self, virtual = False):
         '''
@@ -31,7 +30,6 @@ class Machine:
             self.spi.open(0,0)
             self.spi.max_speed_hz = round(1E6)
             self.spi.cshigh = False
-            self.reset_pin = LED(self.reset_gpio)
 
     @property
     def laser_power(self):
@@ -65,12 +63,16 @@ class Machine:
         '''
         #TODO: this will not work if the machine is receiving
         state = self.spi.xfer([Scanhead.COMMANDS.STATUS])[0]
-        errors = [int(i) for i in list('{0:0b}'.format(state&0b11111))]
+        if state == 255:
+            print("Error; check reset pin is high and binary is correct")
+            return
+        errors = [int(i) for i in list('{0:0b}'.format(state&0b1111))]
         if max(errors)>0:
             print("Detected errors; ", end='')
             for idx, val in enumerate(errors):
-                error = list(Scanhead.ERRORS._asdict())[idx]
-                if val>0: print(error, end='')
+                if val>0:
+                    error = list(Scanhead.ERRORS._asdict())[idx]
+                    print(error, end='')
             print() # to endline
         machinestate = list(Scanhead.STATES._asdict())[state>>5]
         print(f"The machine state is {machinestate}")
@@ -109,13 +111,15 @@ class Machine:
         val = errorstate + (state<<5)
         return [val]
 
-    def reset(self):
+    def reset(self, pin=26):
         '''
         reset the chip by raising and lowering the reset pin
         '''
-        self.reset_pin.off()
-        sleep(0.1)
-        self.reset_pin.on()
+        reset_pin = LED(pin)
+        reset_pin.off()
+        sleep(1)
+        reset_pin.on()
+        sleep(1)
 
 
     def test_photodiode(self):
@@ -136,10 +140,9 @@ class Machine:
         return res
 
     def flash(self, recompile=False, removebuild=False):
-        plat = board.Platform()
-        hexacore = Scanhead(plat)
         build_name = 'scanhead'
+        plat = board.Platform()
         if not recompile and not os.path.isdir('build'): recompile = True
-        if recompile: plat.build(freq=50, core=hexacore, build_name = build_name)
+        if recompile: plat.build(freq=50, core = Scanhead(plat), build_name = build_name)
         plat.upload(build_name)
         if removebuild: plat.removebuild()

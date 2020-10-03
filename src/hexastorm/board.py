@@ -30,7 +30,6 @@ _io = [
         Subsignal('clk',Pins("79")),
         IOStandard("LVCMOS33"))
 ]
-
 _connectors = []
 
 
@@ -42,10 +41,11 @@ class Platform(LatticePlatform):
     def __init__(self):
         LatticePlatform.__init__(self, "ice40-hx8k-tq144:4k",
                                  _io, _connectors, toolchain="icestorm")
-             
+
     def build(self, core, build_name, freq=default_clk_freq):
         if 'arm' in platform.machine():
-                # arm platform: use apio --pre-pack can't be passed as binary is not compiled with python
+                # arm platform uses apio
+                # --pre-pack can't be used as binary is not compiled with python
                 print(f"Using apio extension with freq {freq} MHz")
                 self.toolchain.nextpnr_build_template = [
                     'apio raw "yosys -q -l {build_name}.rpt {build_name}.ys"',
@@ -58,6 +58,6 @@ class Platform(LatticePlatform):
         proc = subprocess.Popen(['icezprog', f'build/{build_name}.bin'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         stdout, stderr = proc.communicate()
         if stderr or ('Failed' in str(stdout)):  raise Exception("Not able to upload bitstream")
-    
+
     def removebuild(self):
         shutil.rmtree('build')

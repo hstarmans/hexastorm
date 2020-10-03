@@ -6,15 +6,19 @@ from hexastorm.controller import Machine
 
 class TestScanhead(unittest.TestCase):
     ''' Test on scanhead flashed to FPGA'''
-    
-    def setUp(self):
-        self.sh = Machine()
-        self.sh.flash(recompile=True, removebuild=True)
+   
+
+    @classmethod
+    def setUpClass(cls):
+        cls.sh = Machine()
+        cls.sh.flash(recompile=True, removebuild=True)
+        pass
     
     def test_photodiode(self):
         assert self.sh.test_photodiode() == False
 
     def test_memory(self):
+        assert self.sh.get_state() == 0
         for _ in range(Scanhead.MEMDEPTH//Scanhead.MEMWIDTH):
             assert self.sh.spi.xfer([Scanhead.COMMANDS.WRITE_L]) == self.sh.state(state=Scanhead.STATES.STOP)
             for _ in range(Scanhead.CHUNKSIZE): assert self.sh.spi.xfer([int('11111111', 2)]) == self.sh.state(state=Scanhead.STATES.STOP)

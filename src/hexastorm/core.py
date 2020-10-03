@@ -46,7 +46,7 @@ class Scanhead(Module):
 
     #TODO: SYNC START and SINGLE_FACET are not used
     #      SYNC_START timestamp at which you turn on the laser
-    VARIABLES = {'RPM':2400,'SPINUP_TIME':1.5, 'STABLE_TIME':1.125, 'FACETS':4,
+    VARIABLES = {'RPM':1200,'SPINUP_TIME':1.5, 'STABLE_TIME':1.125, 'FACETS':4,
             'CRYSTAL_HZ':50E6, 'LASER_HZ': 100E3,
             'END%': 0.8, 'START%': 0.35, 'SINGLE_LINE':False,
             'SINGLE_FACET':False, 'DIRECTION':0, 'SYNCSTART':1/3000, 'JITTER_THRESH':1/400}
@@ -211,7 +211,7 @@ class Scanhead(Module):
         self.poly_pwm = platform.request("poly_pwm")
         self.sync += If(pwmcounter == 0,
                 self.poly_pwm.eq(~self.poly_pwm),
-                pwmcounter.eq(int(polyperiod))).Else(
+                pwmcounter.eq(polyperiod-1)).Else(
                 pwmcounter.eq(pwmcounter - 1)
                 )
         # Laser FSM
