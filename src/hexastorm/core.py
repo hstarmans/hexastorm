@@ -46,8 +46,7 @@ class Scanhead(Module):
     VARIABLES = {'RPM':1200,'SPINUP_TIME':1.5, 'STABLE_TIME':1.125, 'FACETS':4,
                  'CRYSTAL_HZ':50E6, 'LASER_HZ': 100E3,
                  'END%': 0.7, 'START%': 0.35, 'SINGLE_LINE':False,
-                 'SINGLE_FACET':False, 'DIRECTION':0, 'JITTER_THRESH':1/200}
-    if VARIABLES['END%']>(1-VARIABLES['JITTER_THRESH']): raise Exception("Invalid settings")
+                 'SINGLE_FACET':False, 'DIRECTION':0}
     CHUNKSIZE = 8 # you write in chunks of 8 bytes
     # one block is 4K bits, there are 32 blocks (officially 20 in HX4K)
     MEMWIDTH = 8  
@@ -214,13 +213,16 @@ class Scanhead(Module):
                 )
         # Laser FSM
         # Laser FSM controls the laser, polygon anld output to motor
-        facetcnt = Signal(max=int(self.VARIABLES['FACETS']))
+        facetcnt = Signal(max=self.VARIABLES['FACETS'])
         # stable counter used for both spinup and photo diode stable
-        spinupticks = int(self.VARIABLES['SPINUP_TIME']*self.VARIABLES['CRYSTAL_HZ'])
-        stableticks = int(self.VARIABLES['STABLE_TIME']*self.VARIABLES['CRYSTAL_HZ'])
-        stablecounter = Signal(max=max(spinupticks, stableticks))
-        ticksinfacet = self.VARIABLES['CRYSTAL_HZ']/(self.VARIABLES['RPM']/60*self.VARIABLES['FACETS'])
+        spinupticks = round(self.VARIABLES['SPINUP_TIME']*self.VARIABLES['CRYSTAL_HZ'])
+        stableticks = round(self.VARIABLES['STABLE_TIME']*self.VARIABLES['CRYSTAL_HZ'])
+        stablecounter = Signal(max=max(spinupticks, stableticks))   # counter is used twice, hence the max
+        stablethresh = Signal(max=stableticks)
+        ticksinfacet = round(self.VARIABLES['CRYSTAL_HZ']/(self.VARIABLES['RPM']/60*self.VARIABLES['FACETS']))
         LASERTICKS = int(self.VARIABLES['CRYSTAL_HZ']/self.VARIABLES['LASER_HZ'])
+        JITTERTICKS = round(0.5*LASERTICKS)
+        if self.VARIABLES['END%']>(1-JITTERTICKS/ticksinfacet): raise Exception("Invalid settings, END% too high")
         BITSINSCANLINE = round((ticksinfacet*(self.VARIABLES['END%']-self.VARIABLES['START%']))/LASERTICKS)
         if BITSINSCANLINE <= 0: raise Exception("Bits in scanline invalid")            
         self.lasercnt = Signal(max=LASERTICKS)
@@ -279,7 +281,10 @@ class Scanhead(Module):
         self.poly_en = platform.request("poly_en")
         self.photodiode = platform.request("photodiode")
         self.laserfsm.act("STOP",
+            NextValue(stablethresh, stableticks-1),
             NextValue(stablecounter, 0),
+            NextValue(facetcnt, 0),
+            NextValue(self.tickcounter, 0),
             NextValue(self.scanbit, 0),
             NextValue(self.lasercnt, 0),
             NextValue(self.laser0, 0),
@@ -340,11 +345,8 @@ class Scanhead(Module):
                  NextState("STOP")
             )
         )
-        # Photodiode falling edge detector
+        # Photodiode rising edge detector
         photodiode_d = Signal()
-        photodiode_fall = Signal()
-        self.sync += photodiode_d.eq(self.photodiode)
-        self.comb += photodiode_fall.eq(~self.photodiode & photodiode_d)
         self.laserfsm.act("PHOTODIODETEST",
             If(self.photodiode == 0,
                 NextValue(self.laserfsmstate, self.STATES.STOP),
@@ -358,6 +360,7 @@ class Scanhead(Module):
             NextValue(stablecounter, stablecounter + 1),
             If(stablecounter>spinupticks-1,
                 NextState("STATE_WAIT_STABLE"),
+                NextValue(self.laser0, 1),
                 NextValue(stablecounter, 0),
             ),
             If(self.laserfsmstate!=self.STATES.START,
@@ -365,35 +368,39 @@ class Scanhead(Module):
             )
         )
         self.laserfsm.act("STATE_WAIT_STABLE",
-            NextValue(self.laser0, 1),
             NextValue(stablecounter, stablecounter+1),
-            #TODO: change stable counter thresh
-            If(photodiode_fall,
-               NextValue(facetcnt, facetcnt+1), 
+            NextValue(photodiode_d, self.photodiode),
+            If(stablecounter>=stablethresh,
+               NextValue(self.error[self.ERRORS.NOTSTABLE], 1),
+               NextValue(self.laserfsmstate, self.STATES.STOP),
+               NextState('STOP')
+            ).
+            Elif(~self.photodiode&~photodiode_d,
                NextValue(self.tickcounter, 0),
-               If((self.tickcounter+1>round(ticksinfacet*(1-self.VARIABLES['JITTER_THRESH'])))&
-                  (self.tickcounter+1<round(ticksinfacet*(1+self.VARIABLES['JITTER_THRESH']))),
+               NextValue(self.laser0, 0),
+               If((self.tickcounter+1>ticksinfacet-JITTERTICKS)&
+                  (self.tickcounter+1<ticksinfacet+JITTERTICKS),
+                  If(facetcnt==0, NextValue(facetcnt, self.VARIABLES['FACETS']-1)).
+                  Else(NextValue(facetcnt, facetcnt-1)), 
                   NextValue(stablecounter, 0),
-                  NextValue(self.laser0, 0),
+                  NextValue(stablethresh, round(1.1*ticksinfacet)), 
                   If((self.VARIABLES['SINGLE_FACET']==True)&(facetcnt>0),
                     NextState('WAIT_END')
                   ).
                   Else(
                     NextState('WAIT_FOR_DATA_RUN')
                   )
+               ).
+               Else(
+                   NextState('WAIT_END')
                )
             ).
+            Elif(self.laserfsmstate!=self.STATES.START,
+                 NextState("STOP")
+            ).  
             Else(
                 NextValue(self.tickcounter, self.tickcounter+1)
-            ),
-            If(stablecounter>stableticks-1,
-               NextValue(self.error[self.ERRORS.NOTSTABLE], 1),
-               NextValue(self.laserfsmstate, self.STATES.STOP),
-               NextState('STOP')
-            ),
-            If(self.laserfsmstate!=self.STATES.START,
-                 NextState("STOP")
-            )  
+            )
         )
         self.laserfsm.act('WAIT_FOR_DATA_RUN',
             NextValue(self.tickcounter, self.tickcounter+1),
@@ -449,7 +456,8 @@ class Scanhead(Module):
         )
         self.laserfsm.act("WAIT_END",
             NextValue(self.tickcounter, self.tickcounter+1),
-            If(self.tickcounter>=round((1-self.VARIABLES['JITTER_THRESH'])*ticksinfacet-1),
-               NextState("STATE_WAIT_STABLE")
+            If(self.tickcounter>=ticksinfacet-2*JITTERTICKS,
+               NextState("STATE_WAIT_STABLE"),
+               NextValue(self.laser0, 1),
             )
         )

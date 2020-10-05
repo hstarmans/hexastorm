@@ -25,8 +25,6 @@ The user has to define the following parameters;
 | STABLE_TIME | seconds system tries to determine position laser with photodiode |
 | FACETS | number of polygon facets|
 | DIRECTION | exposure direction, i.e. forward or backward |
-| SYNCSTART | 1-SYNCSTART fraction where laser is turned on to trigger photodiode |
-| JITTER_THRESH | allowed fractional jitter per period |
 | SINGLE_LINE | system exposes fixed pattern, i.e. line|
 <br>
 Using the above, the code determines the number of bits in a scanline. Via a serial port interface the user can push data to the scanner.
@@ -93,8 +91,6 @@ This will produce output, here 28 is the address of the I2C device.
 ```
 <!-- 
 TODO:
-  write hardware test case
-  try to "add a reset pin" 
   add photodiode synt to the end of test with write and also make sure you can write to multiple lines
   add virtual test for single line
   single line now keeps stationary at a fixed 8 bit pattern

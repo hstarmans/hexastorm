@@ -14,6 +14,7 @@ class TestScanhead(unittest.TestCase):
         cls.sh.flash(recompile=True, removebuild=True)
 
     def test_stable(self):
+        'test if laser can stabilize itself and gives memread error if no data is written'
         self.sh.start()
         sleep(round(Scanhead.VARIABLES['SPINUP_TIME']+Scanhead.VARIABLES['STABLE_TIME']+2))
         assert self.sh.spi.xfer([Scanhead.COMMANDS.STATUS]) == self.sh.state(state = Scanhead.STATES.START,
@@ -22,9 +23,11 @@ class TestScanhead(unittest.TestCase):
         self.sh.spi.xfer([Scanhead.COMMANDS.STATUS]) == self.sh.state(state=Scanhead.STATES.STOP)
     
     def test_photodiode(self):
+        'test if photodiode is triggered when laser is turned on and motor spins'
         assert self.sh.test_photodiode() == False
 
     def test_memory(self):
+        'test if memory full is raised when writing to memory'
         assert self.sh.get_state() == 0
         for _ in range(Scanhead.MEMDEPTH//Scanhead.MEMWIDTH):
             assert self.sh.spi.xfer([Scanhead.COMMANDS.WRITE_L]) == self.sh.state(state=Scanhead.STATES.STOP)
