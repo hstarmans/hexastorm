@@ -23,7 +23,7 @@ class TestScanhead(unittest.TestCase):
         self.sh.spi.xfer([Scanhead.COMMANDS.STATUS]) == self.sh.state(state=Scanhead.STATES.STOP)
     
     def test_photodiode(self):
-        'test if photodiode is triggered when laser is turned on and motor spins'
+        'test if photodiode is triggered when laser is turned on and prism spins'
         assert self.sh.test_photodiode() == False
 
     def test_memory(self):
