@@ -91,9 +91,11 @@ This will produce output, here 28 is the address of the I2C device.
 ```
 <!-- 
 TODO:
+  constraint of multiple errors reduces space too much
+  write uniform line to memory and see if you can notice a difference with a 0 line
+  in single line exposure, you should move the memory back so you can replace the ring
   add photodiode synt to the end of test with write and also make sure you can write to multiple lines
   add virtual test for single line
-  single line now keeps stationary at a fixed 8 bit pattern
   add virtual test for single facet
   add movement, the head should determine wether it has to move after a line. You need to add this encoding.
   replace migen with nmigen

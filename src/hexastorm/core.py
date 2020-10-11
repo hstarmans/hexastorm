@@ -217,14 +217,13 @@ class Scanhead(Module):
         LASERTICKS = int(self.VARIABLES['CRYSTAL_HZ']/self.VARIABLES['LASER_HZ'])
         JITTERTICKS = round(0.5*LASERTICKS)
         if self.VARIABLES['END%']>(1-JITTERTICKS/ticksinfacet): raise Exception("Invalid settings, END% too high")
-        BITSINSCANLINE = round((ticksinfacet*(self.VARIABLES['END%']-self.VARIABLES['START%']))/LASERTICKS)
-        if BITSINSCANLINE <= 0: raise Exception("Bits in scanline invalid")
-        if (self.MEMWIDTH*self.MEMDEPTH)//BITSINSCANLINE<5: raise Exception("Memory too small for 5 lines")
+        self.BITSINSCANLINE = round((ticksinfacet*(self.VARIABLES['END%']-self.VARIABLES['START%']))/LASERTICKS)
+        if self.BITSINSCANLINE <= 0: raise Exception("Bits in scanline invalid")
+        if (self.MEMWIDTH*self.MEMDEPTH)//self.BITSINSCANLINE<5: raise Exception("Memory too small for 5 lines")
         self.lasercnt = Signal(max=LASERTICKS)
-        self.scanbit = Signal(max=BITSINSCANLINE)
+        self.scanbit = Signal(max=self.BITSINSCANLINE)
         self.tickcounter = Signal(max=int(ticksinfacet*2))
         self.submodules.laserfsm = FSM(reset_state = "RESET")
-        firststart = Signal()
         # leesfoutdetectie:
         #   in het begin zijn lees en schrijfadres gelijk
         #   als er geschreven is dan is het schrijf adres een groter dan lees adres
@@ -237,6 +236,8 @@ class Scanhead(Module):
         readtrig = Signal()
         self.submodules.readmem= FSM(reset_state = "RESET")
         self.readmem.act("RESET",
+            NextValue(writeport.adr, 0),
+            NextValue(readport.adr, 0),
             NextValue(written, 0),
             NextState("WAIT")
         )
@@ -267,7 +268,6 @@ class Scanhead(Module):
             NextState("WAIT")
         )
         self.laserfsm.act("RESET",
-            NextValue(firststart, 1),
             NextState("STOP")
         )
         self.laser0 = platform.request("laser0")
@@ -287,13 +287,7 @@ class Scanhead(Module):
                  NextValue(self.error[self.ERRORS.NOTSTABLE], 0),
                  NextValue(self.error[self.ERRORS.MEMREAD], 0),
                  NextValue(self.poly_en, 0),
-                 If((firststart==1)|(self.error[self.ERRORS.MEMREAD]==1),
-                    NextValue(readtrig, 1),
-                    NextState("WAITREAD")
-                 ).
-                 Else(
-                    NextState("SPINUP")
-                 )
+                 NextState("SPINUP")
             ).
             Elif(self.laserfsmstate==self.STATES.MOTORTEST,
                 NextValue(self.poly_en, 0),
@@ -312,15 +306,6 @@ class Scanhead(Module):
                 NextValue(self.laser0, 1),
                 NextValue(self.poly_en, 0),
                 NextState("PHOTODIODETEST")
-            )
-        )
-        # if you start laser head for the first time, you need to read
-        # in the first start there is no data in memory yet so you need to copy it
-        self.laserfsm.act("WAITREAD",
-            If(readtrig == 0,
-               NextValue(firststart, 0),
-               NextValue(dat_r_old, dat_r_new),
-               NextState("SPINUP")
             )
         )
         self.laserfsm.act("MOTORTEST",
@@ -424,7 +409,7 @@ class Scanhead(Module):
                     NextState('DATA_RUN')
                 ).
                 Elif(self.tickcounter>int(self.VARIABLES['START%']*ticksinfacet-2),
-                    NextValue(self.error[self.ERRORS.INVALID], 1),   #TODO: replace with timeout, constraint of multiple errors reduces space too much
+                    NextValue(self.error[self.ERRORS.INVALID], 1),   #TODO: replace with timeout
                     NextState('DATA_RUN')
                 )
             ).
@@ -439,7 +424,7 @@ class Scanhead(Module):
                 NextValue(self.lasercnt, LASERTICKS-1),
                 #NOTE: readbit and scanbit counters can be different
                 #      readbit is your current position in memory and scanbit your current byte position in scanline
-                If(self.scanbit >= BITSINSCANLINE,
+                If(self.scanbit >= self.BITSINSCANLINE,
                     NextState("WAIT_END"),
                     NextValue(self.scanbit, 0),
                     If(self.VARIABLES['SINGLE_LINE']==1,
@@ -451,7 +436,7 @@ class Scanhead(Module):
                     # read from memory before the spinup
                     # it is triggered here again, so fresh data is available once the end is reached
                     # if read bit is 0, trigger a read out unless the next byte is outside of line
-                    If((readbit == 0)&((self.scanbit+9)>BITSINSCANLINE),
+                    If((readbit == 0)&((self.scanbit+9)>self.BITSINSCANLINE),
                         NextValue(readtrig, 1),
                         NextValue(readbit, readbit+1),
                         NextValue(dat_r_old, dat_r_old>>1)
