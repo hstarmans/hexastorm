@@ -1,5 +1,6 @@
 """
-    constraint file for the Kicad board available at https://github.com/hstarmans/firestarter/tree/master/pi_hat
+    constraint file for the Kicad board available at 
+    https://github.com/hstarmans/firestarter/tree/master/pi_hat
 """
 import subprocess
 import platform
@@ -55,9 +56,12 @@ class Platform(LatticePlatform):
         return super().build(core, build_name = build_name)
 
     def upload(self, build_name):
-        proc = subprocess.Popen(['icezprog', f'build/{build_name}.bin'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        proc = subprocess.Popen(['icezprog', f'build/{build_name}.bin'],
+                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT)
         stdout, stderr = proc.communicate()
-        if stderr or ('Failed' in str(stdout)):  raise Exception("Not able to upload bitstream")
+        if stderr or ('Failed' in str(stdout)):
+            raise Exception("Not able to upload bitstream")
 
     def removebuild(self):
         shutil.rmtree('build')
