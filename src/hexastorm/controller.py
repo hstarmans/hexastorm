@@ -18,19 +18,21 @@ class Machine:
     ic_dev_nr = 1
     ic_address = 0x28
     
-    def __init__(self, virtual = False):
+    def __init__(self, connected=True):
         '''
-        virtual: false scanhead is actually used
+        if not connected to hardware implentation
+        connect to a virtual model, see virtual test
         '''
-        self.plat = hs.board.Platform()
-        self.sh = hs.core.Scanhead(self.plat)
-        # IC bus used to set power laser
-        self.bus = SMBus(self.ic_dev_nr)
-        # SPI to sent data to scanner
-        self.spi = spidev.SpiDev()
-        self.spi.open(0,0)
-        self.spi.max_speed_hz = round(1E6)
-        self.spi.cshigh = False
+        if connected:
+            self.plat = hs.board.Platform()
+            self.sh = hs.core.Scanhead(self.plat)
+            # IC bus used to set power laser
+            self.bus = SMBus(self.ic_dev_nr)
+            # SPI to sent data to scanner
+            self.spi = spidev.SpiDev()
+            self.spi.open(0,0)
+            self.spi.max_speed_hz = round(1E6)
+            self.spi.cshigh = False
 
     @property
     def single_line(self):
