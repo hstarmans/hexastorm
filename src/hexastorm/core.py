@@ -55,6 +55,7 @@ class Scanhead(Module):
     # one block is 4K bits, there are 32 blocks (officially 20 in HX4K)
     MEMWIDTH = 8  
     MEMDEPTH = 512
+    assert (MEMDEPTH%8 == 0) & (MEMDEPTH>=8)
 
 
     def __init__(self, platform, test=False):
@@ -215,8 +216,8 @@ class Scanhead(Module):
         stablethresh = Signal(max=stableticks)
         ticksinfacet = round(self.VARIABLES['CRYSTAL_HZ']/(self.VARIABLES['RPM']/60*self.VARIABLES['FACETS']))
         LASERTICKS = int(self.VARIABLES['CRYSTAL_HZ']/self.VARIABLES['LASER_HZ'])
-        JITTERTICKS = round(0.5*LASERTICKS)
-        if self.VARIABLES['END%']>(1-JITTERTICKS/ticksinfacet): raise Exception("Invalid settings, END% too high")
+        self.JITTERTICKS = round(0.5*LASERTICKS)
+        if self.VARIABLES['END%']>(1-self.JITTERTICKS/ticksinfacet): raise Exception("Invalid settings, END% too high")
         self.BITSINSCANLINE = round((ticksinfacet*(self.VARIABLES['END%']-self.VARIABLES['START%']))/LASERTICKS)
         if self.BITSINSCANLINE <= 0: raise Exception("Bits in scanline invalid")
         if (self.MEMWIDTH*self.MEMDEPTH)//self.BITSINSCANLINE<5: raise Exception("Memory too small for 5 lines")
@@ -284,10 +285,16 @@ class Scanhead(Module):
             NextValue(self.poly_en, 1),
             NextValue(readbit,0),
             If(self.laserfsmstate==self.STATES.START,
-                 NextValue(self.error[self.ERRORS.NOTSTABLE], 0),
-                 NextValue(self.error[self.ERRORS.MEMREAD], 0),
-                 NextValue(self.poly_en, 0),
-                 NextState("SPINUP")
+                If(self.photodiode == 0,
+                    NextValue(self.laserfsmstate, self.STATES.STOP),
+                    NextState("STOP")
+                ).
+                Else(
+                    NextValue(self.error[self.ERRORS.NOTSTABLE], 0),
+                    NextValue(self.error[self.ERRORS.MEMREAD], 0),
+                    NextValue(self.poly_en, 0),
+                    NextState("SPINUP")
+                )
             ).
             Elif(self.laserfsmstate==self.STATES.MOTORTEST,
                 NextValue(self.poly_en, 0),
@@ -303,8 +310,16 @@ class Scanhead(Module):
                 NextState("LINETEST")
             ).
             Elif(self.laserfsmstate==self.STATES.PHOTODIODETEST,
-                NextValue(self.laser0, 1),
-                NextValue(self.poly_en, 0),
+                # photodiode should be high with laser off
+                # something is wrong, this makes sure error is produced
+                If(self.photodiode == 0,
+                    NextValue(self.laser0, 1),
+                    NextValue(self.poly_en, 1)
+                ).
+                Else(
+                    NextValue(self.laser0, 1),
+                    NextValue(self.poly_en, 0),
+                ),
                 NextState("PHOTODIODETEST")
             )
         )
@@ -326,7 +341,7 @@ class Scanhead(Module):
         # Photodiode rising edge detector
         photodiode_d = Signal()
         self.laserfsm.act("PHOTODIODETEST",
-            If(self.photodiode == 0,
+            If((self.photodiode == 0) & (self.poly_en == 0),
                 NextValue(self.laserfsmstate, self.STATES.STOP),
                 NextState("STOP")
             ).
@@ -356,8 +371,8 @@ class Scanhead(Module):
             Elif(~self.photodiode&~photodiode_d,
                NextValue(self.tickcounter, 0),
                NextValue(self.laser0, 0),
-               If((self.tickcounter+1>ticksinfacet-JITTERTICKS)&
-                  (self.tickcounter+1<ticksinfacet+JITTERTICKS),
+               If((self.tickcounter>ticksinfacet-self.JITTERTICKS)&
+                  (self.tickcounter<ticksinfacet+self.JITTERTICKS),
                   If(facetcnt==0, NextValue(facetcnt, self.VARIABLES['FACETS']-1)).
                   Else(NextValue(facetcnt, facetcnt-1)), 
                   NextValue(stablecounter, 0),
@@ -465,7 +480,7 @@ class Scanhead(Module):
         )
         self.laserfsm.act("WAIT_END",
             NextValue(self.tickcounter, self.tickcounter+1),
-            If(self.tickcounter>=ticksinfacet-2*JITTERTICKS,
+            If(self.tickcounter>=ticksinfacet-2*self.JITTERTICKS,
                NextState("STATE_WAIT_STABLE"),
                NextValue(self.laser0, 1),
             )
