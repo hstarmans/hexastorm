@@ -29,7 +29,7 @@ class FakeSpi():
 def checkpin(pin, value=0):
     '''check value of pin'''
     timeout = 0
-    while (yield pin) == value:
+    while (yield pin) != value:
         timeout += 1
         if timeout>100:
             raise Exception(f"Pin doesnt change state")
@@ -88,6 +88,8 @@ class TestMachine():
                     if val>0:
                         error = list(self.sh.ERRORS._asdict())[idx]
                         error_string += error + ' '
+            else:
+                error_string = 'None'
             machinestate = list(self.sh.STATES._asdict())[state>>5]
             raise Exception(f"State {machinestate} and errors {error_string} not expected")
 
@@ -134,7 +136,8 @@ class TestMachine():
         assert max(bytelst) <= 255
         assert min(bytelst) >= 0
         bytelst = [sh.INSTRUCTIONS.STOP] + bytelst if lastline else [sh.INSTRUCTIONS.SCAN] + bytelst
-        for _ in range(math.ceil(len(bytelst)/sh.MEMWIDTH)):
+        bytelst.reverse()
+        for _ in range(math.ceil(len(bytelst)/sh.CHUNKSIZE)):
             state = self.get_state((yield from spi.xfer([sh.COMMANDS.WRITE_L]))[0])
             assert state['statebits'] in [sh.STATES.STOP, sh.STATES.START]
             if state['errorbits'] == pow(2, sh.ERRORS.MEMFULL): return bytelst
@@ -145,169 +148,148 @@ class TestMachine():
                     yield from spi.xfer([0])
         return bytelst
 
+TM = TestMachine()
+SH = TM.sh
+STATE = TM.state
+
 class TestScanhead(unittest.TestCase):
     ''' Virtual test for scanhead'''
 
-    def setUp(self):
-        self.tm = TestMachine()
-        self.clocks = self.tm.clocks
+    def _test_decorator(func):
+        return lambda self: run_simulation(SH, [func(self)], clocks=TM.clocks)
 
+    @_test_decorator
     def test_pwmgeneration(self):
         ''' verify generation of polygon pulse
         '''
-        sh = self.tm.sh
-        def cpu_side():
-            yield from checkpin(sh.poly_pwm, value=0)
-            yield from checkpin(sh.poly_pwm, value=1)
-        run_simulation(sh, [cpu_side()], clocks=self.clocks)
+        yield from checkpin(SH.poly_pwm, value=0)
+        yield from checkpin(SH.poly_pwm, value=1)
 
+    @_test_decorator
     def test_testmodes(self):
         ''' verify four test modes; laser, motor, line and photodiode
         '''
-        tm = self.tm
-        state, sh = tm.state, tm.sh
-        def cpu_side():
-            test_commands = [sh.COMMANDS.LASERTEST,
-                             sh.COMMANDS.MOTORTEST,
-                             sh.COMMANDS.LINETEST,
-                             sh.COMMANDS.PHOTODIODETEST]
-            states = [sh.STATES.LASERTEST,
-                      sh.STATES.MOTORTEST,
-                      sh.STATES.LINETEST,
-                      sh.STATES.PHOTODIODETEST]
-            # NOTE: on default photodiode is high
-            yield sh.photodiode.eq(1) 
-            for idx, test_command in enumerate(test_commands):
-                yield from tm.checkreply(sh.COMMANDS.STATUS, state(state=sh.STATES.STOP))
-                yield from tm.checkreply(test_command, state(state=sh.STATES.STOP))
-                if test_command != sh.COMMANDS.MOTORTEST:
-                    yield from checkpin(sh.laser0)
-                if test_command != sh.COMMANDS.LASERTEST:
-                    yield from checkpin(sh.poly_en, value=1)
-                if test_command == sh.COMMANDS.PHOTODIODETEST:
-                    yield sh.photodiode.eq(0) 
-                    # check if laser and polygon turned off
-                    yield from checkpin(sh.laser0, 1)
-                    yield from checkpin(sh.poly_en, value=0)
-                    yield from tm.checkreply(sh.COMMANDS.STOP, state(state=sh.STATES.STOP))
-                else:
-                    yield from tm.checkreply(sh.COMMANDS.STOP, state(state=states[idx]))
-        #run_simulation(sh, [cpu_side()], clocks=self.clocks)
+        test_commands = [SH.COMMANDS.LASERTEST,
+                            SH.COMMANDS.MOTORTEST,
+                            SH.COMMANDS.LINETEST,
+                            SH.COMMANDS.PHOTODIODETEST]
+        states = [SH.STATES.LASERTEST,
+                    SH.STATES.MOTORTEST,
+                    SH.STATES.LINETEST,
+                    SH.STATES.PHOTODIODETEST]
+        # NOTE: on default photodiode is high
+        yield SH.photodiode.eq(1) 
+        for idx, test_command in enumerate(test_commands):
+            yield from TM.checkreply(SH.COMMANDS.STATUS, STATE(state=SH.STATES.STOP))
+            yield from TM.checkreply(test_command, STATE(state=SH.STATES.STOP))
+            if test_command != SH.COMMANDS.MOTORTEST:
+                yield from checkpin(SH.laser0)
+            if test_command != SH.COMMANDS.LASERTEST:
+                yield from checkpin(SH.poly_en, value=1)
+            if test_command == SH.COMMANDS.PHOTODIODETEST:
+                for _ in range(6): yield
+                yield SH.photodiode.eq(0) 
+                yield from checkpin(SH.laser0, 1)
+                yield from checkpin(SH.poly_en, value=0)
+                yield from TM.checkreply(SH.COMMANDS.STOP, STATE(state=SH.STATES.STOP))
+            else:
+                yield from TM.checkreply(SH.COMMANDS.STOP, STATE(state=states[idx]))
 
+    @_test_decorator
     def test_writedata(self):
-        tm = self.tm
-        state, sh = tm.state, tm.sh
-        def cpu_side():
-            for i in range(sh.MEMDEPTH+1):
-                data_byte = i%256 # bytes can't be larger than 255
-                if i%(sh.CHUNKSIZE)==0:
-                    if (i>0)&((i%sh.MEMDEPTH)==0):
-                        # check if memory is full
-                        yield from tm.checkreply(sh.COMMANDS.WRITE_L, 
-                                                  state(errors = [sh.ERRORS.MEMFULL],
-                                                        state = sh.STATES.STOP))
-                        continue
-                    else:
-                        yield from tm.checkreply(sh.COMMANDS.WRITE_L,
-                                                   state(state=sh.STATES.STOP))
-                yield from tm.checkreply(data_byte, state(state=sh.STATES.STOP))
-            in_memory = []
-            loops = sh.MEMDEPTH
-            for i in range(loops):
-                value = (yield sh.mem[i])
-                in_memory.append(value)
-            self.assertEqual(list(range(loops)),in_memory)
-        #run_simulation(sh, [cpu_side()])
+        for i in range(SH.MEMDEPTH+1):
+            data_byte = i%256 # bytes can't be larger than 255
+            if i%(SH.CHUNKSIZE)==0:
+                if (i>0)&((i%SH.MEMDEPTH)==0):
+                    # check if memory is full
+                    yield from TM.checkreply(SH.COMMANDS.WRITE_L, 
+                                                STATE(errors = [SH.ERRORS.MEMFULL],
+                                                    state = SH.STATES.STOP))
+                    continue
+                else:
+                    yield from TM.checkreply(SH.COMMANDS.WRITE_L,
+                                                STATE(state=SH.STATES.STOP))
+            yield from TM.checkreply(data_byte, STATE(state=SH.STATES.STOP))
+        in_memory = []
+        loops = SH.MEMDEPTH
+        for i in range(loops):
+            value = (yield SH.mem[i])
+            in_memory.append(value)
+        self.assertEqual(list(range(loops)), in_memory)
 
+    @_test_decorator
     def test_nosync(self):
-        tm = self.tm
-        state, sh = tm.state, tm.sh
-        def cpu_side():
-            yield sh.photodiode.eq(1) 
-            yield from tm.checkreply(sh.COMMANDS.STATUS, state(state=sh.STATES.STOP))
-            yield from tm.checkreply(sh.COMMANDS.START, state(state=sh.STATES.STOP))
-            yield from checkenterstate(sh.laserfsm, 'SPINUP')
-            yield from checkenterstate(sh.laserfsm, 'STATE_WAIT_STABLE')
-            yield from checkpin(sh.laser0, value = 1)
-            yield from checkenterstate(sh.laserfsm, 'STOP')
-            yield from tm.checkreply(sh.COMMANDS.STATUS,
-                                     state(errors=[sh.ERRORS.NOTSTABLE],
-                                           state=sh.STATES.STOP))
-        #run_simulation(sh, [cpu_side()])
+        yield SH.photodiode.eq(1) 
+        yield from TM.checkreply(SH.COMMANDS.STATUS, STATE(state=SH.STATES.STOP))
+        yield from TM.checkreply(SH.COMMANDS.START, STATE(state=SH.STATES.STOP))
+        yield from checkenterstate(SH.laserfsm, 'SPINUP')
+        yield from checkenterstate(SH.laserfsm, 'STATE_WAIT_STABLE')
+        yield from checkpin(SH.laser0, value = 1)
+        yield from checkenterstate(SH.laserfsm, 'STOP')
+        yield from TM.checkreply(SH.COMMANDS.STATUS,
+                                    STATE(errors=[SH.ERRORS.NOTSTABLE],
+                                          state=SH.STATES.STOP))
 
+    @_test_decorator
     def test_scanlinewithoutwrite(self):
-        tm = self.tm
-        state, sh = tm.state, tm.sh
-        def cpu_side():
-            yield sh.photodiode.eq(1) 
-            yield from tm.checkreply(sh.COMMANDS.START, state(state=sh.STATES.STOP))
-            yield from checkenterstate(sh.laserfsm, 'STATE_WAIT_STABLE')
-            yield from tm.photodiode_trigger()
-            yield from checkenterstate(sh.laserfsm, 'READ_INSTRUCTION')
-            yield from checkenterstate(sh.laserfsm, 'WAIT_END')
-            yield from checkenterstate(sh.laserfsm, 'STATE_WAIT_STABLE')
-            yield from tm.photodiode_trigger()
-            yield from tm.checkreply(sh.COMMANDS.STOP, state(errors=[sh.ERRORS.MEMREAD],
-                                                                state=sh.STATES.START))
-        #run_simulation(sh, [cpu_side()])
+        yield SH.photodiode.eq(1) 
+        yield from TM.checkreply(SH.COMMANDS.START, STATE(state=SH.STATES.STOP))
+        yield from checkenterstate(SH.laserfsm, 'STATE_WAIT_STABLE')
+        yield from TM.photodiode_trigger()
+        yield from checkenterstate(SH.laserfsm, 'READ_INSTRUCTION')
+        yield from checkenterstate(SH.laserfsm, 'WAIT_END')
+        yield from checkenterstate(SH.laserfsm, 'STATE_WAIT_STABLE')
+        yield from TM.photodiode_trigger()
+        yield from TM.checkreply(SH.COMMANDS.STOP, STATE(errors=[SH.ERRORS.MEMREAD],
+                                                         state=SH.STATES.START))
 
+    @_test_decorator
     def test_invalidspicommand(self):
-        tm = self.tm
-        state, sh = tm.state, tm.sh
-        def cpu_side():
-            yield from tm.checkreply(255, state(state=sh.STATES.STOP))
-            yield from tm.checkreply(sh.COMMANDS.STATUS,
-                                      state(errors=[sh.ERRORS.INVALID],
-                                            state=sh.STATES.STOP))
-        #run_simulation(sh, [cpu_side()])
+        yield from TM.checkreply(255, STATE(state=SH.STATES.STOP))
+        yield from TM.checkreply(SH.COMMANDS.STATUS,
+                                    STATE(errors=[SH.ERRORS.INVALID],
+                                          state=SH.STATES.STOP))
 
+    @_test_decorator
     def test_invalidscanline(self):
         ''' check error received if scanline is sent with invalid command byte'''
-        tm = self.tm
-        state, sh = tm.state, tm.sh
-        def cpu_side():
-            yield from tm.checkreply(sh.COMMANDS.WRITE_L, state(state=sh.STATES.STOP))
-            for _ in range(sh.CHUNKSIZE):
-                yield from tm.checkreply(int('11111101', 2), state(state=sh.STATES.STOP))
-            yield sh.photodiode.eq(1)
-            yield from tm.checkreply(sh.COMMANDS.START, state(state=sh.STATES.STOP))
-            yield from checkenterstate(sh.laserfsm, 'STATE_WAIT_STABLE')
-            yield from tm.photodiode_trigger()
-            yield from checkenterstate(sh.laserfsm, 'WAIT_END')
-            yield from tm.checkreply(sh.COMMANDS.STOP, state(errors=[sh.ERRORS.INVALIDLINE],
-                                                state=sh.STATES.START))
-            yield from checkenterstate(sh.laserfsm, 'STOP')
-        #run_simulation(sh, [cpu_side()])
+        yield from TM.checkreply(SH.COMMANDS.WRITE_L, STATE(state=SH.STATES.STOP))
+        for _ in range(SH.CHUNKSIZE):
+            yield from TM.checkreply(int('11111101', 2), STATE(state=SH.STATES.STOP))
+        yield SH.photodiode.eq(1)
+        yield from TM.checkreply(SH.COMMANDS.START, STATE(state=SH.STATES.STOP))
+        yield from checkenterstate(SH.laserfsm, 'STATE_WAIT_STABLE')
+        yield from TM.photodiode_trigger()
+        yield from checkenterstate(SH.laserfsm, 'WAIT_END')
+        yield from TM.checkreply(SH.COMMANDS.STOP, STATE(errors=[SH.ERRORS.INVALIDLINE],
+                                            state=SH.STATES.START))
+        yield from checkenterstate(SH.laserfsm, 'STOP')
 
+    @_test_decorator
     def test_stopscanline(self):
         ''' check machine transitions to stop if stop command byte is sent
         '''
-        tm = self.tm
-        state, sh = tm.state, tm.sh
-        def cpu_side():
-            yield from tm.writeline([0]*sh.BITSINSCANLINE, lastline=True)
-            yield from tm.checkreply(sh.COMMANDS.START, state(state=sh.STATES.STOP))
-            yield sh.photodiode.eq(1)
-            yield from checkenterstate(sh.laserfsm, 'STATE_WAIT_STABLE')
-            yield from tm.photodiode_trigger()
-            yield from checkenterstate(sh.laserfsm, 'WAIT_END')
-            yield from tm.checkreply(sh.COMMANDS.STOP, state(errors=[sh.ERRORS.INVALIDLINE],
-                                                             state=sh.STATES.START))
-            yield from checkenterstate(sh.laserfsm, 'STOP')
-        run_simulation(sh, [cpu_side()])
+        yield from TM.writeline([0]*SH.BITSINSCANLINE, lastline=True)
+        yield from TM.checkreply(SH.COMMANDS.START, STATE(state=SH.STATES.STOP))
+        yield SH.photodiode.eq(1)
+        yield from checkenterstate(SH.laserfsm, 'STATE_WAIT_STABLE')
+        yield from TM.photodiode_trigger()
+        yield from checkenterstate(SH.laserfsm, 'READ_INSTRUCTION')
+        yield from checkenterstate(SH.laserfsm, 'STOP')
+        yield from TM.checkreply(SH.COMMANDS.STATUS, STATE(state=SH.STATES.STOP))
 
     # def test_scanlinewithwrite(self):
     #     def cpu_side():
     #         for _ in range(int(Scanhead.MEMDEPTH/Scanhead.MEMWIDTH)): 
-    #             yield from self.checkreply(Scanhead.COMMANDS.WRITE_L, self.state(state=Scanhead.STATES.STOP))
-    #             for _ in range(Scanhead.CHUNKSIZE): yield from self.checkreply(int('11111101', 2), self.state(state=Scanhead.STATES.STOP))
+    #             yield from self.checkreply(Scanhead.COMMANDS.WRITE_L, self.state(STATE=Scanhead.STATES.STOP))
+    #             for _ in range(Scanhead.CHUNKSIZE): yield from self.checkreply(int('11111101', 2), self.state(STATE=Scanhead.STATES.STOP))
     #         # check if mem is full
     #         yield from self.checkreply(Scanhead.COMMANDS.STATUS, self.state(errors=[Scanhead.ERRORS.MEMFULL],
-    #                                                                          state=Scanhead.STATES.STOP))
+    #                                                                          STATE=Scanhead.STATES.STOP))
     #         # turn on laser head
     #         yield self.sh.photodiode.eq(1) 
     #         yield from self.checkreply(Scanhead.COMMANDS.START, self.state(errors=[Scanhead.ERRORS.MEMFULL],
-    #                                                                          state=Scanhead.STATES.STOP))
+    #                                                                          STATE=Scanhead.STATES.STOP))
     #         # check if statemachine goes to spinup state
     #         yield from self.checkenterstate(self.sh.laserfsm, 'SPINUP')
     #         # check if statemachine goes to statewaitstable
@@ -354,7 +336,7 @@ class TestScanhead(unittest.TestCase):
     #         self.assertEqual((yield self.sh.tickcounter), int(self.ticksinfacet*(1-Scanhead.VARIABLES['SYNCSTART'])))
     #         yield
     #         self.assertEqual((yield self.sh.laser0), 1)
-    #     #run_simulation(self.scanhead, [cpu_side()])
+    #     run_simulation(self.scanhead, [cpu_side()])
 
 if __name__ == '__main__':
     unittest.main()
