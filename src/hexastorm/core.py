@@ -1,3 +1,4 @@
+import math
 import sys
 from collections import namedtuple
 
@@ -51,7 +52,7 @@ class Scanhead(Module):
                  'CRYSTAL_HZ':50E6, 'LASER_HZ': 100E3,
                  'END%': 0.7, 'START%': 0.35, 'SINGLE_LINE':False,
                  'SINGLE_FACET':False, 'DIRECTION':0}
-    CHUNKSIZE = 8 # you write in chunks of 8 bytes
+    CHUNKSIZE = 1 # ONLY 1 is supported!!
     # one block is 4K bits, there are 32 blocks (officially 20 in HX4K)
     MEMWIDTH = 8  
     MEMDEPTH = 512
@@ -59,6 +60,14 @@ class Scanhead(Module):
 
 
     def __init__(self, platform, test=False):
+        # variables
+        self.ticksinfacet = round(self.VARIABLES['CRYSTAL_HZ']/(self.VARIABLES['RPM']/60*self.VARIABLES['FACETS']))
+        LASERTICKS = int(self.VARIABLES['CRYSTAL_HZ']/self.VARIABLES['LASER_HZ'])
+        self.JITTERTICKS = round(0.5*LASERTICKS)
+        if self.VARIABLES['END%']>(1-self.JITTERTICKS/self.ticksinfacet): raise Exception("Invalid settings, END% too high")
+        self.BITSINSCANLINE = round((self.ticksinfacet*(self.VARIABLES['END%']-self.VARIABLES['START%']))/LASERTICKS)
+        if self.BITSINSCANLINE <= 0: raise Exception("Bits in scanline invalid")
+        if (self.MEMWIDTH*self.MEMDEPTH)//self.BITSINSCANLINE<5: raise Exception("Memory too small for 5 lines")
         # clock; routing was not able to reach speed higher than 70 MHz
         #        for entire circuit on iCE40, so clock is contraint to 50 MHz
         clk100 = platform.request('clk100')
@@ -87,13 +96,13 @@ class Scanhead(Module):
         # one block 8*512 = 4096 bits currently used
         self.specials.mem = Memory(width=self.MEMWIDTH, depth=self.MEMDEPTH)
         writeport = self.mem.get_port(write_capable=True, mode = READ_FIRST)
-        readport = self.mem.get_port(has_re=True)
-        self.specials += writeport, readport
-        self.ios = {writeport.adr, writeport.dat_w, writeport.we, readport.dat_r, readport.adr, readport.re}
+        self.readport = self.mem.get_port(has_re=True)
+        self.specials += writeport, self.readport
+        self.ios = {writeport.adr, writeport.dat_w, writeport.we, self.readport.dat_r, self.readport.adr, self.readport.re}
         readbit = Signal(max = self.MEMWIDTH)
         self.writebyte = Signal(max=self.MEMDEPTH)
         written = Signal()
-        dat_r_new = Signal(max= self.MEMWIDTH)
+        self.dat_r_new = Signal(max= self.MEMWIDTH)
         dat_r_old = Signal(max= self.MEMWIDTH)
         # Receiver State Machine
         # Consists out of component from litex and own custom component
@@ -115,7 +124,7 @@ class Scanhead(Module):
         start_rise = Signal()
         self.sync += start_d.eq(spislave.start)
         self.comb += start_rise.eq(spislave.start & ~start_d)
-        self.sync += self.error[self.ERRORS.MEMFULL].eq((writeport.adr==readport.adr)&(written==1))
+        self.sync += self.error[self.ERRORS.MEMFULL].eq((writeport.adr==self.readport.adr)&(written==1)&(self.VARIABLES['SINGLE_LINE']==False))
         # Custom Receiver
         self.submodules.receiver = FSM(reset_state = "IDLE")
         self.receiver.act("IDLE",
@@ -158,7 +167,7 @@ class Scanhead(Module):
                 ).
                 Elif(spislave.mosi == self.COMMANDS.WRITE_L,
                     # only switch to write stage if memory is not full
-                    If((writeport.adr==readport.adr)&(written==1),
+                    If((writeport.adr==self.readport.adr)&(written==1),
                         NextValue(command, self.COMMANDS.RECVCOMMAND)
                     ).
                     Else(
@@ -193,7 +202,16 @@ class Scanhead(Module):
             )
         )
         self.receiver.act("WRITE",
-            NextValue(writeport.adr, writeport.adr+1), 
+            If(writeport.adr+1==self.MEMDEPTH,
+               NextValue(writeport.adr, 0)
+            ).
+            # wrap around is different in single line mode
+            Elif((writeport.adr==math.ceil(self.BITSINSCANLINE/self.MEMWIDTH))&(self.VARIABLES['SINGLE_LINE']==True), 
+                 NextValue(writeport.adr, 0)
+            ).
+            Else(
+              NextValue(writeport.adr, writeport.adr+1)
+            ),
             NextValue(writeport.we, 0),
             NextState("IDLE")
         )
@@ -208,22 +226,15 @@ class Scanhead(Module):
                 )
         # Laser FSM
         # Laser FSM controls the laser, polygon anld output to motor
-        facetcnt = Signal(max=self.VARIABLES['FACETS'])
+        self.facetcnt = Signal(max=self.VARIABLES['FACETS'])
         # stable counter used for both spinup and photo diode stable
         spinupticks = round(self.VARIABLES['SPINUP_TIME']*self.VARIABLES['CRYSTAL_HZ'])
         stableticks = round(self.VARIABLES['STABLE_TIME']*self.VARIABLES['CRYSTAL_HZ'])
         stablecounter = Signal(max=max(spinupticks, stableticks))   # counter is used twice, hence the max
         stablethresh = Signal(max=stableticks)
-        ticksinfacet = round(self.VARIABLES['CRYSTAL_HZ']/(self.VARIABLES['RPM']/60*self.VARIABLES['FACETS']))
-        LASERTICKS = int(self.VARIABLES['CRYSTAL_HZ']/self.VARIABLES['LASER_HZ'])
-        self.JITTERTICKS = round(0.5*LASERTICKS)
-        if self.VARIABLES['END%']>(1-self.JITTERTICKS/ticksinfacet): raise Exception("Invalid settings, END% too high")
-        self.BITSINSCANLINE = round((ticksinfacet*(self.VARIABLES['END%']-self.VARIABLES['START%']))/LASERTICKS)
-        if self.BITSINSCANLINE <= 0: raise Exception("Bits in scanline invalid")
-        if (self.MEMWIDTH*self.MEMDEPTH)//self.BITSINSCANLINE<5: raise Exception("Memory too small for 5 lines")
         self.lasercnt = Signal(max=LASERTICKS)
-        self.scanbit = Signal(max=self.BITSINSCANLINE)
-        self.tickcounter = Signal(max=int(ticksinfacet*2))
+        self.scanbit = Signal(max=self.BITSINSCANLINE+1)
+        self.tickcounter = Signal(max=int(self.ticksinfacet*2))
         self.submodules.laserfsm = FSM(reset_state = "RESET")
         # leesfoutdetectie:
         #   in het begin zijn lees en schrijfadres gelijk
@@ -238,32 +249,33 @@ class Scanhead(Module):
         self.submodules.readmem= FSM(reset_state = "RESET")
         self.readmem.act("RESET",
             NextValue(writeport.adr, 0),
-            NextValue(readport.adr, 0),
+            NextValue(self.readport.adr, 0),
+            NextValue(self.readport.re, 1),
             NextValue(written, 0),
             NextState("WAIT")
         )
         self.readmem.act("WAIT",
-            NextValue(readport.re, 0),
             If(readtrig,
+               NextValue(self.readport.re, 0),
                NextState("READ")
             )
         )
         self.readmem.act("READ",
             NextValue(readtrig, 0),
-            NextValue(readport.re, 1),
-            If((readport.adr == writeport.adr)&(written == 0),
+            NextValue(self.readport.re, 1),
+            If((self.readport.adr == writeport.adr)&(written == 0),
                NextValue(self.error[self.ERRORS.MEMREAD], 1),
             ).
             Else(
-                NextValue(dat_r_new, readport.dat_r),
+                NextValue(self.dat_r_new, self.readport.dat_r),
                 # increase address after succesfull read
-                If(readport.adr+1==self.MEMDEPTH,
-                   NextValue(readport.adr, 0),
+                If(self.readport.adr+1==self.MEMDEPTH,
+                   NextValue(self.readport.adr, 0),
                    If(writeport.adr == 0, NextValue(written,0))
                 ).
                 Else(
-                    NextValue(readport.adr, readport.adr+1),
-                    If(readport.adr+1 == writeport.adr, NextValue(written,0))
+                    NextValue(self.readport.adr, self.readport.adr+1),
+                    If(self.readport.adr+1 == writeport.adr, NextValue(written,0))
                 )
             ),
             NextState("WAIT")
@@ -277,7 +289,7 @@ class Scanhead(Module):
         self.laserfsm.act("STOP",
             NextValue(stablethresh, stableticks-1),
             NextValue(stablecounter, 0),
-            NextValue(facetcnt, 0),
+            NextValue(self.facetcnt, 0),
             NextValue(self.tickcounter, 0),
             NextValue(self.scanbit, 0),
             NextValue(self.lasercnt, 0),
@@ -371,14 +383,14 @@ class Scanhead(Module):
             Elif(~self.photodiode&~photodiode_d,
                NextValue(self.tickcounter, 0),
                NextValue(self.laser0, 0),
-               If((self.tickcounter>ticksinfacet-self.JITTERTICKS)&
-                  (self.tickcounter<ticksinfacet+self.JITTERTICKS),
-                  If(facetcnt==0, NextValue(facetcnt, self.VARIABLES['FACETS']-1)).
-                  Else(NextValue(facetcnt, facetcnt-1)), 
+               If((self.tickcounter>self.ticksinfacet-self.JITTERTICKS)&
+                  (self.tickcounter<self.ticksinfacet+self.JITTERTICKS),
+                  If(self.facetcnt==0, NextValue(self.facetcnt, self.VARIABLES['FACETS']-1)).
+                  Else(NextValue(self.facetcnt, self.facetcnt-1)), 
                   NextValue(stablecounter, 0),
-                  NextValue(stablethresh, round(1.1*ticksinfacet)), 
-                  If((self.VARIABLES['SINGLE_FACET']==True)&(facetcnt>0),
-                    NextState('WAIT_END')
+                  NextValue(stablethresh, round(1.1*self.ticksinfacet)), 
+                  If((self.VARIABLES['SINGLE_FACET']==True)&(self.facetcnt>0),
+                    NextState('WAIT_END')   # WAIT END
                   ).
                   Else(
                     NextState('READ_INSTRUCTION'),
@@ -386,7 +398,7 @@ class Scanhead(Module):
                   )
                ).
                Else(
-                   NextState('WAIT_END')
+                   NextState('WAIT_END')  # WAIT END
                )
             ).
             Elif(self.laserfsmstate!=self.STATES.START,
@@ -402,11 +414,11 @@ class Scanhead(Module):
                If(self.error[self.ERRORS.MEMREAD] == 1,
                    NextState("WAIT_END"),
                ).
-               Elif(dat_r_new == self.INSTRUCTIONS.STOP,
+               Elif(self.dat_r_new == self.INSTRUCTIONS.STOP,
+                   NextState("STOP"),
                    NextValue(self.laserfsmstate, self.STATES.STOP),
-                   NextState("STOP")
                ).
-               Elif(dat_r_new == self.INSTRUCTIONS.SCAN,
+               Elif(self.dat_r_new == self.INSTRUCTIONS.SCAN,
                    NextState('WAIT_FOR_DATA_RUN'),
                    NextValue(readtrig, 1),
                ).
@@ -418,13 +430,13 @@ class Scanhead(Module):
         self.laserfsm.act('WAIT_FOR_DATA_RUN',
             NextValue(self.tickcounter, self.tickcounter + 1),
             If(readtrig == 0,
-                NextValue(dat_r_old, dat_r_new),
+                NextValue(dat_r_old, self.dat_r_new),
                 NextValue(readbit, 0),
-                If(self.tickcounter==int(self.VARIABLES['START%']*ticksinfacet-2),
+                If(self.tickcounter==int(self.VARIABLES['START%']*self.ticksinfacet-2),
                     NextState('DATA_RUN')
                 ).
-                Elif(self.tickcounter>int(self.VARIABLES['START%']*ticksinfacet-2),
-                    NextValue(self.error[self.ERRORS.INVALID], 1),   #TODO: replace with timeout
+                Elif(self.tickcounter>int(self.VARIABLES['START%']*self.ticksinfacet-2),
+                    #NextValue(self.error[self.ERRORS.INVALID], 1),   #TODO: replace with timeout
                     NextState('DATA_RUN')
                 )
             ).
@@ -434,24 +446,24 @@ class Scanhead(Module):
         )
         self.laserfsm.act("DATA_RUN",
             NextValue(self.tickcounter, self.tickcounter + 1),
-            NextValue(self.lasercnt, self.lasercnt - 1),
             If(self.lasercnt == 0,
-                NextValue(self.lasercnt, LASERTICKS-1),
                 #NOTE: readbit and scanbit counters can be different
                 #      readbit is your current position in memory and scanbit your current byte position in scanline
                 If(self.scanbit >= self.BITSINSCANLINE,
                     NextState("WAIT_END"),
                     NextValue(self.scanbit, 0),
                     If(self.VARIABLES['SINGLE_LINE']==1,
-                        NextValue(readport.adr, 0)  # this is tricky as you don't execute written check
+                        NextValue(self.error[self.ERRORS.MEMREAD], 0),
+                        NextValue(self.readport.adr, 0)  # this is tricky as you don't execute written check
                     )
                 ).
                 Else(
+                    NextValue(self.lasercnt, LASERTICKS-1),
                     NextValue(self.scanbit, self.scanbit+1),
                     # read from memory before the spinup
                     # it is triggered here again, so fresh data is available once the end is reached
                     # if read bit is 0, trigger a read out unless the next byte is outside of line
-                    If((readbit == 0)&((self.scanbit+9)>self.BITSINSCANLINE),
+                    If((readbit == 0)&((self.scanbit+9)<self.BITSINSCANLINE),
                         NextValue(readtrig, 1),
                         NextValue(readbit, readbit+1),
                         NextValue(dat_r_old, dat_r_old>>1)
@@ -459,7 +471,7 @@ class Scanhead(Module):
                     # final read bit copy memory
                     # move to next address, i.e. byte, if end is reached
                     Elif(readbit==self.MEMWIDTH-1,
-                        NextValue(dat_r_old, dat_r_new),
+                        NextValue(dat_r_old, self.dat_r_new),
                         NextValue(readbit, 0)
                     ).
                     Else(
@@ -467,7 +479,7 @@ class Scanhead(Module):
                         NextValue(dat_r_old, dat_r_old>>1)
                     ),
                     # if there is no data, laser off error should already have been reported
-                    If(written==0,
+                    If(self.error[self.ERRORS.MEMREAD] == 1,
                         NextValue(self.laser0, 0)
                     ).
                     # else use the data from the memory
@@ -476,11 +488,14 @@ class Scanhead(Module):
             ).
             Elif(self.laserfsmstate!=self.STATES.START,
                NextState("STOP")
+            ).
+            Else(
+                NextValue(self.lasercnt, self.lasercnt - 1)
             )
         )
         self.laserfsm.act("WAIT_END",
             NextValue(self.tickcounter, self.tickcounter+1),
-            If(self.tickcounter>=ticksinfacet-2*self.JITTERTICKS,
+            If(self.tickcounter>=self.ticksinfacet-2*self.JITTERTICKS,
                NextState("STATE_WAIT_STABLE"),
                NextValue(self.laser0, 1),
             )
