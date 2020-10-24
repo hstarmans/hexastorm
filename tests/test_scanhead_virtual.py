@@ -58,7 +58,7 @@ class TestMachine():
         self.ticksinfacet = 18
         self.laserticks = 4
         sh.MEMDEPTH = 8
-        sh.CHUNKSIZE = 2
+        sh.CHUNKSIZE = 1
         sh.VARIABLES['CRYSTAL_HZ']= round(self.ticksinfacet*sh.VARIABLES['FACETS']
                                           *sh.VARIABLES['RPM']/60)
         sh.VARIABLES['LASER_HZ'] = sh.VARIABLES['CRYSTAL_HZ']/self.laserticks
@@ -170,7 +170,6 @@ class TestMachine():
                 assert (yield self.sh.laser0) == bit
                 yield
 
-
     def writeline(self, bitlst, lastline = False):
         '''
         writes bytelst to memory
@@ -179,23 +178,22 @@ class TestMachine():
 
         return: the bytes it wasn't able to write if memory gets full
         '''
-        sh, spi = self.sh, self.spi
-        assert len(bitlst) == sh.BITSINSCANLINE
+        assert len(bitlst) == self.sh.BITSINSCANLINE
         assert max(bitlst) <= 1
         assert min(bitlst) >= 0
         bitorder = 'little'
         bytelst = np.packbits(bitlst, bitorder=bitorder).tolist()
-        bytelst = [sh.INSTRUCTIONS.STOP] + bytelst if lastline else [sh.INSTRUCTIONS.SCAN] + bytelst
+        bytelst = [self.sh.INSTRUCTIONS.STOP] + bytelst if lastline else [self.sh.INSTRUCTIONS.SCAN] + bytelst
         bytelst.reverse()
-        for _ in range(math.ceil(len(bytelst)/sh.CHUNKSIZE)):
-            state = self.get_state((yield from spi.xfer([sh.COMMANDS.WRITE_L]))[0])
-            assert state['statebits'] in [sh.STATES.STOP, sh.STATES.START]
-            if state['errorbits'] == pow(2, sh.ERRORS.MEMFULL): return bytelst
-            for _ in range(sh.CHUNKSIZE):
+        for _ in range(math.ceil(len(bytelst)/self.sh.CHUNKSIZE)):
+            state = self.get_state((yield from self.spi.xfer([self.sh.COMMANDS.WRITE_L]))[0])
+            assert state['statebits'] in [self.sh.STATES.STOP, self.sh.STATES.START]
+            if state['errorbits'] == pow(2, self.sh.ERRORS.MEMFULL): return bytelst
+            for _ in range(self.sh.CHUNKSIZE):
                 try:
-                    state = (yield from spi.xfer([bytelst.pop()]))
+                    state = (yield from self.spi.xfer([bytelst.pop()]))
                 except IndexError:
-                    yield from spi.xfer([0])
+                    yield from self.spi.xfer([0])
         return np.unpackbits(np.array(bytelst, dtype=np.uint8), bitorder=bitorder).tolist()
 
 
@@ -215,13 +213,13 @@ class TestScanhead(unittest.TestCase):
             return functie
         return nested_dec
     
-    @_test_decorator
+    @_test_decorator()
     def test_pwmgeneration(self):
         ''' verify generation of polygon pulse'''
         yield from checkpin(self.tm.sh.poly_pwm, value=0)
         yield from checkpin(self.tm.sh.poly_pwm, value=1)
 
-    @_test_decorator
+    @_test_decorator()
     def test_testmodes(self):
         ''' verify four test modes; laser, motor, line and photodiode'''
         test_commands = [self.tm.sh.COMMANDS.LASERTEST,
@@ -250,7 +248,7 @@ class TestScanhead(unittest.TestCase):
             else:
                 yield from self.tm.checkreply(self.tm.sh.COMMANDS.STOP, self.tm.state(state=states[idx]))
 
-    @_test_decorator
+    @_test_decorator()
     def test_writedata(self):
         for i in range(self.tm.sh.MEMDEPTH+1):
             data_byte = i%256 # bytes can't be larger than 255
@@ -272,7 +270,7 @@ class TestScanhead(unittest.TestCase):
             in_memory.append(value)
         self.assertEqual(list(range(loops)), in_memory)
 
-    @_test_decorator
+    @_test_decorator()
     def test_nosync(self):
         yield self.tm.sh.photodiode.eq(1) 
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.STATUS, self.tm.state(state=self.tm.sh.STATES.STOP))
@@ -285,7 +283,7 @@ class TestScanhead(unittest.TestCase):
                                     self.tm.state(errors=[self.tm.sh.ERRORS.NOTSTABLE],
                                           state=self.tm.sh.STATES.STOP))
 
-    @_test_decorator
+    @_test_decorator()
     def test_scanlinewithoutwrite(self):
         yield self.tm.sh.photodiode.eq(1) 
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, self.tm.state(state=self.tm.sh.STATES.STOP))
@@ -298,14 +296,14 @@ class TestScanhead(unittest.TestCase):
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.STOP, self.tm.state(errors=[self.tm.sh.ERRORS.MEMREAD],
                                                          state=self.tm.sh.STATES.START))
 
-    @_test_decorator
+    @_test_decorator()
     def test_invalidspicommand(self):
         yield from self.tm.checkreply(255, self.tm.state(state=self.tm.sh.STATES.STOP))
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.STATUS,
                                     self.tm.state(errors=[self.tm.sh.ERRORS.INVALID],
                                           state=self.tm.sh.STATES.STOP))
 
-    @_test_decorator
+    @_test_decorator()
     def test_invalidscanline(self):
         '''check error received if scanline is sent with invalid command byte'''
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.WRITE_L, self.tm.state(state=self.tm.sh.STATES.STOP))
@@ -320,7 +318,7 @@ class TestScanhead(unittest.TestCase):
                                             state=self.tm.sh.STATES.START))
         yield from checkenterstate(self.tm.sh.laserfsm, 'STOP')
 
-    @_test_decorator
+    @_test_decorator()
     def test_stopscanline(self):
         '''check machine transitions to stop if stop command byte is sent'''
         yield from self.tm.writeline([0]*self.tm.sh.BITSINSCANLINE, lastline=True)
@@ -347,7 +345,7 @@ class TestScanhead(unittest.TestCase):
         yield from self.tm.checkline(bitlst)
     
     @_test_decorator(singleline=True, singlefacet=True)
-    def test_scanlinewritesinglelinesinglefacet(self):
+    def test_scanlinerepeatedsinglefacet(self):
         '''test scanline with write in single line and single facet mode
         
         Scanline is always repeated and only a single facet is used
@@ -363,9 +361,16 @@ class TestScanhead(unittest.TestCase):
             yield
         yield from self.tm.checkline(bitlst)
 
-    # change information without disabling head in single write
-    # add a full buffer write
-    # you write bytes in chunks --> you don't account for that when moving the read address
+    @_test_decorator()
+    def test_scanlineringbuffer(self):
+        '''test scanline with write using ring buffer
+        '''
+        lines = [[1,0], [1,1], [0,1]]
+        for line in lines: yield from self.tm.writeline(line, lastline=False) 
+        yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, self.tm.state(state=self.tm.sh.STATES.STOP))
+        yield self.tm.sh.photodiode.eq(1)
+        for line in lines: yield from self.tm.checkline(line)
+
 
 if __name__ == '__main__':
     unittest.main()
