@@ -3,6 +3,7 @@ import spidev
 from time import sleep
 import math
 
+import numpy as np
 from gpiozero import LED
 from smbus2 import SMBus
 
@@ -146,21 +147,24 @@ class Machine:
         sleep(1)
 
 
-    def writeline(self, bytelst, lastline = False):
+    def writeline(self, bitlst, bitorder = 'little'):
         '''
         writes bytelst to memory
-          if bytelst is empty --> last line command is given
-         preceded by scan command
+        if bytelst is empty --> last line command is given
 
         return: the bytes it wasn't able to write if memory gets full
         '''
-        assert len(bytelst) == self.sh.BITSINSCANLINE
-        assert max(bytelst) <= 255
-        assert min(bytelst) >= 0
-        bytelst = [self.sh.INSTRUCTIONS.STOP] + bytelst if lastline else [self.sh.INSTRUCTIONS.SCAN] + bytelst
+        if len(bitlst) == 0:
+            bytelst = [self.sh.INSTRUCTIONS.STOP]
+        else:
+            assert len(bitlst) == self.sh.BITSINSCANLINE
+            assert max(bitlst) <= 1
+            assert min(bitlst) >= 0
+            bytelst = np.packbits(bitlst, bitorder=bitorder).tolist()
+            bytelst = [self.sh.INSTRUCTIONS.SCAN] + bytelst
         bytelst.reverse()
         for _ in range(math.ceil(len(bytelst)/self.sh.CHUNKSIZE)):
-            state = self.get_state(self.spi.xfer([self.sh.COMMANDS.WRITE_L])[0])
+            state = self.get_state((yield from self.spi.xfer([self.sh.COMMANDS.WRITE_L]))[0])
             assert state['statebits'] in [self.sh.STATES.STOP, self.sh.STATES.START]
             if state['errorbits'] == pow(2, self.sh.ERRORS.MEMFULL): return bytelst
             for _ in range(self.sh.CHUNKSIZE): 
@@ -168,7 +172,7 @@ class Machine:
                     state = self.spi.xfer([bytelst.pop()])
                 except IndexError:
                     self.spi.xfer([0])
-        return bytelst
+        return np.unpackbits(np.array(bytelst, dtype=np.uint8), bitorder=bitorder).tolist()
 
 
     def test_photodiode(self):

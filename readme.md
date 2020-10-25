@@ -6,9 +6,10 @@ The position of the laser is determined via a sensor such as a photodiode.
 <br>
 Code is tested on the system shown in the image above, branded as [Hexastorm](https://www.hexastorm.com). 
 The bill of materials (BOM) and links to FreeCad and PCB designs can be found on [Hackaday](https://hackaday.io/project/21933-open-hardware-fast-high-resolution-laser).
+The code took most inspiration from [LDGraphy](https://github.com/hzeller/ldgraphy).
 
 ## Install Notes
-Install [litex](https://github.com/enjoy-digital/litex), make a special folder for this installation
+Install [litex](https://github.com/enjoy-digital/litex), make a special folder for this installation.
 For setting the power to laser over ic, you need to install smbus2. <br>
 Python packages can be installed from apio to enable the toolchain. Apio nextpnr currently comes without python support.
 [yowasp](http://yowasp.org/) comes with python support but only works on a X86 system. Yowasp takes a lot of time to run the first time.
@@ -26,7 +27,7 @@ The following parameters describe the system. <br>
 | FACETS | number of polygon facets|
 | DIRECTION | exposure direction, i.e. forward or backward |
 | SINGLE_LINE | system exposes fixed pattern, i.e. line|
-| SINGLE_FACET | only on of the facets is used|
+| SINGLE_FACET | only one of the facets is used|
 <br>
 Using the above, the code determines the number of bits in a scanline. Via a serial port interface the user can push data to the scanner.
 A line is preceded with a command which can be SCAN or STOP. The data is stored on the chip in block ram. 
@@ -59,8 +60,9 @@ System is for writing to, i.e. exposing, a substrate. Reading should also be pos
 System has no link for LIDAR measurements, circuit can be found [here](https://hackaday.io/project/163501-open-source-lidar-unruly).<br>
 The FPGA controls all the stepper motors. At the moment it is not possible to use GCODE or apply acceleration profiles. <br>
 <br>
-Most of these implementation can be removed by improving the code. The current focus is on a proof of principle and creating 
-a FPGA gcode parser using [beagleg](https://github.com/hzeller/beagleg).
+Most of these implementation can be removed by improving the code. The current focus is on a proof of principle.
+Next step would be to create a copy of [beagleg](https://github.com/hzeller/beagleg) with a FPGA code parser.
+In a later stage, they might be merged.
 
 ## Other notes
 ### Migen examles

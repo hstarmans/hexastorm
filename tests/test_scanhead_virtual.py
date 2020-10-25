@@ -170,20 +170,21 @@ class TestMachine():
                 assert (yield self.sh.laser0) == bit
                 yield
 
-    def writeline(self, bitlst, lastline = False):
+    def writeline(self, bitlst, bitorder = 'little'):
         '''
         writes bytelst to memory
-            if bytelst is empty --> last line command is given
-            preceded by scan command
+        if bytelst is empty --> last line command is given
 
         return: the bytes it wasn't able to write if memory gets full
         '''
-        assert len(bitlst) == self.sh.BITSINSCANLINE
-        assert max(bitlst) <= 1
-        assert min(bitlst) >= 0
-        bitorder = 'little'
-        bytelst = np.packbits(bitlst, bitorder=bitorder).tolist()
-        bytelst = [self.sh.INSTRUCTIONS.STOP] + bytelst if lastline else [self.sh.INSTRUCTIONS.SCAN] + bytelst
+        if len(bitlst) == 0:
+            bytelst = [self.sh.INSTRUCTIONS.STOP]
+        else:
+            assert len(bitlst) == self.sh.BITSINSCANLINE
+            assert max(bitlst) <= 1
+            assert min(bitlst) >= 0
+            bytelst = np.packbits(bitlst, bitorder=bitorder).tolist()
+            bytelst = [self.sh.INSTRUCTIONS.SCAN] + bytelst
         bytelst.reverse()
         for _ in range(math.ceil(len(bytelst)/self.sh.CHUNKSIZE)):
             state = self.get_state((yield from self.spi.xfer([self.sh.COMMANDS.WRITE_L]))[0])
@@ -321,7 +322,7 @@ class TestScanhead(unittest.TestCase):
     @_test_decorator()
     def test_stopscanline(self):
         '''check machine transitions to stop if stop command byte is sent'''
-        yield from self.tm.writeline([0]*self.tm.sh.BITSINSCANLINE, lastline=True)
+        yield from self.tm.writeline([])
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, self.tm.state(state=self.tm.sh.STATES.STOP))
         yield self.tm.sh.photodiode.eq(1)
         yield from checkenterstate(self.tm.sh.laserfsm, 'STATE_WAIT_STABLE')
@@ -337,13 +338,13 @@ class TestScanhead(unittest.TestCase):
         In this mode the line is always repeated.
         '''
         bitlst = [1,0]
-        yield from self.tm.writeline(bitlst, lastline=False)
+        yield from self.tm.writeline(bitlst)
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, self.tm.state(state=self.tm.sh.STATES.STOP))
         yield self.tm.sh.photodiode.eq(1)
         yield from self.tm.checkline(bitlst)
         yield from self.tm.checkline(bitlst)
         yield from self.tm.checkline(bitlst)
-    
+
     @_test_decorator(singleline=True, singlefacet=True)
     def test_scanlinerepeatedsinglefacet(self):
         '''test scanline with write in single line and single facet mode
@@ -351,7 +352,7 @@ class TestScanhead(unittest.TestCase):
         Scanline is always repeated and only a single facet is used
         '''
         bitlst = [1,0]
-        yield from self.tm.writeline(bitlst, lastline=False)
+        yield from self.tm.writeline(bitlst)
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, self.tm.state(state=self.tm.sh.STATES.STOP))
         yield self.tm.sh.photodiode.eq(1)
         yield from self.tm.checkline(bitlst)
@@ -366,7 +367,7 @@ class TestScanhead(unittest.TestCase):
         '''test scanline with write using ring buffer
         '''
         lines = [[1,0], [1,1], [0,1]]
-        for line in lines: yield from self.tm.writeline(line, lastline=False) 
+        for line in lines: yield from self.tm.writeline(line) 
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, self.tm.state(state=self.tm.sh.STATES.STOP))
         yield self.tm.sh.photodiode.eq(1)
         for line in lines: yield from self.tm.checkline(line)

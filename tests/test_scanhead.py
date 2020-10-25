@@ -4,7 +4,6 @@ from time import sleep
 from hexastorm.core import Scanhead
 from hexastorm.controller import Machine
 
-
 class TestScanhead(unittest.TestCase):
     ''' Test on scanhead flashed to FPGA'''
 
@@ -39,7 +38,6 @@ class TestScanhead(unittest.TestCase):
                                                                              state=Scanhead.STATES.STOP)
         self.sh.reset()
         self.sh.spi.xfer([Scanhead.COMMANDS.STATUS]) == self.sh.state(state=Scanhead.STATES.STOP)
-
 
 if __name__ == '__main__':
     unittest.main()
