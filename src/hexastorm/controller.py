@@ -163,7 +163,7 @@ class Machine:
             bytelst = [self.sh.INSTRUCTIONS.SCAN] + bytelst
         bytelst.reverse()
         for _ in range(math.ceil(len(bytelst)/self.sh.CHUNKSIZE)):
-            state = self.get_state((yield from self.spi.xfer([self.sh.COMMANDS.WRITE_L]))[0])
+            state = self.get_state((self.spi.xfer([self.sh.COMMANDS.WRITE_L]))[0])
             assert state['statebits'] in [self.sh.STATES.STOP, self.sh.STATES.START]
             if state['errorbits'] == pow(2, self.sh.ERRORS.MEMFULL): return bytelst
             for _ in range(self.sh.CHUNKSIZE): 

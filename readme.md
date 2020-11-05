@@ -88,6 +88,13 @@ This will produce output, here 28 is the address of the I2C device.
 60: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
 70: -- -- -- -- -- -- -- --
 ```
+## Install Numpy
+```console
+sudo apt update
+sudo apt remove python3-numpy
+sudo apt install libatlas3-base
+sudo pip3 install numpy
+```
 <!-- 
 TODO:
   test current code base on scanner in single line and single facet mode;

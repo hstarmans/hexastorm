@@ -26,6 +26,14 @@ class TestScanhead(unittest.TestCase):
         'test if photodiode is triggered when laser is turned on and prism spins'
         self.assertFalse(self.sh.test_photodiode())
 
+    def test_stopscanline(self):
+        'test if head transitions to stop if a stopline is sent'
+        self.sh.writeline([])
+        self.sh.start()
+        sleep(round(Scanhead.VARIABLES['SPINUP_TIME']+Scanhead.VARIABLES['STABLE_TIME']+2))
+        self.assertEqual(self.sh.spi.xfer([Scanhead.COMMANDS.STATUS]), self.sh.state(state = Scanhead.STATES.STOP))
+        self.sh.reset()
+
     def test_memory(self):
         'test if memory full is raised when writing to memory'
         for _, item in self.sh.get_state().items(): self.assertFalse(item)
