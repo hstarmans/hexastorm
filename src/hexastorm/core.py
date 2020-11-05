@@ -64,7 +64,8 @@ class Scanhead(Module):
         self.ticksinfacet = round(self.VARIABLES['CRYSTAL_HZ']/(self.VARIABLES['RPM']/60*self.VARIABLES['FACETS']))
         LASERTICKS = int(self.VARIABLES['CRYSTAL_HZ']/self.VARIABLES['LASER_HZ'])
         self.JITTERTICKS = round(0.5*LASERTICKS)
-        if self.VARIABLES['END%']>(1-self.JITTERTICKS/self.ticksinfacet): raise Exception("Invalid settings, END% too high")
+        STARTCOUNT = 10  
+        if self.VARIABLES['END%']>round(1-(self.JITTERTICKS+1)/self.ticksinfacet): raise Exception("Invalid settings, END% too high")
         self.BITSINSCANLINE = round((self.ticksinfacet*(self.VARIABLES['END%']-self.VARIABLES['START%']))/LASERTICKS)
         if self.BITSINSCANLINE <= 0: raise Exception("Bits in scanline invalid")
         if (self.MEMWIDTH*self.MEMDEPTH)//self.BITSINSCANLINE<5: raise Exception("Memory too small for 5 lines")
@@ -286,7 +287,9 @@ class Scanhead(Module):
         self.laser0 = platform.request("laser0")
         self.poly_en = platform.request("poly_en")
         self.photodiode = platform.request("photodiode")
+        startupcounter = Signal(max=STARTCOUNT)
         self.laserfsm.act("STOP",
+            NextValue(startupcounter, 0),
             NextValue(stablethresh, stableticks-1),
             NextValue(stablecounter, 0),
             NextValue(self.facetcnt, 0),
@@ -386,19 +389,23 @@ class Scanhead(Module):
                If((self.tickcounter>self.ticksinfacet-self.JITTERTICKS)&
                   (self.tickcounter<self.ticksinfacet+self.JITTERTICKS),
                   If(self.facetcnt==0, NextValue(self.facetcnt, self.VARIABLES['FACETS']-1)).
-                  Else(NextValue(self.facetcnt, self.facetcnt-1)), 
+                  Else(NextValue(self.facetcnt, self.facetcnt-1)),
                   NextValue(stablecounter, 0),
-                  NextValue(stablethresh, round(1.1*self.ticksinfacet)), 
-                  If((self.VARIABLES['SINGLE_FACET']==True)&(self.facetcnt>0),
-                    NextState('WAIT_END')   # WAIT END
+                  If(startupcounter<STARTCOUNT-2,
+                    NextValue(startupcounter, startupcounter+1),
+                    NextState('WAIT_END')
+                  ).
+                  Elif((self.VARIABLES['SINGLE_FACET']==True)&(self.facetcnt>0),
+                    NextState('WAIT_END')
                   ).
                   Else(
+                    NextValue(stablethresh, round(2.1*self.ticksinfacet)),
                     NextState('READ_INSTRUCTION'),
                     NextValue(readtrig, 1),
                   )
                ).
                Else(
-                   NextState('WAIT_END')  # WAIT END
+                   NextState('WAIT_END')
                )
             ).
             Elif(self.laserfsmstate!=self.STATES.START,
@@ -494,8 +501,9 @@ class Scanhead(Module):
             )
         )
         self.laserfsm.act("WAIT_END",
+            NextValue(stablecounter, stablecounter+1),
             NextValue(self.tickcounter, self.tickcounter+1),
-            If(self.tickcounter>=self.ticksinfacet-2*self.JITTERTICKS,
+            If(self.tickcounter>=round(self.ticksinfacet-self.JITTERTICKS-1),
                NextState("STATE_WAIT_STABLE"),
                NextValue(self.laser0, 1),
             )
