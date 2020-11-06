@@ -24,8 +24,7 @@ class Machine:
         if not connected to hardware implentation
         connect to a virtual model, see virtual test
         '''
-        self.plat = hs.board.Platform()
-        self.sh = hs.core.Scanhead(self.plat)
+        self.sh = hs.core.Scanhead(hs.board.Platform())
         # IC bus used to set power laser
         self.bus = SMBus(self.ic_dev_nr)
         # SPI to sent data to scanner
@@ -47,7 +46,7 @@ class Machine:
         set system in single line mode
         '''
         assert isinstance(val, bool)
-        self.sh.VARIABLES['SINGLE_LINE'] = val
+        hs.core.Scanhead.VARIABLES['SINGLE_LINE'] = val
         self.flash(recompile=True, removebuild=True)
 
     @property
@@ -74,12 +73,15 @@ class Machine:
         if byte is None: byte = self.spi.xfer([self.sh.COMMANDS.STATUS])[0]
         return {'statebits': byte>>5, 'errorbits': byte&0b11111}
 
-    def status(self):
+    def status(self, byte=None):
         '''
         prints state machine and list of errors
         '''
         #TODO: this will not work if the machine is receiving
-        state = self.spi.xfer([self.sh.COMMANDS.STATUS])[0]
+        if not byte:
+            state = self.spi.xfer([self.sh.COMMANDS.STATUS])[0]
+        else:
+            state = byte
         if state == 255:
             print("Error; check reset pin is high and binary is correct")
             return
@@ -193,10 +195,13 @@ class Machine:
 
     def flash(self, recompile=False, removebuild=False):
         build_name = 'scanhead'
+        plat = hs.board.Platform() #this object gets depleted, io objects get removed from list if requested
+        self.sh = hs.core.Scanhead(plat)  #needs reinit to update settings
         if recompile: 
             if os.path.isdir('build'):
-                self.plat.removebuild()
-            self.plat.build(freq=50, core = self.sh, build_name = build_name)
-        self.plat.upload(build_name)
+                plat.removebuild()
+            plat.build(freq=50, core = self.sh, build_name = build_name)
+        plat.upload(build_name)
         if removebuild:
-            self.plat.removebuild()
+            plat.removebuild()
+        self.reset()  #TODO: you need to reset, why?!!

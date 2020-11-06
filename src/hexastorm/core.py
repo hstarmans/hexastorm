@@ -263,7 +263,7 @@ class Scanhead(Module):
         self.readmem.act("READ",
             NextValue(readtrig, 0),
             NextValue(self.readport.re, 1),
-            If((self.readport.adr == writeport.adr)&(written == 0),
+            If((self.readport.adr == writeport.adr)&(written == 0)&(self.VARIABLES['SINGLE_LINE']==False),
                NextValue(self.error[self.ERRORS.MEMREAD], 1),
             ).
             Else(
