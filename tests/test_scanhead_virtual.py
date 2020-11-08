@@ -342,7 +342,13 @@ class TestScanhead(unittest.TestCase):
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, self.tm.state(state=self.tm.sh.STATES.STOP))
         yield self.tm.sh.photodiode.eq(1)
         yield from self.tm.checkline(bitlst)
-        yield from self.tm.checkline(bitlst)
+        yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, self.tm.state(state=self.tm.sh.STATES.START))
+        yield from checkenterstate(self.tm.sh.laserfsm, 'STOP')
+        bitlst = [1,1]
+        yield from self.tm.writeline(bitlst)
+        yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, self.tm.state(state=self.tm.sh.STATES.STOP,
+                                                                               errors=[self.tm.sh.ERRORS.NOTSTABLE]))
+        yield self.tm.sh.photodiode.eq(1)
         yield from self.tm.checkline(bitlst)
 
     @_test_decorator(singleline=True, singlefacet=True)
