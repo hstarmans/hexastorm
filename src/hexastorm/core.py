@@ -127,6 +127,10 @@ class Scanhead(Module):
         self.sync += self.error[self.ERRORS.MEMFULL].eq((writeport.adr==self.readport.adr)&(written==1)&(self.VARIABLES['SINGLE_LINE']==False))
         # Custom Receiver
         self.submodules.receiver = FSM(reset_state = "IDLE")
+        self.receiver.act("RESET",
+            NextValue(command, self.COMMANDS.RECVCOMMAND),
+            NextState("IDLE")
+        )
         self.receiver.act("IDLE",
                 NextValue(spislave.miso, Cat([self.error, self.laserfsmstate])),
                 If(start_rise,
@@ -167,7 +171,7 @@ class Scanhead(Module):
                 ).
                 Elif(spislave.mosi == self.COMMANDS.WRITE_L,
                     # only switch to write stage if memory is not full
-                    If((writeport.adr==self.readport.adr)&(written==1),
+                    If(self.error[self.ERRORS.MEMFULL]==1,
                         NextValue(command, self.COMMANDS.RECVCOMMAND)
                     ).
                     Else(
@@ -392,7 +396,7 @@ class Scanhead(Module):
                     NextState('WAIT_END')
                   ).
                   Else(
-                    NextValue(stablethresh, round(2.1*self.ticksinfacet)),
+                    NextValue(stablethresh, min(round(2.1*self.ticksinfacet), stableticks)),
                     NextState('READ_INSTRUCTION'),
                     NextValue(readtrig, 1),
                   )
@@ -452,6 +456,7 @@ class Scanhead(Module):
                 If(self.scanbit >= self.BITSINSCANLINE,
                     NextState("WAIT_END"),
                     NextValue(self.scanbit, 0),
+                    NextValue(readbit, 0),
                     If(self.VARIABLES['SINGLE_LINE']==1,
                         NextValue(self.error[self.ERRORS.MEMREAD], 0),
                         NextValue(self.readport.adr, 0)  # this is tricky as you don't execute written check
