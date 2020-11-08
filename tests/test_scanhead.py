@@ -51,13 +51,21 @@ class TestScanhead(unittest.TestCase):
         '''test scanline with write in single line mode
         
         In this mode the line is always repeated.
-        TODO: Once written you cannot change the line, this leads to failures
         '''
         self.sh.single_line = True
         self.sh.writeline([0]*self.sh.sh.BITSINSCANLINE)
         self.sh.start()  #TODO: add the wait to start!
         sleep(self.STABLE_TIME)
         self.stateEqual(state = Scanhead.STATES.START)
+        # write some lines
+        self.sh.writeline([1]*self.sh.sh.BITSINSCANLINE)
+        sleep(1)
+        self.sh.writeline([0]*self.sh.sh.BITSINSCANLINE)
+        sleep(1)
+        # write stopline
+        self.sh.writeline([])
+        sleep(self.STABLE_TIME)
+        self.stateEqual(state = Scanhead.STATES.STOP)
         self.sh.single_line = False
 
     def test_memory(self):
