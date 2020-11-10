@@ -203,12 +203,28 @@ class TestScanhead(unittest.TestCase):
     def setUp(self):
         self.tm = TestMachine()
 
-    def _test_decorator(singleline=False, singlefacet=False):
+    def _test_decorator(singleline=False, singlefacet=False, simulatediode=False):
         def nested_dec(func):
             def functie(self):
                 if singlefacet: self.tm.single_facet = True
                 if singleline: self.tm.single_line = True
-                run_simulation(self.tm.sh, [func(self)], clocks=self.tm.clocks)
+                if simulatediode:
+                    class DiodeSimulator(Module):
+                        def __init__(self):
+                            self.submodules.sh = sh = self.tm.sh
+                            diodecounter = Signal(max=sh.ticksinfacet)
+                            self.sync += If(diodecounter == sh.ticksinfacet,
+                                            diodecounter.eq(sh.ticksinfacet-1)
+                                         ).
+                                         Elif(diodecounter>sh.ticksinfacet-3,
+                                            sh.photodiode.eq(!(1&(sh.poly_en==1)&(sh.laser0==1))),
+                                         ).
+                                         Else(diodecounter.eq(diodecounter - 1),
+                                            sh.photodiode.eq(1)
+                                         )
+                    run_simulation(DiodeSimulator, [func(self)], clocks=self.tm.clocks)
+                else:
+                    run_simulation(self.tm.sh, [func(self)], clocks=self.tm.clocks)
                 if singleline: self.tm.single_line = False
                 if singlefacet: self.tm.single_facet = False
             return functie

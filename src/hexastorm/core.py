@@ -396,7 +396,7 @@ class Scanhead(Module):
                     NextState('WAIT_END')
                   ).
                   Else(
-                    NextValue(stablethresh, min(round(2.1*self.ticksinfacet), stableticks)),
+                    NextValue(stablethresh, min(round(10.1*self.ticksinfacet), stableticks)),  #TODO: lower!
                     NextState('READ_INSTRUCTION'),
                     NextValue(readtrig, 1),
                   )

@@ -1,6 +1,6 @@
 import os
 import spidev
-from time import sleep
+from time import sleep, time
 import math
 
 import numpy as np
@@ -32,22 +32,41 @@ class Machine:
         self.spi.open(0,0)
         self.spi.max_speed_hz = round(1E6)
         self.spi.cshigh = False
+    
+    @property
+    def single_facet(self):
+        '''
+        return if system is in single facet mode
+        '''
+        return hs.core.Scanhead.VARIABLES['SINGLE_FACET']
+
+    @single_facet.setter
+    def single_facet(self, val):
+        '''
+        set system in single facet mode
+
+        You need to run flash to push settings to head
+        '''
+        assert isinstance(val, bool)
+        hs.core.Scanhead.VARIABLES['SINGLE_FACET'] = val
+
 
     @property
     def single_line(self):
         '''
         return if system is in single line mode
         '''
-        return self.sh.VARIABLES['SINGLE_LINE']
+        return hs.core.Scanhead.VARIABLES['SINGLE_LINE']
 
     @single_line.setter
     def single_line(self, val):
         '''
         set system in single line mode
+
+        You need to run flash to push settings to head
         '''
         assert isinstance(val, bool)
         hs.core.Scanhead.VARIABLES['SINGLE_LINE'] = val
-        self.flash(recompile=True, removebuild=True)
 
     @property
     def laser_power(self):
@@ -71,7 +90,8 @@ class Machine:
         grabs state and error bits
         '''
         if byte is None: byte = self.spi.xfer([self.sh.COMMANDS.STATUS])[0]
-        return {'statebits': byte>>5, 'errorbits': byte&0b11111}
+        errors = [int(i) for i in list('{0:0b}'.format(byte&0b11111))]
+        return {'statebits': byte>>5, 'errorbits': errors}
 
     def status(self, byte=None):
         '''
@@ -147,6 +167,14 @@ class Machine:
         reset_pin.on()
         sleep(1)
 
+    def forcewrite(self, data, timeout=15):
+        state = self.get_state((self.spi.xfer([data]))[0])
+        assert state['statebits'] in [self.sh.STATES.STOP, self.sh.STATES.START]
+        t = time()
+        while (state['errorbits'][self.sh.ERRORS.MEMFULL] == 1)&((time()-t)<timeout):
+            state = self.get_state((self.spi.xfer([data]))[0])
+        if (time()-t)>timeout:
+            raise Exception("Timeout, memory is full and does not get unloaded")
 
     def writeline(self, bitlst, bitorder = 'little'):
         '''
@@ -165,16 +193,12 @@ class Machine:
             bytelst = [self.sh.INSTRUCTIONS.SCAN] + bytelst
         bytelst.reverse()
         for _ in range(math.ceil(len(bytelst)/self.sh.CHUNKSIZE)):
-            state = self.get_state((self.spi.xfer([self.sh.COMMANDS.WRITE_L]))[0])
-            assert state['statebits'] in [self.sh.STATES.STOP, self.sh.STATES.START]
-            if state['errorbits'] == pow(2, self.sh.ERRORS.MEMFULL): return bytelst
+            self.forcewrite(self.sh.COMMANDS.WRITE_L)
             for _ in range(self.sh.CHUNKSIZE): 
                 try:
-                    state = self.spi.xfer([bytelst.pop()])
+                    self.forcewrite(bytelst.pop())
                 except IndexError:
-                    self.spi.xfer([0])
-        return np.unpackbits(np.array(bytelst, dtype=np.uint8), bitorder=bitorder).tolist()
-
+                    self.forcewrite(0)
 
     def test_photodiode(self):
         '''

@@ -53,8 +53,9 @@ class TestScanhead(unittest.TestCase):
         In this mode the line is always repeated.
         '''
         self.sh.single_line = True
+        self.sh.flash(recompile=True, removebuild=True)
         self.sh.writeline([0]*self.sh.sh.BITSINSCANLINE)
-        self.sh.start()  #TODO: add the wait to start!
+        self.sh.start()
         sleep(self.STABLE_TIME)
         self.stateEqual(state = Scanhead.STATES.START)
         # write some lines
@@ -67,6 +68,43 @@ class TestScanhead(unittest.TestCase):
         sleep(self.STABLE_TIME)
         self.stateEqual(state = Scanhead.STATES.STOP)
         self.sh.single_line = False
+        self.sh.flash(recompile=True, removebuild=True)
+
+    def test_scanlinerepeatedsinglefacet(self):
+        '''test scanline with write in single line and single facet mode
+        
+        Scanline is always repeated and only a single facet is used
+        Note; real test would require camera, this is added later
+        '''
+        self.sh.single_line = True
+        self.sh.single_facet = True
+        self.sh.flash(recompile=True, removebuild=True)
+        self.sh.writeline([0]*self.sh.sh.BITSINSCANLINE)
+        self.sh.start()
+        sleep(self.STABLE_TIME)
+        self.sh.writeline([])
+        sleep(self.STABLE_TIME)
+        self.stateEqual(state = Scanhead.STATES.STOP)
+        self.sh.single_line = False
+        self.sh.single_facet = False
+        self.sh.flash(recompile=True, removebuild=True)
+
+    def test_scanlineringbuffer(self):
+        '''test scanline with write using ring buffer
+        '''
+        self.sh.writeline([0]*self.sh.sh.BITSINSCANLINE)
+        self.sh.start()
+        sleep(self.STABLE_TIME)
+        self.stateEqual(state = Scanhead.STATES.START, errors=[Scanhead.ERRORS.MEMREAD])
+        for line in range(100):
+            print(f"Writing line number {line}")
+            if line%2 == 0:
+                res = self.sh.writeline([1]*self.sh.sh.BITSINSCANLINE)
+            else:
+                res = self.sh.writeline([0]*self.sh.sh.BITSINSCANLINE)
+        self.sh.writeline([])
+        sleep(self.STABLE_TIME)
+        self.stateEqual(state = Scanhead.STATES.STOP, errors=[Scanhead.ERRORS.MEMREAD, Scanhead.ERRORS.INVALID])
 
     def test_memory(self):
         'test if memory full is raised when writing to memory'
