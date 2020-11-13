@@ -139,19 +139,6 @@ class TestMachine():
         val = errorstate+(state<<5)
         return val
 
-    def photodiode_trigger(self):
-        '''triggers photodiode at end facet, requires you r in STATE_WAIT_STABLE
-        '''
-        sh = self.sh
-        count = (yield sh.tickcounter)
-        if count-3>=self.sh.ticksinfacet:
-            raise Exception(f"Invalid tickcount {count} > {self.sh.ticksinfacet-3}")
-        for _ in range(sh.ticksinfacet-3-count): yield
-        yield sh.photodiode.eq(0)
-        yield
-        yield
-        yield sh.photodiode.eq(1)
-
     def get_state(self, byte):
         '''
         places state and error bits in dict
@@ -159,8 +146,7 @@ class TestMachine():
         return {'statebits': byte>>5, 'errorbits': byte&0b11111}
 
     def checkline(self, bitlst):
-        yield from checkenterstate(self.sh.laserfsm, 'STATE_WAIT_STABLE')
-        yield from self.photodiode_trigger()
+        yield from checkenterstate(self.sh.laserfsm, 'READ_INSTRUCTION')
         yield from checkenterstate(self.sh.laserfsm, 'DATA_RUN')
         yield
         for idx, bit in enumerate(bitlst):
@@ -210,19 +196,20 @@ class TestScanhead(unittest.TestCase):
                 if singleline: self.tm.single_line = True
                 if simulatediode:
                     class DiodeSimulator(Module):
-                        def __init__(self):
-                            self.submodules.sh = sh = self.tm.sh
+                        def __init__(self, sh):
+                            self.submodules.sh = sh
                             diodecounter = Signal(max=sh.ticksinfacet)
-                            self.sync += If(diodecounter == sh.ticksinfacet,
-                                            diodecounter.eq(sh.ticksinfacet-1)
-                                         ).
+                            self.sync += (If(diodecounter == sh.ticksinfacet,
+                                            diodecounter.eq(0)
+                                           ).
                                          Elif(diodecounter>sh.ticksinfacet-3,
-                                            sh.photodiode.eq(!(1&(sh.poly_en==1)&(sh.laser0==1))),
+                                            sh.photodiode.eq(~(1&(sh.poly_en==0)&(sh.laser0==1))),
+                                            diodecounter.eq(diodecounter + 1)
                                          ).
-                                         Else(diodecounter.eq(diodecounter - 1),
+                                         Else(diodecounter.eq(diodecounter + 1),
                                             sh.photodiode.eq(1)
-                                         )
-                    run_simulation(DiodeSimulator, [func(self)], clocks=self.tm.clocks)
+                                         ))
+                    run_simulation(DiodeSimulator(self.tm.sh), [func(self)], clocks=self.tm.clocks)
                 else:
                     run_simulation(self.tm.sh, [func(self)], clocks=self.tm.clocks)
                 if singleline: self.tm.single_line = False
@@ -236,7 +223,7 @@ class TestScanhead(unittest.TestCase):
         yield from checkpin(self.tm.sh.poly_pwm, value=0)
         yield from checkpin(self.tm.sh.poly_pwm, value=1)
 
-    @_test_decorator()
+    @_test_decorator(simulatediode=True)
     def test_testmodes(self):
         ''' verify four test modes; laser, motor, line and photodiode'''
         test_commands = [self.tm.sh.COMMANDS.LASERTEST,
@@ -247,23 +234,24 @@ class TestScanhead(unittest.TestCase):
                     self.tm.sh.STATES.MOTORTEST,
                     self.tm.sh.STATES.LINETEST,
                     self.tm.sh.STATES.PHOTODIODETEST]
-        # NOTE: on default photodiode is high
-        yield self.tm.sh.photodiode.eq(1) 
         for idx, test_command in enumerate(test_commands):
             yield from self.tm.checkreply(self.tm.sh.COMMANDS.STATUS, self.tm.state(state=self.tm.sh.STATES.STOP))
             yield from self.tm.checkreply(test_command, self.tm.state(state=self.tm.sh.STATES.STOP))
-            if test_command != self.tm.sh.COMMANDS.MOTORTEST:
-                yield from checkpin(self.tm.sh.laser0)
-            if test_command != self.tm.sh.COMMANDS.LASERTEST:
-                yield from checkpin(self.tm.sh.poly_en, value=1)
-            if test_command == self.tm.sh.COMMANDS.PHOTODIODETEST:
-                for _ in range(6): yield
-                yield self.tm.sh.photodiode.eq(0) 
-                yield from checkpin(self.tm.sh.laser0, 1)
+            if test_command == self.tm.sh.COMMANDS.MOTORTEST:
+                yield from checkpin(self.tm.sh.laser0, value=0)
                 yield from checkpin(self.tm.sh.poly_en, value=0)
-                yield from self.tm.checkreply(self.tm.sh.COMMANDS.STOP, self.tm.state(state=self.tm.sh.STATES.STOP))
-            else:
                 yield from self.tm.checkreply(self.tm.sh.COMMANDS.STOP, self.tm.state(state=states[idx]))
+            elif test_command == self.tm.sh.COMMANDS.LASERTEST:
+                yield from checkpin(self.tm.sh.poly_en, value=1)
+                yield from checkpin(self.tm.sh.laser0, value=1)
+                yield from self.tm.checkreply(self.tm.sh.COMMANDS.STOP, self.tm.state(state=states[idx]))
+            elif test_command == self.tm.sh.COMMANDS.LINETEST:
+                yield from checkpin(self.tm.sh.poly_en, value=0)
+                yield from checkpin(self.tm.sh.laser0, value=1)
+                yield from self.tm.checkreply(self.tm.sh.COMMANDS.STOP, self.tm.state(state=states[idx]))
+            else:
+                for _ in range(self.tm.sh.ticksinfacet): yield
+                yield from self.tm.checkreply(self.tm.sh.COMMANDS.STOP, self.tm.state(state=self.tm.sh.STATES.STOP))
 
     @_test_decorator()
     def test_writedata(self):
@@ -300,16 +288,13 @@ class TestScanhead(unittest.TestCase):
                                     self.tm.state(errors=[self.tm.sh.ERRORS.NOTSTABLE],
                                           state=self.tm.sh.STATES.STOP))
 
-    @_test_decorator()
+    @_test_decorator(simulatediode=True)
     def test_scanlinewithoutwrite(self):
-        yield self.tm.sh.photodiode.eq(1) 
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, self.tm.state(state=self.tm.sh.STATES.STOP))
         yield from checkenterstate(self.tm.sh.laserfsm, 'STATE_WAIT_STABLE')
-        yield from self.tm.photodiode_trigger()
         yield from checkenterstate(self.tm.sh.laserfsm, 'READ_INSTRUCTION')
         yield from checkenterstate(self.tm.sh.laserfsm, 'WAIT_END')
         yield from checkenterstate(self.tm.sh.laserfsm, 'STATE_WAIT_STABLE')
-        yield from self.tm.photodiode_trigger()
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.STOP, self.tm.state(errors=[self.tm.sh.ERRORS.MEMREAD],
                                                          state=self.tm.sh.STATES.START))
 
@@ -320,34 +305,30 @@ class TestScanhead(unittest.TestCase):
                                     self.tm.state(errors=[self.tm.sh.ERRORS.INVALID],
                                           state=self.tm.sh.STATES.STOP))
 
-    @_test_decorator()
+    @_test_decorator(simulatediode=True)
     def test_invalidscanline(self):
         '''check error received if scanline is sent with invalid command byte'''
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.WRITE_L, self.tm.state(state=self.tm.sh.STATES.STOP))
         for _ in range(self.tm.sh.CHUNKSIZE):
             yield from self.tm.checkreply(int('11111101', 2), self.tm.state(state=self.tm.sh.STATES.STOP))
-        yield self.tm.sh.photodiode.eq(1)
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, self.tm.state(state=self.tm.sh.STATES.STOP))
         yield from checkenterstate(self.tm.sh.laserfsm, 'STATE_WAIT_STABLE')
-        yield from self.tm.photodiode_trigger()
+        yield from checkenterstate(self.tm.sh.laserfsm, 'READ_INSTRUCTION')
         yield from checkenterstate(self.tm.sh.laserfsm, 'WAIT_END')
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.STOP, self.tm.state(errors=[self.tm.sh.ERRORS.INVALIDLINE],
-                                            state=self.tm.sh.STATES.START))
-        yield from checkenterstate(self.tm.sh.laserfsm, 'STOP')
+                                                                              state=self.tm.sh.STATES.START))
 
-    @_test_decorator()
+    @_test_decorator(simulatediode=True)
     def test_stopscanline(self):
         '''check machine transitions to stop if stop command byte is sent'''
         yield from self.tm.writeline([])
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, self.tm.state(state=self.tm.sh.STATES.STOP))
-        yield self.tm.sh.photodiode.eq(1)
         yield from checkenterstate(self.tm.sh.laserfsm, 'STATE_WAIT_STABLE')
-        yield from self.tm.photodiode_trigger()
         yield from checkenterstate(self.tm.sh.laserfsm, 'READ_INSTRUCTION')
         yield from checkenterstate(self.tm.sh.laserfsm, 'STOP')
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.STATUS, self.tm.state(state=self.tm.sh.STATES.STOP))
 
-    @_test_decorator(singleline=True)
+    @_test_decorator(singleline=True, simulatediode=True)
     def test_scanlinerepeated(self):
         '''test scanline with write in single line mode
         
@@ -356,18 +337,15 @@ class TestScanhead(unittest.TestCase):
         bitlst = [1,0]
         yield from self.tm.writeline(bitlst)
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, self.tm.state(state=self.tm.sh.STATES.STOP))
-        yield self.tm.sh.photodiode.eq(1)
         yield from self.tm.checkline(bitlst)
-        yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, self.tm.state(state=self.tm.sh.STATES.START))
+        yield from self.tm.checkreply(self.tm.sh.COMMANDS.STOP, self.tm.state(state=self.tm.sh.STATES.START))
         yield from checkenterstate(self.tm.sh.laserfsm, 'STOP')
         bitlst = [1,1]
         yield from self.tm.writeline(bitlst)
-        yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, self.tm.state(state=self.tm.sh.STATES.STOP,
-                                                                               errors=[self.tm.sh.ERRORS.NOTSTABLE]))
-        yield self.tm.sh.photodiode.eq(1)
+        yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, self.tm.state(state=self.tm.sh.STATES.STOP))
         yield from self.tm.checkline(bitlst)
 
-    @_test_decorator(singleline=True, singlefacet=True)
+    @_test_decorator(singleline=True, singlefacet=True, simulatediode=True)
     def test_scanlinerepeatedsinglefacet(self):
         '''test scanline with write in single line and single facet mode
         
@@ -376,22 +354,18 @@ class TestScanhead(unittest.TestCase):
         bitlst = [1,0]
         yield from self.tm.writeline(bitlst)
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, self.tm.state(state=self.tm.sh.STATES.STOP))
-        yield self.tm.sh.photodiode.eq(1)
         yield from self.tm.checkline(bitlst)
         for _ in range(self.tm.sh.VARIABLES['FACETS']-1):
             yield from checkenterstate(self.tm.sh.laserfsm, 'STATE_WAIT_STABLE')
-            yield from self.tm.photodiode_trigger()
-            yield
         yield from self.tm.checkline(bitlst)
 
-    @_test_decorator()
+    @_test_decorator(simulatediode=True)
     def test_scanlineringbuffer(self):
         '''test scanline with write using ring buffer
         '''
         lines = [[1,0], [1,1], [0,1]]
         for line in lines: yield from self.tm.writeline(line) 
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, self.tm.state(state=self.tm.sh.STATES.STOP))
-        yield self.tm.sh.photodiode.eq(1)
         for line in lines: yield from self.tm.checkline(line)
 
 
