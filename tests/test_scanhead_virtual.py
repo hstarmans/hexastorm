@@ -181,6 +181,8 @@ class TestMachine():
                     state = (yield from self.spi.xfer([bytelst.pop()]))
                 except IndexError:
                     yield from self.spi.xfer([0])
+        yield from checkenterstate(self.sh.receiver, 'WRITE')
+        yield from checkenterstate(self.sh.receiver, 'IDLE')
         return np.unpackbits(np.array(bytelst, dtype=np.uint8), bitorder=bitorder).tolist()
 
 
@@ -277,7 +279,7 @@ class TestScanhead(unittest.TestCase):
 
     @_test_decorator()
     def test_nosync(self):
-        yield self.tm.sh.photodiode.eq(1) 
+        yield self.tm.sh.photodiode.eq(1)
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.STATUS, self.tm.state(state=self.tm.sh.STATES.STOP))
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, self.tm.state(state=self.tm.sh.STATES.STOP))
         yield from checkenterstate(self.tm.sh.laserfsm, 'SPINUP')
@@ -338,11 +340,8 @@ class TestScanhead(unittest.TestCase):
         yield from self.tm.writeline(bitlst)
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, self.tm.state(state=self.tm.sh.STATES.STOP))
         yield from self.tm.checkline(bitlst)
-        yield from self.tm.checkreply(self.tm.sh.COMMANDS.STOP, self.tm.state(state=self.tm.sh.STATES.START))
-        yield from checkenterstate(self.tm.sh.laserfsm, 'STOP')
         bitlst = [1,1]
         yield from self.tm.writeline(bitlst)
-        yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, self.tm.state(state=self.tm.sh.STATES.STOP))
         yield from self.tm.checkline(bitlst)
 
     @_test_decorator(singleline=True, singlefacet=True, simulatediode=True)
@@ -354,17 +353,22 @@ class TestScanhead(unittest.TestCase):
         bitlst = [1,0]
         yield from self.tm.writeline(bitlst)
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, self.tm.state(state=self.tm.sh.STATES.STOP))
-        yield from self.tm.checkline(bitlst)
-        for _ in range(self.tm.sh.VARIABLES['FACETS']-1):
+        # facet counter changes
+        for facet in range(self.tm.sh.VARIABLES['FACETS']-1):
             yield from checkenterstate(self.tm.sh.laserfsm, 'STATE_WAIT_STABLE')
-        yield from self.tm.checkline(bitlst)
+            yield from checkenterstate(self.tm.sh.laserfsm, 'WAIT_END')
+            self.assertEqual(facet, (yield self.tm.sh.facetcnt))
+        # still line only projected at specific facet count
+        for _ in range(2):
+            yield from self.tm.checkline(bitlst)
+            self.assertEqual(1, (yield self.tm.sh.facetcnt))
 
     @_test_decorator(simulatediode=True)
     def test_scanlineringbuffer(self):
         '''test scanline with write using ring buffer
         '''
         lines = [[1,0], [1,1], [0,1]]
-        for line in lines: yield from self.tm.writeline(line) 
+        for line in lines: yield from self.tm.writeline(line)
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, self.tm.state(state=self.tm.sh.STATES.STOP))
         for line in lines: yield from self.tm.checkline(line)
 

@@ -389,8 +389,8 @@ class Scanhead(Module):
                NextValue(self.laser0, 0),
                If((self.tickcounter>self.ticksinfacet-self.JITTERTICKS)&
                   (self.tickcounter<self.ticksinfacet+self.JITTERTICKS),
-                  If(self.facetcnt==0, NextValue(self.facetcnt, self.VARIABLES['FACETS']-1)).
-                  Else(NextValue(self.facetcnt, self.facetcnt-1)),
+                  If(self.facetcnt==self.VARIABLES['FACETS']-1, NextValue(self.facetcnt, 0)).
+                  Else(NextValue(self.facetcnt, self.facetcnt+1)),
                   NextValue(stablecounter, 0),
                   If((self.VARIABLES['SINGLE_FACET']==True)&(self.facetcnt>0),
                     NextState('WAIT_END')
