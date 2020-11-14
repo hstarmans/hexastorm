@@ -100,7 +100,7 @@ class Scanhead(Module):
         self.specials += writeport, self.readport
         self.ios = {writeport.adr, writeport.dat_w, writeport.we, self.readport.dat_r, self.readport.adr, self.readport.re}
         readbit = Signal(max = self.MEMWIDTH)
-        self.writebyte = Signal(max=self.MEMDEPTH)
+        self.writebyte = Signal(max=self.MEMWIDTH)
         written = Signal()
         self.dat_r_new = Signal(max= self.MEMWIDTH)
         dat_r_old = Signal(max= self.MEMWIDTH)

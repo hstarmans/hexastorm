@@ -139,11 +139,14 @@ class TestMachine():
         val = errorstate+(state<<5)
         return val
 
-    def get_state(self, byte):
+    def get_state(self, byte=None):
         '''
         places state and error bits in dict
         '''
-        return {'statebits': byte>>5, 'errorbits': byte&0b11111}
+        if byte is None: raise Exception("should not occur")
+        errors = [int(i) for i in list('{0:0b}'.format(byte&0b111111))]
+        errors.reverse()
+        return {'statebits': byte>>5, 'errorbits': errors}
 
     def checkline(self, bitlst):
         yield from checkenterstate(self.sh.laserfsm, 'READ_INSTRUCTION')
@@ -156,12 +159,21 @@ class TestMachine():
                 assert (yield self.sh.laser0) == bit
                 yield
 
+    def forcewrite(self, data, maxtrials=10):
+        '''' the question is --> how many ticks are within a transaction'''
+        state = self.get_state((yield from self.spi.xfer([data]))[0])
+        assert state['statebits'] in [self.sh.STATES.STOP, self.sh.STATES.START]
+        trials = 0
+        while state['errorbits'][self.sh.ERRORS.MEMFULL]:
+           state = self.get_state((yield from self.spi.xfer([data]))[0])
+           trials += 1
+           if trials>10:
+                raise Exception("More than trials required to write to memory")
+
     def writeline(self, bitlst, bitorder = 'little'):
         '''
-        writes bytelst to memory
-        if bytelst is empty --> last line command is given
-
-        return: the bytes it wasn't able to write if memory gets full
+        writes bitlist to memory
+        if bytelst is empty --> stop command is send
         '''
         if len(bitlst) == 0:
             bytelst = [self.sh.INSTRUCTIONS.STOP]
@@ -172,19 +184,17 @@ class TestMachine():
             bytelst = np.packbits(bitlst, bitorder=bitorder).tolist()
             bytelst = [self.sh.INSTRUCTIONS.SCAN] + bytelst
         bytelst.reverse()
+        #NOTE: chunksize of 1 only supported but this code does support it!
         for _ in range(math.ceil(len(bytelst)/self.sh.CHUNKSIZE)):
-            state = self.get_state((yield from self.spi.xfer([self.sh.COMMANDS.WRITE_L]))[0])
-            assert state['statebits'] in [self.sh.STATES.STOP, self.sh.STATES.START]
-            if state['errorbits'] == pow(2, self.sh.ERRORS.MEMFULL): return bytelst
+            yield from self.forcewrite(self.sh.COMMANDS.WRITE_L)
             for _ in range(self.sh.CHUNKSIZE):
                 try:
-                    state = (yield from self.spi.xfer([bytelst.pop()]))
+                    byte = bytelst.pop()
                 except IndexError:
-                    yield from self.spi.xfer([0])
+                    byte = 0
+                yield from self.forcewrite(byte)
         yield from checkenterstate(self.sh.receiver, 'WRITE')
         yield from checkenterstate(self.sh.receiver, 'IDLE')
-        return np.unpackbits(np.array(bytelst, dtype=np.uint8), bitorder=bitorder).tolist()
-
 
 class TestScanhead(unittest.TestCase):
     ''' Virtual test for scanhead'''
@@ -362,16 +372,63 @@ class TestScanhead(unittest.TestCase):
         for _ in range(2):
             yield from self.tm.checkline(bitlst)
             self.assertEqual(1, (yield self.tm.sh.facetcnt))
+    
+    @_test_decorator()
+    def test_writespeed(self):
+        '''test speed to write 1 byte to memory and give estimate for max laser speed
+        '''
+        def test_speed(count, byte):
+            yield self.tm.spi.spimaster.mosi.eq(byte)
+            yield self.tm.spi.spimaster.length.eq(8)
+            yield self.tm.spi.spimaster.start.eq(1)
+            count += 1
+            yield
+            yield self.tm.spi.spimaster.start.eq(0)
+            count += 1
+            yield
+            while (yield self.tm.spi.spimaster.done) == 0:
+                count += 1 
+                yield
+            byte_received = (yield self.tm.spi.spimaster.miso)
+            return count, byte_received
+        count = 0
+        count, bytereceived = (yield from test_speed(count, self.tm.sh.COMMANDS.WRITE_L))
+        self.assertEqual(bytereceived, self.tm.state(state=self.tm.sh.STATES.STOP))
+        count, bytereceived = (yield from test_speed(count, 255))
+        self.assertEqual(bytereceived, self.tm.state(state=self.tm.sh.STATES.STOP))
+        def test_enter_state_speed(count, state, fsm = self.tm.sh.receiver):
+            delta = 0
+            while (fsm.decoding[(yield fsm.state)] != state):
+                delta += 1
+                if delta>100:
+                    raise Exception(f"Reached {fsm.decoding[(yield fsm.state)]} not {state}")
+                yield
+            return count+delta
+        count = (yield from test_enter_state_speed(count, 'WRITE'))
+        count = (yield from test_enter_state_speed(count, 'IDLE'))
+        #print(f"Writing 1 byte to memory takes {count} ticks")
+        # NOTE: command byte is ignored
+        #       it might be that one byte requires 3 transactions as memory is full
+        #       part of circuit operates at 100E6 and part of 50E6 Hz
+        #crystal = 50E6
+        #print(f"Speed of laser must be lower than  {(crystal*8)/(count*1E6):.2f} Mhz")
 
     @_test_decorator(simulatediode=True)
     def test_scanlineringbuffer(self):
         '''test scanline with write using ring buffer
         '''
-        lines = [[1,0], [1,1], [0,1]]
-        for line in lines: yield from self.tm.writeline(line)
-        yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, self.tm.state(state=self.tm.sh.STATES.STOP))
-        for line in lines: yield from self.tm.checkline(line)
-
+        for i in range(3):
+            lines = [[1,0], [1,1], [0,1]] 
+            for line in lines: yield from self.tm.writeline(line)
+            if not i:
+                yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, self.tm.state(state=self.tm.sh.STATES.STOP))
+            else:
+                yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, self.tm.state(state=self.tm.sh.STATES.STOP,
+                                                                                errors=[self.tm.sh.ERRORS.MEMREAD]))
+            for line in lines: yield from self.tm.checkline(line)
+            yield from self.tm.checkreply(self.tm.sh.COMMANDS.STOP, self.tm.state(state=self.tm.sh.STATES.START,
+                                                                                errors=[self.tm.sh.ERRORS.MEMREAD]))
+            yield from checkenterstate(self.tm.sh.laserfsm, 'STOP')
 
 if __name__ == '__main__':
     unittest.main()

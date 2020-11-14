@@ -90,7 +90,8 @@ class Machine:
         grabs state and error bits
         '''
         if byte is None: byte = self.spi.xfer([self.sh.COMMANDS.STATUS])[0]
-        errors = [int(i) for i in list('{0:0b}'.format(byte&0b11111))]
+        errors = [int(i) for i in list('{0:0b}'.format(byte&0b111111))]
+        errors.reverse()
         return {'statebits': byte>>5, 'errorbits': errors}
 
     def status(self, byte=None):
@@ -178,10 +179,8 @@ class Machine:
 
     def writeline(self, bitlst, bitorder = 'little'):
         '''
-        writes bytelst to memory
-        if bytelst is empty --> last line command is given
-
-        return: the bytes it wasn't able to write if memory gets full
+        writes biylst to memory
+        if bitlst is empty --> last line command is given
         '''
         if len(bitlst) == 0:
             bytelst = [self.sh.INSTRUCTIONS.STOP]
@@ -196,9 +195,10 @@ class Machine:
             self.forcewrite(self.sh.COMMANDS.WRITE_L)
             for _ in range(self.sh.CHUNKSIZE): 
                 try:
-                    self.forcewrite(bytelst.pop())
+                    byte = bytelst.pop()
                 except IndexError:
-                    self.forcewrite(0)
+                    byte = 0    
+                self.forcewrite(0)
 
     def test_photodiode(self):
         '''
