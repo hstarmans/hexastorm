@@ -167,13 +167,13 @@ class TestMachine():
         while state['errorbits'][self.sh.ERRORS.MEMFULL]:
            state = self.get_state((yield from self.spi.xfer([data]))[0])
            trials += 1
-           if trials>10:
-                raise Exception("More than trials required to write to memory")
+           if trials>maxtrials:
+                raise Exception(f"More than {maxtrials} required to write to memory")
 
     def writeline(self, bitlst, bitorder = 'little'):
         '''
         writes bitlist to memory
-        if bytelst is empty --> stop command is send
+        if bytelst is empty --> stop command is sent
         '''
         if len(bitlst) == 0:
             bytelst = [self.sh.INSTRUCTIONS.STOP]

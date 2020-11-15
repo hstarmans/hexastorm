@@ -56,6 +56,7 @@ class Scanhead(Module):
     # one block is 4K bits, there are 32 blocks (officially 20 in HX4K)
     MEMWIDTH = 8  
     MEMDEPTH = 512
+    #TODO: remove line below
     assert (MEMDEPTH%8 == 0) & (MEMDEPTH>=8)
 
 
@@ -128,6 +129,7 @@ class Scanhead(Module):
         # Custom Receiver
         self.submodules.receiver = FSM(reset_state = "IDLE")
         self.receiver.act("RESET",
+            NextValue(writeport.adr, 0),
             NextValue(command, self.COMMANDS.RECVCOMMAND),
             NextState("IDLE")
         )
@@ -252,7 +254,6 @@ class Scanhead(Module):
         readtrig = Signal()
         self.submodules.readmem= FSM(reset_state = "RESET")
         self.readmem.act("RESET",
-            NextValue(writeport.adr, 0),
             NextValue(self.readport.adr, 0),
             NextValue(self.readport.re, 1),
             NextValue(written, 0),
@@ -457,6 +458,7 @@ class Scanhead(Module):
                     NextState("WAIT_END"),
                     NextValue(self.scanbit, 0),
                     NextValue(readbit, 0),
+                    #TODO: this shouldn't be here, you should trigger
                     If(self.VARIABLES['SINGLE_LINE']==1,
                         NextValue(self.error[self.ERRORS.MEMREAD], 0),
                         NextValue(self.readport.adr, 0)  # this is tricky as you don't execute written check

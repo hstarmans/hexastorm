@@ -99,7 +99,7 @@ class Machine:
         prints state machine and list of errors
         '''
         #TODO: this will not work if the machine is receiving
-        if not byte:
+        if byte is None:
             state = self.spi.xfer([self.sh.COMMANDS.STATUS])[0]
         else:
             state = byte
@@ -168,19 +168,21 @@ class Machine:
         reset_pin.on()
         sleep(1)
 
-    def forcewrite(self, data, timeout=15):
+    def forcewrite(self, data, maxtrials=100):
         state = self.get_state((self.spi.xfer([data]))[0])
         assert state['statebits'] in [self.sh.STATES.STOP, self.sh.STATES.START]
-        t = time()
-        while (state['errorbits'][self.sh.ERRORS.MEMFULL] == 1)&((time()-t)<timeout):
+        trials = 0
+        while (state['errorbits'][self.sh.ERRORS.MEMFULL] == 1):
             state = self.get_state((self.spi.xfer([data]))[0])
-        if (time()-t)>timeout:
-            raise Exception("Timeout, memory is full and does not get unloaded")
+            trials += 1
+            if trials>maxtrials:
+                self.reset()
+                raise Exception(f"More than {maxtrials} trials required to write to memory")
 
     def writeline(self, bitlst, bitorder = 'little'):
         '''
-        writes biylst to memory
-        if bitlst is empty --> last line command is given
+        writes bitlst to memory
+        if bitlst is empty --> stop command is sent
         '''
         if len(bitlst) == 0:
             bytelst = [self.sh.INSTRUCTIONS.STOP]
@@ -198,7 +200,7 @@ class Machine:
                     byte = bytelst.pop()
                 except IndexError:
                     byte = 0    
-                self.forcewrite(0)
+                self.forcewrite(byte)
 
     def test_photodiode(self):
         '''
