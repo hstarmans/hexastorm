@@ -173,7 +173,7 @@ class TestMachine():
     def writeline(self, bitlst, bitorder = 'little'):
         '''
         writes bitlist to memory
-        if bytelst is empty --> stop command is sent
+        if bitlst is empty --> stop command is sent
         '''
         if len(bitlst) == 0:
             bytelst = [self.sh.INSTRUCTIONS.STOP]
@@ -297,7 +297,7 @@ class TestScanhead(unittest.TestCase):
         yield from checkpin(self.tm.sh.laser0, value = 1)
         yield from checkenterstate(self.tm.sh.laserfsm, 'STOP')
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.STATUS,
-                                    self.tm.state(errors=[self.tm.sh.ERRORS.NOTSTABLE],
+                                    self.tm.state(errors=[self.tm.sh.ERRORS.NOTSTABLE, self.tm.sh.ERRORS.MEMREAD],
                                           state=self.tm.sh.STATES.STOP))
 
     @_test_decorator(simulatediode=True)
@@ -326,9 +326,9 @@ class TestScanhead(unittest.TestCase):
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, self.tm.state(state=self.tm.sh.STATES.STOP))
         yield from checkenterstate(self.tm.sh.laserfsm, 'STATE_WAIT_STABLE')
         yield from checkenterstate(self.tm.sh.laserfsm, 'READ_INSTRUCTION')
-        yield from checkenterstate(self.tm.sh.laserfsm, 'WAIT_END')
+        yield from checkenterstate(self.tm.sh.laserfsm, 'STOP')
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.STOP, self.tm.state(errors=[self.tm.sh.ERRORS.INVALIDLINE],
-                                                                              state=self.tm.sh.STATES.START))
+                                                                              state=self.tm.sh.STATES.STOP))
 
     @_test_decorator(simulatediode=True)
     def test_stopscanline(self):
