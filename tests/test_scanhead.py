@@ -13,7 +13,7 @@ class TestScanhead(unittest.TestCase):
         if flash:
             cls.sh.flash(recompile=True, removebuild=True)
         else:
-            print("resetting the machine")
+            print("Resetting the machine")
             cls.sh.reset()
         cls.STABLE_TIME = round(Scanhead.VARIABLES['SPINUP_TIME']+Scanhead.VARIABLES['STABLE_TIME']+2)
 
@@ -93,31 +93,27 @@ class TestScanhead(unittest.TestCase):
     def test_scanlineringbuffer(self):
         '''test scanline with write using ring buffer
         '''
-        #TODO: you can't write multiple lines without getting invalid
-        # 432 --> 54 byte
-        # 438 bits in een scanline
-        # there can be 10 lines in memory
-        maximum = 4
+        #there can be 10 lines in memory
+        maximum = 5
         for i in range(maximum):
             print(i)
             self.sh.writeline([0]*self.sh.sh.BITSINSCANLINE)
-        self.sh.writeline([])
         self.sh.start()
         sleep(self.STABLE_TIME)
-        #for line in range(1):
-        #    self.sh.writeline([]*self.sh.sh.BITSINSCANLINE)
-        #     print(f"Writing line number {line}")
-        #     if line%2 == 0:
-        #         res = self.sh.writeline([1]*self.sh.sh.BITSINSCANLINE)
-        #     else:
-        #         res = self.sh.writeline([0]*self.sh.sh.BITSINSCANLINE)
-        # self.sh.writeline([])
-        # sleep(self.STABLE_TIME)
-        self.stateEqual(state = Scanhead.STATES.STOP) #, errors=[Scanhead.ERRORS.MEMREAD])
+        for line in range(1000):
+            print(f"Writing line number {line}")
+            if line%2 == 0:
+                res = self.sh.writeline([1]*self.sh.sh.BITSINSCANLINE)
+            else:
+                res = self.sh.writeline([0]*self.sh.sh.BITSINSCANLINE)
+            #TODO: if you don't sleep between lines --> it will crash
+            sleep(0.01)
+        self.sh.writeline([])
+        sleep(self.STABLE_TIME)
+        self.stateEqual(state = Scanhead.STATES.STOP)
 
     def test_memory(self):
         'test if memory full is raised when writing to memory'
-        for _, item in self.sh.get_state().items(): self.assertFalse(item)
         for _ in range(Scanhead.MEMDEPTH//Scanhead.CHUNKSIZE):
             self.assertEqual(self.sh.spi.xfer([Scanhead.COMMANDS.WRITE_L]), self.sh.state(state=Scanhead.STATES.STOP))
             for _ in range(Scanhead.CHUNKSIZE): self.stateEqual(state=Scanhead.STATES.STOP)

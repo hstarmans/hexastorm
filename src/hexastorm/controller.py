@@ -175,7 +175,9 @@ class Machine:
         while (state['errorbits'][self.sh.ERRORS.MEMFULL] == 1):
             state = self.get_state((self.spi.xfer([data]))[0])
             trials += 1
+            sleep(0.1)
             if trials>maxtrials:
+                self.status()
                 self.reset()
                 raise Exception(f"More than {maxtrials} trials required to write to memory")
 

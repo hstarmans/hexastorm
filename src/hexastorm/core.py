@@ -73,6 +73,10 @@ class Scanhead(Module):
             self.MEMDEPTH = bytesinline + 1  # command byte is equal to 1
         elif (self.MEMWIDTH*self.MEMDEPTH)//self.BITSINSCANLINE<5:
             raise Exception("Memory too small for 5 lines")
+        else:
+            bytesinline = math.ceil(self.BITSINSCANLINE/8)
+            #TODO: if you don't have a nice integer number ringbuffer will crash
+            self.MEMDEPTH = 5*(bytesinline + 1)
         # clock; routing was not able to reach speed higher than 70 MHz
         #        for entire circuit on iCE40, so clock is contraint to 50 MHz
         clk100 = platform.request('clk100')
@@ -276,6 +280,8 @@ class Scanhead(Module):
                NextValue(self.error[self.ERRORS.MEMREAD], 1),
             ).
             Else(
+                #TODO: you could split into two signals --> one if ever memread occured, other memread signal
+                NextValue(self.error[self.ERRORS.MEMREAD], 0),
                 NextValue(self.dat_r_new, self.readport.dat_r),
                 # increase address after succesfull read
                 If(self.readport.adr+1==self.MEMDEPTH,
@@ -421,6 +427,7 @@ class Scanhead(Module):
             NextValue(self.tickcounter, self.tickcounter+1),
             If(readtrig == 0,
                If(self.error[self.ERRORS.MEMREAD] == 1,
+                   NextValue(readtrig, 1),
                    NextState("WAIT_END")
                ).
                Elif(self.dat_r_new == self.INSTRUCTIONS.STOP,
