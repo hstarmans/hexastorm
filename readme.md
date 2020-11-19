@@ -55,6 +55,7 @@ The following parameters describe the system. <br>
 Using the above, the code determines the number of bits in a scanline. Via a serial port interface the user can push data to the scanner.
 A line is preceded with a command which can be SCAN or STOP. The data is stored on the chip in block ram. 
 Once turned on, the scanner reads out this memory via First In First Out (FIFO).
+
 ## Commands
 | command | reply |
 |---|---|
