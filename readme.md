@@ -9,11 +9,34 @@ The bill of materials (BOM) and links to FreeCad and PCB designs can be found on
 The code took most inspiration from [LDGraphy](https://github.com/hzeller/ldgraphy).
 
 ## Install Notes
-Install [litex](https://github.com/enjoy-digital/litex), make a special folder for this installation.
-For setting the power to laser over ic, you need to install smbus2. <br>
-Python packages can be installed from apio to enable the toolchain. Apio nextpnr currently comes without python support.
-[yowasp](http://yowasp.org/) comes with python support but only works on a X86 system. Yowasp takes a lot of time to run the first time.
-The FPGA toolchain can be build from source via [ICE40](http://www.clifford.at/icestorm/). 
+On Raspberry, install libatlas so latest Numpy can be installed via pip.
+```console
+sudo apt update
+sudo apt install libatlas3-base
+```
+Install required libraries
+```
+pip3 install requirements.txt
+```
+Make folder and install litex, this install a lot!
+```
+mkdir ~/litex
+cd ~/litex
+wget https://raw.githubusercontent.com/enjoy-digital/litex/master/litex_setup.py
+./litex_setup.py init install --user
+```
+Install Hexastorm in develop mode so you can edit.
+```
+python setup.py develop
+```
+Install ice40 and yosys
+```
+apio install yosys
+apio install ice40
+```
+An alternative to apio is yowasp or compile from source. Apio is chosen as compilation takes a long time on a Raspberry.
+[Yowasp](http://yowasp.org/) comes with python support but only works on a X86 system. Yowasp takes a lot of time to run the first time.
+The FPGA toolchain can be build from source via [ICE40](http://www.clifford.at/icestorm/).
 
 ## Parameters
 The following parameters describe the system. <br>
@@ -31,8 +54,7 @@ The following parameters describe the system. <br>
 <br>
 Using the above, the code determines the number of bits in a scanline. Via a serial port interface the user can push data to the scanner.
 A line is preceded with a command which can be SCAN or STOP. The data is stored on the chip in block ram. 
-If turned on the scanner reads out this memory via First In First Out (FIFO).
-
+Once turned on, the scanner reads out this memory via First In First Out (FIFO).
 ## Commands
 | command | reply |
 |---|---|
@@ -71,11 +93,9 @@ Examples used to gain experience with migen.
 ### I2C
 In the current scanhead, I2C is used to set the power of the laser via a digipot.
 I2C can be enabled on the Raspberry Pi as [follows](https://pimylifeup.com/raspberry-pi-i2c/).
-
 ```console
 i2cdetect -y 1
 ```
-
 This will produce output, here 28 is the address of the I2C device.
 ```console
      0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f
@@ -87,13 +107,6 @@ This will produce output, here 28 is the address of the I2C device.
 50: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
 60: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
 70: -- -- -- -- -- -- -- --
-```
-## Install Numpy
-```console
-sudo apt update
-sudo apt remove python3-numpy
-sudo apt install libatlas3-base
-sudo pip3 install numpy
 ```
 <!-- 
 TODO:

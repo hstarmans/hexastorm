@@ -107,6 +107,7 @@ class TestScanhead(unittest.TestCase):
             else:
                 res = self.sh.writeline([0]*self.sh.sh.BITSINSCANLINE)
             #TODO: if you don't sleep between lines --> it will crash
+            #      system needs some time to react to SPI byte
             sleep(0.01)
         self.sh.writeline([])
         sleep(self.STABLE_TIME)
