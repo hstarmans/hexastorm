@@ -15,22 +15,22 @@ sudo apt update
 sudo apt install libatlas3-base
 ```
 Install required libraries
-```
+```console
 pip3 install requirements.txt
 ```
 Make folder and install litex, this install a lot!
-```
+```console
 mkdir ~/litex
 cd ~/litex
 wget https://raw.githubusercontent.com/enjoy-digital/litex/master/litex_setup.py
 ./litex_setup.py init install --user
 ```
 Install Hexastorm in develop mode so you can edit.
-```
+```console
 python setup.py develop
 ```
 Install ice40 and yosys
-```
+```console
 apio install yosys
 apio install ice40
 ```
@@ -87,7 +87,7 @@ Next step would be to create a copy of [beagleg](https://github.com/hzeller/beag
 In a later stage, they might be merged.
 
 ## Other notes
-### Migen examles
+### Migen examples
 Examples used to gain experience with migen.
 
 ### I2C
