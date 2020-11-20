@@ -7,10 +7,8 @@ import numpy as np
 from gpiozero import LED
 from smbus2 import SMBus
 
-import hexastorm.controller
-import hexastorm.core
-import hexastorm.board
-import hexastorm as hs
+from hexastorm.core import Scanhead
+import hexastorm.board as board
 
 class Machine:
     '''
@@ -24,7 +22,7 @@ class Machine:
         if not connected to hardware implentation
         connect to a virtual model, see virtual test
         '''
-        self.sh = hs.core.Scanhead(hs.board.Platform())
+        self.sh = Scanhead(board.Platform())
         # IC bus used to set power laser
         self.bus = SMBus(self.ic_dev_nr)
         # SPI to sent data to scanner
@@ -38,7 +36,7 @@ class Machine:
         '''
         return if system is in single facet mode
         '''
-        return hs.core.Scanhead.VARIABLES['SINGLE_FACET']
+        return Scanhead.VARIABLES['SINGLE_FACET']
 
     @single_facet.setter
     def single_facet(self, val):
@@ -48,7 +46,7 @@ class Machine:
         You need to run flash to push settings to head
         '''
         assert isinstance(val, bool)
-        hs.core.Scanhead.VARIABLES['SINGLE_FACET'] = val
+        Scanhead.VARIABLES['SINGLE_FACET'] = val
 
 
     @property
@@ -56,7 +54,7 @@ class Machine:
         '''
         return if system is in single line mode
         '''
-        return hs.core.Scanhead.VARIABLES['SINGLE_LINE']
+        return Scanhead.VARIABLES['SINGLE_LINE']
 
     @single_line.setter
     def single_line(self, val):
@@ -66,7 +64,7 @@ class Machine:
         You need to run flash to push settings to head
         '''
         assert isinstance(val, bool)
-        hs.core.Scanhead.VARIABLES['SINGLE_LINE'] = val
+        Scanhead.VARIABLES['SINGLE_LINE'] = val
 
     @property
     def laser_power(self):
@@ -92,9 +90,11 @@ class Machine:
         if byte is None: byte = self.spi.xfer([self.sh.COMMANDS.STATUS])[0]
         errors = [int(i) for i in list('{0:0b}'.format(byte&0b111111))]
         errors.reverse()
+        # pad the list to 5
+        for i in range(len(errors), 5): errors.append(0)
         return {'statebits': byte>>5, 'errorbits': errors}
 
-    def status(self, byte=None):
+    def status(self, byte=None, verbose=True):
         '''
         prints state machine and list of errors
         '''
@@ -103,20 +103,21 @@ class Machine:
             state = self.spi.xfer([self.sh.COMMANDS.STATUS])[0]
         else:
             state = byte
-        if state == 255:
-            print("Error; check reset pin is high and binary is correct")
-            return
+        if state == 255: raise Exception("Check reset pin is high and binary is correct")
         errors = [int(i) for i in list('{0:0b}'.format(state&0b11111))]
         errors.reverse()
+        error_string = 'None'
         if max(errors)>0:
-            print("Detected errors; ", end='')
+            error_string = ''
             for idx, val in enumerate(errors):
                 if val>0:
                     error = list(self.sh.ERRORS._asdict())[idx]
-                    print(error, end=' ')
-            print() # to endline
+                    error_string += error + ' '
         machinestate = list(self.sh.STATES._asdict())[state>>5]
-        print(f"The machine state is {machinestate}")
+        if verbose:
+            print(f"The machine state is {machinestate}")
+            print(f"The error are {error_string}")
+        return machinestate, error_string
 
     def start(self):
         '''
@@ -148,7 +149,8 @@ class Machine:
         '''
         self.spi.xfer([self.sh.COMMANDS.MOTORTEST])
 
-    def state(self, errors=[], state=hs.core.Scanhead.STATES.STOP):
+    #NOTE: this function might be refactored
+    def state(self, errors=[], state=Scanhead.STATES.STOP):
         ''' 
         given a list of errors and a certain state
         this function returns the state encoding
@@ -156,7 +158,7 @@ class Machine:
         errorstate = 0
         for error in errors: errorstate += pow(2, error)
         val = errorstate + (state<<5)
-        return [val]
+        return val
 
     def reset(self, pin=26):
         '''
@@ -170,7 +172,6 @@ class Machine:
 
     def forcewrite(self, data, maxtrials=100):
         state = self.get_state((self.spi.xfer([data]))[0])
-        assert state['statebits'] in [self.sh.STATES.STOP, self.sh.STATES.START]
         trials = 0
         while (state['errorbits'][self.sh.ERRORS.MEMFULL] == 1):
             state = self.get_state((self.spi.xfer([data]))[0])
@@ -180,11 +181,11 @@ class Machine:
                 self.status()
                 self.reset()
                 raise Exception(f"More than {maxtrials} trials required to write to memory")
-
-    def writeline(self, bitlst, bitorder = 'little'):
+    
+    def bittobytelist(self, bitlst, bitorder = 'little'):
         '''
-        writes bitlst to memory
-        if bitlst is empty --> stop command is sent
+        converts bitlst to bytelst
+        if bytelst is empty stop command is sent
         '''
         if len(bitlst) == 0:
             bytelst = [self.sh.INSTRUCTIONS.STOP]
@@ -195,14 +196,31 @@ class Machine:
             bytelst = np.packbits(bitlst, bitorder=bitorder).tolist()
             bytelst = [self.sh.INSTRUCTIONS.SCAN] + bytelst
         bytelst.reverse()
+        return bytelst
+
+    def genwritebytes(self, bytelst):
+        '''
+        writes bytelst to memory
+
+        generator notation to facilitate sharing function with virtual object
+        '''
         for _ in range(math.ceil(len(bytelst)/self.sh.CHUNKSIZE)):
-            self.forcewrite(self.sh.COMMANDS.WRITE_L)
+            yield self.sh.COMMANDS.STATUS
+            yield self.sh.COMMANDS.WRITE_L
             for _ in range(self.sh.CHUNKSIZE): 
                 try:
-                    byte = bytelst.pop()
+                    yield bytelst.pop()
                 except IndexError:
-                    byte = 0    
-                self.forcewrite(byte)
+                    yield 0    
+
+    def writeline(self, bitlst, bitorder = 'little'):
+        '''
+        writes bitlst to memory
+        if bitlst is empty --> stop command is sent
+        '''
+        bytelst = self.bittobytelist(bitlst)
+        for byte in self.genwritebytes(bytelst):
+            self.forcewrite(byte)
 
     def test_photodiode(self):
         '''
@@ -223,8 +241,8 @@ class Machine:
 
     def flash(self, recompile=False, removebuild=False):
         build_name = 'scanhead'
-        plat = hs.board.Platform() #this object gets depleted, io objects get removed from list if requested
-        self.sh = hs.core.Scanhead(plat)  #needs reinit to update settings
+        plat = board.Platform() #this object gets depleted, io objects get removed from list if requested
+        self.sh = Scanhead(plat)  #needs reinit to update settings
         if recompile: 
             if os.path.isdir('build'):
                 plat.removebuild()

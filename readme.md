@@ -18,7 +18,7 @@ Install required libraries
 ```console
 pip3 install requirements.txt
 ```
-Make folder and install litex, this install a lot!
+Make folder and install litex, this downloads and installs a lot!
 ```console
 mkdir ~/litex
 cd ~/litex
@@ -67,7 +67,6 @@ Once turned on, the scanner reads out this memory via First In First Out (FIFO).
 | LINETEST | turn on the laser and the motor|
 | PHOTODIODETEST | turn on motor, laser and turn off if photodiode is triggered|
 | WRITE_L | next byte will be stored in memory |
-| READ_D | retrieve debug information, not used |
 <br>
 
 ## Detailed description

@@ -109,10 +109,10 @@ class Scanhead(Module):
         self.specials += writeport, self.readport
         self.ios = {writeport.adr, writeport.dat_w, writeport.we, self.readport.dat_r, self.readport.adr, self.readport.re}
         readbit = Signal(max = self.MEMWIDTH)
-        self.writebyte = Signal(max=self.MEMWIDTH)
+        self.chunkcnt = Signal(max=self.CHUNKSIZE+1)
         written = Signal()
-        self.dat_r_new = Signal(max= self.MEMWIDTH)
-        dat_r_old = Signal(max= self.MEMWIDTH)
+        self.dat_r_new = Signal(self.MEMWIDTH)
+        dat_r_old = Signal(self.MEMWIDTH)
         # Receiver State Machine
         # Consists out of component from litex and own custom component
         # Detects whether new command is available
@@ -135,51 +135,49 @@ class Scanhead(Module):
         self.comb += start_rise.eq(spislave.start & ~start_d)
         self.sync += self.error[self.ERRORS.MEMFULL].eq((writeport.adr==self.readport.adr)&(written==1)&(self.VARIABLES['SINGLE_LINE']==False))
         # Custom Receiver
+        #  Receiver should be faster than SPI transaction!
         self.submodules.receiver = FSM(reset_state = "IDLE")
         self.receiver.act("RESET",
             NextValue(writeport.adr, 0),
             NextValue(command, self.COMMANDS.RECVCOMMAND),
+            NextValue(spislave.miso, Cat([self.laserfsmstate, self.error])),
             NextState("IDLE")
         )
+        spi_mosi = Signal(self.MEMWIDTH)
         self.receiver.act("IDLE",
-                NextValue(spislave.miso, Cat([self.error, self.laserfsmstate])),
-                If(start_rise,
-                    NextState("WAITFORDONE")
-                )
-        )
-        self.receiver.act("WAITFORDONE",
+            NextValue(spislave.miso, Cat([self.error, self.laserfsmstate])),
             If(done_rise,
+                NextValue(spi_mosi, spislave.mosi),
                 NextState("PROCESSINPUT")
+            ).
+            Else(
+                NextState("IDLE")
             )
         )
+        # command is now used as extra parameter for state and makes it more confusing
         self.receiver.act("PROCESSINPUT",
-            NextState("IDLE"),
             # Read Header
             If(command == self.COMMANDS.RECVCOMMAND,
-                If(spislave.mosi == self.COMMANDS.STOP,
+                NextState("IDLE"),
+                If(spi_mosi == self.COMMANDS.STOP,
                     NextValue(self.laserfsmstate, self.STATES.STOP)
                 ).
-                Elif(spislave.mosi == self.COMMANDS.START,
+                Elif(spi_mosi == self.COMMANDS.START,
                     NextValue(self.laserfsmstate, self.STATES.START)
                 ).
-                Elif(spislave.mosi == self.COMMANDS.LASERTEST,
+                Elif(spi_mosi == self.COMMANDS.LASERTEST,
                     NextValue(self.laserfsmstate, self.STATES.LASERTEST)
                 ).
-                Elif(spislave.mosi == self.COMMANDS.MOTORTEST,
+                Elif(spi_mosi == self.COMMANDS.MOTORTEST,
                     NextValue(self.laserfsmstate, self.STATES.MOTORTEST)
                 ).
-                Elif(spislave.mosi == self.COMMANDS.LINETEST,
+                Elif(spi_mosi == self.COMMANDS.LINETEST,
                     NextValue(self.laserfsmstate, self.STATES.LINETEST)
                 ).
-                Elif(spislave.mosi == self.COMMANDS.PHOTODIODETEST,
+                Elif(spi_mosi == self.COMMANDS.PHOTODIODETEST,
                     NextValue(self.laserfsmstate, self.STATES.PHOTODIODETEST)
                 ).
-                Elif(spislave.mosi == self.COMMANDS.READ_D,
-                    NextValue(command, self.COMMANDS.READ_D),
-                    #NOTE doesn't work as you jump to idle where miso is changed
-                    NextValue(spislave.miso, debug)
-                ).
-                Elif(spislave.mosi == self.COMMANDS.WRITE_L,
+                Elif(spi_mosi == self.COMMANDS.WRITE_L,
                     # only switch to write stage if memory is not full
                     If(self.error[self.ERRORS.MEMFULL]==1,
                         NextValue(command, self.COMMANDS.RECVCOMMAND)
@@ -188,8 +186,8 @@ class Scanhead(Module):
                         NextValue(command, self.COMMANDS.WRITE_L)
                     )
                 ).
-                Elif(spislave.mosi == self.COMMANDS.STATUS).
-                Elif(spislave.mosi != 0,
+                Elif(spi_mosi == self.COMMANDS.STATUS).
+                Elif(spi_mosi != 0,
                     NextValue(self.error[self.ERRORS.INVALID], 1)
                 )
                 # TODO: there seem to be zero commands being sent over?
@@ -197,23 +195,17 @@ class Scanhead(Module):
             ).
             # Read data after header; only applicable for debug or write line
             Else(
-                If(command == self.COMMANDS.READ_D,
-                    NextValue(command, self.COMMANDS.RECVCOMMAND),
+                NextValue(written, 1),
+                NextValue(writeport.dat_w, spi_mosi),
+                NextValue(writeport.we, 1),
+                NextState("WRITE"),
+                If(self.chunkcnt>=self.CHUNKSIZE-1,
+                    NextValue(self.chunkcnt, 0),
+                    NextValue(command, self.COMMANDS.RECVCOMMAND)
                 ).
-                # command must be WRITE_L
-                Else(
-                    NextValue(written, 1),
-                    NextValue(writeport.dat_w, spislave.mosi),
-                    NextValue(writeport.we, 1),
-                    NextState("WRITE"),
-                    If(self.writebyte>=self.CHUNKSIZE-1,
-                        NextValue(self.writebyte, 0),
-                        NextValue(command, self.COMMANDS.RECVCOMMAND)
-                    ).
-                    Else(NextValue(self.writebyte, self.writebyte+1)
-                    )
+                Else(NextValue(self.chunkcnt, self.chunkcnt+1)
                 )
-            )
+                )
         )
         self.receiver.act("WRITE",
             If(writeport.adr+1==self.MEMDEPTH,

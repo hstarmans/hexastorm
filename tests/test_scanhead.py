@@ -37,14 +37,14 @@ class TestScanhead(unittest.TestCase):
         self.sh.reset()
     
     def stateEqual(self, state, errors=[]):
-        val = self.sh.spi.xfer([Scanhead.COMMANDS.STATUS])
+        val = self.sh.spi.xfer([Scanhead.COMMANDS.STATUS])[0]
         val1 =  self.sh.state(state = state, errors = errors)
         try:
             super().assertEqual(val, val1)
         except AssertionError as e:
-            self.sh.status(byte=val[0])  # prints text
+            self.sh.status(byte=val)  # prints text
             print('not equal to')
-            self.sh.status(byte=val1[0]) # prints text
+            self.sh.status(byte=val1) # prints text
             self.sh.reset()
             raise Exception("states not equal")
 
@@ -100,26 +100,26 @@ class TestScanhead(unittest.TestCase):
             self.sh.writeline([0]*self.sh.sh.BITSINSCANLINE)
         self.sh.start()
         sleep(self.STABLE_TIME)
-        for line in range(1000):
+        for line in range(100):
             print(f"Writing line number {line}")
             if line%2 == 0:
                 res = self.sh.writeline([1]*self.sh.sh.BITSINSCANLINE)
             else:
                 res = self.sh.writeline([0]*self.sh.sh.BITSINSCANLINE)
             #TODO: if you don't sleep between lines --> it will crash
-            #      system needs some time to react to SPI byte
+            #      system needs empty memory, your memory full doesn't propagate fast enough
             sleep(0.01)
         self.sh.writeline([])
         sleep(self.STABLE_TIME)
         self.stateEqual(state = Scanhead.STATES.STOP)
 
     def test_memory(self):
-        'test if memory full is raised when writing to memory'
-        for _ in range(Scanhead.MEMDEPTH//Scanhead.CHUNKSIZE):
-            self.assertEqual(self.sh.spi.xfer([Scanhead.COMMANDS.WRITE_L]), self.sh.state(state=Scanhead.STATES.STOP))
-            for _ in range(Scanhead.CHUNKSIZE): self.stateEqual(state=Scanhead.STATES.STOP)
+        '''test if memory full is raised when writing to memory'''
+        for i in range(self.sh.sh.MEMDEPTH//self.sh.sh.CHUNKSIZE):
+            self.assertEqual(self.sh.spi.xfer([Scanhead.COMMANDS.WRITE_L])[0], self.sh.state(state=Scanhead.STATES.STOP))
+            for _ in range(self.sh.sh.CHUNKSIZE): self.stateEqual(state=Scanhead.STATES.STOP)
         # quick check if you reached end of memory via invalid command
-        self.assertEqual(self.sh.spi.xfer([255]), self.sh.state(errors = [Scanhead.ERRORS.MEMFULL], state = Scanhead.STATES.STOP))
+        self.assertEqual(self.sh.spi.xfer([255])[0], self.sh.state(errors = [Scanhead.ERRORS.MEMFULL], state = Scanhead.STATES.STOP))
         # the above command is invalid and should be captured
         self.stateEqual(errors=[Scanhead.ERRORS.INVALID, Scanhead.ERRORS.MEMFULL], state=Scanhead.STATES.STOP)
         self.sh.reset()
