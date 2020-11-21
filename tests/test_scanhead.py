@@ -41,7 +41,7 @@ class TestScanhead(unittest.TestCase):
         val1 =  self.sh.statetobyte(state = state, errors = errors)
         try:
             super().assertEqual(val, val1)
-        except AssertionError as e:
+        except AssertionError:
             self.sh.status(byte=val)  # prints text
             print('not equal to')
             self.sh.status(byte=val1) # prints text
@@ -103,9 +103,9 @@ class TestScanhead(unittest.TestCase):
         for line in range(100):
             print(f"Writing line number {line}")
             if line%2 == 0:
-                res = self.sh.writeline([1]*self.sh.sh.BITSINSCANLINE)
+                self.sh.writeline([1]*self.sh.sh.BITSINSCANLINE)
             else:
-                res = self.sh.writeline([0]*self.sh.sh.BITSINSCANLINE)
+                self.sh.writeline([0]*self.sh.sh.BITSINSCANLINE)
             #TODO: if you don't sleep between lines --> it will crash
             #      system needs empty memory, your memory full doesn't propagate fast enough
             sleep(0.01)
@@ -115,7 +115,7 @@ class TestScanhead(unittest.TestCase):
 
     def test_memory(self):
         '''test if memory full is raised when writing to memory'''
-        for i in range(self.sh.sh.MEMDEPTH//self.sh.sh.CHUNKSIZE):
+        for _ in range(self.sh.sh.MEMDEPTH//self.sh.sh.CHUNKSIZE):
             self.assertEqual(self.sh.spi.xfer([Scanhead.COMMANDS.WRITE_L])[0], self.sh.statetobyte(state=Scanhead.STATES.STOP))
             for _ in range(self.sh.sh.CHUNKSIZE): self.stateEqual(state=Scanhead.STATES.STOP)
         # quick check if you reached end of memory via invalid command

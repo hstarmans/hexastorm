@@ -128,12 +128,7 @@ class Scanhead(Module):
         done_rise = Signal()
         self.sync += done_d.eq(spislave.done)
         self.comb += done_rise.eq(spislave.done & ~done_d)
-        # Start detector (could be refactored)
-        start_d = Signal()
-        start_rise = Signal()
-        self.sync += start_d.eq(spislave.start)
-        self.comb += start_rise.eq(spislave.start & ~start_d)
-        self.sync += self.error[self.ERRORS.MEMFULL].eq((writeport.adr==self.readport.adr)&(written==1)&(self.VARIABLES['SINGLE_LINE']==False))
+       
         # Custom Receiver
         #  Receiver should be faster than SPI transaction!
         self.submodules.receiver = FSM(reset_state = "IDLE")
@@ -208,17 +203,33 @@ class Scanhead(Module):
                 )
         )
         self.receiver.act("WRITE",
+            # Write address position
             If(writeport.adr+1==self.MEMDEPTH,
                NextValue(writeport.adr, 0)
             ).
             # wrap around is different in single line mode
             Elif((writeport.adr==math.ceil(self.BITSINSCANLINE/self.MEMWIDTH))&(self.VARIABLES['SINGLE_LINE']==True), 
-                 NextValue(writeport.adr, 0)
+                NextValue(writeport.adr, 0)
             ).
             Else(
-              NextValue(writeport.adr, writeport.adr+1)
+                NextValue(writeport.adr, writeport.adr+1)
             ),
             NextValue(writeport.we, 0),
+            # Memfull trigger
+            If((written==1)&(self.VARIABLES['SINGLE_LINE']==False),
+                If(((writeport.adr+self.CHUNKSIZE+1)>self.readport.adr)&(self.readport.adr>writeport.adr),
+                    NextValue(self.error[self.ERRORS.MEMFULL], 1)
+                ).
+                Elif(((writeport.adr+self.CHUNKSIZE+1-self.MEMDEPTH)>self.readport.adr)&(self.readport.adr<writeport.adr),
+                    NextValue(self.error[self.ERRORS.MEMFULL], 1)
+                ).
+                Else(
+                    NextValue(self.error[self.ERRORS.MEMFULL], 0)
+                )
+            ).
+            Else(
+                NextValue(self.error[self.ERRORS.MEMFULL], 0)
+            ),
             NextState("IDLE")
         )
         # the original motor driver was designed for 6 facets and pulsed for eached facet

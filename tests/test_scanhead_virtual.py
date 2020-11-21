@@ -192,7 +192,9 @@ class TestScanhead(unittest.TestCase):
         #TODO: memdepth is overwritten
         depth = self.tm.sh.MEMDEPTH
         for i in range(depth//Scanhead.CHUNKSIZE):
-            yield from self.tm.spi.xfer([Scanhead.COMMANDS.WRITE_L])
+            statebyte = (yield from self.tm.spi.xfer([Scanhead.COMMANDS.WRITE_L]))[0]
+            state = self.tm.bytetostate(statebyte)
+            self.assertEqual(state['errorbits'][self.tm.sh.ERRORS.MEMFULL], 0)
             for _ in range(Scanhead.CHUNKSIZE):
                 yield from self.tm.spi.xfer([i])
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.STATUS, state=self.tm.sh.STATES.STOP, errors=[self.tm.sh.ERRORS.MEMFULL])
