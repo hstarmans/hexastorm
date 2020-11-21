@@ -27,7 +27,7 @@ class FakeSpi():
         return byte_received
 
 def checkpin(pin, value=0, maxticks=100):
-    '''do max ticks until pin reaches value'''
+    '''do maxticks until pin reaches value'''
     ticks = 0
     while (yield pin) != value:
         ticks += 1
@@ -36,7 +36,7 @@ def checkpin(pin, value=0, maxticks=100):
         yield
 
 def getstate(fsm):
-    '''retrieves encoding of state'''
+    '''retrieves encoding of state of finite state machine'''
     return fsm.decoding[(yield fsm.state)]
 
 def checkenterstate(fsm, wait_state, maxticks=100):
@@ -55,13 +55,14 @@ class TestMachine(Machine):
         self.clocks = {"sys": 20, 'clk100':10}
         self.ticksinfacet = 18
         self.laserticks = 4
+        #TODO: MEMDEPTH is actually overwritten, make a decision here
         sh.MEMDEPTH = 8
         sh.CHUNKSIZE = 1
         sh.VARIABLES['CRYSTAL_HZ']= round(self.ticksinfacet*sh.VARIABLES['FACETS']
                                           *sh.VARIABLES['RPM']/60)
         sh.VARIABLES['LASER_HZ'] = sh.VARIABLES['CRYSTAL_HZ']/self.laserticks
         sh.VARIABLES['SPINUP_TIME'] = 10/sh.VARIABLES['CRYSTAL_HZ']
-        sh.VARIABLES['STABLE_TIME'] = 30/sh.VARIABLES['CRYSTAL_HZ']
+        sh.VARIABLES['STABLE_TIME'] = 50/sh.VARIABLES['CRYSTAL_HZ']  #TODO: stop scanline seems to affect the stable thresh?! can be 30 without stopline
         sh.VARIABLES['START%'] = 2/self.ticksinfacet
         scanbits = 2
         Scanhead.VARIABLES['END%'] = (self.laserticks*scanbits)/self.ticksinfacet + sh.VARIABLES['START%']
@@ -78,7 +79,7 @@ class TestMachine(Machine):
         '''
         data_received = (yield from self.spi.xfer([command]))[0]
         try:
-            assert data_received == self.state(errors = errors, state=state)
+            assert data_received == self.statetobyte(errors=errors, state=state)
         except AssertionError:
             machine_state, error_string = self.status(byte=data_received, verbose=False)
             raise Exception(f"State {machine_state} and errors {error_string} not expected")
@@ -97,10 +98,10 @@ class TestMachine(Machine):
                 yield
 
     def forcewrite(self, data, maxtrials=10):
-        state = self.get_state((yield from self.spi.xfer([data]))[0])
+        state = self.bytetostate((yield from self.spi.xfer([data]))[0])
         trials = 0
         while state['errorbits'][self.sh.ERRORS.MEMFULL]:
-           state = self.get_state((yield from self.spi.xfer([data]))[0])
+           state = self.bytetostate((yield from self.spi.xfer([data]))[0])
            trials += 1
            if trials>maxtrials:
                 raise Exception(f"More than {maxtrials} required to write to memory")
@@ -188,7 +189,7 @@ class TestScanhead(unittest.TestCase):
 
     @_test_decorator()
     def test_memory(self):
-        #TODO: Scanhead.MEMDEPTH is 8 but this one is 10?
+        #TODO: memdepth is overwritten
         depth = self.tm.sh.MEMDEPTH
         for i in range(depth//Scanhead.CHUNKSIZE):
             yield from self.tm.spi.xfer([Scanhead.COMMANDS.WRITE_L])
@@ -292,6 +293,7 @@ class TestScanhead(unittest.TestCase):
     def test_writespeed(self, verbose=False):
         '''test speed to write 1 byte to memory and give estimate for max laser speed
         '''
+        #NOTE: this is not really a test, bit of experimental work
         def test_speed(count, byte):
             yield self.tm.spi.spimaster.mosi.eq(byte)
             yield self.tm.spi.spimaster.length.eq(8)
@@ -308,9 +310,9 @@ class TestScanhead(unittest.TestCase):
             return count, byte_received
         count = 0
         count, bytereceived = (yield from test_speed(count, self.tm.sh.COMMANDS.WRITE_L))
-        self.assertEqual(bytereceived, self.tm.state(state=self.tm.sh.STATES.STOP))
+        self.assertEqual(bytereceived, self.tm.statetobyte(state=self.tm.sh.STATES.STOP))
         count, bytereceived = (yield from test_speed(count, 255))
-        self.assertEqual(bytereceived, self.tm.state(state=self.tm.sh.STATES.STOP))
+        self.assertEqual(bytereceived, self.tm.statetobyte(state=self.tm.sh.STATES.STOP))
         def test_enter_state_speed(count, state, fsm = self.tm.sh.receiver):
             delta = 0
             while (fsm.decoding[(yield fsm.state)] != state):

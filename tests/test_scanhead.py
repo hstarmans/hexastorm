@@ -38,7 +38,7 @@ class TestScanhead(unittest.TestCase):
     
     def stateEqual(self, state, errors=[]):
         val = self.sh.spi.xfer([Scanhead.COMMANDS.STATUS])[0]
-        val1 =  self.sh.state(state = state, errors = errors)
+        val1 =  self.sh.statetobyte(state = state, errors = errors)
         try:
             super().assertEqual(val, val1)
         except AssertionError as e:
@@ -116,10 +116,10 @@ class TestScanhead(unittest.TestCase):
     def test_memory(self):
         '''test if memory full is raised when writing to memory'''
         for i in range(self.sh.sh.MEMDEPTH//self.sh.sh.CHUNKSIZE):
-            self.assertEqual(self.sh.spi.xfer([Scanhead.COMMANDS.WRITE_L])[0], self.sh.state(state=Scanhead.STATES.STOP))
+            self.assertEqual(self.sh.spi.xfer([Scanhead.COMMANDS.WRITE_L])[0], self.sh.statetobyte(state=Scanhead.STATES.STOP))
             for _ in range(self.sh.sh.CHUNKSIZE): self.stateEqual(state=Scanhead.STATES.STOP)
         # quick check if you reached end of memory via invalid command
-        self.assertEqual(self.sh.spi.xfer([255])[0], self.sh.state(errors = [Scanhead.ERRORS.MEMFULL], state = Scanhead.STATES.STOP))
+        self.assertEqual(self.sh.spi.xfer([255])[0], self.sh.statetobyte(errors = [Scanhead.ERRORS.MEMFULL], state = Scanhead.STATES.STOP))
         # the above command is invalid and should be captured
         self.stateEqual(errors=[Scanhead.ERRORS.INVALID, Scanhead.ERRORS.MEMFULL], state=Scanhead.STATES.STOP)
         self.sh.reset()

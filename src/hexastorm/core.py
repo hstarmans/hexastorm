@@ -44,7 +44,7 @@ class Scanhead(Module):
         If all bits are zero, there is no error.
         Returned is the bit which equals the error
         '''
-        errors = ('MEMFULL', 'MEMREAD', 'NOTSTABLE', 'INVALID', 'INVALIDLINE', 'TIMEOUT')
+        errors = ('MEMFULL', 'MEMREAD', 'NOTSTABLE', 'INVALID', 'INVALIDLINE')
         Errors = namedtuple('Errors', errors, defaults=tuple(range(len(errors))))
         return Errors()
     ERRORS = errors.__func__()

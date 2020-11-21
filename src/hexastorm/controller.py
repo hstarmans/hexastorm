@@ -13,15 +13,12 @@ import hexastorm.board as board
 class Machine:
     '''
     class used to control a laser scanner
+    TODO: you should create an abstact class which can be implemented by virtual or real machine
     '''
     ic_dev_nr = 1
     ic_address = 0x28
     
     def __init__(self):
-        '''
-        if not connected to hardware implentation
-        connect to a virtual model, see virtual test
-        '''
         self.sh = Scanhead(board.Platform())
         # IC bus used to set power laser
         self.bus = SMBus(self.ic_dev_nr)
@@ -34,7 +31,7 @@ class Machine:
     @property
     def single_facet(self):
         '''
-        return if system is in single facet mode
+        true if system is in single facet mode
         '''
         return Scanhead.VARIABLES['SINGLE_FACET']
 
@@ -52,7 +49,7 @@ class Machine:
     @property
     def single_line(self):
         '''
-        return if system is in single line mode
+        true if system is in single line mode
         '''
         return Scanhead.VARIABLES['SINGLE_LINE']
 
@@ -68,44 +65,56 @@ class Machine:
 
     @property
     def laser_power(self):
+        '''
+        return laser power in range [0-255]
+        '''
         return self.bus.read_byte_data(self.ic_address, 0)
 
     @laser_power.setter
     def laser_power(self, val):
         '''
-        set laser power to given value in range [0-255]
-        for the laser driver chip. This does not turn on or off the laser.
+        set the maximum laser current of driver chip to given value in range [0-255]
+        This does not turn on or off the laser. 
         
+        Laser will be set to this current if pulsed.
         The laser power can be changed in two ways.
-        First by using one or two channels. Second by settings a value between
+        First by using one or two channels. Second by setting a value between
         0-255 at the laser driver chip.
         '''
         if val < 0 or val > 255: raise Exception('Invalid laser power')
         self.bus.write_byte_data(self.ic_address, 0, val)
 
-    def get_state(self, byte=None):
+    def bytetostate(self, byte=None):
         '''
-        grabs state and error bits
+        seperate the state and error bits from a byte
         '''
         if byte is None: byte = self.spi.xfer([self.sh.COMMANDS.STATUS])[0]
-        errors = [int(i) for i in list('{0:0b}'.format(byte&0b111111))]
+        errors = [int(i) for i in list('{0:0b}'.format(byte&0b11111))]
         errors.reverse()
         # pad the list to 5
-        for i in range(len(errors), 5): errors.append(0)
-        return {'statebits': byte>>5, 'errorbits': errors}
+        for _ in range(len(errors), 5): errors.append(0)
+        return {'state': byte>>5, 'errorbits': errors}
+
+    def statetobyte(self, errors=[], state=Scanhead.STATES.STOP):
+        '''
+        create byte correspdonding to a list of errors and a certain state
+        '''
+        errorstate = 0
+        for error in errors: errorstate += pow(2, error)
+        val = errorstate + (state<<5)
+        return val
 
     def status(self, byte=None, verbose=True):
         '''
-        prints state machine and list of errors
+        prints state machine and list of errors for given byte
+        if verbose is True
+
+        returns the machine state and errors as string
         '''
         #TODO: this will not work if the machine is receiving
-        if byte is None:
-            state = self.spi.xfer([self.sh.COMMANDS.STATUS])[0]
-        else:
-            state = byte
+        bytedict = self.bytetostate(byte)
+        state, errors = bytedict['state'], bytedict['errorbits']
         if state == 255: raise Exception("Check reset pin is high and binary is correct")
-        errors = [int(i) for i in list('{0:0b}'.format(state&0b11111))]
-        errors.reverse()
         error_string = 'None'
         if max(errors)>0:
             error_string = ''
@@ -113,10 +122,10 @@ class Machine:
                 if val>0:
                     error = list(self.sh.ERRORS._asdict())[idx]
                     error_string += error + ' '
-        machinestate = list(self.sh.STATES._asdict())[state>>5]
+        machinestate = list(self.sh.STATES._asdict())[state]
         if verbose:
             print(f"The machine state is {machinestate}")
-            print(f"The error are {error_string}")
+            print(f"The errors are {error_string}")
         return machinestate, error_string
 
     def start(self):
@@ -139,7 +148,7 @@ class Machine:
 
     def test_line(self):
         '''
-        enable laser and motor and create line
+        enable laser and motor which creates line
         '''
         self.spi.xfer([self.sh.COMMANDS.LINETEST])
 
@@ -148,17 +157,6 @@ class Machine:
         enable motor
         '''
         self.spi.xfer([self.sh.COMMANDS.MOTORTEST])
-
-    #NOTE: this function might be refactored
-    def state(self, errors=[], state=Scanhead.STATES.STOP):
-        ''' 
-        given a list of errors and a certain state
-        this function returns the state encoding
-        '''
-        errorstate = 0
-        for error in errors: errorstate += pow(2, error)
-        val = errorstate + (state<<5)
-        return val
 
     def reset(self, pin=26):
         '''
@@ -171,10 +169,10 @@ class Machine:
         sleep(1)
 
     def forcewrite(self, data, maxtrials=100):
-        state = self.get_state((self.spi.xfer([data]))[0])
+        state = self.bytetostate((self.spi.xfer([data]))[0])
         trials = 0
         while (state['errorbits'][self.sh.ERRORS.MEMFULL] == 1):
-            state = self.get_state((self.spi.xfer([data]))[0])
+            state = self.bytetostate((self.spi.xfer([data]))[0])
             trials += 1
             sleep(0.1)
             if trials>maxtrials:
@@ -211,7 +209,7 @@ class Machine:
                 try:
                     yield bytelst.pop()
                 except IndexError:
-                    yield 0    
+                    yield 0
 
     def writeline(self, bitlst, bitorder = 'little'):
         '''
@@ -231,7 +229,7 @@ class Machine:
         self.spi.xfer([self.sh.COMMANDS.PHOTODIODETEST])
         sleep(2)
         res = True
-        if self.get_state()['statebits']!=self.sh.STATES.STOP:
+        if self.bytetostate()['state']!=self.sh.STATES.STOP:
             print("Test failed, stopping")
             self.stop()
         else:
@@ -241,12 +239,13 @@ class Machine:
 
     def flash(self, recompile=False, removebuild=False):
         build_name = 'scanhead'
-        plat = board.Platform() #this object gets depleted, io objects get removed from list if requested
-        self.sh = Scanhead(plat)  #needs reinit to update settings
-        if recompile: 
+        plat = board.Platform()   # this object gets depleted, io objects get removed from list if requested
+        self.sh = Scanhead(plat)  # needs reinit to update settings
+        if recompile:
             if os.path.isdir('build'):
                 plat.removebuild()
-            plat.build(freq=50, core = self.sh, build_name = build_name)
+            plat.build(freq=50, core = self.sh,
+                       build_name = build_name)
         plat.upload(build_name)
         if removebuild:
             plat.removebuild()
