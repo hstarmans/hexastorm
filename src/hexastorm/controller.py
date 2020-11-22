@@ -168,13 +168,12 @@ class Machine:
         reset_pin.on()
         sleep(1)
 
-    def forcewrite(self, data, maxtrials=100):
+    def forcewrite(self, data, maxtrials=1E6):
         state = self.bytetostate((self.spi.xfer([data]))[0])
         trials = 0
         while (state['errorbits'][self.sh.ERRORS.MEMFULL] == 1):
             state = self.bytetostate((self.spi.xfer([data]))[0])
             trials += 1
-            sleep(0.1)
             if trials>maxtrials:
                 self.status()
                 self.reset()

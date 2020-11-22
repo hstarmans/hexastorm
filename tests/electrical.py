@@ -5,7 +5,7 @@ from hexastorm.core import Scanhead
 from hexastorm.controller import Machine
 
 class Tests(unittest.TestCase):
-    ''' Test on a real scanhead with a FPGA'''
+    '''Test on a real scanhead with a FPGA'''
 
     @classmethod
     def setUpClass(cls, flash=True):
@@ -37,9 +37,7 @@ class Tests(unittest.TestCase):
         self.sh.reset()
     
     def stateEqual(self, state, errors=[]):
-        '''helper function which asserts if machine is in given state
-            NOTE: not a test should be moved
-        '''
+        'helper function which asserts if machine is in given state'
         val = self.sh.spi.xfer([Scanhead.COMMANDS.STATUS])[0]
         val1 =  self.sh.statetobyte(state = state, errors = errors)
         try:
@@ -94,30 +92,27 @@ class Tests(unittest.TestCase):
         self.sh.flash(recompile=True, removebuild=True)
 
     def test_scanlineringbuffer(self):
-        '''test scanline with write using ring buffer
-        '''
-        #there can be 10 lines in memory
+        'test scanline with write using ring buffer'
         maximum = 4
-        for i in range(maximum):
-            print(i)
+        for line in range(maximum):
+            print(f"Writing line number {line}")
             self.sh.writeline([0]*self.sh.sh.BITSINSCANLINE)
         self.sh.start()
-        sleep(self.STABLE_TIME+2)
-        # for line in range(100):
-        #     print(f"Writing line number {line}")
-        #     if line%2 == 0:
-        #         self.sh.writeline([1]*self.sh.sh.BITSINSCANLINE)
-        #     else:
-        #         self.sh.writeline([0]*self.sh.sh.BITSINSCANLINE)
-            #TODO: if you don't sleep between lines --> it will crash
-            #      system needs empty memory, your memory full doesn't propagate fast enough
-            # sleep(0.1)
-        # self.sh.writeline([])
+        for line in range(maximum, 1000+maximum):
+            print(f"Writing line number {line}")
+            if line%2 == 0:
+                self.sh.writeline([1]*self.sh.sh.BITSINSCANLINE)
+            else:
+                self.sh.writeline([0]*self.sh.sh.BITSINSCANLINE)
+        self.sh.writeline([])
         sleep(self.STABLE_TIME)
+        #TODO: fast writing seems to cause "invalid bytes"
+        #      ringbuffer seems to work correctly
         self.stateEqual(state = Scanhead.STATES.STOP)
 
     def test_memory(self):
-        '''test if memory full is raised when writing to memory'''
+        'test if memory full is raised when writing to memory'
+        #TODO: work with CHUNKsize!
         for i in range((self.sh.sh.MEMDEPTH-self.sh.sh.bytesinline)//self.sh.sh.CHUNKSIZE):
             self.assertEqual(self.sh.spi.xfer([Scanhead.COMMANDS.WRITE_L])[0], self.sh.statetobyte(state=Scanhead.STATES.STOP))
             for _ in range(self.sh.sh.CHUNKSIZE): self.stateEqual(state=Scanhead.STATES.STOP)
