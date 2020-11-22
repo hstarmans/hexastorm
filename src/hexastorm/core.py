@@ -68,9 +68,9 @@ class Scanhead(Module):
         if self.VARIABLES['END%']>round(1-(self.JITTERTICKS+1)/self.ticksinfacet): raise Exception("Invalid settings, END% too high")
         self.BITSINSCANLINE = round((self.ticksinfacet*(self.VARIABLES['END%']-self.VARIABLES['START%']))/LASERTICKS)
         if self.BITSINSCANLINE <= 0: raise Exception("Bits in scanline invalid")
+        self.bytesinline = math.ceil(self.BITSINSCANLINE/8)+1 # command byte is equal to 1
         if self.VARIABLES['SINGLE_LINE']==1:
-            bytesinline = math.ceil(self.BITSINSCANLINE/8)
-            self.MEMDEPTH = bytesinline + 1  # command byte is equal to 1
+            self.MEMDEPTH = self.bytesinline 
         elif (self.MEMWIDTH*self.MEMDEPTH)//self.BITSINSCANLINE<5:
             raise Exception("Memory too small for 5 lines")
         else:
@@ -128,7 +128,7 @@ class Scanhead(Module):
         done_rise = Signal()
         self.sync += done_d.eq(spislave.done)
         self.comb += done_rise.eq(spislave.done & ~done_d)
-       
+        #self.sync += self.error[self.ERRORS.MEMFULL].eq((writeport.adr==self.readport.adr)&(written==1)&(self.VARIABLES['SINGLE_LINE']==False))
         # Custom Receiver
         #  Receiver should be faster than SPI transaction!
         self.submodules.receiver = FSM(reset_state = "IDLE")
@@ -190,7 +190,6 @@ class Scanhead(Module):
             ).
             # Read data after header; only applicable for debug or write line
             Else(
-                NextValue(written, 1),
                 NextValue(writeport.dat_w, spi_mosi),
                 NextValue(writeport.we, 1),
                 NextState("WRITE"),
@@ -202,7 +201,12 @@ class Scanhead(Module):
                 )
                 )
         )
+        dummyf = Signal(max=2*self.MEMDEPTH)
+        dummyb = Signal(min=-self.MEMDEPTH, max=self.MEMDEPTH)
+        self.comb += dummyf.eq(writeport.adr+self.bytesinline+2)
+        self.comb += dummyb.eq(writeport.adr+self.bytesinline+2-self.MEMDEPTH)
         self.receiver.act("WRITE",
+            NextValue(written, 1),
             # Write address position
             If(writeport.adr+1==self.MEMDEPTH,
                NextValue(writeport.adr, 0)
@@ -216,19 +220,19 @@ class Scanhead(Module):
             ),
             NextValue(writeport.we, 0),
             # Memfull trigger
+            # WRITTEN IS 1 slaat nergens op
             If((written==1)&(self.VARIABLES['SINGLE_LINE']==False),
-                If(((writeport.adr+self.CHUNKSIZE+1)>self.readport.adr)&(self.readport.adr>writeport.adr),
+                If((dummyf>self.readport.adr)&(self.readport.adr>writeport.adr),
                     NextValue(self.error[self.ERRORS.MEMFULL], 1)
                 ).
-                Elif(((writeport.adr+self.CHUNKSIZE+1-self.MEMDEPTH)>self.readport.adr)&(self.readport.adr<writeport.adr),
+                # readport.adr<writeport.adr doesn't work
+                Elif((dummyb>self.readport.adr)&(self.readport.adr<writeport.adr),
                     NextValue(self.error[self.ERRORS.MEMFULL], 1)
                 ).
-                Else(
-                    NextValue(self.error[self.ERRORS.MEMFULL], 0)
+                Else(NextValue(self.error[self.ERRORS.MEMFULL], 0)
                 )
             ).
-            Else(
-                NextValue(self.error[self.ERRORS.MEMFULL], 0)
+            Else(NextValue(self.error[self.ERRORS.MEMFULL], 0)
             ),
             NextState("IDLE")
         )

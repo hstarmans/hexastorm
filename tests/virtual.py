@@ -117,7 +117,7 @@ class TestMachine(Machine):
             yield from self.forcewrite(byte)
 
 
-class TestScanhead(unittest.TestCase):
+class Tests(unittest.TestCase):
     ''' Virtual test for scanhead'''
     def setUp(self):
         self.tm = TestMachine()
@@ -152,13 +152,13 @@ class TestScanhead(unittest.TestCase):
         return nested_dec
     
     @_test_decorator()
-    def test_pwmgeneration(self):
+    def pwmgeneration(self):
         ''' verify generation of polygon pulse'''
         yield from checkpin(self.tm.sh.poly_pwm, value=0)
         yield from checkpin(self.tm.sh.poly_pwm, value=1)
 
     @_test_decorator(simulatediode=True)
-    def test_testmodes(self):
+    def testmodes(self):
         ''' verify four test modes; laser, motor, line and photodiode'''
         test_commands = [self.tm.sh.COMMANDS.LASERTEST,
                             self.tm.sh.COMMANDS.MOTORTEST,
@@ -188,7 +188,7 @@ class TestScanhead(unittest.TestCase):
                 yield from self.tm.checkreply(self.tm.sh.COMMANDS.STOP, state=self.tm.sh.STATES.STOP)
 
     @_test_decorator()
-    def test_memory(self):
+    def memory(self):
         #TODO: memdepth is overwritten
         depth = self.tm.sh.MEMDEPTH
         for i in range(depth//Scanhead.CHUNKSIZE):
@@ -205,7 +205,7 @@ class TestScanhead(unittest.TestCase):
         self.assertEqual(list(range(depth)), in_memory)
 
     @_test_decorator()
-    def test_nosync(self):
+    def nosync(self):
         yield self.tm.sh.photodiode.eq(1)
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.STATUS, state=self.tm.sh.STATES.STOP)
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, state=self.tm.sh.STATES.STOP)
@@ -217,7 +217,7 @@ class TestScanhead(unittest.TestCase):
                                           state=self.tm.sh.STATES.STOP)
 
     @_test_decorator(simulatediode=True)
-    def test_scanlinewithoutwrite(self):
+    def scanlinewithoutwrite(self):
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, state=self.tm.sh.STATES.STOP)
         yield from checkenterstate(self.tm.sh.laserfsm, 'STATE_WAIT_STABLE')
         yield from checkenterstate(self.tm.sh.laserfsm, 'READ_INSTRUCTION')
@@ -227,13 +227,13 @@ class TestScanhead(unittest.TestCase):
                                                          state=self.tm.sh.STATES.START)
 
     @_test_decorator()
-    def test_invalidspicommand(self):
+    def invalidspicommand(self):
         yield from self.tm.checkreply(255, state=self.tm.sh.STATES.STOP)
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.STATUS, errors=[self.tm.sh.ERRORS.INVALID],
                                           state=self.tm.sh.STATES.STOP)
 
     @_test_decorator(simulatediode=True)
-    def test_invalidscanline(self):
+    def invalidscanline(self):
         '''check error received if scanline is sent with invalid command byte'''
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.WRITE_L, state=self.tm.sh.STATES.STOP)
         for _ in range(self.tm.sh.CHUNKSIZE):
@@ -246,7 +246,7 @@ class TestScanhead(unittest.TestCase):
                                                                               state=self.tm.sh.STATES.STOP)
 
     @_test_decorator(simulatediode=True)
-    def test_stopscanline(self):
+    def stopscanline(self):
         '''check machine transitions to stop if stop command byte is sent'''
         yield from self.tm.writeline([])
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, state=self.tm.sh.STATES.STOP)
@@ -256,7 +256,7 @@ class TestScanhead(unittest.TestCase):
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.STATUS, state=self.tm.sh.STATES.STOP)
 
     @_test_decorator(singleline=True, simulatediode=True)
-    def test_scanlinerepeated(self):
+    def scanlinerepeated(self):
         '''test scanline with write in single line mode
         
         In this mode the line is always repeated.
@@ -273,7 +273,7 @@ class TestScanhead(unittest.TestCase):
         yield from self.tm.checkline(bitlst)
 
     @_test_decorator(singleline=True, singlefacet=True, simulatediode=True)
-    def test_scanlinerepeatedsinglefacet(self):
+    def scanlinerepeatedsinglefacet(self):
         '''test scanline with write in single line and single facet mode
         
         Scanline is always repeated and only a single facet is used
@@ -292,7 +292,7 @@ class TestScanhead(unittest.TestCase):
             self.assertEqual(1, (yield self.tm.sh.facetcnt))
     
     @_test_decorator()
-    def test_writespeed(self, verbose=False):
+    def writespeed(self, verbose=False):
         '''test speed to write 1 byte to memory and give estimate for max laser speed
         '''
         #NOTE: this is not really a test, bit of experimental work
@@ -334,7 +334,7 @@ class TestScanhead(unittest.TestCase):
             print(f"Speed of laser must be lower than  {(crystal*8)/(count*1E6):.2f} Mhz")
 
     @_test_decorator(simulatediode=True)
-    def test_scanlineringbuffer(self):
+    def scanlineringbuffer(self):
         '''test scanline with write using ring buffer
         '''
         for i in range(3):
