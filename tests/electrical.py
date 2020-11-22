@@ -17,18 +17,18 @@ class Tests(unittest.TestCase):
             cls.sh.reset()
         cls.STABLE_TIME = round(Scanhead.VARIABLES['SPINUP_TIME']+Scanhead.VARIABLES['STABLE_TIME']+2)
 
-    def stable(self):
+    def test_stable(self):
         'test if laser can stabilize itself and gives memread error if no data is written'
         self.sh.start()
         sleep(self.STABLE_TIME)
         self.stateEqual(state = Scanhead.STATES.START, errors=[Scanhead.ERRORS.MEMREAD])
         self.sh.reset()
     
-    def photodiode(self):
+    def test_photodiode(self):
         'test if photodiode is triggered when laser is turned on and prism spins'
         self.assertFalse(self.sh.test_photodiode())
 
-    def stopscanline(self):
+    def test_stopscanline(self):
         'test if head transitions to stop if a stopline is sent'
         self.sh.writeline([])
         self.sh.start()
@@ -51,7 +51,7 @@ class Tests(unittest.TestCase):
             self.sh.reset()
             raise Exception("states not equal")
 
-    def scanlinerepeated(self):
+    def test_scanlinerepeated(self):
         '''test scanline with write in single line mode
         
         In this mode the line is always repeated.
@@ -74,7 +74,7 @@ class Tests(unittest.TestCase):
         self.sh.single_line = False
         self.sh.flash(recompile=True, removebuild=True)
 
-    def scanlinerepeatedsinglefacet(self):
+    def test_scanlinerepeatedsinglefacet(self):
         '''test scanline with write in single line and single facet mode
         
         Scanline is always repeated and only a single facet is used
@@ -93,7 +93,7 @@ class Tests(unittest.TestCase):
         self.sh.single_facet = False
         self.sh.flash(recompile=True, removebuild=True)
 
-    def scanlineringbuffer(self):
+    def test_scanlineringbuffer(self):
         '''test scanline with write using ring buffer
         '''
         #there can be 10 lines in memory
@@ -116,7 +116,7 @@ class Tests(unittest.TestCase):
         sleep(self.STABLE_TIME)
         self.stateEqual(state = Scanhead.STATES.STOP)
 
-    def memory(self):
+    def test_memory(self):
         '''test if memory full is raised when writing to memory'''
         for i in range((self.sh.sh.MEMDEPTH-self.sh.sh.bytesinline)//self.sh.sh.CHUNKSIZE):
             self.assertEqual(self.sh.spi.xfer([Scanhead.COMMANDS.WRITE_L])[0], self.sh.statetobyte(state=Scanhead.STATES.STOP))

@@ -27,7 +27,7 @@ class FakeSpi():
         return byte_received
 
 def checkpin(pin, value=0, maxticks=100):
-    '''do maxticks until pin reaches value'''
+    'do maxticks until pin reaches value'
     ticks = 0
     while (yield pin) != value:
         ticks += 1
@@ -36,11 +36,11 @@ def checkpin(pin, value=0, maxticks=100):
         yield
 
 def getstate(fsm):
-    '''retrieves encoding of state of finite state machine'''
+    'retrieves encoding of state of finite state machine'
     return fsm.decoding[(yield fsm.state)]
 
 def checkenterstate(fsm, wait_state, maxticks=100):
-    '''checks if state is entered'''
+    'checks if state is entered'
     ticks  = 0
     while (fsm.decoding[(yield fsm.state)] != wait_state):
         ticks += 1
@@ -75,8 +75,7 @@ class TestMachine(Machine):
         self.spi = FakeSpi(self.sh.master)
 
     def checkreply(self, command, state=Scanhead.STATES.STOP, errors=[]):
-        '''command is sent and checked against expected byte
-        '''
+        'command is sent and checked against expected byte'
         data_received = (yield from self.spi.xfer([command]))[0]
         try:
             assert data_received == self.statetobyte(errors=errors, state=state)
@@ -85,8 +84,7 @@ class TestMachine(Machine):
             raise Exception(f"State {machine_state} and errors {error_string} not expected")
 
     def checkline(self, bitlst):
-        '''it is verified wether the laser produces the pattern in bitlist
-        '''
+        'it is verified wether the laser produces the pattern in bitlist'
         yield from checkenterstate(self.sh.laserfsm, 'READ_INSTRUCTION')
         yield from checkenterstate(self.sh.laserfsm, 'DATA_RUN')
         yield
@@ -96,6 +94,15 @@ class TestMachine(Machine):
             for _ in range(self.laserticks):
                 assert (yield self.sh.laser0) == bit
                 yield
+
+    def getmemory(self):
+        'returns the SRAM memory as list'
+        in_memory = []
+        depth = self.sh.MEMDEPTH
+        for i in range(depth):
+            value = (yield self.sh.mem[i])
+            in_memory.append(value)
+        return in_memory
 
     def forcewrite(self, data, maxtrials=10):
         state = self.bytetostate((yield from self.spi.xfer([data]))[0])
@@ -113,8 +120,7 @@ class TestMachine(Machine):
         '''
         bytelst = self.bittobytelist(bitlst)
         g = self.genwritebytes(bytelst)
-        for byte in g:
-            yield from self.forcewrite(byte)
+        for byte in g: yield from self.forcewrite(byte)
 
 
 class Tests(unittest.TestCase):
@@ -152,14 +158,14 @@ class Tests(unittest.TestCase):
         return nested_dec
     
     @_test_decorator()
-    def pwmgeneration(self):
-        ''' verify generation of polygon pulse'''
+    def test_pwmgeneration(self):
+        'verify generation of polygon pulse'
         yield from checkpin(self.tm.sh.poly_pwm, value=0)
         yield from checkpin(self.tm.sh.poly_pwm, value=1)
 
     @_test_decorator(simulatediode=True)
-    def testmodes(self):
-        ''' verify four test modes; laser, motor, line and photodiode'''
+    def test_testmodes(self):
+        'verify four test modes; laser, motor, line and photodiode'
         test_commands = [self.tm.sh.COMMANDS.LASERTEST,
                             self.tm.sh.COMMANDS.MOTORTEST,
                             self.tm.sh.COMMANDS.LINETEST,
@@ -188,9 +194,9 @@ class Tests(unittest.TestCase):
                 yield from self.tm.checkreply(self.tm.sh.COMMANDS.STOP, state=self.tm.sh.STATES.STOP)
 
     @_test_decorator()
-    def memory(self):
+    def test_memory(self):
         #TODO: memdepth is overwritten
-        depth = self.tm.sh.MEMDEPTH
+        depth = self.tm.sh.MEMDEPTH-self.tm.sh.bytesinline
         for i in range(depth//Scanhead.CHUNKSIZE):
             statebyte = (yield from self.tm.spi.xfer([Scanhead.COMMANDS.WRITE_L]))[0]
             state = self.tm.bytetostate(statebyte)
@@ -198,14 +204,10 @@ class Tests(unittest.TestCase):
             for _ in range(Scanhead.CHUNKSIZE):
                 yield from self.tm.spi.xfer([i])
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.STATUS, state=self.tm.sh.STATES.STOP, errors=[self.tm.sh.ERRORS.MEMFULL])
-        in_memory = []
-        for i in range(depth):
-            value = (yield self.tm.sh.mem[i])
-            in_memory.append(value)
-        self.assertEqual(list(range(depth)), in_memory)
+        self.assertEqual(list(range(depth)), self.tm.getmemory())
 
     @_test_decorator()
-    def nosync(self):
+    def test_nosync(self):
         yield self.tm.sh.photodiode.eq(1)
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.STATUS, state=self.tm.sh.STATES.STOP)
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, state=self.tm.sh.STATES.STOP)
@@ -217,7 +219,7 @@ class Tests(unittest.TestCase):
                                           state=self.tm.sh.STATES.STOP)
 
     @_test_decorator(simulatediode=True)
-    def scanlinewithoutwrite(self):
+    def test_scanlinewithoutwrite(self):
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, state=self.tm.sh.STATES.STOP)
         yield from checkenterstate(self.tm.sh.laserfsm, 'STATE_WAIT_STABLE')
         yield from checkenterstate(self.tm.sh.laserfsm, 'READ_INSTRUCTION')
@@ -227,14 +229,14 @@ class Tests(unittest.TestCase):
                                                          state=self.tm.sh.STATES.START)
 
     @_test_decorator()
-    def invalidspicommand(self):
+    def test_invalidspicommand(self):
         yield from self.tm.checkreply(255, state=self.tm.sh.STATES.STOP)
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.STATUS, errors=[self.tm.sh.ERRORS.INVALID],
                                           state=self.tm.sh.STATES.STOP)
 
     @_test_decorator(simulatediode=True)
-    def invalidscanline(self):
-        '''check error received if scanline is sent with invalid command byte'''
+    def test_invalidscanline(self):
+        'check error received if scanline is sent with invalid command byte'
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.WRITE_L, state=self.tm.sh.STATES.STOP)
         for _ in range(self.tm.sh.CHUNKSIZE):
             yield from self.tm.checkreply(int('11111101', 2), state=self.tm.sh.STATES.STOP)
@@ -246,8 +248,8 @@ class Tests(unittest.TestCase):
                                                                               state=self.tm.sh.STATES.STOP)
 
     @_test_decorator(simulatediode=True)
-    def stopscanline(self):
-        '''check machine transitions to stop if stop command byte is sent'''
+    def test_stopscanline(self):
+        'check machine transitions to stop if stop command byte is sent'
         yield from self.tm.writeline([])
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, state=self.tm.sh.STATES.STOP)
         yield from checkenterstate(self.tm.sh.laserfsm, 'STATE_WAIT_STABLE')
@@ -256,7 +258,7 @@ class Tests(unittest.TestCase):
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.STATUS, state=self.tm.sh.STATES.STOP)
 
     @_test_decorator(singleline=True, simulatediode=True)
-    def scanlinerepeated(self):
+    def test_scanlinerepeated(self):
         '''test scanline with write in single line mode
         
         In this mode the line is always repeated.
@@ -273,7 +275,7 @@ class Tests(unittest.TestCase):
         yield from self.tm.checkline(bitlst)
 
     @_test_decorator(singleline=True, singlefacet=True, simulatediode=True)
-    def scanlinerepeatedsinglefacet(self):
+    def test_scanlinerepeatedsinglefacet(self):
         '''test scanline with write in single line and single facet mode
         
         Scanline is always repeated and only a single facet is used
@@ -292,9 +294,8 @@ class Tests(unittest.TestCase):
             self.assertEqual(1, (yield self.tm.sh.facetcnt))
     
     @_test_decorator()
-    def writespeed(self, verbose=False):
-        '''test speed to write 1 byte to memory and give estimate for max laser speed
-        '''
+    def test_writespeed(self, verbose=False):
+        'test speed to write 1 byte to memory and give estimate for max laser speed'
         #NOTE: this is not really a test, bit of experimental work
         def test_speed(count, byte):
             yield self.tm.spi.spimaster.mosi.eq(byte)
@@ -334,17 +335,21 @@ class Tests(unittest.TestCase):
             print(f"Speed of laser must be lower than  {(crystal*8)/(count*1E6):.2f} Mhz")
 
     @_test_decorator(simulatediode=True)
-    def scanlineringbuffer(self):
-        '''test scanline with write using ring buffer
-        '''
-        for i in range(3):
-            lines = [[1,0], [1,1], [0,1]] 
+    def test_scanlineringbuffer(self):
+        'test scanline with write using ring buffer'
+        lines = [[1,1], [1,1], [0,1], [0,0]]
+        for line in lines: yield from self.tm.writeline(line)
+        yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, state=self.tm.sh.STATES.STOP, errors=[self.tm.sh.ERRORS.MEMFULL])
+        for line in lines: yield from self.tm.checkline(line)
+        for line in lines: yield from self.tm.writeline(line)
+        for _ in range(self.tm.sh.ticksinfacet*len(lines)): yield
+        yield from self.tm.checkreply(self.tm.sh.COMMANDS.STOP, state=self.tm.sh.STATES.START, errors=[self.tm.sh.ERRORS.MEMREAD])
+        yield from checkenterstate(self.tm.sh.laserfsm, 'STOP')
+        for _ in range(3):
+            lines = [[1,0], [1,1], [0,1]]
             for line in lines: yield from self.tm.writeline(line)
-            if not i:
-                yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, state=self.tm.sh.STATES.STOP)
-            else:
-                yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, state=self.tm.sh.STATES.STOP,
-                                                                         errors=[self.tm.sh.ERRORS.MEMREAD])
+            yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, state=self.tm.sh.STATES.STOP,
+                                                                     errors=[self.tm.sh.ERRORS.MEMREAD])
             for line in lines: yield from self.tm.checkline(line)
             yield from self.tm.checkreply(self.tm.sh.COMMANDS.STOP, state=self.tm.sh.STATES.START,
                                                                     errors=[self.tm.sh.ERRORS.MEMREAD])

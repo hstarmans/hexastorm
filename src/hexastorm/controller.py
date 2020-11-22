@@ -203,7 +203,6 @@ class Machine:
         generator notation to facilitate sharing function with virtual object
         '''
         for _ in range(math.ceil(len(bytelst)/self.sh.CHUNKSIZE)):
-            yield self.sh.COMMANDS.STATUS
             yield self.sh.COMMANDS.WRITE_L
             for _ in range(self.sh.CHUNKSIZE): 
                 try:

@@ -203,8 +203,22 @@ class Scanhead(Module):
         )
         dummyf = Signal(max=2*self.MEMDEPTH)
         dummyb = Signal(min=-self.MEMDEPTH, max=self.MEMDEPTH)
-        self.comb += dummyf.eq(writeport.adr+self.bytesinline+2)
-        self.comb += dummyb.eq(writeport.adr+self.bytesinline+2-self.MEMDEPTH)
+        self.sync += dummyf.eq(writeport.adr+self.bytesinline)
+        self.sync += dummyb.eq(writeport.adr+self.bytesinline-(self.MEMDEPTH-1))
+        # Memfull trigger
+        self.sync += (If((written==1)&(self.VARIABLES['SINGLE_LINE']==False),
+                            If((dummyf>self.readport.adr)&(self.readport.adr>writeport.adr),
+                                self.error[self.ERRORS.MEMFULL].eq(1)
+                            ).
+                            # readport.adr<writeport.adr doesn't work
+                            Elif((dummyb>self.readport.adr)&(self.readport.adr<writeport.adr),
+                                self.error[self.ERRORS.MEMFULL].eq(1)
+                            ).
+                            Else(self.error[self.ERRORS.MEMFULL].eq(0))
+                        ).
+                        Else(self.error[self.ERRORS.MEMFULL].eq(0)
+                        )
+            	    )
         self.receiver.act("WRITE",
             NextValue(written, 1),
             # Write address position
@@ -219,21 +233,6 @@ class Scanhead(Module):
                 NextValue(writeport.adr, writeport.adr+1)
             ),
             NextValue(writeport.we, 0),
-            # Memfull trigger
-            # WRITTEN IS 1 slaat nergens op
-            If((written==1)&(self.VARIABLES['SINGLE_LINE']==False),
-                If((dummyf>self.readport.adr)&(self.readport.adr>writeport.adr),
-                    NextValue(self.error[self.ERRORS.MEMFULL], 1)
-                ).
-                # readport.adr<writeport.adr doesn't work
-                Elif((dummyb>self.readport.adr)&(self.readport.adr<writeport.adr),
-                    NextValue(self.error[self.ERRORS.MEMFULL], 1)
-                ).
-                Else(NextValue(self.error[self.ERRORS.MEMFULL], 0)
-                )
-            ).
-            Else(NextValue(self.error[self.ERRORS.MEMFULL], 0)
-            ),
             NextState("IDLE")
         )
         # the original motor driver was designed for 6 facets and pulsed for eached facet
@@ -289,20 +288,22 @@ class Scanhead(Module):
             Else(
                 #TODO: you could split into two signals --> one if ever memread occured, other memread signal
                 NextValue(self.error[self.ERRORS.MEMREAD], 0),
-                NextValue(self.dat_r_new, self.readport.dat_r),
-                # increase address after succesfull read
-                If(self.readport.adr+1==self.MEMDEPTH,
-                   NextValue(self.readport.adr, 0),
-                   If((writeport.adr == 0)&(self.VARIABLES['SINGLE_LINE']==False), NextValue(written,0))
-                ).
-                Else(
-                    NextValue(self.readport.adr, self.readport.adr+1),
-                    If((self.readport.adr+1 == writeport.adr)&(self.VARIABLES['SINGLE_LINE']==False), NextValue(written,0))
-                )
+                NextValue(self.dat_r_new, self.readport.dat_r)
+            ),
+            # always increase address, if you move over the write set written to zero
+            If(self.readport.adr+1==self.MEMDEPTH,
+                NextValue(self.readport.adr, 0),
+                If((writeport.adr == 0)&(self.VARIABLES['SINGLE_LINE']==False), NextValue(written,0))
+            ).
+            Else(
+                NextValue(self.readport.adr, self.readport.adr+1),
+                If((self.readport.adr+1 == writeport.adr)&(self.VARIABLES['SINGLE_LINE']==False), NextValue(written,0))
             ),
             NextState("WAIT")
         )
         self.laserfsm.act("RESET",
+            NextValue(self.readport.adr, 0),
+            NextValue(writeport.adr, 0),
             NextState("STOP")
         )
         self.laser0 = platform.request("laser0")
@@ -390,9 +391,6 @@ class Scanhead(Module):
                 NextState("STATE_WAIT_STABLE"),
                 NextValue(self.laser0, 1),
                 NextValue(stablecounter, 0),
-            ),
-            If(self.laserfsmstate!=self.STATES.START,
-                 NextState("STOP")
             )
         )
         self.laserfsm.act("STATE_WAIT_STABLE",
@@ -401,7 +399,7 @@ class Scanhead(Module):
             If(stablecounter>=stablethresh,
                NextValue(self.error[self.ERRORS.NOTSTABLE], 1),
                NextValue(self.laserfsmstate, self.STATES.STOP),
-               NextState('STOP')
+               NextState('RESET')
             ).
             Elif(~self.photodiode&~photodiode_d,
                NextValue(self.tickcounter, 0),
@@ -424,7 +422,7 @@ class Scanhead(Module):
                )
             ).
             Elif(self.laserfsmstate!=self.STATES.START,
-                 NextState("STOP")
+                 NextState("RESET")
             ).  
             Else(
                 NextValue(self.tickcounter, self.tickcounter+1)
@@ -434,18 +432,25 @@ class Scanhead(Module):
             NextValue(self.tickcounter, self.tickcounter+1),
             If(readtrig == 0,
                If(self.error[self.ERRORS.MEMREAD] == 1,
+                   # move back the address and read again
+                   If(self.readport.adr == 0,
+                        NextValue(self.readport.adr, self.MEMDEPTH-1)
+                   ).
+                   Else(
+                       NextValue(self.readport.adr, self.readport.adr-1)
+                   ),
                    NextValue(readtrig, 1),
                    NextState("WAIT_END")
                ).
                Elif(self.dat_r_new == self.INSTRUCTIONS.STOP,
-                   NextState("STOP"),
+                   NextState("RESET"),
                    NextValue(self.laserfsmstate, self.STATES.STOP)
                ).
                Elif(self.dat_r_new == self.INSTRUCTIONS.SCAN,
                    NextState('WAIT_FOR_DATA_RUN'),
                    NextValue(readtrig, 1),
                ).
-               Else(NextState("STOP"),
+               Else(NextState("RESET"),
                     NextValue(self.laserfsmstate, self.STATES.STOP),
                     NextValue(self.error[self.ERRORS.INVALIDLINE], 1),
                )
@@ -470,9 +475,6 @@ class Scanhead(Module):
                     #NextValue(self.error[self.ERRORS.INVALID], 1),   #TODO: replace with timeout
                     NextState('DATA_RUN')
                 )
-            ).
-            Elif(self.laserfsmstate != self.STATES.START,
-                 NextState("STOP")
             )
         )
         self.laserfsm.act("DATA_RUN",
@@ -511,9 +513,6 @@ class Scanhead(Module):
                     ),
                     NextValue(self.laser0, dat_r_old[0])
                 )
-            ).
-            Elif(self.laserfsmstate!=self.STATES.START,
-               NextState("STOP")
             ).
             Else(
                 NextValue(self.lasercnt, self.lasercnt - 1)
