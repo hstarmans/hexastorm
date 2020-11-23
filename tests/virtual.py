@@ -196,6 +196,7 @@ class Tests(unittest.TestCase):
     @_test_decorator()
     def test_memory(self):
         #TODO: memdepth is overwritten
+        #TODO: variable chunksize
         depth = self.tm.sh.MEMDEPTH-self.tm.sh.bytesinline
         for i in range(depth//Scanhead.CHUNKSIZE):
             statebyte = (yield from self.tm.spi.xfer([Scanhead.COMMANDS.WRITE_L]))[0]
@@ -204,7 +205,7 @@ class Tests(unittest.TestCase):
             for _ in range(Scanhead.CHUNKSIZE):
                 yield from self.tm.spi.xfer([i])
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.STATUS, state=self.tm.sh.STATES.STOP, errors=[self.tm.sh.ERRORS.MEMFULL])
-        self.assertEqual(list(range(depth)), self.tm.getmemory())
+        self.assertEqual(list(range(depth)), (yield from self.tm.getmemory())[:depth])
 
     @_test_decorator()
     def test_nosync(self):
@@ -270,8 +271,8 @@ class Tests(unittest.TestCase):
         bitlst = [1,1]
         yield from self.tm.writeline(bitlst)
         # ensure write is received
-        yield from checkenterstate(self.tm.sh.receiver, 'WRITE')
-        yield from checkenterstate(self.tm.sh.receiver, 'IDLE')
+        yield from checkenterstate(self.tm.sh.parser, 'WRITE')
+        yield from checkenterstate(self.tm.sh.parser, 'IDLE')
         yield from self.tm.checkline(bitlst)
 
     @_test_decorator(singleline=True, singlefacet=True, simulatediode=True)
@@ -316,7 +317,7 @@ class Tests(unittest.TestCase):
         self.assertEqual(bytereceived, self.tm.statetobyte(state=self.tm.sh.STATES.STOP))
         count, bytereceived = (yield from test_speed(count, 255))
         self.assertEqual(bytereceived, self.tm.statetobyte(state=self.tm.sh.STATES.STOP))
-        def test_enter_state_speed(count, state, fsm = self.tm.sh.receiver):
+        def test_enter_state_speed(count, state, fsm = self.tm.sh.parser):
             delta = 0
             while (fsm.decoding[(yield fsm.state)] != state):
                 delta += 1

@@ -15,7 +15,7 @@ class Scanhead(Module):
     '''
     @staticmethod
     def commands():
-        commands = ('RECVCOMMAND', 'STATUS', 'START', 'STOP', 'LASERTEST',
+        commands = ('STATUS', 'START', 'STOP', 'LASERTEST',
                     'MOTORTEST', 'LINETEST', 'PHOTODIODETEST',
                      'READ_D', 'WRITE_L')
         Commands = namedtuple('Commands', commands, defaults=tuple(range(len(commands))))
@@ -119,107 +119,104 @@ class Scanhead(Module):
         self.spi = platform.request("spi")
         spislave = SPISlave(self.spi, data_width=8)
         self.submodules.slave = spislave
-        # COMMANDS 
-        # The command variable contains command to be executed
-        # typically the recvcommand, cannot be set externally
-        command = Signal(max=len(self.COMMANDS))
         # Done detector
         done_d = Signal()
         done_rise = Signal()
         self.sync += done_d.eq(spislave.done)
         self.comb += done_rise.eq(spislave.done & ~done_d)
-        #self.sync += self.error[self.ERRORS.MEMFULL].eq((writeport.adr==self.readport.adr)&(written==1)&(self.VARIABLES['SINGLE_LINE']==False))
-        # Custom Receiver
-        #  Receiver should be faster than SPI transaction!
-        self.submodules.receiver = FSM(reset_state = "IDLE")
-        self.receiver.act("RESET",
-            NextValue(writeport.adr, 0),
-            NextValue(command, self.COMMANDS.RECVCOMMAND),
-            NextValue(spislave.miso, Cat([self.laserfsmstate, self.error])),
-            NextState("IDLE")
-        )
-        spi_mosi = Signal(self.MEMWIDTH)
-        self.receiver.act("IDLE",
-            NextValue(spislave.miso, Cat([self.error, self.laserfsmstate])),
-            If(done_rise,
-                NextValue(spi_mosi, spislave.mosi),
-                NextState("PROCESSINPUT")
-            ).
-            Else(
-                NextState("IDLE")
-            )
-        )
-        # command is now used as extra parameter for state and makes it more confusing
-        self.receiver.act("PROCESSINPUT",
-            # Read Header
-            If(command == self.COMMANDS.RECVCOMMAND,
-                NextState("IDLE"),
-                If(spi_mosi == self.COMMANDS.STOP,
-                    NextValue(self.laserfsmstate, self.STATES.STOP)
-                ).
-                Elif(spi_mosi == self.COMMANDS.START,
-                    NextValue(self.laserfsmstate, self.STATES.START)
-                ).
-                Elif(spi_mosi == self.COMMANDS.LASERTEST,
-                    NextValue(self.laserfsmstate, self.STATES.LASERTEST)
-                ).
-                Elif(spi_mosi == self.COMMANDS.MOTORTEST,
-                    NextValue(self.laserfsmstate, self.STATES.MOTORTEST)
-                ).
-                Elif(spi_mosi == self.COMMANDS.LINETEST,
-                    NextValue(self.laserfsmstate, self.STATES.LINETEST)
-                ).
-                Elif(spi_mosi == self.COMMANDS.PHOTODIODETEST,
-                    NextValue(self.laserfsmstate, self.STATES.PHOTODIODETEST)
-                ).
-                Elif(spi_mosi == self.COMMANDS.WRITE_L,
-                    # only switch to write stage if memory is not full
-                    If(self.error[self.ERRORS.MEMFULL]==1,
-                        NextValue(command, self.COMMANDS.RECVCOMMAND)
-                    ).
-                    Else(
-                        NextValue(command, self.COMMANDS.WRITE_L)
-                    )
-                ).
-                Elif(spi_mosi == self.COMMANDS.STATUS).
-                Elif(spi_mosi != 0,
-                    NextValue(self.error[self.ERRORS.INVALID], 1)
-                )
-                # TODO: there seem to be zero commands being sent over?
-                # uncaptured
-            ).
-            # Read data after header; only applicable for debug or write line
-            Else(
-                NextValue(writeport.dat_w, spi_mosi),
-                NextValue(writeport.we, 1),
-                NextState("WRITE"),
-                If(self.chunkcnt>=self.CHUNKSIZE-1,
-                    NextValue(self.chunkcnt, 0),
-                    NextValue(command, self.COMMANDS.RECVCOMMAND)
-                ).
-                Else(NextValue(self.chunkcnt, self.chunkcnt+1)
-                )
-                )
-        )
+        # Start detector 
+        start_d = Signal()
+        start_rise = Signal()
+        self.sync += start_d.eq(spislave.start)
+        self.comb += start_rise.eq(spislave.start & ~start_d)
+        # Memfull trigger
         dummyf = Signal(max=2*self.MEMDEPTH)
         dummyb = Signal(min=-self.MEMDEPTH, max=self.MEMDEPTH)
         self.sync += dummyf.eq(writeport.adr+self.bytesinline)
         self.sync += dummyb.eq(writeport.adr+self.bytesinline-(self.MEMDEPTH-1))
-        # Memfull trigger
-        self.sync += (If((written==1)&(self.VARIABLES['SINGLE_LINE']==False),
+        # Receiver
+        self.submodules.parser = FSM(reset_state = "RESET")
+        spi_mosi = Signal(self.MEMWIDTH)
+        parsertrigger = Signal()
+        memfulld = Signal()
+        command = Signal()
+        self.parser.act("RESET",
+            NextValue(command, 1)
+        )
+        self.parser.act("WAITFORSTART",
+                NextValue(spislave.miso, Cat([self.error, self.laserfsmstate])),
+                NextValue(memfulld, self.error[self.ERRORS.MEMFULL]),
+                If((written==1)&(self.VARIABLES['SINGLE_LINE']==False),
                             If((dummyf>self.readport.adr)&(self.readport.adr>writeport.adr),
-                                self.error[self.ERRORS.MEMFULL].eq(1)
+                                NextValue(self.error[self.ERRORS.MEMFULL],1)
                             ).
-                            # readport.adr<writeport.adr doesn't work
                             Elif((dummyb>self.readport.adr)&(self.readport.adr<writeport.adr),
-                                self.error[self.ERRORS.MEMFULL].eq(1)
+                                NextValue(self.error[self.ERRORS.MEMFULL],1)
                             ).
-                            Else(self.error[self.ERRORS.MEMFULL].eq(0))
+                            Else(NextValue(self.error[self.ERRORS.MEMFULL],0))
                         ).
-                        Else(self.error[self.ERRORS.MEMFULL].eq(0)
-                        )
-            	    )
-        self.receiver.act("WRITE",
+                Else(NextValue(self.error[self.ERRORS.MEMFULL],0)),
+                If(start_rise,
+                    NextState("WAITFORDONE")
+                )
+        )       
+        self.parser.act("WAITFORDONE",
+            # shouldn't happen parsing too slow
+            # If(parsertrigger,
+            #     NextValue(self.error[self.ERRORS.INVALID], 1)
+            # ),
+            If(done_rise,
+                NextValue(spi_mosi, spislave.mosi),
+                NextValue(spislave.miso, 1),  #PRETEND MEM IS FULL
+                If(command,
+                    NextState("PROCESSCOMMAND")
+                ).
+                Else(
+                    NextValue(command, 1),
+                    NextValue(writeport.dat_w, spislave.mosi),
+                    NextValue(writeport.we, 1),
+                    NextState("WRITE")
+                )
+            )
+        )
+        # command is now used as extra parameter for state and makes it more confusing
+        self.parser.act("PROCESSCOMMAND",
+            NextState("WAITFORSTART"),
+            If(spi_mosi == self.COMMANDS.STOP,
+                NextValue(self.laserfsmstate, self.STATES.STOP)
+            ).
+            Elif(spi_mosi == self.COMMANDS.START,
+                NextValue(self.laserfsmstate, self.STATES.START)
+            ).
+            Elif(spi_mosi == self.COMMANDS.LASERTEST,
+                NextValue(self.laserfsmstate, self.STATES.LASERTEST)
+            ).
+            Elif(spi_mosi == self.COMMANDS.MOTORTEST,
+                NextValue(self.laserfsmstate, self.STATES.MOTORTEST)
+            ).
+            Elif(spi_mosi == self.COMMANDS.LINETEST,
+                NextValue(self.laserfsmstate, self.STATES.LINETEST)
+            ).
+            Elif(spi_mosi == self.COMMANDS.PHOTODIODETEST,
+                NextValue(self.laserfsmstate, self.STATES.PHOTODIODETEST)
+            ).
+            Elif(spi_mosi == self.COMMANDS.WRITE_L,
+                # only switch to write stage if memory is not full
+                If(memfulld,
+                    NextValue(command, 1)
+                ).
+                Else(
+                    NextValue(command, 0)
+                )
+            ).
+            Elif(spi_mosi == self.COMMANDS.STATUS
+            ).
+            Elif(spi_mosi != 0,
+                NextValue(self.error[self.ERRORS.INVALID], 1)
+            )
+        )
+        self.parser.act("WRITE",
+            NextState("WAITFORSTART"),
             NextValue(written, 1),
             # Write address position
             If(writeport.adr+1==self.MEMDEPTH,
@@ -232,8 +229,7 @@ class Scanhead(Module):
             Else(
                 NextValue(writeport.adr, writeport.adr+1)
             ),
-            NextValue(writeport.we, 0),
-            NextState("IDLE")
+            NextValue(writeport.we, 0)
         )
         # the original motor driver was designed for 6 facets and pulsed for eached facet
         polyperiod = int(self.VARIABLES['CRYSTAL_HZ']/(self.VARIABLES['RPM']/60)/(6*2))
@@ -264,7 +260,7 @@ class Scanhead(Module):
         # tick counter; number of ticks in a facet for the oscillator
         # laser counter; laser operates at reduced speed this controlled by this counter
         # readbit counter; current bit position in memory
-        # scanbit counter; current bit positioin along scanline
+        # scanbit counter; current bit position along scanline
         readtrig = Signal()
         self.submodules.readmem= FSM(reset_state = "RESET")
         self.readmem.act("RESET",

@@ -171,9 +171,13 @@ class Machine:
     def forcewrite(self, data, maxtrials=1E6):
         state = self.bytetostate((self.spi.xfer([data]))[0])
         trials = 0
+        if (state['errorbits'][self.sh.ERRORS.INVALID] == 1):
+                raise Exception("INVALID DETECTEDin WRITEL")
         while (state['errorbits'][self.sh.ERRORS.MEMFULL] == 1):
             state = self.bytetostate((self.spi.xfer([data]))[0])
             trials += 1
+            if (state['errorbits'][self.sh.ERRORS.INVALID] == 1):
+                raise Exception("INVALID DETECTED IN WRITEL")
             if trials>maxtrials:
                 self.status()
                 self.reset()

@@ -91,24 +91,33 @@ class Tests(unittest.TestCase):
         self.sh.single_facet = False
         self.sh.flash(recompile=True, removebuild=True)
 
+    def test_invaliderror(self):
+        'test if you can cause an invalid error'
+        # for i in range(100000):
+        #     #print(f"Sending command {i}")
+        #     self.sh.forcewrite(Scanhead.COMMANDS.MOTORTEST)
+        #     self.sh.forcewrite(Scanhead.COMMANDS.LINETEST)
+        # self.stateEqual(state=Scanhead.STATES.MOTORTEST)
+
     def test_scanlineringbuffer(self):
+        #TODO: there seem to be two things
+        #       -- transacations can have invalids --> you have to proof this
+        #       -- your ring keeps moving if you cancel the software
         'test scanline with write using ring buffer'
         maximum = 4
         for line in range(maximum):
             print(f"Writing line number {line}")
             self.sh.writeline([0]*self.sh.sh.BITSINSCANLINE)
         self.sh.start()
-        for line in range(maximum, 1000+maximum):
+        for line in range(maximum, 15000+maximum):
             print(f"Writing line number {line}")
             if line%2 == 0:
                 self.sh.writeline([1]*self.sh.sh.BITSINSCANLINE)
             else:
                 self.sh.writeline([0]*self.sh.sh.BITSINSCANLINE)
-        self.sh.writeline([])
-        sleep(self.STABLE_TIME)
-        #TODO: fast writing seems to cause "invalid bytes"
-        #      ringbuffer seems to work correctly
-        self.stateEqual(state = Scanhead.STATES.STOP)
+        #self.sh.writeline([])
+        #sleep(self.STABLE_TIME)
+        self.stateEqual(state = Scanhead.STATES.START)
 
     def test_memory(self):
         'test if memory full is raised when writing to memory'
