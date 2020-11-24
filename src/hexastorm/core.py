@@ -73,10 +73,6 @@ class Scanhead(Module):
             self.MEMDEPTH = self.bytesinline 
         elif (self.MEMWIDTH*self.MEMDEPTH)//self.BITSINSCANLINE<5:
             raise Exception("Memory too small for 5 lines")
-        else:
-            bytesinline = math.ceil(self.BITSINSCANLINE/8)
-            #TODO: if you don't have a nice integer number ringbuffer will crash
-            self.MEMDEPTH = 5*(bytesinline + 1)
         # clock; routing was not able to reach speed higher than 70 MHz
         #        for entire circuit on iCE40, so clock is contraint to 50 MHz
         clk100 = platform.request('clk100')
@@ -114,6 +110,9 @@ class Scanhead(Module):
         self.dat_r_new = Signal(self.MEMWIDTH)
         dat_r_old = Signal(self.MEMWIDTH)
         # Receiver State Machine
+        # TODO: tried to paralize receiver and parser but this gives errors
+        #       I am not able achieve agreement between Linux host and FPGA on memfull
+        #       Memfull is not correctly propagated every 10K operations which results in failure.
         # Consists out of component from litex and own custom component
         # Detects whether new command is available
         self.spi = platform.request("spi")
@@ -134,19 +133,21 @@ class Scanhead(Module):
         dummyb = Signal(min=-self.MEMDEPTH, max=self.MEMDEPTH)
         self.sync += dummyf.eq(writeport.adr+self.bytesinline)
         self.sync += dummyb.eq(writeport.adr+self.bytesinline-(self.MEMDEPTH-1))
-        # Receiver
         self.submodules.parser = FSM(reset_state = "RESET")
         spi_mosi = Signal(self.MEMWIDTH)
         parsertrigger = Signal()
         memfulld = Signal()
         command = Signal()
         self.parser.act("RESET",
-            NextValue(command, 1)
+            NextValue(command, 1),
+            NextState('WAITFORSTART')
         )
         self.parser.act("WAITFORSTART",
-                NextValue(spislave.miso, Cat([self.error, self.laserfsmstate])),
-                NextValue(memfulld, self.error[self.ERRORS.MEMFULL]),
-                If((written==1)&(self.VARIABLES['SINGLE_LINE']==False),
+                If(start_rise,
+                    NextState("WAITFORDONE")
+                ).
+                Else(
+                    If((written==1)&(self.VARIABLES['SINGLE_LINE']==False),
                             If((dummyf>self.readport.adr)&(self.readport.adr>writeport.adr),
                                 NextValue(self.error[self.ERRORS.MEMFULL],1)
                             ).
@@ -154,20 +155,17 @@ class Scanhead(Module):
                                 NextValue(self.error[self.ERRORS.MEMFULL],1)
                             ).
                             Else(NextValue(self.error[self.ERRORS.MEMFULL],0))
-                        ).
-                Else(NextValue(self.error[self.ERRORS.MEMFULL],0)),
-                If(start_rise,
-                    NextState("WAITFORDONE")
+                    ).
+                    Else(NextValue(self.error[self.ERRORS.MEMFULL],0)),
+                         NextValue(spislave.miso, Cat([self.error, self.laserfsmstate])),
+                        NextValue(memfulld, self.error[self.ERRORS.MEMFULL]),
                 )
         )       
         self.parser.act("WAITFORDONE",
-            # shouldn't happen parsing too slow
-            # If(parsertrigger,
-            #     NextValue(self.error[self.ERRORS.INVALID], 1)
-            # ),
+            NextValue(spi_mosi, spislave.mosi),
             If(done_rise,
-                NextValue(spi_mosi, spislave.mosi),
-                NextValue(spislave.miso, 1),  #PRETEND MEM IS FULL
+                #TODO: don't overfloat bug with not stable
+                NextValue(spislave.miso, 4),  
                 If(command,
                     NextState("PROCESSCOMMAND")
                 ).
@@ -201,11 +199,7 @@ class Scanhead(Module):
                 NextValue(self.laserfsmstate, self.STATES.PHOTODIODETEST)
             ).
             Elif(spi_mosi == self.COMMANDS.WRITE_L,
-                # only switch to write stage if memory is not full
-                If(memfulld,
-                    NextValue(command, 1)
-                ).
-                Else(
+                If(memfulld == 0 ,
                     NextValue(command, 0)
                 )
             ).

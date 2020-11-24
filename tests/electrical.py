@@ -91,33 +91,27 @@ class Tests(unittest.TestCase):
         self.sh.single_facet = False
         self.sh.flash(recompile=True, removebuild=True)
 
-    def test_invaliderror(self):
-        'test if you can cause an invalid error'
-        # for i in range(100000):
-        #     #print(f"Sending command {i}")
-        #     self.sh.forcewrite(Scanhead.COMMANDS.MOTORTEST)
-        #     self.sh.forcewrite(Scanhead.COMMANDS.LINETEST)
-        # self.stateEqual(state=Scanhead.STATES.MOTORTEST)
-
     def test_scanlineringbuffer(self):
-        #TODO: there seem to be two things
-        #       -- transacations can have invalids --> you have to proof this
-        #       -- your ring keeps moving if you cancel the software
         'test scanline with write using ring buffer'
+        #NOTE: if you press CTRL+C during a spi transaction with a full line --> the FPGA hangs
         maximum = 4
         for line in range(maximum):
             print(f"Writing line number {line}")
             self.sh.writeline([0]*self.sh.sh.BITSINSCANLINE)
         self.sh.start()
-        for line in range(maximum, 15000+maximum):
-            print(f"Writing line number {line}")
-            if line%2 == 0:
-                self.sh.writeline([1]*self.sh.sh.BITSINSCANLINE)
-            else:
+        bitlst = [1]*self.sh.sh.BITSINSCANLINE
+        bytelst = self.sh.bittobytelist(bitlst)
+        from copy import deepcopy
+        for line in range(maximum, 5800+maximum):
+            if (line%600)<300:
+                print(f"Writing blank line number {line}")
                 self.sh.writeline([0]*self.sh.sh.BITSINSCANLINE)
-        #self.sh.writeline([])
-        #sleep(self.STABLE_TIME)
-        self.stateEqual(state = Scanhead.STATES.START)
+            else:
+                print(f"Writing full line number {line}")
+                self.sh.writeline([1]*self.sh.sh.BITSINSCANLINE)
+        self.sh.writeline([])
+        sleep(self.STABLE_TIME)
+        self.stateEqual(state = Scanhead.STATES.STOP)
 
     def test_memory(self):
         'test if memory full is raised when writing to memory'

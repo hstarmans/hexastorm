@@ -30,15 +30,12 @@ class Machine:
     
     @property
     def single_facet(self):
-        '''
-        true if system is in single facet mode
-        '''
+        'true if system is in single facet mode'
         return Scanhead.VARIABLES['SINGLE_FACET']
 
     @single_facet.setter
     def single_facet(self, val):
-        '''
-        set system in single facet mode
+        '''set system in single facet mode
 
         You need to run flash to push settings to head
         '''
@@ -48,15 +45,12 @@ class Machine:
 
     @property
     def single_line(self):
-        '''
-        true if system is in single line mode
-        '''
+        'true if system is in single line mode'
         return Scanhead.VARIABLES['SINGLE_LINE']
 
     @single_line.setter
     def single_line(self, val):
-        '''
-        set system in single line mode
+        '''set system in single line mode
 
         You need to run flash to push settings to head
         '''
@@ -65,9 +59,7 @@ class Machine:
 
     @property
     def laser_power(self):
-        '''
-        return laser power in range [0-255]
-        '''
+        'return laser power in range [0-255]'
         return self.bus.read_byte_data(self.ic_address, 0)
 
     @laser_power.setter
@@ -85,9 +77,7 @@ class Machine:
         self.bus.write_byte_data(self.ic_address, 0, val)
 
     def bytetostate(self, byte=None):
-        '''
-        seperate the state and error bits from a byte
-        '''
+        'seperate the state and error bits from a byte'
         if byte is None: byte = self.spi.xfer([self.sh.COMMANDS.STATUS])[0]
         errors = [int(i) for i in list('{0:0b}'.format(byte&0b11111))]
         errors.reverse()
@@ -96,17 +86,14 @@ class Machine:
         return {'state': byte>>5, 'errorbits': errors}
 
     def statetobyte(self, errors=[], state=Scanhead.STATES.STOP):
-        '''
-        create byte correspdonding to a list of errors and a certain state
-        '''
+        'create byte correspdonding to a list of errors and a certain state'
         errorstate = 0
         for error in errors: errorstate += pow(2, error)
         val = errorstate + (state<<5)
         return val
 
     def status(self, byte=None, verbose=True):
-        '''
-        prints state machine and list of errors for given byte
+        '''prints state machine and list of errors for given byte
         if verbose is True
 
         returns the machine state and errors as string
@@ -129,39 +116,27 @@ class Machine:
         return machinestate, error_string
 
     def start(self):
-        '''
-        start scanhead
-        '''
-        self.spi.xfer([self.sh.COMMANDS.START])
+        'start scanhead'
+        self.forcewrite(self.sh.COMMANDS.START)
 
     def stop(self):
-        '''
-        disables scanhead
-        '''
+        'disables scanhead'
         self.spi.xfer([self.sh.COMMANDS.STOP])
 
     def test_laser(self):
-        '''
-        enable laser
-        '''
+        'enable laser'
         self.spi.xfer([self.sh.COMMANDS.LASERTEST])
 
     def test_line(self):
-        '''
-        enable laser and motor which creates line
-        '''
+        'enable laser and motor which creates line'
         self.spi.xfer([self.sh.COMMANDS.LINETEST])
 
     def test_motor(self):
-        '''
-        enable motor
-        '''
+        'enable motor'
         self.spi.xfer([self.sh.COMMANDS.MOTORTEST])
 
     def reset(self, pin=26):
-        '''
-        reset the chip by raising and lowering the reset pin
-        '''
+        'reset the chip by raising and lowering the reset pin'
         reset_pin = LED(pin)
         reset_pin.off()
         sleep(1)
@@ -171,21 +146,25 @@ class Machine:
     def forcewrite(self, data, maxtrials=1E6):
         state = self.bytetostate((self.spi.xfer([data]))[0])
         trials = 0
+        #NOTE: invalids should be detected
+        #      this was an issue with an older version of the code
         if (state['errorbits'][self.sh.ERRORS.INVALID] == 1):
-                raise Exception("INVALID DETECTEDin WRITEL")
-        while (state['errorbits'][self.sh.ERRORS.MEMFULL] == 1):
+                raise Exception("INVALID DETECTED")
+        while (state['errorbits'][self.sh.ERRORS.MEMFULL] == 1)|(state['errorbits'][self.sh.ERRORS.NOTSTABLE] == 1):
             state = self.bytetostate((self.spi.xfer([data]))[0])
             trials += 1
             if (state['errorbits'][self.sh.ERRORS.INVALID] == 1):
-                raise Exception("INVALID DETECTED IN WRITEL")
+                self.status()
+                self.reset()
+                raise Exception("INVALID DETECTED")
             if trials>maxtrials:
                 self.status()
                 self.reset()
                 raise Exception(f"More than {maxtrials} trials required to write to memory")
     
     def bittobytelist(self, bitlst, bitorder = 'little'):
-        '''
-        converts bitlst to bytelst
+        '''converts bitlst to bytelst
+        
         if bytelst is empty stop command is sent
         '''
         if len(bitlst) == 0:
@@ -200,8 +179,7 @@ class Machine:
         return bytelst
 
     def genwritebytes(self, bytelst):
-        '''
-        writes bytelst to memory
+        '''writes bytelst to memory
 
         generator notation to facilitate sharing function with virtual object
         '''
@@ -214,8 +192,8 @@ class Machine:
                     yield 0
 
     def writeline(self, bitlst, bitorder = 'little'):
-        '''
-        writes bitlst to memory
+        '''writes bitlst to memory
+        
         if bitlst is empty --> stop command is sent
         '''
         bytelst = self.bittobytelist(bitlst)
@@ -223,10 +201,9 @@ class Machine:
             self.forcewrite(byte)
 
     def test_photodiode(self):
-        '''
-        enable motor, laser and disable if photodiode is triggered
+        '''enable motor, laser and disable if photodiode is triggered
 
-        returns False if succesfull and True if unsuccesfull
+        returns False if succesfull
         '''
         self.spi.xfer([self.sh.COMMANDS.PHOTODIODETEST])
         sleep(2)
