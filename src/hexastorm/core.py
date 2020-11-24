@@ -105,7 +105,6 @@ class Scanhead(Module):
         self.specials += writeport, self.readport
         self.ios = {writeport.adr, writeport.dat_w, writeport.we, self.readport.dat_r, self.readport.adr, self.readport.re}
         readbit = Signal(max = self.MEMWIDTH)
-        self.chunkcnt = Signal(max=self.CHUNKSIZE+1)
         written = Signal()
         self.dat_r_new = Signal(self.MEMWIDTH)
         dat_r_old = Signal(self.MEMWIDTH)
@@ -131,15 +130,17 @@ class Scanhead(Module):
         # Memfull trigger
         dummyf = Signal(max=2*self.MEMDEPTH)
         dummyb = Signal(min=-self.MEMDEPTH, max=self.MEMDEPTH)
-        self.sync += dummyf.eq(writeport.adr+self.bytesinline)
-        self.sync += dummyb.eq(writeport.adr+self.bytesinline-(self.MEMDEPTH-1))
+        self.sync += dummyf.eq(writeport.adr+self.CHUNKSIZE+1)
+        self.sync += dummyb.eq(writeport.adr+self.CHUNKSIZE+1-(self.MEMDEPTH-1))
         self.submodules.parser = FSM(reset_state = "RESET")
         spi_mosi = Signal(self.MEMWIDTH)
         parsertrigger = Signal()
         memfulld = Signal()
         command = Signal()
+        chunkcnt = Signal(max=self.CHUNKSIZE+1)
         self.parser.act("RESET",
             NextValue(command, 1),
+            NextValue(chunkcnt, 0),
             NextState('WAITFORSTART')
         )
         self.parser.act("WAITFORSTART",
@@ -158,8 +159,8 @@ class Scanhead(Module):
                     ).
                     Else(NextValue(self.error[self.ERRORS.MEMFULL],0)),
                          NextValue(spislave.miso, Cat([self.error, self.laserfsmstate])),
-                        NextValue(memfulld, self.error[self.ERRORS.MEMFULL]),
-                )
+                         NextValue(memfulld, self.error[self.ERRORS.MEMFULL])
+                    )
         )       
         self.parser.act("WAITFORDONE",
             NextValue(spi_mosi, spislave.mosi),
@@ -170,6 +171,12 @@ class Scanhead(Module):
                     NextState("PROCESSCOMMAND")
                 ).
                 Else(
+                    If(chunkcnt>=self.CHUNKSIZE-1,
+                        NextValue(chunkcnt, 0),
+                        NextValue(command, 1)
+                    ).
+                    Else(NextValue(chunkcnt, chunkcnt+1)
+                    ),
                     NextValue(command, 1),
                     NextValue(writeport.dat_w, spislave.mosi),
                     NextValue(writeport.we, 1),

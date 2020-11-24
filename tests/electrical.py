@@ -38,8 +38,8 @@ class Tests(unittest.TestCase):
     
     def stateEqual(self, state, errors=[]):
         'helper function which asserts if machine is in given state'
-        val = self.sh.spi.xfer([Scanhead.COMMANDS.STATUS])[0]
-        val1 =  self.sh.statetobyte(state = state, errors = errors)
+        val = self.sh.busywrite(Scanhead.COMMANDS.STATUS)
+        val1 = self.sh.statetobyte(state = state, errors = errors)
         try:
             super().assertEqual(val, val1)
         except AssertionError:
@@ -115,12 +115,11 @@ class Tests(unittest.TestCase):
 
     def test_memory(self):
         'test if memory full is raised when writing to memory'
-        #TODO: work with CHUNKsize!
-        for i in range((self.sh.sh.MEMDEPTH-self.sh.sh.bytesinline)//self.sh.sh.CHUNKSIZE):
-            self.assertEqual(self.sh.spi.xfer([Scanhead.COMMANDS.WRITE_L])[0], self.sh.statetobyte(state=Scanhead.STATES.STOP))
+        for i in range((self.sh.sh.MEMDEPTH-self.sh.sh.CHUNKSIZE-1)//self.sh.sh.CHUNKSIZE):
+            self.assertEqual(self.sh.busywrite(Scanhead.COMMANDS.WRITE_L), self.sh.statetobyte(state=Scanhead.STATES.STOP))
             for _ in range(self.sh.sh.CHUNKSIZE): self.stateEqual(state=Scanhead.STATES.STOP)
         # quick check if you reached end of memory via invalid command
-        self.assertEqual(self.sh.spi.xfer([255])[0], self.sh.statetobyte(errors = [Scanhead.ERRORS.MEMFULL], state = Scanhead.STATES.STOP))
+        self.assertEqual(self.sh.busywrite(255), self.sh.statetobyte(errors = [Scanhead.ERRORS.MEMFULL], state = Scanhead.STATES.STOP))
         # the above command is invalid and should be captured
         self.stateEqual(errors=[Scanhead.ERRORS.INVALID, Scanhead.ERRORS.MEMFULL], state=Scanhead.STATES.STOP)
         self.sh.reset()

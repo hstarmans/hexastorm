@@ -117,23 +117,23 @@ class Machine:
 
     def start(self):
         'start scanhead'
-        self.forcewrite(self.sh.COMMANDS.START)
+        self.busywrite(self.sh.COMMANDS.START)
 
     def stop(self):
         'disables scanhead'
-        self.spi.xfer([self.sh.COMMANDS.STOP])
+        self.busywrite(self.sh.COMMANDS.STOP)
 
     def test_laser(self):
         'enable laser'
-        self.spi.xfer([self.sh.COMMANDS.LASERTEST])
+        self.busywrite(self.sh.COMMANDS.LASERTEST)
 
     def test_line(self):
         'enable laser and motor which creates line'
-        self.spi.xfer([self.sh.COMMANDS.LINETEST])
+        self.busywrite(self.sh.COMMANDS.LINETEST)
 
     def test_motor(self):
         'enable motor'
-        self.spi.xfer([self.sh.COMMANDS.MOTORTEST])
+        self.busywrite(self.sh.COMMANDS.MOTORTEST)
 
     def reset(self, pin=26):
         'reset the chip by raising and lowering the reset pin'
@@ -143,15 +143,33 @@ class Machine:
         reset_pin.on()
         sleep(1)
 
-    def forcewrite(self, data, maxtrials=1E6):
-        state = self.bytetostate((self.spi.xfer([data]))[0])
+    def busywrite(self, data, maxtrials=1E6):
+        byte = (self.spi.xfer([data]))[0]
+        state = self.bytetostate(byte)
         trials = 0
-        #NOTE: invalids should be detected
+        #TODO: NOTSTABLE can also mean busy --> still needs fix
+        while (state['errorbits'][self.sh.ERRORS.NOTSTABLE] == 1):
+            byte = (self.spi.xfer([data]))[0]
+            state = self.bytetostate(byte)
+            trials += 1
+            if trials>maxtrials:
+                self.status()
+                self.reset()
+                raise Exception(f"More than {maxtrials} trials required to write to memory")
+        return byte
+
+
+    def forcewrite(self, data, maxtrials=1E6):
+        byte = (self.spi.xfer([data]))[0]
+        state = self.bytetostate(byte)
+        trials = 0
+        # NOTE: invalids should be detected
         #      this was an issue with an older version of the code
         if (state['errorbits'][self.sh.ERRORS.INVALID] == 1):
                 raise Exception("INVALID DETECTED")
         while (state['errorbits'][self.sh.ERRORS.MEMFULL] == 1)|(state['errorbits'][self.sh.ERRORS.NOTSTABLE] == 1):
-            state = self.bytetostate((self.spi.xfer([data]))[0])
+            byte = (self.spi.xfer([data]))[0]
+            state = self.bytetostate(byte)
             trials += 1
             if (state['errorbits'][self.sh.ERRORS.INVALID] == 1):
                 self.status()
@@ -197,15 +215,14 @@ class Machine:
         if bitlst is empty --> stop command is sent
         '''
         bytelst = self.bittobytelist(bitlst)
-        for byte in self.genwritebytes(bytelst):
-            self.forcewrite(byte)
+        for byte in self.genwritebytes(bytelst): self.forcewrite(byte)
 
     def test_photodiode(self):
         '''enable motor, laser and disable if photodiode is triggered
 
         returns False if succesfull
         '''
-        self.spi.xfer([self.sh.COMMANDS.PHOTODIODETEST])
+        self.busywrite(self.sh.COMMANDS.PHOTODIODETEST)
         sleep(2)
         res = True
         if self.bytetostate()['state']!=self.sh.STATES.STOP:
