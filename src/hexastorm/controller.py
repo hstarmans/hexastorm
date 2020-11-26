@@ -13,7 +13,6 @@ import hexastorm.board as board
 class Machine:
     '''
     class used to control a laser scanner
-    TODO: you should create an abstact class which can be implemented by virtual or real machine
     '''
     ic_dev_nr = 1
     ic_address = 0x28
@@ -27,7 +26,9 @@ class Machine:
         self.spi.open(0,0)
         self.spi.max_speed_hz = round(1E6)
         self.spi.cshigh = False
-    
+        self.STABLE_TIME = round(Scanhead.VARIABLES['SPINUP_TIME']
+                                    + Scanhead.VARIABLES['STABLE_TIME']+2)
+
     @property
     def single_facet(self):
         'true if system is in single facet mode'

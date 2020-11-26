@@ -90,6 +90,23 @@ In a later stage, they might be merged.
 ### Migen examples
 Examples used to gain experience with migen.
 
+### Camera
+Currently I am using a uEye camera as I have one laying around.
+When you pick a camera choose one with global shutter and make sure it is monochrome for
+a high resolution.
+
+#### Install Notes
+On Ueye website select Ueye 2240 monochrome. Download and install the driver for
+linux, arm v7, as this is the raspberry pi platform
+#### OpenCV 
+```console
+pip3 install opencv-python
+```
+Also install the following dependencies
+```console
+sudo apt install -y libopenjp2-7 libilmbase-dev libopenexr-dev libgstreamer1.0-dev ffmpeg
+```
+
 ### I2C
 In the current scanhead, I2C is used to set the power of the laser via a digipot.
 I2C can be enabled on the Raspberry Pi as [follows](https://pimylifeup.com/raspberry-pi-i2c/).

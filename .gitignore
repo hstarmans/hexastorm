@@ -5,6 +5,9 @@
 *.vcd
 build*
 
+# Optical camera images
+tests/images*
+
 # other
 # Byte-compiled / optimized / DLL files
 __pycache__/
