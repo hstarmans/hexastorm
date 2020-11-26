@@ -49,16 +49,13 @@ class Scanhead(Module):
         return Errors()
     ERRORS = errors.__func__()
     VARIABLES = {'RPM':1200,'SPINUP_TIME':1.5, 'STABLE_TIME':1.125, 'FACETS':4,
-                 'CRYSTAL_HZ':50E6, 'LASER_HZ': 100E3,
-                 'END%': 0.7, 'START%': 0.35, 'SINGLE_LINE':False,
+                 'CRYSTAL_HZ':50E6, 'LASER_HZ':100E3,
+                 'END%':0.7, 'START%':0.35, 'SINGLE_LINE':False,
                  'SINGLE_FACET':False, 'DIRECTION':0}
     CHUNKSIZE = 1 # ONLY 1 is supported!!
     # one block is 4K bits, there are 32 blocks (officially 20 in HX4K)
-    MEMWIDTH = 8  
+    MEMWIDTH = 8
     MEMDEPTH = 512
-    #TODO: remove line below
-    assert (MEMDEPTH%8 == 0) & (MEMDEPTH>=8)
-
 
     def __init__(self, platform, test=False):
         # variables

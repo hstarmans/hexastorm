@@ -115,7 +115,7 @@ class Tests(unittest.TestCase):
 
     def test_memory(self):
         'test if memory full is raised when writing to memory'
-        for i in range((self.sh.sh.MEMDEPTH-self.sh.sh.CHUNKSIZE-1)//self.sh.sh.CHUNKSIZE):
+        for _ in range((self.sh.sh.MEMDEPTH-self.sh.sh.CHUNKSIZE-1)//self.sh.sh.CHUNKSIZE):
             self.assertEqual(self.sh.busywrite(Scanhead.COMMANDS.WRITE_L), self.sh.statetobyte(state=Scanhead.STATES.STOP))
             for _ in range(self.sh.sh.CHUNKSIZE): self.stateEqual(state=Scanhead.STATES.STOP)
         # quick check if you reached end of memory via invalid command

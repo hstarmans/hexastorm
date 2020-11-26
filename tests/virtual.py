@@ -55,7 +55,6 @@ class TestMachine(Machine):
         self.clocks = {"sys": 20, 'clk100':10}
         self.ticksinfacet = 18
         self.laserticks = 4
-        #TODO: MEMDEPTH is actually overwritten, make a decision here
         sh.MEMDEPTH = 8
         sh.CHUNKSIZE = 1
         sh.VARIABLES['CRYSTAL_HZ']= round(self.ticksinfacet*sh.VARIABLES['FACETS']
@@ -194,10 +193,8 @@ class Tests(unittest.TestCase):
                 yield from self.tm.checkreply(self.tm.sh.COMMANDS.STOP, state=self.tm.sh.STATES.STOP)
 
     @_test_decorator()
-    def test_memory(self):
-        #TODO: memdepth is overwritten
-        #TODO: variable chunksize
-        depth = self.tm.sh.MEMDEPTH-self.tm.sh.bytesinline
+    def test_memory(self)
+        depth = self.tm.sh.MEMDEPTH-self.tm.sh.CHUNKSIZE-1
         for i in range(depth//Scanhead.CHUNKSIZE):
             statebyte = (yield from self.tm.spi.xfer([Scanhead.COMMANDS.WRITE_L]))[0]
             state = self.tm.bytetostate(statebyte)
@@ -272,7 +269,7 @@ class Tests(unittest.TestCase):
         yield from self.tm.writeline(bitlst)
         # ensure write is received
         yield from checkenterstate(self.tm.sh.parser, 'WRITE')
-        yield from checkenterstate(self.tm.sh.parser, 'IDLE')
+        yield from checkenterstate(self.tm.sh.parser, 'WAITFORSTART')
         yield from self.tm.checkline(bitlst)
 
     @_test_decorator(singleline=True, singlefacet=True, simulatediode=True)
@@ -326,7 +323,7 @@ class Tests(unittest.TestCase):
                 yield
             return count+delta
         count = (yield from test_enter_state_speed(count, 'WRITE'))
-        count = (yield from test_enter_state_speed(count, 'IDLE'))
+        count = (yield from test_enter_state_speed(count, 'WAITFORSTART'))
         if verbose:
             print(f"Writing 1 byte to memory takes {count} ticks")
             # NOTE: command byte is ignored
@@ -338,7 +335,7 @@ class Tests(unittest.TestCase):
     @_test_decorator(simulatediode=True)
     def test_scanlineringbuffer(self):
         'test scanline with write using ring buffer'
-        lines = [[1,1], [1,1], [0,1], [0,0]]
+        lines = [[1,1], [1,1], [0,1]]
         for line in lines: yield from self.tm.writeline(line)
         yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, state=self.tm.sh.STATES.STOP, errors=[self.tm.sh.ERRORS.MEMFULL])
         for line in lines: yield from self.tm.checkline(line)
@@ -350,7 +347,8 @@ class Tests(unittest.TestCase):
             lines = [[1,0], [1,1], [0,1]]
             for line in lines: yield from self.tm.writeline(line)
             yield from self.tm.checkreply(self.tm.sh.COMMANDS.START, state=self.tm.sh.STATES.STOP,
-                                                                     errors=[self.tm.sh.ERRORS.MEMREAD])
+                                                                     errors=[self.tm.sh.ERRORS.MEMFULL,
+                                                                             self.tm.sh.ERRORS.MEMREAD])
             for line in lines: yield from self.tm.checkline(line)
             yield from self.tm.checkreply(self.tm.sh.COMMANDS.STOP, state=self.tm.sh.STATES.START,
                                                                     errors=[self.tm.sh.ERRORS.MEMREAD])
