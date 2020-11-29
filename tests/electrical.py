@@ -1,6 +1,8 @@
 import unittest
 from time import sleep
 
+import spidev
+
 from hexastorm.core import Scanhead
 from hexastorm.controller import Machine
 
@@ -124,6 +126,30 @@ class Tests(unittest.TestCase):
         self.stateEqual(errors=[Scanhead.ERRORS.INVALID, Scanhead.ERRORS.MEMFULL], state=Scanhead.STATES.STOP)
         self.sh.reset()
         self.stateEqual(state=Scanhead.STATES.STOP)
+
+
+class MotorTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.spi = spidev.SpiDev()
+        cls.spi.open(1,0)
+        cls.spi.max_speed_hz = int(16000000/8)
+    
+    def test_simple(self):
+        '''writing to chopconfig and see if data is returned
+        
+        see example on page 22
+        https://www.trinamic.com/fileadmin/assets/Products/ICs_Documents/TMC2130_datasheet.pdf
+        If more than 40 bits are sent, only the last 40 bits received before 
+        the rising edge of CSN are recognized as the command. The rest are shifted on in the ring.
+        There are three drivers in the ring.
+        '''
+        lst = [0XEC, 1, 2, 3, 4]*3 # 0XEC = 236, i.e. data is altered
+        expected = [249, 1, 2, 3, 4]*3
+        for _ in range(2):
+            self.spi.writebytes(lst)
+            res = self.spi.readbytes(len(lst))
+        self.assertEqual(expected, res)
 
 if __name__ == '__main__':
     unittest.main()

@@ -107,6 +107,21 @@ Also install the following dependencies
 sudo apt install -y libopenjp2-7 libilmbase-dev libopenexr-dev libgstreamer1.0-dev ffmpeg
 ```
 
+### SPI
+In the current board, the SPI1-1 select pin is not routed to the correct pin on the Raspberry.
+In /boot/config.txt ensure you have the following
+```console
+dtoverlay=spi0-1cs
+dtoverlay=spi1-1cs,cs0_pin=7
+```
+There should not be dtparam=spi=on, somewhere. This would enable two chip selects for SPI0 and 
+create a conflict with the pin select of SPI1. You can check the configuration via
+```console
+ls /dev/spi*
+sudo vcdbg log msg
+```
+Usefull links are [1](http://terminal28.blogspot.com/2016/05/enabling-spi1-on-raspberry-pi-bzero23.html) and [2](https://bootlin.com/blog/enabling-new-hardware-on-raspberry-pi-with-device-tree-overlays/).
+
 ### I2C
 In the current scanhead, I2C is used to set the power of the laser via a digipot.
 I2C can be enabled on the Raspberry Pi as [follows](https://pimylifeup.com/raspberry-pi-i2c/).
