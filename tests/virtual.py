@@ -193,7 +193,7 @@ class Tests(unittest.TestCase):
                 yield from self.tm.checkreply(self.tm.sh.COMMANDS.STOP, state=self.tm.sh.STATES.STOP)
 
     @_test_decorator()
-    def test_memory(self)
+    def test_memory(self):
         depth = self.tm.sh.MEMDEPTH-self.tm.sh.CHUNKSIZE-1
         for i in range(depth//Scanhead.CHUNKSIZE):
             statebyte = (yield from self.tm.spi.xfer([Scanhead.COMMANDS.WRITE_L]))[0]

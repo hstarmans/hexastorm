@@ -1,8 +1,8 @@
 import os
-import spidev
 from time import sleep, time
 import math
 
+import spidev
 import numpy as np
 from gpiozero import LED
 from smbus2 import SMBus

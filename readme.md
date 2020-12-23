@@ -9,7 +9,7 @@ The bill of materials (BOM) and links to FreeCad and PCB designs can be found on
 The code took most inspiration from [LDGraphy](https://github.com/hzeller/ldgraphy).
 
 ## Install Notes
-On Raspberry, install libatlas so latest Numpy can be installed via pip.
+On Raspberry, install libatlas so latest Numpy, etc. can be installed via pip.
 ```console
 sudo apt update
 sudo apt install libatlas3-base
@@ -27,7 +27,7 @@ wget https://raw.githubusercontent.com/enjoy-digital/litex/master/litex_setup.py
 ```
 Install Hexastorm in develop mode so you can edit.
 ```console
-python setup.py develop
+python setup.py develop --user
 ```
 Install ice40 and yosys
 ```console
