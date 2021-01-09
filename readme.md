@@ -86,19 +86,33 @@ Most of these implementation can be removed by improving the code. The current f
 Next step would be to create a copy of [beagleg](https://github.com/hzeller/beagleg) with a FPGA code parser.
 In a later stage, they might be merged.
 
+## Alignment procedure
+For the first steps, the laser can be turned on via
+```python
+python3 optical.py Tests.alignlaser
+```
+Laser will be turned off upon any key press. <br>
+The steps are as follows <br>
+* Collimate the laserdiode <br>
+Move a white paper sheet at large distance and ensure the spotsize does not change.
+* Pre-align height laser with prism <br>
+Turn the screws so laser goes through both prism sides, does not need to be perfect.
+* Align height photodiode with laser <br>
+Turn the screws of the photodiode base so it is aligned with laser
+* Align polarization laser with prism <br>
+Align the laser so the long axis of the ellipse is parallel to the prism and finetune the height.
+* Test photodiode and stabilization <br>
+Run the photodiode and stabilization test and ensure they pass.
+```python
+python3 electrical.py Tests.test_photodiode Tests.test_stable
+```
+
 ## Other notes
 ### Migen examples
 Examples used to gain experience with migen.
 
-### Camera
-Currently I am using a uEye camera as I have one laying around.
-When you pick a camera choose one with global shutter and make sure it is monochrome for
-a high resolution.
-
-#### Install Notes
-On Ueye website select Ueye 2240 monochrome. Download and install the driver for
-linux, arm v7, as this is the raspberry pi platform
-#### OpenCV 
+### OpenCV 
+For image operations, opencv is required.
 ```console
 pip3 install opencv-python
 ```
@@ -106,6 +120,20 @@ Also install the following dependencies
 ```console
 sudo apt install -y libopenjp2-7 libilmbase-dev libopenexr-dev libgstreamer1.0-dev ffmpeg
 ```
+
+### Camera
+Two camera's have been tried; uEye camera and Arducam Global shutter ov2311.
+Currently, the ov2311 chip is used.
+
+#### uEye camera
+Disadvantages; the uEye is more expensive, drivers require an account and there is no good Python driver. 
+Advantages; the product is more mature.
+On Ueye website select Ueye 2240 monochrome. Download and install the driver for
+linux, arm v7, as this is the raspberry pi platform.  A python library for the camera is available in the source code.
+#### Arducam
+Install my version of the Python libary [ArducamPython])ttps://github.com/hstarmans/Arducampython).
+The camera does not work with a raspberry pi 4B.
+
 
 ### SPI
 In the current board, the SPI1-1 select pin is not routed to the correct pin on the Raspberry.
