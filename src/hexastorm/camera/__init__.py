@@ -1,3 +1,5 @@
+#NOTE: this code is no longer used, moved to arducam
+
 from . import pyueye_utils
 from pyueye import ueye
 

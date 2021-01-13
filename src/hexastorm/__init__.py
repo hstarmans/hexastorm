@@ -1,1 +1,1 @@
-from . import board, controller, core
+from . import board, controller, core, optical
