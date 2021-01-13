@@ -48,7 +48,7 @@ class Scanhead(Module):
         Errors = namedtuple('Errors', errors, defaults=tuple(range(len(errors))))
         return Errors()
     ERRORS = errors.__func__()
-    VARIABLES = {'RPM':1200,'SPINUP_TIME':1.5, 'STABLE_TIME':1.125, 'FACETS':4,
+    VARIABLES = {'RPM':2000,'SPINUP_TIME':1.5, 'STABLE_TIME':1.125, 'FACETS':4,
                  'CRYSTAL_HZ':50E6, 'LASER_HZ':100E3,
                  'END%':0.7, 'START%':0.35, 'SINGLE_LINE':False,
                  'SINGLE_FACET':False, 'DIRECTION':0}

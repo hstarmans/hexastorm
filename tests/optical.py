@@ -2,11 +2,12 @@ import unittest
 import math
 from pathlib import Path
 import time
+import os
 
 import cv2
 import numpy as np
 
-from hexastorm.camera import Cam
+import camera
 from hexastorm.controller import Machine
 from hexastorm.core import Scanhead
 import hexastorm.board as board
@@ -80,28 +81,48 @@ class OptMachine(Machine):
             self.flash(True, True)
         else:
             self.reset()
-        self.cam = Cam()
 
 class Tests(unittest.TestCase):
     ''' Virtual test for scanhead'''
-    def setUp(self):
-        self.om = OptMachine(flash=False)
+    @classmethod
+    def setUpClass(cls):
+        cls.om = OptMachine(flash=False)
+        cls.cam = camera.Cam()
+        cls.cam.init()
+    
+    @classmethod
+    def tearDownClass(cls):
+        cls.cam.close()
 
-    def takepicture(self):
+    def alignlaser(self):
+        '''align laser with prism
+        
+        Laser is aligned without camera
+        '''
+        self.om.test_laser()
+        print("Press enter to confirm laser is aligned with prism")
+        input()
+        self.om.stop()
+
+    def aligncamera(self):
+        '''align laserline with camera
+        '''
+        self.om.test_line()
+        print("This will open up a window")
+        print("Press esc escape live view")
+        self.cam.live_view(3000)
+        self.takepicture()
+        self.om.stop()
+
+    def takepicture(self, capturetime=3000):
         'takes picture and store it with timestamp to this folder'
-        img = self.om.cam.take_picture()
+        img = self.cam.capture(capturetime)
         grey_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         date_string = time.strftime("%Y-%m-%d-%H:%M")
         print(f"Writing to {Path(IMG_DIR, date_string+'.jpg')}")
+        if not os.path.exists(IMG_DIR): os.makedirs(IMG_DIR)
         cv2.imwrite(str(Path(IMG_DIR, date_string+'.jpg')), grey_img) 
-    
-    def aligncamera(self):
-        'manually align camera'
-        self.om.test_line()
-        print("Press enter to confirm camera is aligned")
-        input()
-        self.takepicture()
-        self.om.stop()
+
 
 if __name__ == '__main__':
     unittest.main()
