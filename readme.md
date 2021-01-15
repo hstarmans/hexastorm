@@ -131,8 +131,7 @@ Advantages; the product is more mature.
 On Ueye website select Ueye 2240 monochrome. Download and install the driver for
 linux, arm v7, as this is the raspberry pi platform.  A python library for the camera is available in the source code.
 #### Arducam
-Install my version of the Python libary [ArducamPython])ttps://github.com/hstarmans/Arducampython).
-The camera does not work with a raspberry pi 4B.
+Install my version of the Python libary [ArducamPython](https://github.com/hstarmans/Arducampython).
 
 
 ### SPI
