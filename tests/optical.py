@@ -59,22 +59,38 @@ class Tests(unittest.TestCase):
         input()
         self.om.stop()
 
-    def aligncamera(self):
-        '''align laserline with camera
+    def grabline(self):
+        '''turn on laser and motor
+
+        User can first preview image. After pressing escape,
+        a final image is taken.
         '''
         self.om.test_line()
+        self.om.laser_power = 120
+        self.cam.set_exposure(36000)
         print("This will open up a window")
-        print("Press esc escape live view")
-        self.cam.live_view(3000)
+        print("Press escape to quitlive view")
+        self.cam.live_view(0.6)
         self.takepicture()
         self.om.stop()
 
-    def takepicture(self, capturetime=3000):
+    def grabspot(self, laserpower=80):
+        '''turn on laser
+
+        User can first preview image. After pressing escape,
+        a final image is taken.
+        '''
+        self.om.laser_power = laserpower  #NOTE: at the moment all ND filters and a single channel is used
+        self.cam.set_exposure(1499)
+        self.om.test_laser()
+        print("Calibrate the camera with live view an press escape to confirm spot in vision")
+        self.cam.live_view(scale=0.6)
+        self.takepicture()
+        self.om.stop()
+
+    def takepicture(self):
         'takes picture and store it with timestamp to this folder'
-        img = self.cam.capture(capturetime)
-        # TODO: this should not be needed
-        # crop image as Arducamdriver has some weird internals
-        img = img[:-20,:]
+        img = self.cam.capture()
         grey_img = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
         date_string = time.strftime("%Y-%m-%d-%H:%M")
         print(f"Writing to {Path(IMG_DIR, date_string+'.jpg')}")

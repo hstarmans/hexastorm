@@ -67,12 +67,12 @@ class Machine:
     def laser_power(self, val):
         '''
         set the maximum laser current of driver chip to given value in range [0-255]
-        This does not turn on or off the laser. 
         
-        Laser will be set to this current if pulsed.
+        This does not turn on or off the laser. Laser will be set to this current if pulsed.
         The laser power can be changed in two ways.
         First by using one or two channels. Second by setting a value between
-        0-255 at the laser driver chip.
+        0-255 at the laser driver chip for the laser current.
+        The laser needs a minimum current. It most likely does not work at low currents.
         '''
         if val < 0 or val > 255: raise Exception('Invalid laser power')
         self.bus.write_byte_data(self.ic_address, 0, val)
