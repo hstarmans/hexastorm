@@ -34,8 +34,25 @@ class OpticalTest(unittest.TestCase):
         '''tests laser line detection
         '''
         img = cv.imread(str(Path(TESTIMG_DIR, 'laserline1.jpg')))
-        line= [vx,vy,x,y] = feature.detect_line(img)
+        line = [vx,vy,x,y] = feature.detect_line(img)
         self.assertListEqual(list(line), [0.09047453,-0.9958988,1106.4971,629.26263])
+
+    def test_laserwidth(self):
+        '''tests laser width detection
+        '''
+        img = cv.imread(str(Path(TESTIMG_DIR, 'laserline1.jpg')))
+        pass
+    
+    def test_laserspot(self):
+        '''tests laser spot detection
+        '''
+        dct ={ 'laserspot1.jpg': np.array([26, 36]),
+               'laserspot2.jpg': np.array([27, 41])
+        }
+        for k, v in dct.items():
+            img = cv.imread(str(Path(TESTIMG_DIR, k)))
+            np.testing.assert_array_equal(feature.spotsize(img)['axes'].round(0),
+                                          v)
 
 class Tests(unittest.TestCase):
     ''' Optical test for scanhead'''

@@ -1,32 +1,31 @@
 import cv2 as cv
 import numpy as np
 
-def spotsize(img, pixelsize = 4.65, ellipse = -1):
+def spotsize(img, pixelsize = 3, debug=False, fname='detectsspotdebug.jpg'):
     ''' detects spot
     
+    img: numpy array which should contain the spot
+    pixelsize: the size of one pixel in micrometers
+
     returns dictionary with keys
     centroid  center of detected spot
     position  [x,y] of detected circle or ellipse
     axes      short axis diameter, long axis diameter
               in micrometers
-
-    img: numpy array which should contain the spot
-    pixelsize: the size of one pixel in micrometers
-    ellipse: 1 calculate position and axes of ellipse
-             0 calculate position and radius of circle
-            -1 don't calculate position and axes of the spot
     '''
     if img.max() == 255: print("Camera satured, spotsize can be incorrect")
     if img.min()<0 or img.max()>255: print("Image has wrong format, values outside [0-255]")
-    # Converts image from one colour space to another.
     # RGB image to gray
-    imgray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    imgray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
     # Converts gray scale image to binary using a threshold
-    ret, thresh = cv2.threshold(imgray, img.max()//2, 255, cv2.THRESH_BINARY)
+    _, thresh = cv.threshold(imgray, img.max()//2, 255, cv.THRESH_BINARY)
     # find the external contour
-    im2, contours, hierarchy = cv2.findContours\
-                    (thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if len(contours) == 0 or len(contours)>2:
+    cntrs, hierarchy = cv.findContours\
+                    (thresh, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+    if len(cntrs) == 0:
+        print("Did not detect a spot")
+        return
+    elif len(cntrs)>2:
         def createkey(contour):
             '''key function for sort
             
@@ -35,21 +34,17 @@ def spotsize(img, pixelsize = 4.65, ellipse = -1):
             
             This is not supported at the moment, make sure image is correct
             '''
-            momA = cv2.moments(contour)        
+            momA = cv.moments(contour)        
             (xa,ya) = int(momA['m10']/momA['m00']), int(momA['m01']/momA['m00'])
             return xa          
-        print("Detected none or multiple spots")
-    try:
-        if ellipse == 1:
-            el = cv2.fitEllipse(contours[0])
-        elif ellipse == 0:
-            el = cv2.minEnclosingCircle(contours[0])
-        else:
-            el = [[0,0],[0,0]]
-    except:
-        print("Spot not detected")
+        print("Detected none or multiple spots, using spot with largest surface area")
+        c = max(cntrs, key = cv.contourArea)
+    else:
+        c = cntrs[0]
+    el = cv.fitEllipse(c)
+    if debug: cv.imwrite(fname, cv.ellipse(img, el, (0,255,0), thickness=2))
     # image center via centroid
-    M = cv2.moments(contours[0]) 
+    M = cv.moments(c) 
     center = np.array((int(M['m10']/M['m00']), int(M['m01']/M['m00'])))
     dct = {
         'centroid'  : center*pixelsize,
