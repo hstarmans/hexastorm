@@ -35,13 +35,17 @@ class OpticalTest(unittest.TestCase):
         '''
         img = cv.imread(str(Path(TESTIMG_DIR, 'laserline1.jpg')))
         line = [vx,vy,x,y] = feature.detect_line(img)
-        self.assertListEqual(list(line), [0.09047453,-0.9958988,1106.4971,629.26263])
+        res = [0, 0, 1099, 719]
+        for idx, val in enumerate(line): self.assertEqual(int(val), int(res[idx]))
 
     def test_laserwidth(self):
         '''tests laser width detection
         '''
-        img = cv.imread(str(Path(TESTIMG_DIR, 'laserline1.jpg')))
-        pass
+        img = cv.imread(str(Path(TESTIMG_DIR, 'laserline.jpg')))
+        dct = feature.cross_scan_error(img)
+        dct2 = {'max': 86.36, 'min': 21.58, 'mean': 38.04, 'median': 36.0}
+        for k, v in dct.items(): 
+            self.assertEqual(int(v), int(dct2[k]))
     
     def test_laserspot(self):
         '''tests laser spot detection
