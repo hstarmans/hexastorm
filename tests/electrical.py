@@ -19,10 +19,20 @@ class Tests(unittest.TestCase):
             cls.sh.reset()
         cls.STABLE_TIME = round(Scanhead.VARIABLES['SPINUP_TIME']+Scanhead.VARIABLES['STABLE_TIME']+2)
 
+
+    def motor_test(self):
+        self.sh.test_motor()
+        sleep(10)
+    
+    
     def test_stable(self):
-        'test if laser can stabilize itself and gives memread error if no data is written'
+        '''test if laser can stabilize itself and gives memread error if no data is written
+        
+        If the test fails, make sure that the motor spins smoothly.
+        '''
         self.sh.start()
-        sleep(self.STABLE_TIME)
+        # the longer the harder the test
+        sleep(10)
         self.stateEqual(state = Scanhead.STATES.START, errors=[Scanhead.ERRORS.MEMREAD],
                         ignore=False)
         self.sh.reset()
