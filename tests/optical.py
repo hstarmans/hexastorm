@@ -92,7 +92,8 @@ class Tests(unittest.TestCase):
         print("This will open up a window")
         print("Press escape to quitlive view")
         self.cam.live_view(0.6)
-        self.takepicture()
+        img = self.takepicture()
+        print(feature.cross_scan_error(img))
         self.om.stop()
 
     def grabspot(self, laserpower=80):
@@ -106,7 +107,21 @@ class Tests(unittest.TestCase):
         self.om.test_laser()
         print("Calibrate the camera with live view an press escape to confirm spot in vision")
         self.cam.live_view(scale=0.6)
-        self.takepicture()
+        img = self.takepicture()
+        print(feature.spotsize(img))
+        self.om.stop()
+
+    def searchcamera(self):
+        '''laser is synced with photodiode and a line is projected
+        
+        This is done for various line patterns and used to detect the edges of the camera
+        '''
+        self.om.single_line = True
+        self.om.single_facet = True
+        self.om.flash(recompile=True, removebuild=True)
+        self.om.writeline([1]*self.om.sh.BITSINSCANLINE)
+        self.om.start()
+        self.cam.live_view(scale=0.6)
         self.om.stop()
 
     def takepicture(self):
@@ -117,6 +132,7 @@ class Tests(unittest.TestCase):
         print(f"Writing to {Path(IMG_DIR, date_string+'.jpg')}")
         if not os.path.exists(IMG_DIR): os.makedirs(IMG_DIR)
         cv.imwrite(str(Path(IMG_DIR, date_string+'.jpg')), grey_img)
+        return img
 
 if __name__ == '__main__':
     unittest.main()

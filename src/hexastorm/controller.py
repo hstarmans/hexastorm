@@ -144,12 +144,12 @@ class Machine:
         reset_pin.on()
         sleep(1)
 
-    def busywrite(self, data, maxtrials=1E6):
+    def busywrite(self, data, maxtrials=1E6, ignore=True):
         byte = (self.spi.xfer([data]))[0]
         state = self.bytetostate(byte)
         trials = 0
         #TODO: NOTSTABLE can also mean busy --> still needs fix
-        while (state['errorbits'][self.sh.ERRORS.NOTSTABLE] == 1):
+        while (state['errorbits'][self.sh.ERRORS.NOTSTABLE] == 1) and ignore:
             byte = (self.spi.xfer([data]))[0]
             state = self.bytetostate(byte)
             trials += 1
@@ -224,7 +224,7 @@ class Machine:
         returns False if succesfull
         '''
         self.busywrite(self.sh.COMMANDS.PHOTODIODETEST)
-        sleep(2)
+        sleep(4)
         res = True
         if self.bytetostate()['state']!=self.sh.STATES.STOP:
             print("Test failed, stopping")

@@ -23,7 +23,8 @@ class Tests(unittest.TestCase):
         'test if laser can stabilize itself and gives memread error if no data is written'
         self.sh.start()
         sleep(self.STABLE_TIME)
-        self.stateEqual(state = Scanhead.STATES.START, errors=[Scanhead.ERRORS.MEMREAD])
+        self.stateEqual(state = Scanhead.STATES.START, errors=[Scanhead.ERRORS.MEMREAD],
+                        ignore=False)
         self.sh.reset()
     
     def test_photodiode(self):
@@ -38,9 +39,9 @@ class Tests(unittest.TestCase):
         self.stateEqual(state = Scanhead.STATES.STOP)
         self.sh.reset()
     
-    def stateEqual(self, state, errors=[]):
+    def stateEqual(self, state, errors=[], ignore=True):
         'helper function which asserts if machine is in given state'
-        val = self.sh.busywrite(Scanhead.COMMANDS.STATUS)
+        val = self.sh.busywrite(Scanhead.COMMANDS.STATUS, ignore=ignore)
         val1 = self.sh.statetobyte(state = state, errors = errors)
         try:
             super().assertEqual(val, val1)
