@@ -56,7 +56,7 @@ class Platform(LatticePlatform):
         return super().build(core, build_name = build_name)
 
     def upload(self, build_name):
-        proc = subprocess.Popen(['apio', 'icezprog', f'build/{build_name}.bin'],
+        proc = subprocess.Popen(['icezprog', f'build/{build_name}.bin'],
                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                  stderr=subprocess.STDOUT)
         stdout, stderr = proc.communicate()

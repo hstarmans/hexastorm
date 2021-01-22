@@ -36,8 +36,14 @@ apio install ice40
 ```
 An alternative to apio is yowasp or compile from source. Apio is chosen as compilation takes a long time on a Raspberry.
 [Yowasp](http://yowasp.org/) comes with python support but only works on a X86 system. Yowasp takes a lot of time to run the first time.
-The FPGA toolchain can be build from source via [ICE40](http://www.clifford.at/icestorm/).
-
+The FPGA toolchain can be build from source via [ICE40](http://www.clifford.at/icestorm/).  
+Install icezprog
+```console
+git clone https://github.com/cliffordwolf/icotools
+cd ~/icotools/examples/icezero
+make icezprog
+mv icezprog ~/.local/bin
+```
 ## Parameters
 The following parameters describe the system. <br>
 | parameter | description |
