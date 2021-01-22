@@ -144,7 +144,7 @@ class Machine:
         reset_pin.on()
         sleep(1)
 
-    def busywrite(self, data, maxtrials=1E6, ignore=True):
+    def busywrite(self, data, maxtrials=1E5, ignore=True):
         byte = (self.spi.xfer([data]))[0]
         state = self.bytetostate(byte)
         trials = 0
@@ -215,8 +215,19 @@ class Machine:
         
         if bitlst is empty --> stop command is sent
         '''
+        if len(bitlst)>self.sh.BITSINSCANLINE:
+            raise Exception("Too many bits for a scanline")
         bytelst = self.bittobytelist(bitlst)
         for byte in self.genwritebytes(bytelst): self.forcewrite(byte)
+
+    def writepattern(self, pattern):
+        '''repeats a pattern so a line is formed and writes to head
+
+        pattern: list of bits [0] or [1,0,0]
+        '''
+        line = (pattern*(self.sh.BITSINSCANLINE//len(pattern))
+               + pattern[:self.sh.BITSINSCANLINE%len(pattern)])
+        self.writeline(line)
 
     def test_photodiode(self):
         '''enable motor, laser and disable if photodiode is triggered

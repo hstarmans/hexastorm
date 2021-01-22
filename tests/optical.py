@@ -117,11 +117,14 @@ class Tests(unittest.TestCase):
         This is done for various line patterns and used to detect the edges of the camera
         '''
         self.om.single_line = True
-        self.om.single_facet = True
+        self.om.single_facet = False
         self.om.flash(recompile=True, removebuild=True)
-        self.om.writeline([1]*self.om.sh.BITSINSCANLINE)
+        self.om.laser_power = 120
+        self.cam.set_exposure(36000)
+        self.om.writepattern([1]*8+[0]*8)
         self.om.start()
         self.cam.live_view(scale=0.6)
+        img = self.takepicture()
         self.om.stop()
 
     def takepicture(self):
