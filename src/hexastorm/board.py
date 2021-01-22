@@ -60,7 +60,7 @@ class Platform(LatticePlatform):
                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                  stderr=subprocess.STDOUT)
         stdout, stderr = proc.communicate()
-        if stderr or ('Failed' in str(stdout)):
+        if stderr or ('Failed' in str(stdout)) or ('Error' in str(stdout)):
             raise Exception("Not able to upload bitstream")
 
     def removebuild(self):
