@@ -28,7 +28,7 @@ chmod +x litex_setup.py
 ```
 Install Hexastorm in develop mode so you can edit.
 ```console
-python setup.py develop --user
+python3 setup.py develop --user
 ```
 Install ice40 and yosys
 ```console
