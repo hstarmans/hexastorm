@@ -16,7 +16,7 @@ sudo apt install libatlas3-base
 ```
 Install required libraries
 ```console
-pip3 install requirements.txt
+pip3 install -r requirements.txt
 ```
 Make folder and install litex, this downloads and installs a lot!
 ```console
