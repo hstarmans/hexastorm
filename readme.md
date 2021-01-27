@@ -23,6 +23,7 @@ Make folder and install litex, this downloads and installs a lot!
 mkdir ~/litex
 cd ~/litex
 wget https://raw.githubusercontent.com/enjoy-digital/litex/master/litex_setup.py
+chmod +x litex_setup.py
 ./litex_setup.py init install --user
 ```
 Install Hexastorm in develop mode so you can edit.
