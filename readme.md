@@ -16,18 +16,19 @@ sudo apt install libatlas3-base
 ```
 Install required libraries
 ```console
-pip3 install requirements.txt
+pip3 install -r requirements.txt
 ```
 Make folder and install litex, this downloads and installs a lot!
 ```console
 mkdir ~/litex
 cd ~/litex
 wget https://raw.githubusercontent.com/enjoy-digital/litex/master/litex_setup.py
+chmod +x litex_setup.py
 ./litex_setup.py init install --user
 ```
 Install Hexastorm in develop mode so you can edit.
 ```console
-python setup.py develop --user
+python3 setup.py develop --user
 ```
 Install ice40 and yosys
 ```console
