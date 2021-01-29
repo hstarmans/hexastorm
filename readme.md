@@ -1,9 +1,7 @@
 # Laserscanner
 Implementation of a laserscanner on a FPGA. In a high-speed polygon scanner system, the laser is deflected by a rotating prism or reflective mirror. 
-The position of the laser is determined via a sensor such as a photodiode.
-<br>
-<img src="https://cdn.hackaday.io/images/7106161566426847098.jpg" align="center" height="300"/> 
-<br>
+The position of the laser is determined via a sensor such as a photodiode.  
+<img src="https://cdn.hackaday.io/images/7106161566426847098.jpg" align="center" height="300"/>  
 Code is tested on the system shown in the image above, branded as [Hexastorm](https://www.hexastorm.com). 
 The bill of materials (BOM) and links to FreeCad and PCB designs can be found on [Hackaday](https://hackaday.io/project/21933-open-hardware-fast-high-resolution-laser).
 The code took most inspiration from [LDGraphy](https://github.com/hzeller/ldgraphy).
@@ -43,7 +41,7 @@ make icezprog
 mv icezprog ~/.local/bin
 ```
 ## Parameters
-The following parameters describe the system. <br>
+The following parameters describe the system.  
 | parameter | description |
 |---|---|
 | RPM | revolutions per minute of the rotor |
@@ -55,7 +53,7 @@ The following parameters describe the system. <br>
 | DIRECTION | exposure direction, i.e. forward or backward |
 | SINGLE_LINE | system exposes fixed pattern, i.e. line|
 | SINGLE_FACET | only one of the facets is used|
-<br>
+  
 Using the above, the code determines the number of bits in a scanline. Via a serial port interface the user can push data to the scanner.
 A line is preceded with a command which can be SCAN or STOP. The data is stored on the chip in block ram. 
 Once turned on, the scanner reads out this memory via First In First Out (FIFO).
@@ -70,22 +68,21 @@ Once turned on, the scanner reads out this memory via First In First Out (FIFO).
 | LASERTEST | turn on the laser|
 | LINETEST | turn on the laser and the motor|
 | PHOTODIODETEST | turn on motor, laser and turn off if photodiode is triggered|
-| WRITE_L | next byte will be stored in memory |
-<br>
+| WRITE_L | next byte will be stored in memory |  
 
 ## Detailed description
 Look at the test folders and individually tests on how to use the code. The whole scanhead can be simulated virtually. 
 As such, a scanner is not needed.
 
 ## Limitations
-Only one of the 32 block rams is used. <br>
-The laser can be pulsed at 50 MHZ but data can only be streamed to the laser scanner at 25 megabits per second. <br>
-Parameters can not be changed on the fly. The binary has to be recompiled and uploaded to the scanhead. This is typically fast, i.e. seconds. <br>
-The current implentation is targeted at a system with one laser bundle <br>
-System is for writing to, i.e. exposing, a substrate. Reading should also be possible to enable optical coherence tomagraphy.<br>
-System has no link for LIDAR measurements, circuit can be found [here](https://hackaday.io/project/163501-open-source-lidar-unruly).<br>
-The FPGA controls all the stepper motors. At the moment it is not possible to use GCODE or apply acceleration profiles. <br>
-<br>
+Only one of the 32 block rams is used.  
+The laser can be pulsed at 50 MHZ but data can only be streamed to the laser scanner at 25 megabits per second.  
+Parameters can not be changed on the fly. The binary has to be recompiled and uploaded to the scanhead. This is typically fast, i.e. seconds.  
+The current implentation is targeted at a system with one laser bundle  
+System is for writing to, i.e. exposing, a substrate. Reading should also be possible to enable optical coherence tomagraphy.  
+System has no link for LIDAR measurements, circuit can be found [here](https://hackaday.io/project/163501-open-source-lidar-unruly).  
+The FPGA controls all the stepper motors. At the moment it is not possible to use GCODE or apply acceleration profiles.  
+  
 Most of these implementation can be removed by improving the code. The current focus is on a proof of principle.
 Next step would be to create a copy of [beagleg](https://github.com/hzeller/beagleg) with a FPGA code parser.
 In a later stage, they might be merged.
@@ -113,10 +110,12 @@ Two camera's have been tried; uEye camera and Arducam Global shutter ov2311.
 Currently, the ov2311 chip is used.
 
 #### uEye camera
-Disadvantages; the uEye is more expensive, drivers require an account and there is no good Python driver. 
-Advantages; the product is more mature.
+Disadvantages; the uEye is more expensive, drivers require an account and there is no good Python driver.  
+Advantages; the product is more mature.  
 On Ueye website select Ueye 2240 monochrome. Download and install the driver for
 linux, arm v7, as this is the raspberry pi platform.  A python library for the camera is available in the source code.
+My version can be installed via [uEyeCamera](https://github.com/hstarmans/ueyecamera).
+
 #### Arducam
 Install my version of the Python libary [ArducamPython](https://github.com/hstarmans/Arducampython).
 
@@ -163,9 +162,6 @@ The FPGA toolchain can be build from source via [ICE40](http://www.clifford.at/i
 
 <!-- 
 TODO:
-  test current code base on scanner in single line and single facet mode;
-    stopline
-    scanline
   try to create a static pattern with the scanner in ring mode
   add movement, the head should determine wether it has to move after a line.
   There are others issues, but not needed for minimum viable product;
