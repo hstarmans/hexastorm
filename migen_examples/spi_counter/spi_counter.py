@@ -43,7 +43,7 @@ class TestSPI(unittest.TestCase):
                 yield
                 while (yield dut.master.done) == 0:
                     yield
-                self.assertEqual((yield dut.master.miso), i)
+                self.assertEqual((yield dut.master.miso), i+1)
 
         def slave_generator(dut):
             for i in range(0,2):
@@ -52,9 +52,9 @@ class TestSPI(unittest.TestCase):
                     yield
                 while (yield dut.spicounter.slave.done) == 0:
                     yield
-                self.assertEqual((yield dut.spicounter.slave.mosi), 0xaf)
-                self.assertEqual((yield dut.spicounter.slave.length), 8)
-                self.assertEqual((yield dut.spicounter.done_counter),i+1)
+                result = 0xaf if i>0 else 0
+                self.assertEqual((yield dut.spicounter.slave.mosi), result)
+                self.assertEqual((yield dut.spicounter.done_counter), i+1)
 
         dut = DUT()
         run_simulation(dut, [master_generator(dut), slave_generator(dut)])
