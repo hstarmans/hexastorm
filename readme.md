@@ -94,25 +94,8 @@ Next step would be to create a copy of [beagleg](https://github.com/hzeller/beag
 In a later stage, they might be merged.
 
 ## Alignment procedure
-For the first steps, the laser can be turned on via
-```python
-python3 optical.py Tests.alignlaser
-```
-Laser will be turned off upon any key press. <br>
-The steps are as follows <br>
-* Collimate the laserdiode <br>
-Move a white paper sheet at large distance and ensure the spotsize does not change.
-* Pre-align height laser with prism <br>
-Turn the screws so laser goes through both prism sides, does not need to be perfect.
-* Align height photodiode with laser <br>
-Turn the screws of the photodiode base so it is aligned with laser
-* Align polarization laser with prism <br>
-Align the laser so the long axis of the ellipse is parallel to the prism and finetune the height.
-* Test photodiode and stabilization <br>
-Run the photodiode and stabilization test and ensure they pass.
-```python
-python3 electrical.py Tests.test_photodiode Tests.test_stable
-```
+An instruction video is shown below;  
+[![Alignment procedure image not showing](http://img.youtube.com/vi/Ri6DAneEzw4/0.jpg)](http://www.youtube.com/watch?v=Ri6DAneEzw4 "Alignment procedure")
 
 ## Other notes
 ### Migen examples
