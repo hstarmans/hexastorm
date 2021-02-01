@@ -1,65 +1,128 @@
-import math
 from collections import namedtuple
 
-from migen import NextValue, NextState, Signal, If, Else, Elif, Cat
-from migen import ClockDomain, Memory, READ_FIRST
-from migen import *
+from nmigen import Signal, If, Else, Elif, Cat, Elaboratable
+from nmigen import ClockDomain, Memory, Module
 from litex.soc.cores.clock import iCE40PLL
 from litex.soc.cores.spi import SPISlave
 
 
-class Scanhead(Module):
-    '''
-    This description can be converted to VHDL or Verilog and then converted to
-    binary and uploaded to the FPGA.
-    '''
-    @staticmethod
-    def commands():
-        commands = ('STOP', 'START')
-        Commands = namedtuple('Commands', commands,
-                              defaults=tuple(range(len(commands))))
-        return Commands()
-    COMMANDS = commands.__func__()
 
-    @staticmethod
-    def states():
-        states = ('EMPTY', 'FILLED', 'EXIT')
-        States = namedtuple('States', states, defaults=tuple(range(len(states))))
-        return States()
-    STATES = states.__func__()
+class SPIParser(Elaboratable):
+    'parses instructions by beagleg and stores them in memory'
+    def elaborate(self, platform, test=False):
+        m.module()
+        with m.FSM(reset='RESET', name='parser'):
+            with m.State('RESET'):
+                m.next = 'WAITFORSTART'
+                m.d.sync += [command.eq(1),
+                             chunkcnt.eq(0)]
+            with m.State('WAITFORSTART'):
+                with m.If(start_rise):
+                    m.next = 'WAITFORDONE'
+                with m.Else():
+                    with m.If(written):
+                        with m.If((dummyf > rdport.addr) &
+                                    (rdport.addr > wrport.addr)):
+                            self.error[self.ERRORS.MEMFULL].eq(1)
+                        with m.Elif((dummyb > rdport.addr) &
+                                    (rdport.addr < wrport.addr)):
+                            self.error[self.ERRORS.MEMFULL].eq(1)
+                        with m.Else():
+                            self.error[self.ERRORS.MEMFULL].eq(0)
+                    with m.Else():
+                        self.error[self.ERRORS.MEMFULL].eq(0)
+                        spislave.miso.eq(Cat([self.error,
+                                                self.fsmstate]))
+                        memfulld.eq(self.error[self.ERRORS.MEMFULL])
+            with m.State('WAITFORDONE'):
+                # backup of mosi in case it changes
+                spi_mosi.eq(spislave.mosi)
+                with m.If(done_rise):
+                    # controller is notified peripheral is busy (ugly hack)
+                    spislave.miso.eq(4)
+                    with m.If(command):
+                        m.next = 'PROCESSCOMMAND'
+                    with m.Else():
+                        with m.If(chunkcnt >= self.CHUNKSIZE-1):
+                            chunkcnt.eq(0)
+                            command.eq(1)
+                        with m.Else():
+                            chunkcnt.eq(chunkcnt+1)
+                        command.eq(1)
+                        self.dat_w.eq(spislave.mosi)
+                        self.we.eq(1)
+                        m.next = 'WRITE'
+            # command used as extra parameter this is confusing
+            with m.State('PROCESSCOMMAND'):
+                m.next = 'WAITFORSTART'
+                with m.If(spi_mosi == self.COMMANDS.EMPTY):
+                    command.eq(0)
+                with m.Elif(spi_mosi == self.COMMANDS.FILLED):
+                    command.eq(1)
+                    self.fsmstate.eq(self.STATES.START)
+                with m.Elif(spi_mosi == self.COMMANDS.EXIT):
+                    command.eq(0)
+                    self.fsmstate.eq(self.STATES.STOP)
+                with m.Elif(spi_mosi == self.COMMANDS.ABORT):
+                    pass
+                with m.Else():
+                    self.error[self.ERRORS.INVALID].eq(1)
+                    command.eq(0)
+            with m.State('WRITE'):
+                m.next = 'WAITFORSTART'
+                written.eq(1)
+                with m.If((self.adr + 1) == self.MEMDEPTH):
+                    self.adr.eq(0)
+                with m.Else():
+                    self.adr.eq(self.adr+1)
+                    self.we.eq(0)
 
+
+
+
+
+class GPARSER(Elaboratable):
+    '''
+    FPGA core to parse instructions provided by beagleG
+    '''
     @staticmethod
-    def errors():
-        '''errors
-        Multiple errors can be present at the same time. This is different from state or command
-        as these can only be equal to one value.
-        If all bits are zero, there is no error.
-        Returned is the bit which equals the error
-        '''
-        errors = ('MEMFULL', 'MEMREAD', 'NOTSTABLE', 'INVALID', 'INVALIDLINE')
-        Errors = namedtuple('Errors', errors, defaults=tuple(range(len(errors))))
-        return Errors()
-    ERRORS = errors.__func__()
+    def customnamedtuple(names):
+        states = namedtuple('States', names,
+                            defaults=tuple(range(len(names))))
+        return states()
+    STATES = customnamedtuple.__func__(('STOP', 'START'))
+    COMMANDS = customnamedtuple.__func__(('EMPTY', 'FILLED', 'EXIT', 'ABORT'))
+    ERRORS = customnamedtuple.__func__(('MEMFULL', 'MEMREAD',
+                                        'NOTSTABLE', 'INVALID', 'INVALIDLINE'))
     CHUNKSIZE = 15  # first chunk is command
     # one block is 4K bits, there are 32 blocks (officially 20 in HX4K)
     MEMWIDTH = 8
     MEMDEPTH = 512
 
-    def __init__(self, platform, test=False):
-        # clock; routing was not able to reach speed higher than 70 MHz
-        #        for entire circuit on iCE40, so clock is contraint to 50 MHz
+    VARIABLES = {'CRYSTAL_HZ': 50E6}
+
+    def __init__(self):
+        # TODO: THIS IS WRONG YOU HAVE DUAL ADDRESS!
+        self.adr = Signal(4)
+        self.dat_r = Signal(8)
+        self.dat_w = Signal(8)
+        self.we = Signal()
+        self.re = Signal()
+        self.mem = Memory(width=self.MEMWIDTH, depth=self.MEMDEPTH)
+
+    def elaborate(self, platform, test=False):
+        m = Module()
         clk100 = platform.request('clk100')
-        self.clock_domains.cd_sys = ClockDomain(reset_less=True)
-        platform.add_period_constraint(self.cd_sys.clk, 20)
+        m.domains.cd_sys = ClockDomain(reset_less=True)
+        platform.add_period_constraint(m.domains.cd_sys.clk, 20)
         if not test:
-            self.submodules.pll = pll = iCE40PLL()
+            m.submodules.pll = pll = iCE40PLL()
             pll.register_clkin(clk100, 100e6)
-            pll.create_clkout(self.cd_sys, self.VARIABLES['CRYSTAL_HZ'])
+            pll.create_clkout(m.domains.cd_sys, self.VARIABLES['CRYSTAL_HZ'])
         # three submodules; SPI receiver, memory and laser state machine
         # full byte state
         self.fsmstate = Signal(3)    # state laser module 5-8 bit
         self.error = Signal(5)       # error              0-5 bit
-        debug = Signal(8)            # optional
         # Memory element
         # Rules:
         #        read/write address cannot be equal
@@ -70,13 +133,10 @@ class Scanhead(Module):
         # as it is believed this is not possible
         # sram memory is 32 blocks... each block has its own ports
         # one block 8*512 = 4096 bits currently used
-        self.specials.mem = Memory(width=self.MEMWIDTH, depth=self.MEMDEPTH)
-        writeport = self.mem.get_port(write_capable=True, mode=READ_FIRST)
-        self.readport = self.mem.get_port(has_re=True)
-        self.specials += writeport, self.readport
-        self.ios = {writeport.adr, writeport.dat_w, writeport.we,
-                    self.readport.dat_r, self.readport.adr, self.readport.re}
-        readbit = Signal(max=self.MEMWIDTH)
+        m.submodules.rdport = rdport = self.mem.read_port()
+        m.submodules.wrport = wrport = self.mem.write_port()
+        # TODO: migen also has  a combinatorial here !
+        readbit = Signal(range(self.MEMWIDTH))
         written = Signal()
         self.dat_r_new = Signal(self.MEMWIDTH)
         dat_r_old = Signal(self.MEMWIDTH)
@@ -90,7 +150,7 @@ class Scanhead(Module):
         # Detects whether new command is available
         self.spi = platform.request("spi")
         spislave = SPISlave(self.spi, data_width=8)
-        self.submodules.slave = spislave
+        m.submodules.slave = spislave
         # Done detector
         done_d = Signal()
         done_rise = Signal()
@@ -102,103 +162,15 @@ class Scanhead(Module):
         self.sync += start_d.eq(spislave.start)
         self.comb += start_rise.eq(spislave.start & ~start_d)
         # Memfull trigger
-        dummyf = Signal(max=2*self.MEMDEPTH)
-        dummyb = Signal(min=-self.MEMDEPTH, max=self.MEMDEPTH)
-        self.sync += dummyf.eq(writeport.adr+self.CHUNKSIZE+1)
-        self.sync += dummyb.eq(writeport.adr+self.CHUNKSIZE+1-(self.MEMDEPTH-1))
-        self.submodules.parser = FSM(reset_state="RESET")
+        dummyf = Signal(range(2*self.MEMDEPTH))
+        dummyb = Signal(range(-self.MEMDEPTH, max=self.MEMDEPTH))
+        self.sync += dummyf.eq(wrport.addr+self.CHUNKSIZE+1)
+        self.sync += dummyb.eq(wrport.addr+self.CHUNKSIZE+1-(self.MEMDEPTH-1))
         spi_mosi = Signal(self.MEMWIDTH)
         memfulld = Signal()
         command = Signal()
-        chunkcnt = Signal(max=self.CHUNKSIZE+1)
-        self.parser.act("RESET",
-                        NextValue(command, 1),
-                        NextValue(chunkcnt, 0),
-                        NextState('WAITFORSTART')
-                        )
-        self.parser \
-            .act("WAITFORSTART",
-                 If(start_rise,
-                    NextState("WAITFORDONE")
-                    ).
-                 Else(
-                    # if written, check memory full
-                    If(written == 1,
-                       If((dummyf > self.readport.adr) & \
-                          (self.readport.adr > writeport.adr),
-                          NextValue(self.error[self.ERRORS.MEMFULL], 1)
-                          ).
-                       Elif((dummyb > self.readport.adr) & \
-                            (self.readport.adr < writeport.adr),
-                            NextValue(self.error[self.ERRORS.MEMFULL], 1)
-                            ).
-                       Else(NextValue(self.error[self.ERRORS.MEMFULL], 0)
-                            )
-                       ).
-                    # memory cannot be full
-                    Else(NextValue(self.error[self.ERRORS.MEMFULL], 0)),
-                    NextValue(spislave.miso, Cat([self.error,
-                                                  self.fsmstate])),
-                    NextValue(memfulld, self.error[self.ERRORS.MEMFULL])
-                    )
-                 )
-        self.parser \
-            .act("WAITFORDONE",
-                 # backup of mosi in case it changes
-                 NextValue(spi_mosi, spislave.mosi),
-                 If(done_rise,
-                    # controller is notified peripheral is busy (ugly hack)
-                    NextValue(spislave.miso, 4),
-                    # two possiblities; processing the byte or store it in sram
-                    If(command,
-                       NextState("PROCESSCOMMAND")
-                       ).
-                    Else(
-                        If(chunkcnt >= self.CHUNKSIZE-1,
-                            NextValue(chunkcnt, 0),
-                            NextValue(command, 1)
-                           ).
-                        Else(NextValue(chunkcnt, chunkcnt+1)
-                             ),
-                        NextValue(command, 1),
-                        NextValue(writeport.dat_w, spislave.mosi),
-                        NextValue(writeport.we, 1),
-                        NextState("WRITE")
-                        )
-                    )
-                 )
-        # command used as extra parameter this is confusing
-        self.parser \
-            .act("PROCESSCOMMAND",
-                 NextState("WAITFORSTART"),
-                 If(spi_mosi == self.COMMANDS.EMPTY,
-                    NextValue(command, 0)
-                    ).
-                 Elif(spi_mosi == self.COMMANDS.FILLED,
-                      NextValue(command, 1),
-                      NextValue(self.fsmstate, self.STATES.START)
-                      ).
-                 Elif(spi_mosi == self.COMMANDS.EXIT,
-                      NextValue(self.fsmstate, self.STATES.STOP),
-                      NextValue(command, 0)
-                      ).
-                 Elif(spi_mosi == self.COMMANDS.ABORT).
-                 Else(NextValue(self.error[self.ERRORS.INVALID], 1),
-                      NextValue(command, 0))
-                 )
-        # not sure we will be needing this for g code parser
-        self.parser \
-            .act("WRITE",
-                 NextState("WAITFORSTART"),
-                 NextValue(written, 1),
-                 # Write address position
-                 If(writeport.adr + 1 == self.MEMDEPTH,
-                    NextValue(writeport.adr, 0)
-                    ).
-                 Else(NextValue(writeport.adr, writeport.adr+1)
-                      ),
-                 NextValue(writeport.we, 0)
-                 )
+        chunkcnt = Signal(range(self.CHUNKSIZE+1))
+
 
 ####################
 
