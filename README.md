@@ -8,16 +8,14 @@ The peripheral indicates the controller if the memory is full or busy.
 Busy is a limitation of the current implemention (which can be fixed).
 
 # Detailed Description
-The controller sends over 16 bytes via SPI.
+On the pru 16 instructions can be kept in a ring.
+Each instructions is 30 bytes (QUEUE_ELEMENT_SIZE) long.
+The current idea is to decouple the retrieval and processing of instructions.
+The FPGA retrieves the instructions and stores them locally on the chip. Later these instructions are parsed into
+signals for the motor.
 
-r2 register holds position but r1 is increased.
-it seems to read out all the travel params
+An instruction is made up out of 2 bytes.
 
-
-IN the pru they are kept in a ring of 16 instructions
-
-An instruction is made up out of the following
-QUEUE_ELEMENT_SIZE
 byte0 : state can be empty, filled, exit and abort.
 byte1 : direction bit
 travel parameters
@@ -62,5 +60,16 @@ Steps
 - Place in your on module for the PRU part and debug this with present google test
 
 
-Notes:
- ideally you hack something in the queye so you can step through program
+# Checks
+Beagle G prefers processing of 16 bytes per transfer. You have been using 8 bytes.
+You need to work with old modules.
+
+
+
+ # Installation
+ Although deprecated tools are installed via apio;
+```
+export PATH=/home/pi/.local/bin:$PATH
+export PATH=/home/pi/.apio/packages/toolchain-yosys/bin:$PATH
+export PATH=/home/pi/.apio/packages/toolchain-ice40/bin:$PATH
+``` 
