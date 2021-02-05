@@ -1,24 +1,9 @@
-# the led is on --> can you find this
 import unittest
 
-from nmigen import Signal, Module, Cat, Elaboratable, Record
-from nmigen.hdl.ast import Rose, Fell
-from nmigen.hdl.rec import DIR_FANIN, DIR_FANOUT
 from debug_spi import DebugSPIExample
 
 from luna.gateware.interface.spi import SPIGatewareTestCase
-from luna.gateware.test.utils import LunaGatewareTestCase, sync_test_case
-
-class SPIBus(Record):
-    """ Record representing an SPI bus. """
-
-    def __init__(self):
-        super().__init__([
-            ('sck', 1, DIR_FANIN),
-            ('sdi', 1, DIR_FANIN),
-            ('sdo', 1, DIR_FANOUT),
-            ('cs',  1, DIR_FANIN)
-        ])
+from luna.gateware.test.utils import sync_test_case
 
 
 class SPIDeviceInterfaceTest(SPIGatewareTestCase):
@@ -26,7 +11,6 @@ class SPIDeviceInterfaceTest(SPIGatewareTestCase):
 
     def initialize_signals(self):
         yield self.dut.spi.cs.eq(0)
-
 
     @sync_test_case
     def test_spi_interface(self):
@@ -45,4 +29,5 @@ class SPIDeviceInterfaceTest(SPIGatewareTestCase):
             old = test_byte
 
 if __name__ == "__main__":
+    # TODO: doesnt work create a test platform and pass luna that
     unittest.main()

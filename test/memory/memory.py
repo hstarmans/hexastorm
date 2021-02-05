@@ -1,5 +1,9 @@
+""" SRAM synthesis check
+
+If you run the code below an sram is synthesized by Yosys
+"""
 from nmigen import Elaboratable, Memory, Module, Signal
-from board import Firestarter
+from FPGAG.board import Firestarter
 
 class Memtest(Elaboratable):
     def __init__(self):

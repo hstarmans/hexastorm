@@ -1,162 +1,163 @@
-from collections import namedtuple
+# use abstraction already present in luna !
+# from collections import namedtuple
 
-from nmigen import Signal, Cat, Elaboratable
-from nmigen import Memory, Module
-from litex.soc.cores.spi import SPISlave
+# from nmigen import Signal, Cat, Elaboratable
+# from nmigen import Memory, Module
+# from litex.soc.cores.spi import SPISlave
 
-# NOTE: following doesnt work due to bug in pylint https://github.com/PyCQA/pylint/issues/3876
-# def customnamedtuple(typename, field_names) -> namedtuple:
-#    return namedtuple(typename, field_names,
-#                      defaults=range(len(field_names)))
-
-
-STATES = namedtuple('STATES', ['START', 'STOP'], defaults=range(2))()
-COMMANDS = namedtuple('COMMANDS', ['EMPTY', 'FILLED', 'EXIT', 'ABORT'],
-                      defaults=range(4))()
-ERRORS = namedtuple('ERRORS', ['MEMFULL', 'MEMREAD', 'INVALID'],
-                    defaults=range(3))()
-CHUNKSIZE = 15  # first chunk is command
-# one block is 4K bits, there are 32 blocks (officially 20 in HX4K)
-MEMWIDTH = 16
-MEMDEPTH = 256
-VARIABLES = {'CRYSTAL_HZ': 50E6}
+# # NOTE: following doesnt work due to bug in pylint https://github.com/PyCQA/pylint/issues/3876
+# # def customnamedtuple(typename, field_names) -> namedtuple:
+# #    return namedtuple(typename, field_names,
+# #                      defaults=range(len(field_names)))
 
 
-class SPIParser(Elaboratable):
-    '''parses instructions by beagleg and stores them in memory
-     unless memory is full'''
-
-    def __init__(self):
-        # step generator connections
-        self.written = Signal()
-        self.error = Signal()
-        self.fsmstate = Signal()
-        # memory connections
-        self.read_adr = Signal(range(MEMDEPTH))
-        self.write_adr = Signal(range(MEMDEPTH))
-        self.write_data = Signal(range(MEMWIDTH))
-        self.write_en = Signal()
-
-    def elaborate(self, platform):
-        m = Module()
-        # Memfull trigger
-        # A forward and backward lagged value with resprect to current
-        # memory position to trigger memory full.
-        dummyf = Signal(range(2*MEMDEPTH))
-        dummyb = Signal(range(-MEMDEPTH, MEMDEPTH))
-        m.d.sync += dummyf.eq(self.write_adr+CHUNKSIZE+1)
-        m.d.sync += dummyb.eq(self.write_adr+CHUNKSIZE+1-(MEMDEPTH-1))
-        # memfull is calculated prior to transaction to prevent
-        # conflict
-        memfulld = Signal()
-
-        command = Signal()
-        chunkcnt = Signal(range(CHUNKSIZE+1))
-        # spi
-        spislave = SPISlave(platform.request("spi"),
-                            data_width=MEMWIDTH)
-        m.submodules.slave = spislave
-        # Done detector
-        done_d = Signal()
-        done_rise = Signal()
-        m.d.sync += done_d.eq(spislave.done)
-        m.d.comb += done_rise.eq(spislave.done & ~done_d)
-        # Start detector
-        start_d = Signal()
-        start_rise = Signal()
-        m.d.sync += start_d.eq(spislave.start)
-        m.d.comb += start_rise.eq(spislave.start & ~start_d)
-        # backup of spi_mosi
-        spi_mosi = Signal(MEMWIDTH)
-        with m.FSM(reset='RESET', name='parser'):
-            with m.State('RESET'):
-                m.next = 'WAITFORSTART'
-                m.d.sync += [command.eq(1),
-                             chunkcnt.eq(0)]
-            with m.State('WAITFORSTART'):
-                with m.If(start_rise):
-                    m.next = 'WAITFORDONE'
-                with m.Else():
-                    with m.If(self.written):
-                        with m.If((dummyf > self.read_adr) &
-                                  (self.read_adr > self.write_adr)):
-                            self.error[ERRORS.MEMFULL].eq(1)
-                        with m.Elif((dummyb > self.read_adr) &
-                                    (self.read_adr < self.write_adr)):
-                            self.error[ERRORS.MEMFULL].eq(1)
-                        with m.Else():
-                            self.error[ERRORS.MEMFULL].eq(0)
-                    with m.Else():
-                        self.error[ERRORS.MEMFULL].eq(0)
-                        spislave.miso.eq(Cat([self.error,
-                                              self.fsmstate]))
-                        memfulld.eq(self.error[ERRORS.MEMFULL])
-            with m.State('WAITFORDONE'):
-                with m.If(done_rise):
-                    # backup mosi in case it changes
-                    spi_mosi.eq(spislave.mosi)
-                    # controller is notified peripheral is busy (ugly hack)
-                    spislave.miso.eq(4)
-                    with m.If(command):
-                        m.next = 'PROCESSCOMMAND'
-                    with m.Else():
-                        with m.If(chunkcnt >= CHUNKSIZE-1):
-                            chunkcnt.eq(0)
-                            command.eq(1)
-                        with m.Else():
-                            chunkcnt.eq(chunkcnt+1)
-                        command.eq(1)
-                        self.write_data.eq(spislave.mosi)
-                        self.write_en.eq(1)
-                        m.next = 'WRITE'
-            # command used as extra parameter this is confusing
-            with m.State('PROCESSCOMMAND'):
-                m.next = 'WAITFORSTART'
-                with m.If(spi_mosi == COMMANDS.EMPTY):
-                    command.eq(0)
-                with m.Elif(spi_mosi == COMMANDS.FILLED):
-                    command.eq(1)
-                    self.fsmstate.eq(STATES.START)
-                with m.Elif(spi_mosi == COMMANDS.EXIT):
-                    command.eq(0)
-                    self.fsmstate.eq(STATES.STOP)
-                with m.Elif(spi_mosi == COMMANDS.ABORT):
-                    pass
-                with m.Else():
-                    self.error[ERRORS.INVALID].eq(1)
-                    command.eq(0)
-            with m.State('WRITE'):
-                m.next = 'WAITFORSTART'
-                self.written.eq(1)
-                with m.If((self.write_adr + 1) == MEMDEPTH):
-                    self.write_adr.eq(0)
-                with m.Else():
-                    self.write_adr.eq(self.write_adr+1)
-                    self.write_en.eq(0)
+# STATES = namedtuple('STATES', ['START', 'STOP'], defaults=range(2))()
+# COMMANDS = namedtuple('COMMANDS', ['EMPTY', 'FILLED', 'EXIT', 'ABORT'],
+#                       defaults=range(4))()
+# ERRORS = namedtuple('ERRORS', ['MEMFULL', 'MEMREAD', 'INVALID'],
+#                     defaults=range(3))()
+# CHUNKSIZE = 15  # first chunk is command
+# # one block is 4K bits, there are 32 blocks (officially 20 in HX4K)
+# MEMWIDTH = 16
+# MEMDEPTH = 256
+# VARIABLES = {'CRYSTAL_HZ': 50E6}
 
 
-class GPARSER(Elaboratable):
-    '''
-    FPGA core to parse instructions provided by beagleG
-    '''
-    def __init__(self):
-        self.mem = Memory(width=MEMWIDTH, depth=MEMDEPTH)
+# class SPIParser(Elaboratable):
+#     '''parses instructions by beagleg and stores them in memory
+#      unless memory is full'''
 
-    # NOTE: if platform is None interpret as test
-    def elaborate(self, platform):
-        # core GPARSER module
-        m = Module()
-        m.submodules.rdport = rdport = self.mem.read_port()
-        m.submodules.wrport = wrport = self.mem.write_port()
-        # spi parser connections to core
-        m.submodules.spiparser = spiparser = SPIParser()
-        m.d.comb += [
-            spiparser.read_adr.eq(rdport.addr),
-            spiparser.write_en.eq(wrport.en),
-            spiparser.write_adr.eq(wrport.addr),
-            spiparser.write_data.eq(wrport.data)
-        ]
-        # NOTE: written, error and fsm state are not connected
+#     def __init__(self):
+#         # step generator connections
+#         self.written = Signal()
+#         self.error = Signal()
+#         self.fsmstate = Signal()
+#         # memory connections
+#         self.read_adr = Signal(range(MEMDEPTH))
+#         self.write_adr = Signal(range(MEMDEPTH))
+#         self.write_data = Signal(range(MEMWIDTH))
+#         self.write_en = Signal()
+
+#     def elaborate(self, platform):
+#         m = Module()
+#         # Memfull trigger
+#         # A forward and backward lagged value with resprect to current
+#         # memory position to trigger memory full.
+#         dummyf = Signal(range(2*MEMDEPTH))
+#         dummyb = Signal(range(-MEMDEPTH, MEMDEPTH))
+#         m.d.sync += dummyf.eq(self.write_adr+CHUNKSIZE+1)
+#         m.d.sync += dummyb.eq(self.write_adr+CHUNKSIZE+1-(MEMDEPTH-1))
+#         # memfull is calculated prior to transaction to prevent
+#         # conflict
+#         memfulld = Signal()
+
+#         command = Signal()
+#         chunkcnt = Signal(range(CHUNKSIZE+1))
+#         # spi
+#         spislave = SPISlave(platform.request("spi"),
+#                             data_width=MEMWIDTH)
+#         m.submodules.slave = spislave
+#         # Done detector
+#         done_d = Signal()
+#         done_rise = Signal()
+#         m.d.sync += done_d.eq(spislave.done)
+#         m.d.comb += done_rise.eq(spislave.done & ~done_d)
+#         # Start detector
+#         start_d = Signal()
+#         start_rise = Signal()
+#         m.d.sync += start_d.eq(spislave.start)
+#         m.d.comb += start_rise.eq(spislave.start & ~start_d)
+#         # backup of spi_mosi
+#         spi_mosi = Signal(MEMWIDTH)
+#         with m.FSM(reset='RESET', name='parser'):
+#             with m.State('RESET'):
+#                 m.next = 'WAITFORSTART'
+#                 m.d.sync += [command.eq(1),
+#                              chunkcnt.eq(0)]
+#             with m.State('WAITFORSTART'):
+#                 with m.If(start_rise):
+#                     m.next = 'WAITFORDONE'
+#                 with m.Else():
+#                     with m.If(self.written):
+#                         with m.If((dummyf > self.read_adr) &
+#                                   (self.read_adr > self.write_adr)):
+#                             self.error[ERRORS.MEMFULL].eq(1)
+#                         with m.Elif((dummyb > self.read_adr) &
+#                                     (self.read_adr < self.write_adr)):
+#                             self.error[ERRORS.MEMFULL].eq(1)
+#                         with m.Else():
+#                             self.error[ERRORS.MEMFULL].eq(0)
+#                     with m.Else():
+#                         self.error[ERRORS.MEMFULL].eq(0)
+#                         spislave.miso.eq(Cat([self.error,
+#                                               self.fsmstate]))
+#                         memfulld.eq(self.error[ERRORS.MEMFULL])
+#             with m.State('WAITFORDONE'):
+#                 with m.If(done_rise):
+#                     # backup mosi in case it changes
+#                     spi_mosi.eq(spislave.mosi)
+#                     # controller is notified peripheral is busy (ugly hack)
+#                     spislave.miso.eq(4)
+#                     with m.If(command):
+#                         m.next = 'PROCESSCOMMAND'
+#                     with m.Else():
+#                         with m.If(chunkcnt >= CHUNKSIZE-1):
+#                             chunkcnt.eq(0)
+#                             command.eq(1)
+#                         with m.Else():
+#                             chunkcnt.eq(chunkcnt+1)
+#                         command.eq(1)
+#                         self.write_data.eq(spislave.mosi)
+#                         self.write_en.eq(1)
+#                         m.next = 'WRITE'
+#             # command used as extra parameter this is confusing
+#             with m.State('PROCESSCOMMAND'):
+#                 m.next = 'WAITFORSTART'
+#                 with m.If(spi_mosi == COMMANDS.EMPTY):
+#                     command.eq(0)
+#                 with m.Elif(spi_mosi == COMMANDS.FILLED):
+#                     command.eq(1)
+#                     self.fsmstate.eq(STATES.START)
+#                 with m.Elif(spi_mosi == COMMANDS.EXIT):
+#                     command.eq(0)
+#                     self.fsmstate.eq(STATES.STOP)
+#                 with m.Elif(spi_mosi == COMMANDS.ABORT):
+#                     pass
+#                 with m.Else():
+#                     self.error[ERRORS.INVALID].eq(1)
+#                     command.eq(0)
+#             with m.State('WRITE'):
+#                 m.next = 'WAITFORSTART'
+#                 self.written.eq(1)
+#                 with m.If((self.write_adr + 1) == MEMDEPTH):
+#                     self.write_adr.eq(0)
+#                 with m.Else():
+#                     self.write_adr.eq(self.write_adr+1)
+#                     self.write_en.eq(0)
+
+
+# class GPARSER(Elaboratable):
+#     '''
+#     FPGA core to parse instructions provided by beagleG
+#     '''
+#     def __init__(self):
+#         self.mem = Memory(width=MEMWIDTH, depth=MEMDEPTH)
+
+#     # NOTE: if platform is None interpret as test
+#     def elaborate(self, platform):
+#         # core GPARSER module
+#         m = Module()
+#         m.submodules.rdport = rdport = self.mem.read_port()
+#         m.submodules.wrport = wrport = self.mem.write_port()
+#         # spi parser connections to core
+#         m.submodules.spiparser = spiparser = SPIParser()
+#         m.d.comb += [
+#             spiparser.read_adr.eq(rdport.addr),
+#             spiparser.write_en.eq(wrport.en),
+#             spiparser.write_adr.eq(wrport.addr),
+#             spiparser.write_data.eq(wrport.data)
+#         ]
+#         # NOTE: written, error and fsm state are not connected
 
 ####################
 

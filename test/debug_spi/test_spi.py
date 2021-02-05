@@ -15,8 +15,3 @@ for idx, byte in enumerate(bts):
         spi.xfer([byte])
     spi.cshigh = False
     current = byte
-# at the start of transaction
-#  spi.cs is high !
-
-
-# at the end of tranasction cs high is low
