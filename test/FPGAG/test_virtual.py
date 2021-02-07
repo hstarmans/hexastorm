@@ -15,17 +15,15 @@ class SPIDeviceInterfaceTest(SPIGatewareTestCase):
 
     @sync_test_case
     def test_writegcode(self):
-        self.assertEqual((yield self.dut.led), 0)
-        # at start buffer is free
+        self.assertEqual((yield self.dut.fifo.empty), 1)
         self.assertEqual((yield self.dut.fifo.space_available), MEMDEPTH)
         # write GCODE command with data
-        data = [COMMANDS.GCODE, 1, 2, 3]
-        response = yield from self.spi_exchange_data(data)
+        writedata = [COMMANDS.GCODE, 1, 2, 3, 4]
+        readdata = yield from self.spi_exchange_data(writedata)
         for _ in range(30):
            yield
-        self.assertEqual((yield self.dut.led), 1)
         self.assertEqual((yield self.dut.fifo.space_available), MEMDEPTH-1)
-
+        self.assertEqual((yield self.dut.fifo.empty), 0)
 
 if __name__ == "__main__":
     unittest.main()

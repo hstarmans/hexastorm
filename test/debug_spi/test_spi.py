@@ -1,3 +1,7 @@
+""" raspberry pi test script
+
+test script to run on the raspberry pi
+"""
 import spidev
 from time import sleep
 
