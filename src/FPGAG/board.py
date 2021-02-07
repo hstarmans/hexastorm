@@ -4,16 +4,12 @@ To use it, you'll need to set your LUNA_PLATFORM variable:
 """
 
 import os
-import logging
 import subprocess
 
-
-from nmigen import *
-from nmigen.build import *
+from nmigen.build import Resource, Attrs, Pins, PinsN, Clock, Subsignal
 from nmigen.vendor.lattice_ice40 import LatticeICE40Platform
-
-from nmigen_boards.resources import *
-
+from nmigen_boards.resources import LEDResources
+from nmigen_boards.test.blinky import Blinky
 from luna.gateware.platform.core import LUNAPlatform
 
 

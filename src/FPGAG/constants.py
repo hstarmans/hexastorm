@@ -1,6 +1,6 @@
 from collections import namedtuple
 
-COMMANDS = namedtuple('COMMANDS', ['EMPTY', 'GCODE', 'LASER', 'EXIT', 'ABORT'],
+COMMANDS = namedtuple('COMMANDS', ['EMPTY', 'GCODE', 'EXIT', 'ABORT'],
                       defaults=range(4))()
 MEMWIDTH = 16
 MEMDEPTH = 256
