@@ -8,7 +8,6 @@ from FPGAG.constants import MEMWIDTH, MEMDEPTH
 
 class Memtest(Elaboratable):
     def __init__(self):
-        
         self.mem = Memory(width=MEMWIDTH, depth=MEMDEPTH)
 
     def elaborate(self, platform):

@@ -19,9 +19,11 @@ class SPIDeviceInterfaceTest(SPIGatewareTestCase):
         self.assertEqual((yield self.dut.fifo.space_available), MEMDEPTH)
         # write GCODE command with data
         writedata = [COMMANDS.GCODE, 1, 2, 3, 4]
-        readdata = yield from self.spi_exchange_data(writedata)
-        for _ in range(30):
-           yield
+        _ = yield from self.spi_exchange_data(writedata)
+        # wait for data to be committed
+        if (yield self.dut.fifo.write_commit) == 0:
+            yield
+        yield
         self.assertEqual((yield self.dut.fifo.space_available), MEMDEPTH-1)
         self.assertEqual((yield self.dut.fifo.empty), 0)
 
