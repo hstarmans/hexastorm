@@ -5,7 +5,7 @@ from luna.gateware.interface.spi import SPICommandInterface, SPIBus
 from luna.gateware.memory import TransactionalizedFIFO
 
 from FPGAG.constants import COMMAND_SIZE, WORD_SIZE
-from FPGAG.constants import MEMDEPTH, MEMWIDTH, COMMANDS
+from FPGAG.constants import MEMDEPTH, MEMWIDTH, COMMANDS, BYTESINGCODE
 
 
 class Core(Elaboratable):
@@ -29,6 +29,8 @@ class Core(Elaboratable):
         m.submodules.interface = interface = self.interface
         # Connect fifo
         m.submodules.fifo = fifo = self.fifo
+        # Parser
+        bytesreceived = Signal(range(BYTESINGCODE))
         with m.FSM(reset='RESET', name='parser'):
             with m.State('RESET'):
                 m.next = 'WAIT_COMMAND'
@@ -37,28 +39,41 @@ class Core(Elaboratable):
                 with m.If(interface.command_ready):
                     with m.If(interface.command==COMMANDS.EMPTY):
                         m.next = 'WAIT_COMMAND'
-                    with m.If((interface.command==COMMANDS.GCODE) &
+                    with m.Elif((interface.command==COMMANDS.GCODE) &
                                (fifo.space_available>0)):
                         m.next = 'WAIT_WORD'
-                    with m.If(interface.command==COMMANDS.ABORT):
+                    with m.Elif(interface.command==COMMANDS.ABORT):
                         m.next = 'WAIT_COMMAND'
-                    with m.If(interface.command==COMMANDS.EXIT):
+                    with m.Elif(interface.command==COMMANDS.EXIT):
+                        m.next = 'WAIT_COMMAND'
+                    with m.Else():
                         m.next = 'WAIT_COMMAND'
                     # TODO: set current state to interface
                     #m.d.sync += interface.command.eq(0)
             with m.State('WAIT_WORD'):
                 with m.If(interface.word_complete):
-                    m.d.sync += [fifo.write_en.eq(1),
+                    m.d.sync += [bytesreceived.eq(bytesreceived+4),
+                                 fifo.write_en.eq(1),
                                  fifo.write_data.eq(interface.word_received)
                                 ]
                     m.next = 'WRITE'
             with m.State('WRITE'):
                 m.d.sync += [fifo.write_en.eq(0),
                              fifo.write_commit.eq(1)]
-                m.next = 'WAIT_COMMAND'
+                with m.If(bytesreceived<BYTESINGCODE):
+                    m.next = 'WAIT_WORD'
+                with m.Else():
+                    m.d.sync += [bytesreceived.eq(0)]
+                    m.next = 'WAIT_COMMAND'
         return m
 
-# TODO:
+# Overview:
+#  Currenlty the hardware consists out of the following elements; 
+#  -- SPI command interface
+#  -- transactionaled FIFO
+#  -- SPI parser (basically an extension of SPI command interface)
+#  -- Dispatcher --> dispatches signals to actual hardware
+
+
 #  1: write a test
 #   --> als ik te vaak schrijf naar bord dan raakt ie vol
-#  2: check wether you can synthesize memory
