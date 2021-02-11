@@ -16,7 +16,8 @@ class SPIParser(Elaboratable):
                                              word_size=WORD_SIZE)
         self.fifo = TransactionalizedFIFO(width=MEMWIDTH,
                                           depth=MEMDEPTH)
-        self.dispatcherror = Signal()
+        self.dispatcherror = Signal()  # input
+        self.execute = Signal()        # output
 
     def elaborate(self, platform):
         m = Module()
@@ -37,15 +38,22 @@ class SPIParser(Elaboratable):
                      state[STATE.DISPATCHERROR].eq(self.dispatcherror)
         ]
         # Parser
-        bytesreceived = Signal(range(BYTESINGCODE))
+        bytesreceived = Signal(range(BYTESINGCODE+1))
         with m.FSM(reset='RESET', name='parser'):
             with m.State('RESET'):
+                m.d.sync += self.execute.eq(0)
                 m.next = 'WAIT_COMMAND'
             with m.State('WAIT_COMMAND'):
                 m.d.sync += [fifo.write_commit.eq(0)]
                 with m.If(interface.command_ready):
                     with m.If(interface.command==COMMANDS.EMPTY):
                         m.next = 'WAIT_COMMAND'
+                    with m.Elif(interface.command==COMMANDS.START):
+                        m.next = 'WAIT_COMMAND'
+                        m.d.sync += self.execute.eq(1)
+                    with m.Elif(interface.command==COMMANDS.STOP):
+                        m.next = 'WAIT_COMMAND'
+                        m.d.sync += self.execute.eq(0)
                     with m.Elif(interface.command==COMMANDS.GCODE):
                         with m.If(fifo.space_available>BYTESINGCODE):
                             m.next = 'WAIT_WORD'
@@ -63,13 +71,12 @@ class SPIParser(Elaboratable):
                                 ]
                     m.next = 'WRITE'
             with m.State('WRITE'):
-                m.d.sync += [fifo.write_en.eq(0),
-                             fifo.write_commit.eq(1)]
-                with m.If(bytesreceived<BYTESINGCODE):
-                    m.next = 'WAIT_WORD'
-                with m.Else():
-                    m.d.sync += [bytesreceived.eq(0)]
-                    m.next = 'WAIT_COMMAND'
+                m.d.sync += [fifo.write_en.eq(0)]
+                m.next = 'WAIT_COMMAND'
+                with m.If(bytesreceived==BYTESINGCODE):
+                    m.d.sync += [bytesreceived.eq(0),
+                                 fifo.write_commit.eq(1)]
+                    
         return m
 
 
@@ -93,14 +100,16 @@ class Core(Elaboratable):
         # Define dispatcher
         fifo = self.spiparser.fifo
         error = Signal()
-        m.d.sync += self.spiparser.dispatcherror.eq(error)
-        #bytesreceived = Signal(range(BYTESINGCODE))
+        enabled = Signal()
+        m.d.sync += [self.spiparser.dispatcherror.eq(error),
+                     enabled.eq(self.spiparser.execute)]
+        bytesreceived = Signal(range(BYTESINGCODE))
         with m.FSM(reset='RESET', name='dispatcher'):
             m.d.sync += [fifo.read_commit.eq(0)]
             with m.State('RESET'):
                 m.next = 'WAIT_COMMAND'
             with m.State('WAIT_COMMAND'):
-                with m.If(fifo.empty == 0):
+                with m.If((fifo.empty == 0)&(enabled==1)):
                     m.d.sync += [fifo.read_en.eq(1)]
                     m.next = 'PARSEHEAD'
             with m.State('PARSEHEAD'):

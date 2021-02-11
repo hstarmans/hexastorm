@@ -1,8 +1,8 @@
 from collections import namedtuple
 import numpy as np
 
-COMMANDS = namedtuple('COMMANDS', ['EMPTY', 'GCODE', 'STATUS'],
-                      defaults=range(3))()
+COMMANDS = namedtuple('COMMANDS', ['EMPTY', 'GCODE', 'STATUS', 'START', 'STOP'],
+                      defaults=range(5))()
 STATE = namedtuple('STATE', ['FULL', 'DISPATCHERROR'], defaults=range(2))()
 # one block is 4K there are 32 blocks (officially 20 in HX4K)
 # max of 1 block is 16*256 but if you use a larger memwidth you seem to

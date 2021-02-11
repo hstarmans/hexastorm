@@ -21,17 +21,15 @@ class SPIDeviceInterfaceTest(SPIGatewareTestCase):
         self.assertEqual((yield self.dut.fifo.space_available), MEMDEPTH)
         # write GCODE command with data
         bytes_sent = 0
-        while bytes_sent<BYTESINGCODE:
+        while bytes_sent!=BYTESINGCODE:
             writedata = [COMMANDS.GCODE, 1, 2, 3, 4]
             bytes_sent += 4
             _ = yield from self.spi_exchange_data(writedata)
             self.assertEqual((yield self.dut.fifo.empty), 1)
-        # wait for data to be committed
         while (yield self.dut.fifo.write_commit) == 0:
             yield
-        # TODO: fix
-        # self.assertEqual((yield self.dut.fifo.space_available), MEMDEPTH-(BYTESINGCODE/WORD_SIZE))
-        # self.assertEqual((yield self.dut.fifo.empty), 0)
+        self.assertEqual((yield self.dut.fifo.space_available), MEMDEPTH-BYTESINGCODE/(WORD_SIZE/8))
+        self.assertEqual((yield self.dut.fifo.empty), 1)
 
     @sync_test_case
     def test_setdirection(self):
@@ -49,10 +47,12 @@ class SPIDeviceInterfaceTest(SPIGatewareTestCase):
         while (yield self.dut.fifo.write_commit) == 0:
             yield
         yield
+        # write execute
+        writedata = [COMMANDS.START, COMMANDS.GCODE, 255, 0, 0]
+        _ = yield from self.spi_exchange_data(writedata)
         # data should now be parsed and empty become 1
         while (yield self.dut.fifo.empty) == 0:
             yield
-        yield
         self.assertEqual((yield self.dut.directions.dirx), 1)
         self.assertEqual((yield self.dut.directions.diry), 1)
         self.assertEqual((yield self.dut.directions.dirz), 1)
@@ -61,26 +61,28 @@ class SPIDeviceInterfaceTest(SPIGatewareTestCase):
     def test_invalidcommand(self):
         'write invalid command and test if we can recieve this by querying the status'
         # write invalid GCODE command with data
-        print('ik roep de functie aan')
         bytes_sent = 0
         while bytes_sent<BYTESINGCODE:
             writedata = [COMMANDS.GCODE, 0, 0, 0, 0]
             bytes_sent += 4
-            data_rec = yield from self.spi_exchange_data(writedata)
-            print(data_rec)
+            _ = yield from self.spi_exchange_data(writedata)
         # wait for data to be committed
         while (yield self.dut.fifo.write_commit) == 0:
             yield
         yield
-        print('hier ben ik')
+        # write execute
+        writedata = [COMMANDS.START, COMMANDS.GCODE, 255, 0, 0]
+        _ = yield from self.spi_exchange_data(writedata)
         # data should now be parsed and empty become 1
         while (yield self.dut.fifo.empty) == 0:
             yield
+        # 2 clocks needed for error to propagate
         yield
         yield
         self.assertEqual((yield self.dut.spiparser.dispatcherror), 1)
         # let's request the status
         bytes_sent = 0
+        # TODO: you have jumping rings!!
         while bytes_sent<BYTESINGCODE:
             writedata = [COMMANDS.STATUS, 0, 0, 0, 0]
             bytes_sent += 4
