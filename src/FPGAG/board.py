@@ -33,12 +33,31 @@ class Firestarter(LatticeICE40Platform, LUNAPlatform):
                # SPI bus connected to the debug controller, for simple register exchanges.
                # Note that the Debug Controller is the controller on this bus.
                Resource("debug_spi", 0,
-                        Subsignal("sck",  Pins( "79", dir="i")),
-                        Subsignal("sdi",  Pins( "90", dir="i")),
-                        Subsignal("sdo",  Pins( "87", dir="o")),
-                        Subsignal("cs",   PinsN("85", dir="i")),
+                        Subsignal("sck", Pins( "79", dir="i")),
+                        Subsignal("sdi", Pins( "90", dir="i")),
+                        Subsignal("sdo", Pins( "87", dir="o")),
+                        Subsignal("cs", PinsN("85", dir="i")),
                         Attrs(IO_STANDARD="SB_LVCMOS")
-               )]
+               ),
+               Resource("DIRECTIONS", 0,
+                        Subsignal("dirx", Pins("37", dir="o")),
+                        Subsignal("diry", Pins("18", dir="o")),
+                        Subsignal("dirz", Pins("142", dir="i")),
+                        Attrs(IO_STANDARD="SB_LVCMOS")
+               ),
+               Resource("STEPS", 0,
+                        Subsignal("stepx", Pins("38", dir="o")),
+                        Subsignal("stepy", Pins("19", dir="o")),
+                        Subsignal("stepz", Pins("143", dir="o")),
+                        Attrs(IO_STANDARD="SB_LVCMOS")
+               ),
+               Resource("LIMITS", 0,
+                        Subsignal("limitx", Pins("110", dir="i")),
+                        Subsignal("limity", Pins("124", dir="i")),
+                        Subsignal("limitz", Pins("130", dir="i")),
+                        Attrs(IO_STANDARD="SB_LVCMOS")
+               )
+               ]
 
     connectors = []
 
