@@ -5,6 +5,7 @@ The position of the laser is determined via a sensor such as a photodiode.
 Code is tested on the system shown in the image above, branded as [Hexastorm](https://www.hexastorm.com). 
 The bill of materials (BOM) and links to FreeCad and PCB designs can be found on [Hackaday](https://hackaday.io/project/21933-open-hardware-fast-high-resolution-laser).
 The code took most inspiration from [LDGraphy](https://github.com/hzeller/ldgraphy).
+A new tool chain is in development which leverages better abstractions provided by [Luna](https://github.com/greatscottgadgets/luna) an [Nmigen](https://github.com/nmigen/nmigen).
 
 ## Install Notes
 On Raspberry, install libatlas so latest Numpy, etc. can be installed via pip.
