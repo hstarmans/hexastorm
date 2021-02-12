@@ -1,5 +1,5 @@
 from nmigen import Signal, Cat, Elaboratable, Record
-from nmigen import Module
+from nmigen import Module, Const
 from nmigen.hdl.rec import DIR_FANOUT
 from luna.gateware.utils.cdc import synchronize
 from luna.gateware.interface.spi import SPICommandInterface, SPIBus
@@ -8,6 +8,72 @@ from luna.gateware.memory import TransactionalizedFIFO
 from FPGAG.constants import COMMAND_SIZE, WORD_SIZE, STATE, START_BIT, END_BIT
 from FPGAG.constants import MEMDEPTH, MEMWIDTH, COMMANDS, BYTESINGCODE
 
+
+
+class Divisor(Elaboratable):
+    """ Divisor
+
+    For a tutorial see https://projectf.io/posts/division-in-verilog/
+    """
+    def __init__(self, width=4):
+        self.width = width
+        self.start = Signal()     # start signal input
+        self.busy = Signal()      # calculation in progress output
+        self.valid = Signal()     # quotient and remainder are valid output
+        self.dbz = Signal()       # divide by zero flag output
+        self.x = Signal(width)    # input
+        self.y = Signal(width)    # input
+        self.q = Signal(width)    # output
+        self.r = Signal(width)    # output
+
+    def elaborate(self, platform):
+        m = Module()
+        y1 = Signal(self.width) # NOTE NIET NODIG
+        ac = Signal(self.width+1)
+        ac_next = Signal(self.width+1)
+        q1 = Signal(self.width)
+        q1_next = Signal(self.width)
+        i = Signal(range(self.width+1))
+        self.ac = ac
+        self.q1 = q1
+        # combinatorial
+        with m.If(self.busy):
+            with m.If(ac>=y1):
+                m.d.comb += [ac_next.eq(ac-y1),
+                             q1_next.eq(Cat(1, q1[1:self.width]))]
+            with m.Else():
+                m.d.comb += [Cat(q1_next, ac_next).eq(Cat(q1, ac)<<1)]
+        with m.Else():
+            m.d.comb += [q1_next.eq(0), ac_next.eq(0)]
+        # synchronized
+        with m.If(self.busy):
+            with m.If(i == self.width):
+                m.d.sync += [self.busy.eq(0),
+                             self.valid.eq(1),
+                             i.eq(0),
+                             self.q.eq(q1),
+                             self.r.eq(ac)]
+            with m.Else():
+                m.d.sync += [i.eq(i+1),
+                             ac.eq(ac_next),
+                             q1.eq(q1_next)]
+        with m.Elif(self.start):
+            m.d.sync += [self.valid.eq(0),
+                         i.eq(0)]
+            with m.If(self.y==0):
+                m.d.sync += [self.busy.eq(0),
+                             self.dbz.eq(1)]
+            with m.Else():
+                m.d.sync += [self.busy.eq(1),
+                             self.dbz.eq(0),
+                             y1.eq(self.y),
+                             Cat(q1, ac).eq(Cat(Const(0,1), self.x, Const(0, self.width)))]
+        with m.Else():
+            m.d.sync += [self.q1.eq(0),
+                         self.valid.eq(0),
+                         i.eq(0),
+                         self.ac.eq(0)]
+        return m
 
 class SPIParser(Elaboratable):
     """ Parses commands over SPI """
@@ -36,7 +102,7 @@ class SPIParser(Elaboratable):
         state = Signal(COMMAND_SIZE)
         m.d.sync += [state[STATE.FULL].eq(fifo.space_available>BYTESINGCODE),
                      state[STATE.DISPATCHERROR].eq(self.dispatcherror)
-        ]
+                    ]
         # Parser
         bytesreceived = Signal(range(BYTESINGCODE+1))
         with m.FSM(reset='RESET', name='parser'):
@@ -76,7 +142,6 @@ class SPIParser(Elaboratable):
                 with m.If(bytesreceived==BYTESINGCODE):
                     m.d.sync += [bytesreceived.eq(0),
                                  fifo.write_commit.eq(1)]
-                    
         return m
 
 
@@ -119,7 +184,7 @@ class Core(Elaboratable):
                                  fifo.read_commit.eq(1)]
                     m.next = 'WAIT_COMMAND'
                 with m.Else():
-                    # NOTE: system never recovers user most reset
+                    # NOTE: system never recovers user must reset
                     m.d.sync += [error.eq(1)]
         return m
 
