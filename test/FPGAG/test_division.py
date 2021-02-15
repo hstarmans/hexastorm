@@ -23,6 +23,7 @@ class DivisorTest(LunaGatewareTestCase):
         yield self.dut.start.eq(1)
         yield
         yield self.dut.start.eq(0)
+        yield
         while (yield self.dut.valid)==0 | (yield self.dut.dbz)==0:
             yield
         if (yield self.dut.valid)==1:
@@ -30,9 +31,6 @@ class DivisorTest(LunaGatewareTestCase):
             self.assertEqual((yield self.dut.r), x%y)
         else:
             self.assertEqual(y, 0)
-        yield self.dut.start.eq(0)
-        yield
-
 
     @sync_test_case
     def test_division(self):

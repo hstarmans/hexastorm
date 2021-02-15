@@ -11,42 +11,59 @@ from FPGAG.constants import MEMDEPTH, MEMWIDTH, COMMANDS, BYTESINGCODE
 
 
 class Divisor(Elaboratable):
-    """ Divisor
-
+    """ Euclidean division with a remainder
+    
+    X = Y*Q + R
+    dividend X by divisor Y you get quotient Q and remainder R
     For a tutorial see https://projectf.io/posts/division-in-verilog/
+    
+        width            -- number of bits of divisor and quotients
+    I/O signals:
+        I: start         -- calculation starts on high
+        O: busy          -- calculation in progress
+        O: valid         -- result is valid
+        O: dbz           -- divide by zero
+        I: x             -- dividend
+        I: y             -- divisor
+        O: q             -- quotients
+        O: r             -- remainder
     """
     def __init__(self, width=4):
         self.width = width
-        self.start = Signal()     # start signal input
-        self.busy = Signal()      # calculation in progress output
-        self.valid = Signal()     # quotient and remainder are valid output
-        self.dbz = Signal()       # divide by zero flag output
-        self.x = Signal(width)    # input
-        self.y = Signal(width)    # input
-        self.q = Signal(width)    # output
-        self.r = Signal(width)    # output
+        self.start = Signal()
+        self.busy = Signal()
+        self.valid = Signal()
+        self.dbz = Signal()
+        self.x = Signal(width)
+        self.y = Signal(width)
+        self.q = Signal(width)
+        self.r = Signal(width)
 
     def elaborate(self, platform):
         m = Module()
         ac = Signal(self.width+1)
-        ac_next = Signal(self.width+1)
-        temp = Signal(self.width+1)
+        ac_next = Signal.like(ac)
+        temp = Signal.like(ac)
         q1 = Signal(self.width)
-        q1_next = Signal(self.width)
-        i = Signal(range(self.width+1))
-        self.ac = ac
-        self.q1 = q1
+        q1_next = Signal.like(q1)
+        i = Signal(range(self.width))
         # combinatorial
-        with m.If(self.busy):
-            with m.If(ac>=self.y):
-                m.d.comb += [temp.eq(ac-self.y),
-                             Cat(q1_next, ac_next).eq(Cat(1, q1, temp[0:self.width-1]))]
-            with m.Else():
-                m.d.comb += [Cat(q1_next, ac_next).eq(Cat(q1, ac)<<1)]
+        with m.If(ac>=self.y):
+            m.d.comb += [temp.eq(ac-self.y),
+                         Cat(q1_next, ac_next).eq(Cat(1, q1, temp[0:self.width-1]))]
         with m.Else():
-            m.d.comb += [q1_next.eq(0), ac_next.eq(0)]
+            m.d.comb += [Cat(q1_next, ac_next).eq(Cat(q1, ac)<<1)]
         # synchronized
-        with m.If(self.busy):
+        with m.If(self.start):
+            m.d.sync += [self.valid.eq(0), i.eq(0)]
+            with m.If(self.y==0):
+                m.d.sync += [self.busy.eq(0),
+                             self.dbz.eq(1)]
+            with m.Else():
+                m.d.sync += [self.busy.eq(1),
+                             self.dbz.eq(0),
+                             Cat(q1, ac).eq(Cat(Const(0,1), self.x, Const(0, self.width)))]
+        with m.Elif(self.busy):
             with m.If(i == self.width-1):
                 m.d.sync += [self.busy.eq(0),
                              self.valid.eq(1),
@@ -57,21 +74,6 @@ class Divisor(Elaboratable):
                 m.d.sync += [i.eq(i+1),
                              ac.eq(ac_next),
                              q1.eq(q1_next)]
-        with m.Elif(self.start):
-            m.d.sync += [self.valid.eq(0),
-                         i.eq(0)]
-            with m.If(self.y==0):
-                m.d.sync += [self.busy.eq(0),
-                             self.dbz.eq(1)]
-            with m.Else():
-                m.d.sync += [self.busy.eq(1),
-                             self.dbz.eq(0),
-                             Cat(q1, ac).eq(Cat(Const(0,1), self.x, Const(0, self.width)))]
-        with m.Else():
-            m.d.sync += [self.q1.eq(0),
-                         self.valid.eq(0),
-                         i.eq(0),
-                         self.ac.eq(0)]
         return m
 
 class SPIParser(Elaboratable):
