@@ -28,9 +28,9 @@ class Divisor(Elaboratable):
 
     def elaborate(self, platform):
         m = Module()
-        y1 = Signal(self.width) # NOTE NIET NODIG
         ac = Signal(self.width+1)
         ac_next = Signal(self.width+1)
+        temp = Signal(self.width+1)
         q1 = Signal(self.width)
         q1_next = Signal(self.width)
         i = Signal(range(self.width+1))
@@ -38,21 +38,21 @@ class Divisor(Elaboratable):
         self.q1 = q1
         # combinatorial
         with m.If(self.busy):
-            with m.If(ac>=y1):
-                m.d.comb += [ac_next.eq(ac-y1),
-                             q1_next.eq(Cat(1, q1[1:self.width]))]
+            with m.If(ac>=self.y):
+                m.d.comb += [temp.eq(ac-self.y),
+                             Cat(q1_next, ac_next).eq(Cat(1, q1, temp[0:self.width-1]))]
             with m.Else():
                 m.d.comb += [Cat(q1_next, ac_next).eq(Cat(q1, ac)<<1)]
         with m.Else():
             m.d.comb += [q1_next.eq(0), ac_next.eq(0)]
         # synchronized
         with m.If(self.busy):
-            with m.If(i == self.width):
+            with m.If(i == self.width-1):
                 m.d.sync += [self.busy.eq(0),
                              self.valid.eq(1),
                              i.eq(0),
-                             self.q.eq(q1),
-                             self.r.eq(ac)]
+                             self.q.eq(q1_next),
+                             self.r.eq(ac_next>>1)]
             with m.Else():
                 m.d.sync += [i.eq(i+1),
                              ac.eq(ac_next),
@@ -66,7 +66,6 @@ class Divisor(Elaboratable):
             with m.Else():
                 m.d.sync += [self.busy.eq(1),
                              self.dbz.eq(0),
-                             y1.eq(self.y),
                              Cat(q1, ac).eq(Cat(Const(0,1), self.x, Const(0, self.width)))]
         with m.Else():
             m.d.sync += [self.q1.eq(0),
