@@ -22,6 +22,11 @@ class Test(SPIGatewareTestCase):
             self.assertEqual((yield self.dut.command), 1)
             self.assertEqual((yield self.dut.word_received), struct.unpack('!I', bytearray(write_data[1:]))[0])
             self.assertEqual(to_send, struct.unpack('!I', bytearray(read_data[1:]))[0])
-            # problems: I receive \xff??? for command?
+            print(read_data)
+            # problems: I receive \xff??? for command? this problems dissappears if sdo is set.
+            # bytearray(b'\x00\x00\x00\x00\x16')
+            # bytearray(b'\xff\x00\x00\x00V')
+            # bytearray(b'\xff\x00\x00\x003')
+            # bytearray(b'\xff\x00\x00\x00I'
 if __name__ == "__main__":
     unittest.main()
