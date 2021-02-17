@@ -22,6 +22,11 @@ class Test(SPIGatewareTestCase):
             # problems: 1. word to send to does not come back
             #           2. cs magically gets low during transaction 
             print(read_data)
-
+            # This is printed
+            #    bytearray(b'\x00\x00\x00\x00\x10')
+            #    bytearray(b'\xff\x00\x00\x00\x10')
+            #    bytearray(b'\xff\x00\x00\x00\x10')
+            #    bytearray(b'\xff\x00\x00\x00\x10')
+            # problems: I receive \xff??? and \x10 instead of 16
 if __name__ == "__main__":
     unittest.main()
