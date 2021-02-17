@@ -1,18 +1,26 @@
 import unittest
+from struct import pack, unpack
+
 
 from luna.gateware.interface.spi import SPIGatewareTestCase
 from luna.gateware.test.utils import sync_test_case
 
 from FPGAG.core import Core
 from FPGAG.constants import COMMANDS, MEMDEPTH, BYTESINGCODE, WORD_SIZE
+from FPGAG.constants import COMMAND_SIZE
 
-class SPIDeviceInterfaceTest(SPIGatewareTestCase):
+class Test(SPIGatewareTestCase):
     FRAGMENT_UNDER_TEST = Core
 
     def initialize_signals(self):
-        self.dut.spi = self.dut.spiparser.interface.spi
         self.dut.fifo = self.dut.spiparser.fifo
         yield self.dut.spi.cs.eq(0)
+
+    def write_command(self, data):
+        'convenience function for writing command to controller'
+        assert len(data) == (WORD_SIZE+COMMAND_SIZE)/8
+        read_data = yield from self.spi_exchange_data(data)
+        return unpack('!I', read_data[1:])[0]
 
     @sync_test_case
     def test_writegcode(self):
@@ -86,7 +94,7 @@ class SPIDeviceInterfaceTest(SPIGatewareTestCase):
         while bytes_sent<BYTESINGCODE:
             writedata = [COMMANDS.STATUS, 0, 0, 0, 0]
             bytes_sent += 4
-            read_data = yield from self.spi_exchange_data(writedata)
+            read_data = yield from self.write_command(writedata)
             print(read_data)
 
 

@@ -79,26 +79,25 @@ class Divisor(Elaboratable):
 class SPIParser(Elaboratable):
     """ Parses commands over SPI """
     def __init__(self):
-        self.interface = SPICommandInterface(command_size=COMMAND_SIZE,
-                                             word_size=WORD_SIZE)
-        self.fifo = TransactionalizedFIFO(width=MEMWIDTH,
-                                          depth=MEMDEPTH)
         self.dispatcherror = Signal()  # input
         self.execute = Signal()        # output
+        self.spi = SPIBus()            # I/O
+        # TODO: this is bad practice!!
+        self.fifo = TransactionalizedFIFO(width=MEMWIDTH,
+                                          depth=MEMDEPTH)
 
     def elaborate(self, platform):
+        interface = SPICommandInterface(command_size=COMMAND_SIZE,
+                                        word_size=WORD_SIZE)
+        self.interface = interface # to get a handle for debugging
+      
         m = Module()
-        # Synchronize and connect SPI.
-        if platform:
-            board_spi = platform.request("debug_spi")
-            spi = synchronize(m, board_spi)
-        else:
-            self.spi = SPIBus()
-            spi = synchronize(m, self.spi)
+        spi = synchronize(m, self.spi)
         m.d.comb  += self.interface.spi.connect(spi)
         m.submodules.interface = interface = self.interface
         # Connect fifo
         m.submodules.fifo = fifo = self.fifo
+        self.fifo = fifo 
         # set state
         state = Signal(COMMAND_SIZE)
         m.d.sync += [state[STATE.FULL].eq(fifo.space_available>BYTESINGCODE),
@@ -128,7 +127,7 @@ class SPIParser(Elaboratable):
                             m.next = 'WAIT_COMMAND'
                             m.d.sync += [interface.word_to_send.eq(state)]
                     with m.Elif(interface.command==COMMANDS.STATUS):
-                        m.d.sync += [interface.word_to_send.eq(255)]
+                        m.d.sync += [interface.word_to_send.eq(13)]
                         m.next = 'WAIT_COMMAND'
             with m.State('WAIT_WORD'):
                 with m.If(interface.word_complete):
@@ -149,12 +148,16 @@ class SPIParser(Elaboratable):
 class Core(Elaboratable):
     """ FPGA core for Beage G. """
     def __init__(self):
-        self.spiparser = SPIParser()
+        self.spi = SPIBus()
 
     def elaborate(self, platform):
         m = Module()
         # Connect Parser
-        m.submodules.spiparser = self.spiparser
+        spiparser = SPIParser()
+        m.submodules.spiparser = spiparser
+        self.spiparser = spiparser # TODO: remove!
+        spi = synchronize(m, self.spi)
+        m.d.comb  += spiparser.spi.connect(spi)
         # get directions
         if platform:
             directions = platform.request("DIRECTIONS")
@@ -164,11 +167,11 @@ class Core(Elaboratable):
                                  ('dirz', 1, DIR_FANOUT)])
             self.directions = directions
         # Define dispatcher
-        fifo = self.spiparser.fifo
+        fifo = spiparser.fifo
         error = Signal()
         enabled = Signal()
-        m.d.sync += [self.spiparser.dispatcherror.eq(error),
-                     enabled.eq(self.spiparser.execute)]
+        m.d.sync += [spiparser.dispatcherror.eq(error),
+                     enabled.eq(spiparser.execute)]
         bytesreceived = Signal(range(BYTESINGCODE))
         with m.FSM(reset='RESET', name='dispatcher'):
             m.d.sync += [fifo.read_commit.eq(0)]
