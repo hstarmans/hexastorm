@@ -7,7 +7,7 @@ from luna.gateware.test.utils import sync_test_case
 
 class Test(SPIGatewareTestCase):
     FRAGMENT_UNDER_TEST = SPICommandInterface
-
+    FRAGMENT_ARGUMENTS = {'command_size':8, 'word_size':32}
     def initialize_signals(self):
         yield self.dut.spi.cs.eq(0)
 
@@ -24,9 +24,9 @@ class Test(SPIGatewareTestCase):
             self.assertEqual(to_send, struct.unpack('!I', bytearray(read_data[1:]))[0])
             print(read_data)
             # problems: I receive \xff??? for command? this problems dissappears if sdo is set.
-            # bytearray(b'\x00\x00\x00\x00\x16')
-            # bytearray(b'\xff\x00\x00\x00V')
-            # bytearray(b'\xff\x00\x00\x003')
-            # bytearray(b'\xff\x00\x00\x00I'
+            # bytearray(b'\x00\x00\x00\x00\x1f')
+            # bytearray(b'\xff\x00\x00\x00W')
+            # bytearray(b'\xff\x00\x00\x00/')
+            # bytearray(b'\xff\x00\x00\x00\xde')
 if __name__ == "__main__":
     unittest.main()
