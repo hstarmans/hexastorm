@@ -1,5 +1,6 @@
 import unittest
 from struct import pack, unpack
+from math import ceil
 
 from luna.gateware.interface.spi import SPIGatewareTestCase
 from luna.gateware.test.utils import sync_test_case
@@ -11,6 +12,7 @@ from FPGAG.constants import COMMAND_SIZE
 
 class TestParser(SPIGatewareTestCase):
     FRAGMENT_UNDER_TEST = SPIParser
+    FRAGMENT_ARGUMENTS = {'memdepth': ceil(BYTESINGCODE/4)*2}
 
     def initialize_signals(self):
         yield self.dut.spi.cs.eq(0)
@@ -23,10 +25,11 @@ class TestParser(SPIGatewareTestCase):
 
     @sync_test_case
     def test_writegcode(self):
-        'write GCODE and verify fifo gets full'
+        'write GCODE and verify fifo is no longer empty'
         self.assertEqual((yield self.dut.empty), 1)
         # write GCODE command with data
         bytes_sent = 0
+        
         while bytes_sent!= BYTESINGCODE:
             writedata = [COMMANDS.GCODE, 1, 2, 3, 4]
             bytes_sent += 4
@@ -37,6 +40,20 @@ class TestParser(SPIGatewareTestCase):
         self.assertEqual((yield self.dut.empty), 0)
         self.assertEqual((yield self.dut.fifo.space_available),
                          MEMDEPTH-BYTESINGCODE/(WORD_SIZE/8))
+
+    @sync_test_case
+    def test_memfull(self):
+        'write GCODE and verify FIFO is no longer empty'
+        self.assertEqual((yield self.dut.empty), 1)
+        # write GCODE command with data
+        bytes_sent = 0
+        writedata = [COMMANDS.GCODE, 1, 2, 3, 4]
+        while bytes_sent < BYTESINGCODE*2:
+            bytes_sent += 4
+            read_data = yield from self.write_command(writedata)
+            self.assertEqual(read_data, 0)
+        read_data = yield from self.write_command(writedata)
+        self.assertEqual(read_data, 1)
 
 class TestCore(SPIGatewareTestCase):
     FRAGMENT_UNDER_TEST = Core

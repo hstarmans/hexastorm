@@ -1,3 +1,5 @@
+from math import ceil
+
 from nmigen import Signal, Cat, Elaboratable, Record
 from nmigen import Module, Const
 from nmigen.hdl.rec import DIR_FANOUT
@@ -93,10 +95,18 @@ class SPIParser(Elaboratable):
         I: read_en        -- enable read transactionalizedfifo
         O: empty          -- transactionalizedfifo is empty
     """
-    def __init__(self):
-        self.dispatcherror = Signal()  
-        self.execute = Signal()        
-        self.spi = SPIBus()            
+    def __init__(self, memdepth=None):
+        """ class initialization
+
+        memdepth  -- change depth if memory, used for testing
+        """ 
+        if memdepth:
+            self.memdepth = memdepth
+        else:
+            self.memdepth = MEMDEPTH
+        self.dispatcherror = Signal()
+        self.execute = Signal()
+        self.spi = SPIBus()
         self.read_data = Signal(MEMWIDTH)
         self.read_commit = Signal()
         self.read_en = Signal()
@@ -112,18 +122,18 @@ class SPIParser(Elaboratable):
         m.submodules.interface = interface 
         # Connect fifo
         fifo = TransactionalizedFIFO(width=MEMWIDTH,
-                                     depth=MEMDEPTH)
-        if not platform: # for testing
-            self.fifo = fifo
+                                     depth=self.memdepth)
+        if not platform:
+            self.fifo = fifo # test handle
         m.submodules.fifo = fifo
-        m.d.comb += [ self.read_data.eq(fifo.read_data),
-                      fifo.read_commit.eq(self.read_commit),
-                      fifo.read_en.eq(self.read_en),
-                      self.empty.eq(fifo.empty)
+        m.d.comb += [self.read_data.eq(fifo.read_data),
+                     fifo.read_commit.eq(self.read_commit),
+                     fifo.read_en.eq(self.read_en),
+                     self.empty.eq(fifo.empty)
                     ]
         # set state
         state = Signal(COMMAND_SIZE) # max is actually word_size
-        m.d.sync += [state[STATE.FULL].eq(fifo.space_available<BYTESINGCODE),
+        m.d.sync += [state[STATE.FULL].eq(fifo.space_available<ceil(BYTESINGCODE/4)),
                      state[STATE.DISPATCHERROR].eq(self.dispatcherror)
                     ]
         # Parser
@@ -144,7 +154,7 @@ class SPIParser(Elaboratable):
                         m.next = 'WAIT_COMMAND'
                         m.d.sync += self.execute.eq(0)
                     with m.Elif(interface.command==COMMANDS.GCODE):
-                        with m.If(fifo.space_available>BYTESINGCODE):
+                        with m.If((state[STATE.FULL]==0)|(bytesreceived!=0)):
                             m.next = 'WAIT_WORD'
                         with m.Else():
                             m.next = 'WAIT_COMMAND'
@@ -221,5 +231,4 @@ class Core(Elaboratable):
 #  -- SPI parser (basically an extension of SPI command interface)
 #  -- Dispatcher --> dispatches signals to actual hardware
 
-# -- verify you can trigger memory full
 # -- write a controller class
