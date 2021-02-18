@@ -7,7 +7,7 @@ from luna.gateware.utils.cdc import synchronize
 from luna.gateware.interface.spi import SPICommandInterface, SPIBus
 from luna.gateware.memory import TransactionalizedFIFO
 
-from FPGAG.constants import COMMAND_SIZE, WORD_SIZE, STATE, START_BIT, END_BIT
+from FPGAG.constants import COMMAND_SIZE, WORD_SIZE, bits
 from FPGAG.constants import MEMDEPTH, MEMWIDTH, COMMANDS, BYTESINGCODE
 
 
@@ -188,9 +188,11 @@ class Core(Elaboratable):
         if platform:
             directions = platform.request("DIRECTIONS")
         else:
+            # ideally this is done via layouts etc 
             directions = Record([('dirx', 1, DIR_FANOUT),
                                  ('diry', 1, DIR_FANOUT),
                                  ('dirz', 1, DIR_FANOUT)])
+            aux = Record([('aux0', 1, DIR_FANOUT)]
             self.directions = directions
         # Connect Parser
         parser = SPIParser()
@@ -204,7 +206,12 @@ class Core(Elaboratable):
             self.spi = SPIBus()
             spi = synchronize(m, self.spi)
         m.d.comb  += parser.spi.connect(spi)
+        # Add divisor
+        divisor = Divisor()
+        m.submodules.divisor = divisor
         # Define dispatcher
+        loopcnt = Signal(16)
+        steppercnt = Signal(16)
         with m.FSM(reset='RESET', name='dispatcher'):
             m.d.sync += [parser.read_commit.eq(0)]
             with m.State('RESET'):
@@ -215,13 +222,55 @@ class Core(Elaboratable):
                     m.next = 'PARSEHEAD'
             with m.State('PARSEHEAD'):
                 with m.If(parser.read_data[-8:] == COMMANDS.GCODE):
-                    m.d.sync += [directions.eq(parser.read_data[-END_BIT['DIRECTION']\
-                                               :-START_BIT['DIRECTION']]),
-                                 parser.read_commit.eq(1)]
-                    m.next = 'WAIT_COMMAND'
+                    m.d.sync += [directions.eq(parser.read_data[bits('DIRECTION')],
+                                 aux.eq(parser.read_data[bits('AUX')]),
+                                 loopcnt.eq(0),
+                                 parser.read_en.eq(0)]
+                    m.next = 'ACCELERATE'
                 with m.Else():
                     # NOTE: system never recovers user must reset
                     m.d.sync += [parser.dispatcherror.eq(1)]
+            with m.State('ACCELERATE'):
+                with m.If(parser.read_en):
+                    with m.If(loopcnt<parser.read_data[bits['LOOPS_ACCEL']]):
+                        with m.If(start == 0):
+                            m.d.sync += [divisor.x.eq(loopcnt<<1+divisor.r),
+                                         divisor.y.eq(loopcnt<<2+1),
+                                         divisor.start.eq(1)]
+                        with m.Elif(divisor.finish):
+                            m.sync += [steppercnt.eq(divisor.q),
+                                       loopcnt.eq(loopcnt+1),
+                                       start.eq(0)]
+                    with m.Else():
+                        m.next = 'MOVE'
+                        m.sync += [loopcnt.eq(0)]
+                with m.Else():
+                    m.d.sync += parser.read_en.eq(1)
+            with m.State('MOVE'):
+                with m.If(loopcnt<parser.read_data[bits['LOOPS_TRAVEL']]):
+                    m.sync += [loopcnt.eq(loopcnt+1)]
+                with m.Else():
+                    m.next = 'DECELERATE'
+                    m.sync += [parser.read_en.eq(0),
+                               loopcnt.eq(0)]
+            with m.State('DECELERATE'):
+                with m.If(parser.read_en):
+                    with m.If(loopcnt<parser.read_data[bits['LOOPS_DECEL']]):
+                        with m.If(start == 0):
+                            m.d.sync += [divisor.x.eq(loopcnt<<1+divisor.r),
+                                         divisor.y.eq(loopcnt<<2+1),
+                                         divisor.start.eq(1)]
+                        with m.Elif(divisor.finish):
+                            m.d.sync += [steppercnt.eq(divisor.q),
+                                         loopcnt.eq(loopcnt+1),
+                                         start.eq(0)]
+                    with m.Else():
+                        m.next = 'WAIT_COMMAND'
+                        m.d.sync += [loopcnt.eq(0),
+                                     parser.read_en.eq(1),
+                                     parser.read_commit.eq(1)]
+                with m.Else():
+                    m.d.sync += parser.read_en.eq(1)
         return m
 
 # Overview:
@@ -231,4 +280,8 @@ class Core(Elaboratable):
 #  -- SPI parser (basically an extension of SPI command interface)
 #  -- Dispatcher --> dispatches signals to actual hardware
 
+# -- contemplate upon why the byte widths are what they are 
+# -- add this to docs + limitation of uniform acceleration
+# -- create a second circuit with a clock of 1 MHz
+# -- test move
 # -- write a controller class
