@@ -39,16 +39,21 @@ class Firestarter(LatticeICE40Platform, LUNAPlatform):
                         Subsignal("cs", PinsN("85", dir="i")),
                         Attrs(IO_STANDARD="SB_LVCMOS")
                ),
+               #TODO: fix this by creating proper resource!!
+               Resource("AUX", 0,
+                        Subsignal("0", Pins("39", dir="o")),
+                        Attrs(IO_STANDARD="SB_LVCMOS")
+               ),
                Resource("DIRECTIONS", 0,
-                        Subsignal("dirx", Pins("37", dir="o")),
-                        Subsignal("diry", Pins("18", dir="o")),
-                        Subsignal("dirz", Pins("142", dir="i")),
+                        Subsignal("x", Pins("37", dir="o")),
+                        Subsignal("y", Pins("18", dir="o")),
+                        Subsignal("z", Pins("142", dir="o")),
                         Attrs(IO_STANDARD="SB_LVCMOS")
                ),
                Resource("STEPS", 0,
-                        Subsignal("stepx", Pins("38", dir="o")),
-                        Subsignal("stepy", Pins("19", dir="o")),
-                        Subsignal("stepz", Pins("143", dir="o")),
+                        Subsignal("x", Pins("38", dir="o")),
+                        Subsignal("y", Pins("19", dir="o")),
+                        Subsignal("z", Pins("143", dir="o")),
                         Attrs(IO_STANDARD="SB_LVCMOS")
                ),
                Resource("LIMITS", 0,

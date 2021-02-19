@@ -6,6 +6,7 @@ from luna.gateware.interface.spi import SPIGatewareTestCase
 from luna.gateware.test.utils import sync_test_case
 
 from FPGAG.core import Core, SPIParser
+from FPGAG.board import Firestarter
 from FPGAG.constants import COMMANDS, MEMDEPTH, BYTESINGCODE, WORD_SIZE
 from FPGAG.constants import COMMAND_SIZE
 
@@ -123,6 +124,11 @@ class TestCore(SPIGatewareTestCase):
             bytes_sent += 4
             read_data = yield from self.write_command(writedata)
             self.assertEqual(read_data, 2)
+
+class TestBuild(unittest.TestCase):
+    def test_build(self):
+        platform = Firestarter()
+        platform.build(Core(), do_program=False, verbose=True)
 
 if __name__ == "__main__":
     unittest.main()

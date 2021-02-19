@@ -12,13 +12,19 @@ MEMDEPTH = 256
 COMMAND_SIZE =8
 WORD_SIZE = 32
 WORD_BYTES = round(WORD_SIZE/8)
+FREQ = 1 # speed of motor speed update in Mhz
 G_CODE = {'COMMAND': 1,
           'AUX': 1,
           'DIRECTION': 1,
+          'EMPTY': 1,
+          'FRACTION1': 4,
+          'FRACTION2': 4,
+          'FRACTION3': 4,
           'HIRES_ACCEL_CYCLES': 4,
-          'LOOPS_ACCEL': 2,
-          'LOOPS_TRAVEL': 2,
-          'LOOPS_DECEL': 2
+          'LOOPS_ACCEL': 2,         # loops spent in acceleration
+          'LOOPS_TRAVEL': 2,        # loops spent in travel
+          'TRAVEL_DELAY_CYCLES': 4, # exact cycle value for travel
+          'LOOPS_DECEL': 2          # loops spent in deceleration
 }
 
 def bits(name):
@@ -28,7 +34,7 @@ def bits(name):
     END_BIT = START_BIT+np.array(list(G_CODE.values()))*8
     START_BIT = dict(zip(G_CODE.keys(), START_BIT))
     END_BIT = dict(zip(G_CODE.keys(), END_BIT))
-    return range(START_BIT['name']:END_BIT['name'])
+    return slice(START_BIT[name],END_BIT[name])
 
 QUEUE_ELEMENT_BYTES = sum(G_CODE.values())
 BYTESINGCODE = QUEUE_ELEMENT_BYTES+(WORD_BYTES-QUEUE_ELEMENT_BYTES%WORD_BYTES)
