@@ -3,6 +3,8 @@ from math import ceil
 from nmigen import Signal, Cat, Elaboratable, Record
 from nmigen import Module, Const
 from nmigen.hdl.rec import DIR_FANOUT
+
+from luna.gateware.utils import past_value_of
 from luna.gateware.utils.cdc import synchronize
 from luna.gateware.interface.spi import SPICommandInterface, SPIBus
 from luna.gateware.memory import TransactionalizedFIFO
@@ -76,6 +78,7 @@ class Divisor(Elaboratable):
                              ac.eq(ac_next),
                              q1.eq(q1_next)]
         return m
+
 
 class SPIParser(Elaboratable):
     """ Parses and replies to commands over SPI
@@ -177,13 +180,28 @@ class SPIParser(Elaboratable):
                                  fifo.write_commit.eq(1)]
         return m
 
+
 class Core(Elaboratable):
     """ FPGA core for Beage G and top module """
-    def __init__(self):
-        pass
+    def __init__(self, gfreq=1):
+        self.count = 100/(gfreq*2)
+        if 100%(gfreq*2):
+            raise Exception("Invalid, use PLL to create clock")
 
     def elaborate(self, platform):
         m = Module()
+        # Clock domains:  Dispachter works at 1 MHz
+        cd1 = ClockDomain()
+        m.domains += cd1
+        cd1.reset = sync.reset
+        clockin = Signal()
+        cd1.clock = clockin
+        counter = Signal(range(10))
+        with m.If(counter<self.count):
+            m.d.sync += counter.eq(counter+1)
+        with m.Else():
+            m.d.sync += [counter.eq(0),
+                         clockin.eq(~clockin)] 
         # Directions
         if platform:
             directions = platform.request("DIRECTIONS")
@@ -209,68 +227,70 @@ class Core(Elaboratable):
         # Add divisor
         divisor = Divisor()
         m.submodules.divisor = divisor
+        # Memory trigger
+        readtrigger = Signal()
+        readtrigger_d = past_value_of(readtrigger)
+        with m.If(readtrigger!=readtrigger_d):
+            m.d.comb += parser.read_en.eq(0)
+        with m.Else():
+            m.d.comb += parser.read_en.eq(1)
         # Define dispatcher
         loopcnt = Signal(16)
         steppercnt = Signal(16)
         with m.FSM(reset='RESET', name='dispatcher'):
-            m.d.sync += [parser.read_commit.eq(0)]
+            m.d.cd1 += [parser.read_commit.eq(0)]
             with m.State('RESET'):
                 m.next = 'WAIT_COMMAND'
             with m.State('WAIT_COMMAND'):
                 with m.If((parser.empty == 0)&(parser.execute==1)):
-                    m.d.sync += [parser.read_en.eq(1)]
+                    m.d.cd1 += [parser.read_en.eq(1)]
                     m.next = 'PARSEHEAD'
             with m.State('PARSEHEAD'):
                 with m.If(parser.read_data[-8:] == COMMANDS.GCODE):
-                    m.d.sync += [directions.eq(parser.read_data[bits('DIRECTION')],
+                    m.d.cd1 += [directions.eq(parser.read_data[bits('DIRECTION')]),
                                  aux.eq(parser.read_data[bits('AUX')]),
                                  loopcnt.eq(0),
-                                 parser.read_en.eq(0)]
+                                 readtrigger.eq(~readtrigger)]
                     m.next = 'ACCELERATE'
                 with m.Else():
                     # NOTE: system never recovers user must reset
-                    m.d.sync += [parser.dispatcherror.eq(1)]
+                    # NOTE: also forward division error!
+                    m.d.cd1 += parser.dispatcherror.eq(1)
             with m.State('ACCELERATE'):
-                with m.If(parser.read_en):
-                    with m.If(loopcnt<parser.read_data[bits['LOOPS_ACCEL']]):
-                        with m.If(start == 0):
-                            m.d.sync += [divisor.x.eq(loopcnt<<1+divisor.r),
-                                         divisor.y.eq(loopcnt<<2+1),
-                                         divisor.start.eq(1)]
-                        with m.Elif(divisor.finish):
-                            m.sync += [steppercnt.eq(divisor.q),
-                                       loopcnt.eq(loopcnt+1),
-                                       start.eq(0)]
-                    with m.Else():
-                        m.next = 'MOVE'
-                        m.sync += [loopcnt.eq(0)]
+                with m.If(loopcnt<parser.read_data[bits['LOOPS_ACCEL']]):
+                    m.d.cd1 += [divisor.x.eq(loopcnt<<1+divisor.r),
+                                 divisor.y.eq(loopcnt<<2+1),
+                                 divisor.start.eq(1),
+                                 loopcnt.eq(loopcnt+1)]
+                    with m.Elif(divisor.finish):
+                        m.d.cd1 += [steppercnt.eq(divisor.q),
+                                    loopcnt.eq(loopcnt+1),
+                                    start.eq(0)]
                 with m.Else():
-                    m.d.sync += parser.read_en.eq(1)
+                    m.next = 'MOVE'
+                    m.sync += loopcnt.eq(0)
             with m.State('MOVE'):
                 with m.If(loopcnt<parser.read_data[bits['LOOPS_TRAVEL']]):
-                    m.sync += [loopcnt.eq(loopcnt+1)]
+                    m.d.cd1 += loopcnt.eq(loopcnt+1)
                 with m.Else():
                     m.next = 'DECELERATE'
-                    m.sync += [parser.read_en.eq(0),
-                               loopcnt.eq(0)]
+                    m.d.cd1 += [readtrigger.eq(~readtrigger),
+                                loopcnt.eq(0)]
             with m.State('DECELERATE'):
-                with m.If(parser.read_en):
-                    with m.If(loopcnt<parser.read_data[bits['LOOPS_DECEL']]):
-                        with m.If(start == 0):
-                            m.d.sync += [divisor.x.eq(loopcnt<<1+divisor.r),
-                                         divisor.y.eq(loopcnt<<2+1),
-                                         divisor.start.eq(1)]
-                        with m.Elif(divisor.finish):
-                            m.d.sync += [steppercnt.eq(divisor.q),
-                                         loopcnt.eq(loopcnt+1),
-                                         start.eq(0)]
-                    with m.Else():
-                        m.next = 'WAIT_COMMAND'
-                        m.d.sync += [loopcnt.eq(0),
-                                     parser.read_en.eq(1),
-                                     parser.read_commit.eq(1)]
+                with m.If(loopcnt<parser.read_data[bits['LOOPS_DECEL']]):
+                    with m.If(start == 0):
+                        m.d.cd1 += [divisor.x.eq(loopcnt<<1+divisor.r),
+                                    divisor.y.eq(loopcnt<<2+1),
+                                    divisor.start.eq(1)]
+                    with m.Elif(divisor.finish):
+                        m.d.cd1 += [steppercnt.eq(divisor.q),
+                                    loopcnt.eq(loopcnt+1),
+                                    start.eq(0)]
                 with m.Else():
-                    m.d.sync += parser.read_en.eq(1)
+                    m.next = 'WAIT_COMMAND'
+                    m.d.cd1 += [loopcnt.eq(0),
+                                parser.read_en.eq(1),
+                                parser.read_commit.eq(1)]
         return m
 
 # Overview:
