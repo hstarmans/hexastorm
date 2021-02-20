@@ -10,6 +10,7 @@ from luna.gateware.utils.cdc import synchronize
 from luna.gateware.interface.spi import SPICommandInterface, SPIBus
 from luna.gateware.memory import TransactionalizedFIFO
 
+from FPGAG.resources import StepperLayout, get_all_resources
 from FPGAG.constants import COMMAND_SIZE, WORD_SIZE, bits, STATE
 from FPGAG.constants import MEMDEPTH, MEMWIDTH, COMMANDS, BYTESINGCODE
 
@@ -208,19 +209,11 @@ class Core(Elaboratable):
                          clockin.eq(~clockin)]
         # Directions
         if platform:
-            # TODO: hack fix board with proper layou
-            directions = platform.request("DIRECTIONS")
-            steps = platform.request("STEPS")
-            aux = platform.request("AUX")
+            steppers = [res for res in get_all_resources(platform, "steppers")]
+            #aux = platform.request("AUX")
         else:
             # ideally this is done via layouts etc 
-            directions = Record([('x', 1, DIR_FANOUT),
-                                 ('y', 1, DIR_FANOUT),
-                                 ('z', 1, DIR_FANOUT)])
-            steps = Record([('x', 1, DIR_FANOUT),
-                            ('y', 1, DIR_FANOUT),
-                            ('z', 1, DIR_FANOUT)])
-            aux = Record([('0', 1, DIR_FANOUT)])
+            steppers = [Record(StepperLayout())]
             self.directions = directions
         # Connect Parser
         parser = SPIParser()
@@ -245,27 +238,26 @@ class Core(Elaboratable):
             m.d.comb += parser.read_en.eq(0)
         with m.Else():
             m.d.comb += parser.read_en.eq(1)
-        # Motor States
-        MOTORS = 3 # TODO Fix this
-        delaycnt = Signal(32)
-        delay = Signal(32)
-        mstate = Array(Signal(32) for _ in range(MOTORS))
-        fractioncnt = Signal(range(MOTORS+1))
-        fraction = Array(Signal(32) for _ in range(MOTORS))
-        
+        # Motor States:  each motor has a state and a fraction used to increment it
+        mstate = Array(Signal(32) for _ in range(len(steppers)))
+        fraction = Array(Signal(32) for _ in range(len(steppers)))
+        # Motor state is updated after certain delay
+        # this delay changes as the motor increased speed
+        delaycnt = Signal(32)  # threshold
+        delay = Signal(32)     # current count of delay
+        delaycntinit = Signal(32) # initial count must be temperorarily stored somewhere
+        # used to loop through steppers when fractions are read in
+        fractioncnt = Signal(range(len(steppers)))  
         with m.If(delaycnt<delay):
             m.d.cd1 += delaycnt.eq(delaycnt+1)
         with m.Else():
             m.d.cd1 += delaycnt.eq(0)
-            for i in range(MOTORS):
+            for i in range(len(steppers)):
                 m.d.cd1 += mstate[i].eq(mstate[i]+fraction[i])
         # Step Generator
-        delaycntinit = Signal(32)
         enable = Signal()
-        # TODO: make proper loop over array
-        m.d.comb += [steps.x.eq(mstate[0][-1]&enable),
-                     steps.y.eq(mstate[1][-1]&enable),
-                     steps.z.eq(mstate[2][-1]&enable)]
+        for idx, stepper in enumerate(steppers):
+            m.d.comb += stepper.step.eq(mstate[idx][-1]&enable)
         # Define dispatcher
         loopcnt = Signal(16)
         with m.FSM(reset='RESET', name='dispatcher'):
@@ -278,9 +270,10 @@ class Core(Elaboratable):
                     m.next = 'PARSEHEAD'
             with m.State('PARSEHEAD'):
                 with m.If(parser.read_data[-8:] == COMMANDS.GCODE):
-                    m.d.cd1 += [directions.eq(parser.read_data[bits('DIRECTION')]),
-                                aux.eq(parser.read_data[bits('AUX')]),
-                                loopcnt.eq(0),
+                    # TODO: loop over steppers
+                    #[directions.eq(parser.read_data[bits('DIRECTION')]),
+                    #[aux.eq(parser.read_data[bits('AUX')]),
+                    m.d.cd1 += [loopcnt.eq(0),
                                 readtrigger.eq(~readtrigger)]
                     m.next = 'FRACTIONS'
                 with m.Else():
@@ -289,9 +282,9 @@ class Core(Elaboratable):
                     m.d.cd1 += parser.dispatcherror.eq(1)
             with m.State('FRACTIONS'):
                 m.d.cd1 += readtrigger.eq(~readtrigger)  # je zou deze in een sneller clockdomein kunnen stoppen
-                with m.If(fractioncnt<MOTORS):
+                with m.If(fractioncnt<len(steppers)):  # TODO: check if your conter does right range
                     m.d.cd1 += fraction[fractioncnt].eq(parser.read_data)
-                with m.Elif(fractioncnt==MOTORS):
+                with m.Elif(fractioncnt==len(steppers)):
                     m.d.cd1 += delaycntinit.eq(parser.read_data)
                 with m.Else():
                     m.next = 'ACCELERATE'

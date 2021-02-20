@@ -1,1 +1,1 @@
-from . import board, core, constants
+from . import board, core, constants, resources

@@ -12,6 +12,8 @@ from nmigen_boards.resources import LEDResources
 from nmigen_boards.test.blinky import Blinky
 from luna.gateware.platform.core import LUNAPlatform
 
+from FPGAG.resources import StepperResource
+
 
 class Firestarter(LatticeICE40Platform, LUNAPlatform):
     '''Kicad board available at
@@ -30,8 +32,8 @@ class Firestarter(LatticeICE40Platform, LUNAPlatform):
                         Clock(100e6), Attrs(IO_STANDARD="SB_LVCMOS")),
                *LEDResources(pins='8 3',
                              attrs=Attrs(IO_STANDARD="SB_LVCMOS")),
-               # SPI bus connected to the debug controller, for simple register exchanges.
-               # Note that the Debug Controller is the controller on this bus.
+               # NOTE: there is a proper resource in nmigen_boards
+               #       this is used as it is also done by nmigen
                Resource("debug_spi", 0,
                         Subsignal("sck", Pins( "79", dir="i")),
                         Subsignal("sdi", Pins( "90", dir="i")),
@@ -39,33 +41,20 @@ class Firestarter(LatticeICE40Platform, LUNAPlatform):
                         Subsignal("cs", PinsN("85", dir="i")),
                         Attrs(IO_STANDARD="SB_LVCMOS")
                ),
-               #TODO: fix this by creating proper resource!!
-               Resource("AUX", 0,
-                        Subsignal("0", Pins("39", dir="o")),
-                        Attrs(IO_STANDARD="SB_LVCMOS")
+               # x-stepper
+               StepperResource(number=0, step="38", direction="37", limit='110',
+                               attrs=Attrs(IO_STANDARD="SB_LVTTL")
                ),
-               Resource("DIRECTIONS", 0,
-                        Subsignal("x", Pins("37", dir="o")),
-                        Subsignal("y", Pins("18", dir="o")),
-                        Subsignal("z", Pins("142", dir="o")),
-                        Attrs(IO_STANDARD="SB_LVCMOS")
+               # y-stepper
+               StepperResource(number=1, step="19", direction="18", limit='124',
+                               attrs=Attrs(IO_STANDARD="SB_LVTTL")
                ),
-               Resource("STEPS", 0,
-                        Subsignal("x", Pins("38", dir="o")),
-                        Subsignal("y", Pins("19", dir="o")),
-                        Subsignal("z", Pins("143", dir="o")),
-                        Attrs(IO_STANDARD="SB_LVCMOS")
-               ),
-               Resource("LIMITS", 0,
-                        Subsignal("limitx", Pins("110", dir="i")),
-                        Subsignal("limity", Pins("124", dir="i")),
-                        Subsignal("limitz", Pins("130", dir="i")),
-                        Attrs(IO_STANDARD="SB_LVCMOS")
+               # z-stepper
+               StepperResource(number=2, step="143", direction="142", limit='130',
+                               attrs=Attrs(IO_STANDARD="SB_LVTTL")
                )
                ]
-
     connectors = []
-
     def toolchain_program(self, products, name, **kwargs):
         icezprog = os.environ.get("ICEZPROG", "icezprog")
         with products.extract("{}.bin".format(name)) as bitstream_filename:
