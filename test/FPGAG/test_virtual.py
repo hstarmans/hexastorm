@@ -44,7 +44,7 @@ class TestParser(SPIGatewareTestCase):
 
     @sync_test_case
     def test_memfull(self):
-        'write GCODE and verify FIFO is no longer empty'
+        'write GCODE until memory is full'
         self.assertEqual((yield self.dut.empty), 1)
         # write GCODE command with data
         bytes_sent = 0
