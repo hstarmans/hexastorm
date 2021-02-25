@@ -2,8 +2,15 @@ import unittest
 import struct
 import random
 
+
+from FPGAG.constants import GCODE, MOTOR_COMMAND
+
 from luna.gateware.interface.spi import SPIGatewareTestCase, SPICommandInterface
+
 from luna.gateware.test.utils import sync_test_case
+
+
+
 
 class Test(SPIGatewareTestCase):
     FRAGMENT_UNDER_TEST = SPICommandInterface

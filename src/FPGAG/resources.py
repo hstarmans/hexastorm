@@ -1,5 +1,8 @@
 import itertools
 
+from nmigen import Record
+
+from nmigen.hdl.ast import unsigned
 from nmigen.build import Subsignal, Resource, Pins, ResourceError
 from nmigen.hdl.rec import Layout
 
@@ -26,7 +29,7 @@ def get_all_resources(platform, name):
     return resources
 
 
-def StepperLayout():
+class StepperLayout(Layout):
     """ Layout to test stepper motor """
     def __init__(self):
             super().__init__([
@@ -34,6 +37,11 @@ def StepperLayout():
                 ("dir", unsigned(16)),
                 ("limit", 1)
             ])
+
+class StepperRecord(Record):
+    """ Record to test stepper motor """
+    def __init__(self):
+        super().__init__(StepperLayout())
 
 
 def StepperResource(*args, step, direction, limit, number=None,

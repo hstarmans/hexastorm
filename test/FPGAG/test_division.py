@@ -7,7 +7,7 @@ import random
 
 from luna.gateware.test import LunaGatewareTestCase, sync_test_case
 
-from FPGAG.core import Divisor
+from FPGAG.notused import Divisor
 
 
 class DivisorTest(LunaGatewareTestCase):

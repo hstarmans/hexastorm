@@ -11,75 +11,8 @@ from luna.gateware.interface.spi import SPICommandInterface, SPIBus
 from luna.gateware.memory import TransactionalizedFIFO
 
 from FPGAG.resources import StepperLayout, get_all_resources
-from FPGAG.constants import COMMAND_SIZE, WORD_SIZE, bits, STATE
-from FPGAG.constants import MEMDEPTH, MEMWIDTH, COMMANDS, BYTESINGCODE
-
-
-class Divisor(Elaboratable):
-    """ Euclidean division with a remainder
-    
-    X = Y*Q + R
-    dividend X by divisor Y you get quotient Q and remainder R
-    For a tutorial see https://projectf.io/posts/division-in-verilog/
-    
-        width            -- number of bits of divisor and quotients
-    I/O signals:
-        I: start         -- calculation starts on high
-        O: busy          -- calculation in progress
-        O: valid         -- result is valid
-        O: dbz           -- divide by zero
-        I: x             -- dividend
-        I: y             -- divisor
-        O: q             -- quotients
-        O: r             -- remainder
-    """
-    def __init__(self, width=4):
-        self.width = width
-        self.start = Signal()
-        self.busy = Signal()
-        self.valid = Signal()
-        self.dbz = Signal()
-        self.x = Signal(width)
-        self.y = Signal(width)
-        self.q = Signal(width)
-        self.r = Signal(width)
-
-    def elaborate(self, platform):
-        m = Module()
-        ac = Signal(self.width+1)
-        ac_next = Signal.like(ac)
-        temp = Signal.like(ac)
-        q1 = Signal(self.width)
-        q1_next = Signal.like(q1)
-        i = Signal(range(self.width))
-        # combinatorial
-        with m.If(ac>=self.y):
-            m.d.comb += [temp.eq(ac-self.y),
-                         Cat(q1_next, ac_next).eq(Cat(1, q1, temp[0:self.width-1]))]
-        with m.Else():
-            m.d.comb += [Cat(q1_next, ac_next).eq(Cat(q1, ac)<<1)]
-        # synchronized
-        with m.If(self.start):
-            m.d.sync += [self.valid.eq(0), i.eq(0)]
-            with m.If(self.y==0):
-                m.d.sync += [self.busy.eq(0),
-                             self.dbz.eq(1)]
-            with m.Else():
-                m.d.sync += [self.busy.eq(1),
-                             self.dbz.eq(0),
-                             Cat(q1, ac).eq(Cat(Const(0,1), self.x, Const(0, self.width)))]
-        with m.Elif(self.busy):
-            with m.If(i == self.width-1):
-                m.d.sync += [self.busy.eq(0),
-                             self.valid.eq(1),
-                             i.eq(0),
-                             self.q.eq(q1_next),
-                             self.r.eq(ac_next>>1)]
-            with m.Else():
-                m.d.sync += [i.eq(i+1),
-                             ac.eq(ac_next),
-                             q1.eq(q1_next)]
-        return m
+from FPGAG.constants import COMMAND_SIZE, WORD_SIZE, STATE
+from FPGAG.constants import MEMWIDTH, COMMANDS
 
 
 class SPIParser(Elaboratable):
@@ -100,15 +33,13 @@ class SPIParser(Elaboratable):
         I: read_en        -- enable read transactionalizedfifo
         O: empty          -- transactionalizedfifo is empty
     """
-    def __init__(self, memdepth=None):
+    def __init__(self, platform=None):
         """ class initialization
 
         memdepth  -- change depth if memory, used for testing
         """ 
-        if memdepth:
-            self.memdepth = memdepth
-        else:
-            self.memdepth = MEMDEPTH
+        if platform:
+            self.platform = platform
         self.dispatcherror = Signal()
         self.execute = Signal()
         self.spi = SPIBus()
@@ -119,8 +50,12 @@ class SPIParser(Elaboratable):
 
     def elaborate(self, platform):
         m = Module()
-        # Connect SPI
-        #spi = synchronize(m, self.spi)  # TODO don't drive twice
+        if platform:
+            board_spi = platform.request("debug_spi")
+            spi2 = synchronize(m, board_spi)
+            m.d.comb  += self.spi.connect(spi2)
+        if not platform:
+            platform = self.platform
         spi = self.spi
         interface = SPICommandInterface(command_size=COMMAND_SIZE,
                                         word_size=WORD_SIZE)
@@ -128,22 +63,21 @@ class SPIParser(Elaboratable):
         m.submodules.interface = interface 
         # Connect fifo
         fifo = TransactionalizedFIFO(width=MEMWIDTH,
-                                     depth=self.memdepth)
-        if not platform:
-            self.fifo = fifo # test handle
+                                     depth=platform.memdepth)
+        if platform.name == 'Test':
+            self.fifo = fifo
         m.submodules.fifo = fifo
         m.d.comb += [self.read_data.eq(fifo.read_data),
                      fifo.read_commit.eq(self.read_commit),
                      fifo.read_en.eq(self.read_en),
-                     self.empty.eq(fifo.empty)
-                    ]
+                     self.empty.eq(fifo.empty)]
         # set state
         state = Signal(COMMAND_SIZE) # max is actually word_size
-        m.d.sync += [state[STATE.FULL].eq(fifo.space_available<ceil(BYTESINGCODE/4)),
+        m.d.sync += [state[STATE.FULL].eq(fifo.space_available<ceil(platform.bytesingcode/4)),
                      state[STATE.DISPATCHERROR].eq(self.dispatcherror)
                     ]
         # Parser
-        bytesreceived = Signal(range(BYTESINGCODE+1))
+        bytesreceived = Signal(range(platform.bytesingcode+1))
         with m.FSM(reset='RESET', name='parser'):
             with m.State('RESET'):
                 m.d.sync += self.execute.eq(0)
@@ -178,7 +112,7 @@ class SPIParser(Elaboratable):
             with m.State('WRITE'):
                 m.d.sync += [fifo.write_en.eq(0)]
                 m.next = 'WAIT_COMMAND'
-                with m.If(bytesreceived==BYTESINGCODE):
+                with m.If(bytesreceived==platform.bytesingcode):
                     m.d.sync += [bytesreceived.eq(0),
                                  fifo.write_commit.eq(1)]
         return m

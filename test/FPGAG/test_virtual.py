@@ -6,14 +6,16 @@ from luna.gateware.interface.spi import SPIGatewareTestCase
 from luna.gateware.test.utils import sync_test_case
 
 from FPGAG.core import Core, SPIParser
-from FPGAG.board import Firestarter
-from FPGAG.constants import COMMANDS, MEMDEPTH, BYTESINGCODE, WORD_SIZE
-from FPGAG.constants import COMMAND_SIZE
-
+from FPGAG.board import Firestarter, TestPlatform
+from FPGAG.resources import StepperRecord
+from FPGAG.constants import (COMMANDS,
+                             WORD_SIZE, G_CODE, MOTOR_COMMAND,
+                             COMMAND_SIZE, WORD_BYTES)
 
 class TestParser(SPIGatewareTestCase):
+    platform = TestPlatform()
     FRAGMENT_UNDER_TEST = SPIParser
-    FRAGMENT_ARGUMENTS = {'memdepth': ceil(BYTESINGCODE/4)*2}
+    FRAGMENT_ARGUMENTS = {'platform': platform}
 
     def initialize_signals(self):
         yield self.dut.spi.cs.eq(0)
@@ -30,8 +32,7 @@ class TestParser(SPIGatewareTestCase):
         self.assertEqual((yield self.dut.empty), 1)
         # write GCODE command with data
         bytes_sent = 0
-        
-        while bytes_sent!= BYTESINGCODE:
+        while bytes_sent != self.platform.bytesingcode:
             writedata = [COMMANDS.GCODE, 1, 2, 3, 4]
             bytes_sent += 4
             _ = yield from self.spi_exchange_data(writedata)
@@ -40,7 +41,9 @@ class TestParser(SPIGatewareTestCase):
         # Instruction ready
         self.assertEqual((yield self.dut.empty), 0)
         self.assertEqual((yield self.dut.fifo.space_available),
-                         MEMDEPTH-BYTESINGCODE/(WORD_SIZE/8))
+                         (self.platform.memdepth
+                          -self.platform.bytesingcode/(WORD_SIZE/8)
+                          ))
 
     @sync_test_case
     def test_memfull(self):
@@ -49,12 +52,13 @@ class TestParser(SPIGatewareTestCase):
         # write GCODE command with data
         bytes_sent = 0
         writedata = [COMMANDS.GCODE, 1, 2, 3, 4]
-        while bytes_sent < BYTESINGCODE*2:
+        while bytes_sent < self.platform.bytesingcode*2:
             bytes_sent += 4
             read_data = yield from self.write_command(writedata)
             self.assertEqual(read_data, 0)
         read_data = yield from self.write_command(writedata)
         self.assertEqual(read_data, 1)
+
 
 class TestCore(SPIGatewareTestCase):
     FRAGMENT_UNDER_TEST = Core
@@ -126,7 +130,11 @@ class TestCore(SPIGatewareTestCase):
             self.assertEqual(read_data, 2)
 
 class TestBuild(unittest.TestCase):
-    def test_build(self):
+    def test_parser(self):
+        platform = Firestarter()
+        platform.build(SPIParser(), do_program=False, verbose=True)
+
+    def test_totalbuild(self):
         platform = Firestarter()
         platform.build(Core(), do_program=False, verbose=True)
 
