@@ -8,14 +8,19 @@ STATE = namedtuple('STATE', ['FULL', 'DISPATCHERROR'], defaults=range(2))()
 # max of 1 block is 16*256 but if you use a larger memwidth you seem to
 # use more blocks so this might work
 MEMWIDTH = 32
-
-COMMAND_SIZE =8
+COMMAND_SIZE = 8
 WORD_SIZE = 32
 WORD_BYTES = round(WORD_SIZE/8)
 FREQ = 1 # speed of motor speed update in Mhz
 G_CODE = {'COMMAND': 1, 'AUX': 1}
-MOTOR_COMMAND = {'B0': 1, 'B1': 1, 'B2': 1, 'B3': 1}
+BEZIER_DEGREE = 2
 
+MOTOR_COMMAND = {'B0': 1}
+for i in range(BEZIER_DEGREE):
+    MOTOR_COMMAND.update({f'B{i}':1)
+
+
+# TODO: move this to board
 VARIABLES = {'CRYSTAL_HZ': 50E6}
 
 def getbytesingcode(motors):

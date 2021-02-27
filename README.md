@@ -13,24 +13,35 @@ The following commands are possible;
 |---|---|
 | STATUS | send back the status of the peripheral|
 | START | enable execution of gcode |
-| STOP | halt the execution of gcode |
+| STOP | halt execution of gcode |
 | GCODE | sent over the GCODE instruction |
 
 ## GCODE command
 The word of a GCODE command cannot store all the instructions. So a GCODE instruction 
 consists out of multiple commands in series.
 If prior to the sequence, the memory is already full or there is a parsing error, a status word is sent back.
-If the reply is zero, the peripheral is operating normally. The following information must be sent over;
+If the reply is zero, the peripheral is operating normally. In the case of 1 motor, and bezier of the order 3, the following
+commands must be sent over;
 | data | number of bytes | description
 |---|---|---|
 | COMMAND | 1 | type of commmand, to allow other commands than GCODE
-| DIRECTION | 1 | direction of motors
 | AUX | 2 | auxilliary bits, to enable lights etc.
-| ACCELERATION | 2 | acceleration
-| LOOPS_ACCEL | 2 | loops spend in acceleration
-| LOOPS_TRAVEL | 2 | loops spend in travel
-| DECELERATION | 2 | deceleration
-| LOOPS_DECEL | 2 | loops spend in deceleration
+| B00 | 4 | bezier coeff 0, motor 0
+| B01 | 4 | bezier coeff 1, motor 0
+| B02 | 4 | bezier coeff 2, motor 0
+| B03 | 4 | bezier coeff 3, motor 0
+| B04 | 4 | bezier coeff 4, motor 0
+
+For a bezier of order n, there are n+1 coefficients. If there are m motors, there are m*(n+1) coefficients to sent over.
+
+# Accucuracy
+If scale is set to 1 micron, position is defined in 32 bit signed, the range is +/- 2147 meters.
+In de casteljau's, time is a float between 0 an 1. Let's assume, 10 samples are taken per second,
+the update frequency is 1 MHZ. The float needs to be able to carry 100E3. Looking at the formula
+the max is (-2*pow(100E3, 2)) which is accounted for in 32 bit arithmetic.
+
+we do a bitshit of 17 as (2,17) equals 131K
+
 
 ## Algorithm
 Splines, Bezier, B-splines, and NURBS (Non-Uniform Rational B-splines) curves are the common parametric techniques 

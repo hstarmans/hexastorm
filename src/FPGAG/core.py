@@ -128,7 +128,9 @@ class Core(Elaboratable):
 
     def elaborate(self, platform):
         m = Module()
-        # Clock domains:  Dispachter works at 1 MHz
+        # Clock domains:
+        #  interpolator operates at certain freq e.g. 1 MHz you create clock for this
+        #  it can be argued that this should be done in different module
         cd1 = ClockDomain()
         m.domains += cd1
         # TODO: you don't have reset?
@@ -141,17 +143,6 @@ class Core(Elaboratable):
         with m.Else():
             m.d.sync += [counter.eq(0),
                          clockin.eq(~clockin)]
-        # Directions
-        if platform:
-            steppers = [res for res in get_all_resources(platform, "steppers")]
-            #aux = platform.request("AUX")
-        else:
-            # ideally this is done via layouts etc 
-            steppers = [Record(StepperLayout())]
-            self.directions = directions
-        # Connect Parser
-        parser = SPIParser()
-        m.submodules.parser = parser
         if not platform:
             self.parser = parser
         if platform:
@@ -160,34 +151,17 @@ class Core(Elaboratable):
         else:
             self.spi = SPIBus()
             spi = synchronize(m, self.spi)
+        # Steppers
+        steppers = [res for res in get_all_resources(platform, "steppers")]
+        aux = platform.request("AUX")
+        # Connect Parser
+        parser = SPIParser()
+        m.submodules.parser = parser
         m.d.comb  += parser.spi.connect(spi)
-        # Add divisor
-        divisor = Divisor()
-        m.submodules.divisor = divisor
-        # Memory trigger
-        readtrigger = Signal()
-        readtrigger_d = Signal()
-        m.d.sync += readtrigger_d.eq(readtrigger)
-        with m.If(readtrigger!=readtrigger_d):
-            m.d.comb += parser.read_en.eq(0)
-        with m.Else():
-            m.d.comb += parser.read_en.eq(1)
-        # Motor States:  each motor has a state and a fraction used to increment it
+        # Motor States:  each motor has a state and four bezier coefficients
         mstate = Array(Signal(32) for _ in range(len(steppers)))
-        fraction = Array(Signal(32) for _ in range(len(steppers)))
-        # Motor state is updated after certain delay
-        # this delay changes as the motor increased speed
-        delaycnt = Signal(32)  # threshold
-        delay = Signal(32)     # current count of delay
-        delaycntinit = Signal(32) # initial count must be temperorarily stored somewhere
-        # used to loop through steppers when fractions are read in
-        fractioncnt = Signal(range(len(steppers)))  
-        with m.If(delaycnt<delay):
-            m.d.cd1 += delaycnt.eq(delaycnt+1)
-        with m.Else():
-            m.d.cd1 += delaycnt.eq(0)
-            for i in range(len(steppers)):
-                m.d.cd1 += mstate[i].eq(mstate[i]+fraction[i])
+        coeff = Array(Signal(32) for _ in range(len(steppers)))
+        # write to step state directly with decaljou algo
         # Step Generator
         enable = Signal()
         for idx, stepper in enumerate(steppers):
@@ -195,59 +169,39 @@ class Core(Elaboratable):
         # Define dispatcher
         loopcnt = Signal(16)
         with m.FSM(reset='RESET', name='dispatcher'):
-            #m.d.cd1 += [parser.read_commit.eq(0)]
             with m.State('RESET'):
                 m.next = 'WAIT_COMMAND'
             with m.State('WAIT_COMMAND'):
-                with m.If((parser.empty == 0)&(parser.execute==1)):
-                    m.d.cd1 += readtrigger.eq(~readtrigger)
+                m.d.sync += parser.read_commit.eq(0)
+                with m.If((!parser.empty)&parser.execute):
+                    m.d.sync += parser.read_en.eq(1)
                     m.next = 'PARSEHEAD'
+            # check which command we r handling
             with m.State('PARSEHEAD'):
-                with m.If(parser.read_data[-8:] == COMMANDS.GCODE):
-                    # TODO: loop over steppers
-                    #[directions.eq(parser.read_data[bits('DIRECTION')]),
-                    #[aux.eq(parser.read_data[bits('AUX')]),
-                    m.d.cd1 += [loopcnt.eq(0),
-                                readtrigger.eq(~readtrigger)]
-                    m.next = 'FRACTIONS'
+                with m.If(parser.read_en):
+                    m.d.sync += parser.read_en.eq(0)
+                with m.Elif(parser.read_data[-8:] == COMMANDS.GCODE):
+                    m.d.sync += [aux.eq(parser.read_data[-16:-8]),
+                                 parser.read_en.eq(1),
+                                 steppercnt.eq(0)]
+                    m.next = 'BEZIERCOEFF'
                 with m.Else():
                     # NOTE: system never recovers user must reset
-                    # NOTE: also forward division error!
-                    m.d.cd1 += parser.dispatcherror.eq(1)
-            with m.State('FRACTIONS'):
-                m.d.cd1 += readtrigger.eq(~readtrigger)  # je zou deze in een sneller clockdomein kunnen stoppen
-                with m.If(fractioncnt<len(steppers)):  # TODO: check if your conter does right range
-                    m.d.cd1 += fraction[fractioncnt].eq(parser.read_data)
-                with m.Elif(fractioncnt==len(steppers)):
-                    m.d.cd1 += delaycntinit.eq(parser.read_data)
-                with m.Else():
-                    m.next = 'ACCELERATE'
-            with m.State('ACCELERATE'):
-                with m.If(loopcnt<parser.read_data[bits('LOOPS_ACCEL')]):
-                    m.d.cd1 += [divisor.x.eq(loopcnt<<1+divisor.r),
-                                divisor.y.eq(loopcnt<<2+1),
-                                divisor.start.eq(1),  #TODO: make this a trigger
-                                loopcnt.eq(loopcnt+1)]
-                with m.Else():
-                    m.next = 'MOVE'
-                    m.d.cd1 += loopcnt.eq(0)
-            with m.State('MOVE'):
-                with m.If(loopcnt<parser.read_data[bits('LOOPS_TRAVEL')]):
-                    m.d.cd1 += loopcnt.eq(loopcnt+1)
-                with m.Else():
-                    m.next = 'DECELERATE'
-                    m.d.cd1 += [readtrigger.eq(~readtrigger),
-                                loopcnt.eq(0)]
-            with m.State('DECELERATE'):
-                with m.If(loopcnt<parser.read_data[bits('LOOPS_DECEL')]):
-                    m.d.cd1 += [divisor.x.eq(loopcnt<<1+divisor.r),
-                                divisor.y.eq(loopcnt<<2-1),
-                                divisor.start.eq(1),
-                                loopcnt.eq(loopcnt+1)]
+                    m.d.sync += parser.dispatcherror.eq(1)
+            with m.State('BEZIERCOEFF'):
+                with m.If(parser.read_en):
+                    m.d.sync += parser.read_en.eq(0) 
+                with m.Elif(steppercnt<len(steppers)):  
+                    m.d.sync += [coeff[steppercnt].eq(parser.read_data),
+                                 steppercnt.eq(steppercnt+1),
+                                 parser.read_en.eq(1)]
+                # signal there is a new instruction!!
+                # ideally you can keep two instruction in memory
                 with m.Else():
                     m.next = 'WAIT_COMMAND'
-                    m.d.cd1 += [loopcnt.eq(0),
-                                readtrigger.eq(~readtrigger)]
+                    m.d.sync += parser.read_commit.eq(1)
+        # make a sketch of cabeljau thing            
+        
         return m
 
 # Overview:
