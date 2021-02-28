@@ -12,13 +12,8 @@ COMMAND_SIZE = 8
 WORD_SIZE = 32
 WORD_BYTES = round(WORD_SIZE/8)
 FREQ = 1 # speed of motor speed update in Mhz
-G_CODE = {'COMMAND': 1, 'AUX': 1}
+G_CODE = {'COMMAND': 1, 'AUX': 1, 'EMTY': 2}
 BEZIER_DEGREE = 2
-
-MOTOR_COMMAND = {'B0': 1}
-for i in range(BEZIER_DEGREE):
-    MOTOR_COMMAND.update({f'B{i}':1)
-
 
 # TODO: move this to board
 VARIABLES = {'CRYSTAL_HZ': 50E6}
@@ -28,7 +23,14 @@ def getbytesingcode(motors):
                    + motors*sum(MOTOR_COMMAND.values()))
     bytesingcode += WORD_BYTES-bytesingcode%WORD_BYTES
     return bytesingcode
-
+                          
+def getgcodecommanddct(motors):
+    dct = G_CODE
+    for i in range(motors):
+        motor_command = {f'B{i}0': 1}
+        for j in range(BEZIER_DEGREE):
+            motor_command.update({f'B{i}{j+1}':1)
+        dct.update(MOTOR_COMMAND)
 
 
 

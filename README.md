@@ -32,16 +32,13 @@ commands must be sent over;
 | B03 | 4 | bezier coeff 3, motor 0
 | B04 | 4 | bezier coeff 4, motor 0
 
-For a bezier of order n, there are n+1 coefficients. If there are m motors, there are m*(n+1) coefficients to sent over.
-
 # Accucuracy
 If scale is set to 1 micron, position is defined in 32 bit signed, the range is +/- 2147 meters.
 In de casteljau's, time is a float between 0 an 1. Let's assume, 10 samples are taken per second,
 the update frequency is 1 MHZ. The float needs to be able to carry 100E3. Looking at the formula
 the max is (-2*pow(100E3, 2)) which is accounted for in 32 bit arithmetic.
-
-we do a bitshit of 17 as (2,17) equals 131K
-
+To account for the floats; we do a bitshit of 17 as (2,17) equals 131K.
+It might be an option to set B00 equal to zero, set the scale to steps... but this is for later..
 
 ## Algorithm
 Splines, Bezier, B-splines, and NURBS (Non-Uniform Rational B-splines) curves are the common parametric techniques 

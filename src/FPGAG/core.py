@@ -34,9 +34,8 @@ class SPIParser(Elaboratable):
         O: empty          -- transactionalizedfifo is empty
     """
     def __init__(self, platform=None):
-        """ class initialization
-
-        memdepth  -- change depth if memory, used for testing
+        """
+        platform  -- used to pass test platform
         """ 
         if platform:
             self.platform = platform
@@ -118,39 +117,25 @@ class SPIParser(Elaboratable):
         return m
 
 
-class Core(Elaboratable):
-    """ FPGA core for Beage G and top module """
-    def __init__(self, gfreq=1):
-        # TODO: this might not be clean way of creating freq
-        self.count = round(100/(gfreq*2))
-        if 100%(gfreq*2):
-            raise Exception("Invalid, use PLL to create clock")
+class Dispatcher(Elaboratable):
+    """ Instruction are buffered in SRAM
+        This module reads the commands and dispatches them
+        to other modules"""
+    def __init__(self, platform=None):
+        """
+        platform  -- used to pass test platform
+        """ 
+        if platform:
+            self.platform = platform
 
     def elaborate(self, platform):
         m = Module()
-        # Clock domains:
-        #  interpolator operates at certain freq e.g. 1 MHz you create clock for this
-        #  it can be argued that this should be done in different module
-        cd1 = ClockDomain()
-        m.domains += cd1
-        # TODO: you don't have reset?
-        #cd1.reset = m.d['sys'].reset
-        clockin = Signal()
-        cd1.clock = clockin
-        counter = Signal(range(self.count))
-        with m.If(counter<self.count):
-            m.d.sync += counter.eq(counter+1)
-        with m.Else():
-            m.d.sync += [counter.eq(0),
-                         clockin.eq(~clockin)]
-        if not platform:
-            self.parser = parser
         if platform:
             board_spi = platform.request("debug_spi")
             spi = synchronize(m, board_spi)
         else:
             self.spi = SPIBus()
-            spi = synchronize(m, self.spi)
+            spi = synchronize(m, self.spi) 
         # Steppers
         steppers = [res for res in get_all_resources(platform, "steppers")]
         aux = platform.request("AUX")
@@ -158,16 +143,13 @@ class Core(Elaboratable):
         parser = SPIParser()
         m.submodules.parser = parser
         m.d.comb  += parser.spi.connect(spi)
-        # Motor States:  each motor has a state and four bezier coefficients
-        mstate = Array(Signal(32) for _ in range(len(steppers)))
+        # coeff for decaljau algo
         coeff = Array(Signal(32) for _ in range(len(steppers)))
-        # write to step state directly with decaljou algo
-        # Step Generator
-        enable = Signal()
-        for idx, stepper in enumerate(steppers):
-            m.d.comb += stepper.step.eq(mstate[idx][-1]&enable)
         # Define dispatcher
         loopcnt = Signal(16)
+        if self.platform.name == 'Test':
+            self.parser = parser
+            self.coeff = coeff
         with m.FSM(reset='RESET', name='dispatcher'):
             with m.State('RESET'):
                 m.next = 'WAIT_COMMAND'
@@ -200,10 +182,20 @@ class Core(Elaboratable):
                 with m.Else():
                     m.next = 'WAIT_COMMAND'
                     m.d.sync += parser.read_commit.eq(1)
-        # make a sketch of cabeljau thing            
-        
         return m
 
+    # combine this with cabeljau
+    
+#             # Motor States: each motor has a state and four bezier coefficients
+#         mstate = Array(Signal(32) for _ in range(len(steppers)))
+#         # Step Generator
+#         enable = Signal()
+#         for idx, stepper in enumerate(steppers):
+#             m.d.comb += stepper.step.eq(mstate[idx][-1]&enable)
+    
+    
+    
+    
 # Overview:
 #  the hardware consists out of the following elements
 #  -- SPI command interface

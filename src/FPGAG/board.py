@@ -18,7 +18,8 @@ from FPGAG.resources import StepperResource, StepperRecord
 
 class TestPlatform(LUNAPlatform):
     name = 'Test'
-    bytesingcode = getbytesingcode(1)
+    motors = 1 #TODO: derive this from resources?
+    bytesingcode = getbytesingcode(motors)
     memdepth =  ceil(bytesingcode/4)*2
     resources = [StepperRecord()]
 
