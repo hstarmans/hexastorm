@@ -20,16 +20,16 @@ VARIABLES = {'CRYSTAL_HZ': 50E6}
 
 def getbytesingcode(motors):
     bytesingcode =(sum(G_CODE.values())
-                   + motors*sum(MOTOR_COMMAND.values()))
-    bytesingcode += WORD_BYTES-bytesingcode%WORD_BYTES
+                   + motors*(BEZIER_DEGREE+1)*4)
+    bytesingcode += bytesingcode%WORD_BYTES
     return bytesingcode
                           
 def getgcodecommanddct(motors):
     dct = G_CODE
     for i in range(motors):
-        motor_command = {f'B{i}0': 1}
+        motor_command = {f'B{i}0': 4}
         for j in range(BEZIER_DEGREE):
-            motor_command.update({f'B{i}{j+1}':1)
+            motor_command.update({f'B{i}{j+1}':4})
         dct.update(MOTOR_COMMAND)
 
 

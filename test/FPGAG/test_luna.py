@@ -3,16 +3,14 @@ import struct
 import random
 
 
-from FPGAG.constants import GCODE, MOTOR_COMMAND
-
 from luna.gateware.interface.spi import SPIGatewareTestCase, SPICommandInterface
+from luna.gateware.memory import TransactionalizedFIFO
+from luna.gateware.test import LunaGatewareTestCase
+
 
 from luna.gateware.test.utils import sync_test_case
 
-
-
-
-class Test(SPIGatewareTestCase):
+class TestSPI(SPIGatewareTestCase):
     FRAGMENT_UNDER_TEST = SPICommandInterface
     FRAGMENT_ARGUMENTS = {'command_size':8, 'word_size':32}
     def initialize_signals(self):
@@ -30,10 +28,29 @@ class Test(SPIGatewareTestCase):
             self.assertEqual((yield self.dut.word_received), struct.unpack('!I', bytearray(write_data[1:]))[0])
             self.assertEqual(to_send, struct.unpack('!I', bytearray(read_data[1:]))[0])
             print(read_data)
-            # problems: I receive \xff??? for command? this problems dissappears if sdo is set.
-            # bytearray(b'\x00\x00\x00\x00\x1f')
-            # bytearray(b'\xff\x00\x00\x00W')
-            # bytearray(b'\xff\x00\x00\x00/')
-            # bytearray(b'\xff\x00\x00\x00\xde')
+
+class TestMEM(LunaGatewareTestCase):
+    FRAGMENT_UNDER_TEST = TransactionalizedFIFO
+    FRAGMENT_ARGUMENTS = {'width':32, 'depth':8}
+
+    def initialize_signals(self):
+        yield self.dut.write_en.eq(0)
+
+    @sync_test_case
+    def test_writeandread(self):
+        'test if you can receive bytes'
+        dut = self.dut
+        iterations = 8
+        self.assertEqual((yield dut.space_available), self.FRAGMENT_ARGUMENTS['depth'])
+        for i in range(iterations):
+            yield dut.write_data.eq(i)
+            yield from self.pulse(dut.write_en)
+        yield from self.pulse(dut.write_commit)
+        self.assertEqual((yield dut.space_available), self.FRAGMENT_ARGUMENTS['depth']-iterations)
+        for i in range(iterations):
+            yield from self.pulse(dut.read_en)
+            self.assertEqual(i, (yield dut.read_data))
+            yield from self.pulse(dut.read_commit)
+
 if __name__ == "__main__":
     unittest.main()

@@ -8,14 +8,14 @@ from nmigen.hdl.rec import Layout
 
 
 __all__ = [
-    "StepperResource", 
+    "StepperResource",
     "LaserscannerResource"
 ]
 
 
 def get_all_resources(platform, name):
     """ Helper function to get multiple resources by name
-    
+
     If you request stepper you would end up with a list of
     steppers if there are multiple of such resources
     in your board.

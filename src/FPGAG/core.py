@@ -11,8 +11,8 @@ from luna.gateware.interface.spi import SPICommandInterface, SPIBus
 from luna.gateware.memory import TransactionalizedFIFO
 
 from FPGAG.resources import StepperLayout, get_all_resources
-from FPGAG.constants import COMMAND_SIZE, WORD_SIZE, STATE
-from FPGAG.constants import MEMWIDTH, COMMANDS
+from FPGAG.constants import (COMMAND_SIZE, WORD_SIZE, STATE,
+                             MEMWIDTH, COMMANDS, BEZIER_DEGREE)
 
 
 class SPIParser(Elaboratable):
@@ -53,7 +53,7 @@ class SPIParser(Elaboratable):
             board_spi = platform.request("debug_spi")
             spi2 = synchronize(m, board_spi)
             m.d.comb  += self.spi.connect(spi2)
-        if not platform:
+        else:
             platform = self.platform
         spi = self.spi
         interface = SPICommandInterface(command_size=COMMAND_SIZE,
@@ -124,29 +124,31 @@ class Dispatcher(Elaboratable):
     def __init__(self, platform=None):
         """
         platform  -- used to pass test platform
-        """ 
-        if platform:
-            self.platform = platform
+        """
+        self.platform = platform
 
     def elaborate(self, platform):
         m = Module()
         if platform:
             board_spi = platform.request("debug_spi")
             spi = synchronize(m, board_spi)
+            steppers = [res for res in get_all_resources(platform, "steppers")]
+            aux = platform.request("AUX")
         else:
+            platform = self.platform
             self.spi = SPIBus()
-            spi = synchronize(m, self.spi) 
-        # Steppers
-        steppers = [res for res in get_all_resources(platform, "steppers")]
-        aux = platform.request("AUX")
+            spi = synchronize(m, self.spi)
+            steppers = platform.steppers
+            aux = platform.aux
+            self.aux = aux
         # Connect Parser
-        parser = SPIParser()
+        parser = SPIParser(self.platform)
         m.submodules.parser = parser
         m.d.comb  += parser.spi.connect(spi)
         # coeff for decaljau algo
-        coeff = Array(Signal(32) for _ in range(platform.motors))
-        # Define dispatcher
-        loopcnt = Signal(16)
+        numb_coeff = platform.motors*(BEZIER_DEGREE+1)
+        coeff = Array(Signal(32) for _ in range(numb_coeff))
+        coeffcnt = Signal(range(numb_coeff))
         if self.platform.name == 'Test':
             self.parser = parser
             self.coeff = coeff
@@ -155,7 +157,7 @@ class Dispatcher(Elaboratable):
                 m.next = 'WAIT_COMMAND'
             with m.State('WAIT_COMMAND'):
                 m.d.sync += parser.read_commit.eq(0)
-                with m.If((!parser.empty)&parser.execute):
+                with m.If((parser.empty==0)&parser.execute):
                     m.d.sync += parser.read_en.eq(1)
                     m.next = 'PARSEHEAD'
             # check which command we r handling
@@ -165,17 +167,17 @@ class Dispatcher(Elaboratable):
                 with m.Elif(parser.read_data[-8:] == COMMANDS.GCODE):
                     m.d.sync += [aux.eq(parser.read_data[-16:-8]),
                                  parser.read_en.eq(1),
-                                 steppercnt.eq(0)]
+                                 coeffcnt.eq(0)]
                     m.next = 'BEZIERCOEFF'
                 with m.Else():
                     # NOTE: system never recovers user must reset
                     m.d.sync += parser.dispatcherror.eq(1)
             with m.State('BEZIERCOEFF'):
                 with m.If(parser.read_en):
-                    m.d.sync += parser.read_en.eq(0) 
-                with m.Elif(steppercnt<len(steppers)):  
-                    m.d.sync += [coeff[steppercnt].eq(parser.read_data),
-                                 steppercnt.eq(steppercnt+1),
+                    m.d.sync += parser.read_en.eq(0)
+                with m.Elif(coeffcnt<numb_coeff):
+                    m.d.sync += [coeff[coeffcnt].eq(parser.read_data),   # 
+                                 coeffcnt.eq(coeffcnt+1),
                                  parser.read_en.eq(1)]
                 # signal there is a new instruction!!
                 # ideally you can keep two instruction in memory
@@ -205,7 +207,7 @@ def Casteljau(Elaboratable):
                 m.next = 'WAIT_COMMAND'
             with m.State('WAIT_COMMAND'):
                 m.d.sync += parser.read_commit.eq(0)
-                with m.If((!parser.empty)&parser.execute):
+                with m.If((parser.empty==0)&parser.execute):
                     m.d.sync += parser.read_en.eq(1)
                     m.next = 'PARSEHEAD'
             # check which command we r handling

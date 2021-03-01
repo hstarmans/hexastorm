@@ -6,6 +6,7 @@ from math import ceil
 import os
 import subprocess
 
+from nmigen import Signal
 from nmigen.build import Resource, Attrs, Pins, PinsN, Clock, Subsignal
 from nmigen.vendor.lattice_ice40 import LatticeICE40Platform
 from nmigen_boards.resources import LEDResources
@@ -18,11 +19,11 @@ from FPGAG.resources import StepperResource, StepperRecord
 
 class TestPlatform(LUNAPlatform):
     name = 'Test'
-    motors = 1 #TODO: derive this from resources?
+    motors = 1 
     bytesingcode = getbytesingcode(motors)
     memdepth =  ceil(bytesingcode/4)*2
-    resources = [StepperRecord()]
-
+    steppers = [StepperRecord()]
+    aux = Signal(8)
 
 class Firestarter(LatticeICE40Platform, LUNAPlatform):
     '''Kicad board available at
@@ -30,6 +31,7 @@ class Firestarter(LatticeICE40Platform, LUNAPlatform):
     '''
     name = "firestarter"
     memdepth = 256
+    motors = 3
     bytesingcode = getbytesingcode(motors=3)
     device = 'iCE40HX4K'
     package = 'TQ144'

@@ -8,8 +8,8 @@ from luna.gateware.test.utils import sync_test_case
 from FPGAG.core import Dispatcher, SPIParser
 from FPGAG.board import Firestarter, TestPlatform
 from FPGAG.resources import StepperRecord
-from FPGAG.constants import (COMMANDS,
-                             WORD_SIZE, G_CODE, MOTOR_COMMAND,
+from FPGAG.constants import (COMMANDS, BEZIER_DEGREE,
+                             WORD_SIZE, G_CODE,
                              COMMAND_SIZE, WORD_BYTES)
 
 
@@ -109,16 +109,17 @@ class TestDispatcher(SPIGatewareTestCase):
       
     @sync_test_case
     def test_commandreceival(self):
-        'verify command is processed correctly'    
-        # set the aux pin alternating to 1 and 0
+        'verify command is processed correctly'
+        #TODO: you write in the wrong direction!
         writedata = [COMMANDS.GCODE, COMMANDS.GCODE,
                      int('10101010', 2), 0, 0]
-        _ = yield from self.spi_exchange_data(writedata)
+        yield from self.spi_exchange_data(writedata)
         # write coefficients for each motor
         for motor in range(self.platform.motors):
             for coef in range(BEZIER_DEGREE+1):
                 write_data = [COMMANDS.GCODE, 0,
                               0, 0, motor+coef]
+                yield from self.spi_exchange_data(writedata)
         # wait till instruction is received
         while (yield self.dut.parser.empty) == 1:
             yield
@@ -131,11 +132,11 @@ class TestDispatcher(SPIGatewareTestCase):
             yield
         # confirm receival
         self.assertEqual((yield self.dut.aux), int('10101010', 2))
-        coeff = (yield self.dut.coeff)
         for motor in range(self.platform.motors):
             for coef in range(BEZIER_DEGREE+1):
                 indx = motor*(BEZIER_DEGREE+1)+coef
-                self.assertEqual(coef[indx], motor+coef )
+                self.assertEqual((yield self.dut.coeff[indx]), motor+coef)
+                print('passed')
 
 
 class TestBuild(unittest.TestCase):
