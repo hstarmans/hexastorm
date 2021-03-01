@@ -144,7 +144,7 @@ class Dispatcher(Elaboratable):
         m.submodules.parser = parser
         m.d.comb  += parser.spi.connect(spi)
         # coeff for decaljau algo
-        coeff = Array(Signal(32) for _ in range(len(steppers)))
+        coeff = Array(Signal(32) for _ in range(platform.motors))
         # Define dispatcher
         loopcnt = Signal(16)
         if self.platform.name == 'Test':
@@ -183,6 +183,55 @@ class Dispatcher(Elaboratable):
                     m.next = 'WAIT_COMMAND'
                     m.d.sync += parser.read_commit.eq(1)
         return m
+
+    
+def Casteljau(Elaboratable):
+    """ Sets motor states using casteljau algorithm up to second order
+    """
+    def __init__(self, platform=None):
+        """
+        platform  -- used to pass test platform
+        """ 
+        if platform:
+            self.platform = platform
+        # coeff for decaljau algo
+        self.coeff = Array(Signal(32) for _ in range(len(platform.steppers)))
+    
+    
+    def elaborate(self, platform):
+        m = Module()
+        with m.FSM(reset='RESET', name='dispatcher'):
+            with m.State('RESET'):
+                m.next = 'WAIT_COMMAND'
+            with m.State('WAIT_COMMAND'):
+                m.d.sync += parser.read_commit.eq(0)
+                with m.If((!parser.empty)&parser.execute):
+                    m.d.sync += parser.read_en.eq(1)
+                    m.next = 'PARSEHEAD'
+            # check which command we r handling
+            with m.State('PARSEHEAD'):
+                with m.If(parser.read_en):
+                    m.d.sync += parser.read_en.eq(0)
+                with m.Elif(parser.read_data[-8:] == COMMANDS.GCODE):
+                    m.d.sync += [aux.eq(parser.read_data[-16:-8]),
+                                 parser.read_en.eq(1),
+                                 steppercnt.eq(0)]
+                    m.next = 'BEZIERCOEFF'
+                with m.Else():
+                    # NOTE: system never recovers user must reset
+                    m.d.sync += parser.dispatcherror.eq(1)
+            with m.State('BEZIERCOEFF'):
+                with m.If(parser.read_en):
+                    m.d.sync += parser.read_en.eq(0) 
+                with m.Elif(steppercnt<len(steppers)):  
+                    m.d.sync += [coeff[steppercnt].eq(parser.read_data),
+                                 steppercnt.eq(steppercnt+1),
+                                 parser.read_en.eq(1)]
+                # signal there is a new instruction!!
+                # ideally you can keep two instruction in memory
+                with m.Else():
+                    m.next = 'WAIT_COMMAND'
+                    m.d.sync += parser.read_commit.eq(1)
 
     # combine this with cabeljau
     
