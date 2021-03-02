@@ -202,45 +202,69 @@ def Casteljau(Elaboratable):
         if platform:
             self.platform = platform
         # coeff for decaljau algo
-        self.coeff = Array(Signal(32) for _ in range(len(platform.steppers)))
-    
-    
+        numb_coeff = platform.motors*(BEZIER_DEGREE+1)
+        self.coeff = Array(Signal(32) for _ in range(numb_coeff))
+        self.start = Signal()
+        self.busy = Signal()
+        self.valid = Signal()
+        self.time = Signal(max(100_000))
+        #TODO: define range
+        self.final = Array(Signal(12) for _ in range(platform.motors))
+
     def elaborate(self, platform):
+        # NOTE: yosys have its own way of doing multiplication or can use multiply blocks
+        #       you should ask about this
+        max_time = 100_000
         m = Module()
-        with m.FSM(reset='RESET', name='dispatcher'):
+        mtrcnt = Signal(range(platform.motors))
+        coefcnt = Signal(range(number_coeff))
+        time = Signal(range(max_time))
+        timesquare = Signal(range(max_time**2))
+        temp = Signal(range(max_time**2))
+        with m.FSM(reset='RESET', name='casteljau'):
             with m.State('RESET'):
                 m.next = 'WAIT_COMMAND'
-            with m.State('WAIT_COMMAND'):
-                m.d.sync += parser.read_commit.eq(0)
-                with m.If((parser.empty==0)&parser.execute):
-                    m.d.sync += parser.read_en.eq(1)
-                    m.next = 'PARSEHEAD'
-            # check which command we r handling
-            with m.State('PARSEHEAD'):
-                with m.If(parser.read_en):
-                    m.d.sync += parser.read_en.eq(0)
-                with m.Elif(parser.read_data[-8:] == COMMANDS.GCODE):
-                    m.d.sync += [aux.eq(parser.read_data[-16:-8]),
-                                 parser.read_en.eq(1),
-                                 steppercnt.eq(0)]
-                    m.next = 'BEZIERCOEFF'
+            with m.State('WAIT_START'):
+                with m.If(start):
+                    m.d.sync += busy.eq(1)
+                    m.next = 'TSQUARE'
+            with m.State('TSQUARE'):
+                m.d.sync += self.timesquare.eq(self.time*self.time)
+                m.next = 'TIME0'
+            with m.State('TIME0'):
+                m.d.sync += temp.eq(timesquare-self.time-self.time+1)
+                m.next = 'COEF0'
+            with m.State('COEF0'):
+                with m.If(motorcnt<platform.motors):
+                    m.d.sync += [motorcnt.eq(motorcnt+1),
+                                 coefcnt.eq(coefcnt+platform.motors),
+                                 self.coeff[coefcnt]*temp]
                 with m.Else():
-                    # NOTE: system never recovers user must reset
-                    m.d.sync += parser.dispatcherror.eq(1)
-            with m.State('BEZIERCOEFF'):
-                with m.If(parser.read_en):
-                    m.d.sync += parser.read_en.eq(0) 
-                with m.Elif(steppercnt<len(steppers)):  
-                    m.d.sync += [coeff[steppercnt].eq(parser.read_data),
-                                 steppercnt.eq(steppercnt+1),
-                                 parser.read_en.eq(1)]
-                # signal there is a new instruction!!
-                # ideally you can keep two instruction in memory
+                    m.next = 'TIME1'
+                    m.d.sync += motorcnt.eq(0)
+            with m.State('TIME1'):
+                m.d.sync += temp.eq(-timesquare-timesquare+self.time+self.time)
+                m.next = 'COEF1'
+            with m.State('COEF1'):
+                with m.If(motorcnt<platform.motors):
+                    m.d.sync += [motorcnt.eq(motorcnt+1),
+                                 coefcnt.eq(coefcnt+platform.motors),
+                                 self.coeff[coefcnt+1]*temp]
                 with m.Else():
-                    m.next = 'WAIT_COMMAND'
-                    m.d.sync += parser.read_commit.eq(1)
+                    m.next = 'TIME1'
+                    m.d.sync += motorcnt.eq(0)
+            # you already know t2
+            with m.State('COEF2'):
+                with m.If(motorcnt<platform.motors):
+                    m.d.sync += [motorcnt.eq(motorcnt+1),
+                                 coefcnt.eq(coefcnt+platform.motors),
+                                 self.coeff[coefcnt+2]*timesquare]
+                with m.Else():
+                    m.next = 'WAIT_START'
+                    m.d.sync += valid.eq(1)
 
-    # combine this with cabeljau
+
+# combine this with cabeljau
     
 #             # Motor States: each motor has a state and four bezier coefficients
 #         mstate = Array(Signal(32) for _ in range(len(steppers)))

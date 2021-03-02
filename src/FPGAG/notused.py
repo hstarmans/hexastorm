@@ -1,4 +1,19 @@
-from nmigen import Signal, Elaboratable, Cat, Module, Const
+from nmigen import Signal, Elaboratable, Cat, Module, Const, signed
+
+
+class Multiplication(Elaboratable):
+    def __init__(self):
+        self.a = Signal(signed(16))
+        self.b = Signal(signed(16))
+        self.c = Signal(signed(32))
+
+    def elaborate(self, platform):
+        m = Module()
+        m.d.sync += [
+            self.c.eq(self.a * self.b)
+        ]
+        return m
+
 
 class Divisor(Elaboratable):
     """ Euclidean division with a remainder
