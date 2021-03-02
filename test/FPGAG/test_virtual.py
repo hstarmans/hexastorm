@@ -117,7 +117,7 @@ class TestDispatcher(SPIGatewareTestCase):
         # write coefficients for each motor
         for motor in range(self.platform.motors):
             for coef in range(BEZIER_DEGREE+1):
-                write_data = [COMMANDS.GCODE, 0,
+                writedata = [COMMANDS.GCODE, 0,
                               0, 0, motor+coef]
                 yield from self.spi_exchange_data(writedata)
         # wait till instruction is received
@@ -136,7 +136,6 @@ class TestDispatcher(SPIGatewareTestCase):
             for coef in range(BEZIER_DEGREE+1):
                 indx = motor*(BEZIER_DEGREE+1)+coef
                 self.assertEqual((yield self.dut.coeff[indx]), motor+coef)
-                print('passed')
 
 
 class TestBuild(unittest.TestCase):

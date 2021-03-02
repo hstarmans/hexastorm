@@ -162,28 +162,27 @@ class Dispatcher(Elaboratable):
                     m.next = 'PARSEHEAD'
             # check which command we r handling
             with m.State('PARSEHEAD'):
-                with m.If(parser.read_en):
-                    m.d.sync += parser.read_en.eq(0)
-                with m.Elif(parser.read_data[-8:] == COMMANDS.GCODE):
+                with m.If(parser.read_data[-8:] == COMMANDS.GCODE):
                     m.d.sync += [aux.eq(parser.read_data[-16:-8]),
-                                 parser.read_en.eq(1),
+                                 parser.read_en.eq(0),
                                  coeffcnt.eq(0)]
                     m.next = 'BEZIERCOEFF'
                 with m.Else():
                     # NOTE: system never recovers user must reset
                     m.d.sync += parser.dispatcherror.eq(1)
             with m.State('BEZIERCOEFF'):
-                with m.If(parser.read_en):
-                    m.d.sync += parser.read_en.eq(0)
+                with m.If(parser.read_en==0):
+                    m.d.sync += parser.read_en.eq(1)
                 with m.Elif(coeffcnt<numb_coeff):
-                    m.d.sync += [coeff[coeffcnt].eq(parser.read_data),   # 
+                    m.d.sync += [coeff[coeffcnt].eq(parser.read_data),
                                  coeffcnt.eq(coeffcnt+1),
-                                 parser.read_en.eq(1)]
+                                 parser.read_en.eq(0)]
                 # signal there is a new instruction!!
                 # ideally you can keep two instruction in memory
                 with m.Else():
                     m.next = 'WAIT_COMMAND'
-                    m.d.sync += parser.read_commit.eq(1)
+                    m.d.sync += [parser.read_commit.eq(1),
+                                 parser.read_en.eq(0)]
         return m
 
     
