@@ -81,16 +81,16 @@ class TestDispatcher(SPIGatewareTestCase):
         '''verify invalid spi command via spi'''
         # write invalid GCODE command with data
         bytes_sent = 0
-        while bytes_sent != platform.bytesingcode:
+        while bytes_sent != self.platform.bytesingcode:
             writedata = [COMMANDS.GCODE, 0, 0, 0, 0]
             bytes_sent += 4
-            _ = yield from self.spi_exchange_data(writedata)
+            yield from self.spi_exchange_data(writedata)
         # wait for data to be committed
         while (yield self.dut.parser.empty) == 1:
             yield
         # enable dispatching of code
         writedata = [COMMANDS.START, 0, 0, 0, 0]
-        _ = yield from self.spi_exchange_data(writedata)
+        yield from self.spi_exchange_data(writedata)
         # data should now be prossed from sram and empty become 1
         while (yield self.dut.parser.empty) == 0:
             yield
@@ -100,7 +100,7 @@ class TestDispatcher(SPIGatewareTestCase):
         self.assertEqual((yield self.dut.parser.dispatcherror), 1)
         # let's request the status
         bytes_sent = 0
-        while bytes_sent != BYTESINGCODE:
+        while bytes_sent != self.platform.bytesingcode:
             writedata = [COMMANDS.STATUS, 0, 0, 0, 0]
             bytes_sent += 4
             read_data = yield from self.write_command(writedata)

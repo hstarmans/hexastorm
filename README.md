@@ -32,7 +32,7 @@ commands must be sent over;
 | B03 | 4 | bezier coeff 3, motor 0
 | B04 | 4 | bezier coeff 4, motor 0
 
-# Accucuracy
+# Accuracy
 If scale is set to 1 micron, position is defined in 32 bit signed, the range is +/- 2147 meters.
 In de casteljau's, time is a float between 0 an 1. Let's assume, 10 samples are taken per second,
 the update frequency is 1 MHZ. The float needs to be able to carry 100E3. Looking at the formula

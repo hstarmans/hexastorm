@@ -1,6 +1,7 @@
 from math import ceil
 
 from nmigen import Signal, Cat, Elaboratable, Record
+from nmigen.build.res import ResourceError
 from nmigen import Module, Const
 from nmigen.hdl.mem import Array
 from nmigen.hdl.cd import ClockDomain
@@ -33,12 +34,12 @@ class SPIParser(Elaboratable):
         I: read_en        -- enable read transactionalizedfifo
         O: empty          -- transactionalizedfifo is empty
     """
-    def __init__(self, platform=None):
+    def __init__(self, platform=None, top=False):
         """
         platform  -- used to pass test platform
         """ 
-        if platform:
-            self.platform = platform
+        self.platform = platform
+        self.top = top
         self.dispatcherror = Signal()
         self.execute = Signal()
         self.spi = SPIBus()
@@ -49,11 +50,11 @@ class SPIParser(Elaboratable):
 
     def elaborate(self, platform):
         m = Module()
-        if platform:
+        if platform and self.top:
             board_spi = platform.request("debug_spi")
             spi2 = synchronize(m, board_spi)
             m.d.comb  += self.spi.connect(spi2)
-        else:
+        if self.platform:
             platform = self.platform
         spi = self.spi
         interface = SPICommandInterface(command_size=COMMAND_SIZE,
@@ -133,7 +134,10 @@ class Dispatcher(Elaboratable):
             board_spi = platform.request("debug_spi")
             spi = synchronize(m, board_spi)
             steppers = [res for res in get_all_resources(platform, "steppers")]
-            aux = platform.request("AUX")
+            try:
+                aux = platform.request("AUX")
+            except ResourceError:
+                aux = None
         else:
             platform = self.platform
             self.spi = SPIBus()
@@ -149,7 +153,7 @@ class Dispatcher(Elaboratable):
         numb_coeff = platform.motors*(BEZIER_DEGREE+1)
         coeff = Array(Signal(32) for _ in range(numb_coeff))
         coeffcnt = Signal(range(numb_coeff))
-        if self.platform.name == 'Test':
+        if platform.name == 'Test':
             self.parser = parser
             self.coeff = coeff
         with m.FSM(reset='RESET', name='dispatcher'):
@@ -162,9 +166,11 @@ class Dispatcher(Elaboratable):
                     m.next = 'PARSEHEAD'
             # check which command we r handling
             with m.State('PARSEHEAD'):
+                #TODO: if you sent them differently there would not be this problem
                 with m.If(parser.read_data[-8:] == COMMANDS.GCODE):
-                    m.d.sync += [aux.eq(parser.read_data[-16:-8]),
-                                 parser.read_en.eq(0),
+                    if aux is not None:
+                        m.d.sync += aux.eq(parser.read_data[-16:-8])
+                    m.d.sync += [parser.read_en.eq(0),
                                  coeffcnt.eq(0)]
                     m.next = 'BEZIERCOEFF'
                 with m.Else():
