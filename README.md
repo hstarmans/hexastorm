@@ -26,11 +26,11 @@ commands must be sent over;
 |---|---|---|
 | COMMAND | 1 | type of commmand, to allow other commands than GCODE
 | AUX | 2 | auxilliary bits, to enable lights etc.
-| B00 | 4 | bezier coeff 0, motor 0
-| B01 | 4 | bezier coeff 1, motor 0
-| B02 | 4 | bezier coeff 2, motor 0
-| B03 | 4 | bezier coeff 3, motor 0
-| B04 | 4 | bezier coeff 4, motor 0
+| B00 | 4 | motor 0, bezier coeff 0
+| B01 | 4 | motor 0, bezier coeff 1
+| B02 | 4 | motor 0, bezier coeff 2
+| B03 | 4 | motor 0, bezier coeff 3
+| B04 | 4 | motor 0, bezier coeff 4
 
 # Accuracy
 If scale is set to 1 micron, position is defined in 32 bit signed, the range is +/- 2147 meters.
