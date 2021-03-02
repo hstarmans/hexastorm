@@ -46,11 +46,14 @@ class TestMEM(LunaGatewareTestCase):
             yield dut.write_data.eq(i)
             yield from self.pulse(dut.write_en)
         yield from self.pulse(dut.write_commit)
-        self.assertEqual((yield dut.space_available), self.FRAGMENT_ARGUMENTS['depth']-iterations)
+        self.assertEqual((yield dut.space_available),
+                         self.FRAGMENT_ARGUMENTS['depth']-iterations)
         for i in range(iterations):
-            yield from self.pulse(dut.read_en)
+            yield dut.read_en.eq(1)
+            yield
             self.assertEqual(i, (yield dut.read_data))
-            yield from self.pulse(dut.read_commit)
+            yield dut.read_en.eq(0)
+            yield
 
 if __name__ == "__main__":
     unittest.main()
