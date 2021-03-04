@@ -7,7 +7,21 @@ import random
 
 from luna.gateware.test import LunaGatewareTestCase, sync_test_case
 
-from FPGAG.notused import Divisor
+from FPGAG.notused import Divisor, Multiplication
+
+
+class MultiplicationTest(LunaGatewareTestCase):
+    FRAGMENT_UNDER_TEST = Multiplication
+
+    @sync_test_case
+    def test_multiply(self):
+        a = 319
+        b = 40
+        yield self.dut.a.eq(a)
+        yield self.dut.b.eq(b)
+        yield
+        yield
+        self.assertEqual((yield self.dut.c), a*b)
 
 
 class DivisorTest(LunaGatewareTestCase):

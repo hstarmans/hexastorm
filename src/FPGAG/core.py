@@ -1,6 +1,6 @@
 from math import ceil
 
-from nmigen import Signal, Cat, Elaboratable, Record
+from nmigen import Signal, Cat, Elaboratable, Record, signed
 from nmigen.build.res import ResourceError
 from nmigen import Module, Const
 from nmigen.hdl.mem import Array
@@ -191,78 +191,90 @@ class Dispatcher(Elaboratable):
                                  parser.read_en.eq(0)]
         return m
 
-    
-def Casteljau(Elaboratable):
-    """ Sets motor states using casteljau algorithm up to second order
+
+class Casteljau(Elaboratable):
+    """ Sets motor states using Casteljau algorithm up to second order
     """
     def __init__(self, platform=None):
         """
         platform  -- used to pass test platform
         """ 
-        if platform:
-            self.platform = platform
-        # coeff for decaljau algo
-        numb_coeff = platform.motors*(BEZIER_DEGREE+1)
-        self.coeff = Array(Signal(32) for _ in range(numb_coeff))
+        self.platform = platform
+        self.numb_coeff = platform.motors*(BEZIER_DEGREE+1)
+        self.max_time = 100_000
+        self.max_steps = 10_000
+        # inputs
+        self.coeff = Array(Signal(32) for _ in range(self.numb_coeff))
+        self.time = Signal(self.max_time.bit_length())
         self.start = Signal()
+        # output
         self.busy = Signal()
         self.valid = Signal()
-        self.time = Signal(max(100_000))
-        #TODO: define range
-        self.final = Array(Signal(12) for _ in range(platform.motors))
+        self.motorstate = Array(Signal(signed(self.max_steps.bit_length())) for _ in range(platform.motors))
 
     def elaborate(self, platform):
+        if platform:
+            pass
+        else:
+            platform = self.platform
         # NOTE: yosys have its own way of doing multiplication or can use multiply blocks
         #       you should ask about this
-        max_time = 100_000
+        #       also ask if you uses understands that 2*a = a + a
         m = Module()
+        max_time = self.max_time
         mtrcnt = Signal(range(platform.motors))
-        coefcnt = Signal(range(number_coeff))
-        time = Signal(range(max_time))
-        timesquare = Signal(range(max_time**2))
-        temp = Signal(range(max_time**2))
+        coefcnt = Signal(range(self.numb_coeff))
+        timesquare = Signal(signed((max_time**2).bit_length()))
+        max_temp_time = 2*(max_time**2)+2*(max_time)+2
+        time_temp = Signal(signed(max_temp_time.bit_length()))
+        motor_temp = Signal(signed((max_temp_time*self.max_steps).bit_length()))
+        if motor_temp.width>=64:
+            raise Exception(f"Bits required {motor_temp.width} > 64")
         with m.FSM(reset='RESET', name='casteljau'):
             with m.State('RESET'):
-                m.next = 'WAIT_COMMAND'
+                m.next = 'WAIT_START'
+                m.d.sync += [self.busy.eq(0), self.valid.eq(0)]
             with m.State('WAIT_START'):
-                with m.If(start):
-                    m.d.sync += busy.eq(1)
+                with m.If(self.start):
+                    m.d.sync += [self.busy.eq(1), self.valid.eq(0), coefcnt.eq(0)]
                     m.next = 'TSQUARE'
+            # NOTE: you can do this in on clock with combinatorial
             with m.State('TSQUARE'):
-                m.d.sync += self.timesquare.eq(self.time*self.time)
+                m.d.sync += timesquare.eq(self.time*self.time)
                 m.next = 'TIME0'
             with m.State('TIME0'):
-                m.d.sync += temp.eq(timesquare-self.time-self.time+1)
+                m.d.sync += time_temp.eq(timesquare-2*self.time+1)
                 m.next = 'COEF0'
             with m.State('COEF0'):
-                with m.If(motorcnt<platform.motors):
-                    m.d.sync += [motorcnt.eq(motorcnt+1),
+                with m.If(mtrcnt<platform.motors):
+                    m.d.sync += [motor_temp.eq(self.coeff[coefcnt]*time_temp),
                                  coefcnt.eq(coefcnt+platform.motors),
-                                 self.coeff[coefcnt]*temp]
+                                 mtrcnt.eq(mtrcnt+1)]
                 with m.Else():
                     m.next = 'TIME1'
-                    m.d.sync += motorcnt.eq(0)
+                    m.d.sync += [mtrcnt.eq(0), coefcnt.eq(1)]
             with m.State('TIME1'):
-                m.d.sync += temp.eq(-timesquare-timesquare+self.time+self.time)
+                m.d.sync += time_temp.eq(-2*timesquare+2*self.time)
                 m.next = 'COEF1'
             with m.State('COEF1'):
-                with m.If(motorcnt<platform.motors):
-                    m.d.sync += [motorcnt.eq(motorcnt+1),
+                with m.If(mtrcnt<platform.motors):
+                    m.d.sync += [motor_temp.eq(self.coeff[coefcnt]*time_temp+motor_temp),
                                  coefcnt.eq(coefcnt+platform.motors),
-                                 self.coeff[coefcnt+1]*temp]
+                                 mtrcnt.eq(mtrcnt+1)]
                 with m.Else():
-                    m.next = 'TIME1'
-                    m.d.sync += motorcnt.eq(0)
+                    m.next = 'COEF2'
+                    m.d.sync += [mtrcnt.eq(0), coefcnt.eq(2)]
             # you already know t2
             with m.State('COEF2'):
-                with m.If(motorcnt<platform.motors):
-                    m.d.sync += [motorcnt.eq(motorcnt+1),
+                with m.If(mtrcnt<platform.motors):
+                    #TODO: dont forget to add!
+                    m.d.sync += [motor_temp.eq(self.coeff[coefcnt]*timesquare+motor_temp),
                                  coefcnt.eq(coefcnt+platform.motors),
-                                 self.coeff[coefcnt+2]*timesquare]
+                                 mtrcnt.eq(mtrcnt+1)]
                 with m.Else():
                     m.next = 'WAIT_START'
-                    m.d.sync += valid.eq(1)
-
+                    m.d.sync += [self.busy.eq(0), self.valid.eq(1), self.busy.eq(0)]
+        return m
 
 # combine this with cabeljau
     
@@ -298,4 +310,3 @@ def Casteljau(Elaboratable):
 # -- create a second circuit with a clock of 1 MHz
 # -- test move
 # -- write a controller class
-

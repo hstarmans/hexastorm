@@ -4,13 +4,38 @@ from math import ceil
 
 from luna.gateware.interface.spi import SPIGatewareTestCase
 from luna.gateware.test.utils import sync_test_case
+from luna.gateware.test import LunaGatewareTestCase
 
-from FPGAG.core import Dispatcher, SPIParser
+from FPGAG.core import Dispatcher, SPIParser, Casteljau
 from FPGAG.board import Firestarter, TestPlatform
 from FPGAG.resources import StepperRecord
 from FPGAG.constants import (COMMANDS, BEZIER_DEGREE,
                              WORD_SIZE, G_CODE,
                              COMMAND_SIZE, WORD_BYTES)
+
+
+class TestCasteljau(LunaGatewareTestCase):
+    platform = TestPlatform()
+    FRAGMENT_UNDER_TEST = Casteljau
+    FRAGMENT_ARGUMENTS = {'platform': platform}
+
+    @sync_test_case
+    def test_calculation(self):
+        yield self.dut.time.eq(1000)
+        # we r doing 10_000 steps in 100_000 timesteps, this is a simple line move
+        coefs = [0, 5000, 10_000]
+        numb_coeff = self.platform.motors*(BEZIER_DEGREE+1)
+        # load coefficients
+        for motor in range(self.platform.motors):
+            for coef in range(BEZIER_DEGREE+1):
+                yield self.dut.coeff[coef].eq(coefs[coef])
+        yield from self.pulse(self.dut.start)
+        while (yield self.dut.busy) == 1:
+            yield
+        self.assertEqual((yield self.dut.valid), 1)
+        # does not seem to be correct!
+        for motor in range(self.platform.motors):
+            print((yield self.dut.motorstate[motor]))
 
 
 class TestParser(SPIGatewareTestCase):
