@@ -214,7 +214,9 @@ class Casteljau(Elaboratable):
 
     def elaborate(self, platform):
         if platform:
-            pass
+            steppers = [res for res in get_all_resources(platform, "stepper")]
+            for i in range(len(self.motorstate)):
+                steppers[i].step.eq(self.motorstate[i])
         else:
             platform = self.platform
         # NOTE: yosys have its own way of doing multiplication or can use multiply blocks

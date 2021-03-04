@@ -171,6 +171,10 @@ class TestBuild(unittest.TestCase):
     def test_dispatcher(self):
         platform = Firestarter()
         platform.build(Dispatcher(), do_program=False, verbose=True)
+    
+    def test_casteljau(self):
+        platform = Firestarter()
+        platform.build(Casteljau(Firestarter()), do_program=False, verbose=True)
 
 if __name__ == "__main__":
     unittest.main()
