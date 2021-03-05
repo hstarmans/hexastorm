@@ -194,6 +194,10 @@ class Dispatcher(Elaboratable):
 
 class Casteljau(Elaboratable):
     """ Sets motor states using Casteljau algorithm up to second order
+
+        It is assumed that step speed is smaller than clock speed
+        That implies that the step position can change at most one tick for each
+        clock cycle.
     """
     def __init__(self, platform=None):
         """
@@ -211,18 +215,28 @@ class Casteljau(Elaboratable):
         self.busy = Signal()
         self.valid = Signal()
         self.motorstate = Array(Signal(signed(self.max_steps.bit_length())) for _ in range(platform.motors))
+        self.temp = Signal(1)
+        self.dir = Array(Signal() for _ in range(platform.motors))
+        self.step = Array(Signal() for _ in range(platform.motors))
 
     def elaborate(self, platform):
+        m = Module()
+        # get direction and step
+        motorstate_d = Array(Signal(2) for _ in range(platform.motors))
+        for idx, motorstate in enumerate(self.motorstate):
+            m.d.sync += motorstate_d[idx].eq(motorstate[-2:])
         if platform:
+            led = [res.o for res in get_all_resources(platform, "led")]
             steppers = [res for res in get_all_resources(platform, "stepper")]
-            for i in range(len(self.motorstate)):
-                steppers[i].step.eq(self.motorstate[i])
+            for idx, motorstate in enumerate(self.motorstate):
+                m.d.comb += [steppers[idx].step.eq(motorstate_d[idx][-1]!=motorstate[-1])]
+                             # direction should include the sign
+                             #steppers[idx].dir.eq(motorstate_d[idx][-1]!=motorstate[-1])]
         else:
             platform = self.platform
         # NOTE: yosys have its own way of doing multiplication or can use multiply blocks
         #       you should ask about this
         #       also ask if you uses understands that 2*a = a + a
-        m = Module()
         max_time = self.max_time
         mtrcnt = Signal(range(platform.motors))
         coefcnt = Signal(range(self.numb_coeff))
@@ -270,7 +284,7 @@ class Casteljau(Elaboratable):
             with m.State('COEF2'):
                 with m.If(mtrcnt<platform.motors):
                     #TODO: dont forget to add!
-                    m.d.sync += [motor_temp.eq(self.coeff[coefcnt]*timesquare+motor_temp),
+                    m.d.sync += [self.motorstate[mtrcnt].eq(self.coeff[coefcnt]*timesquare+motor_temp),
                                  coefcnt.eq(coefcnt+platform.motors),
                                  mtrcnt.eq(mtrcnt+1)]
                 with m.Else():

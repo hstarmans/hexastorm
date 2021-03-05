@@ -11,13 +11,12 @@ from nmigen.build import Resource, Attrs, Pins, PinsN, Clock, Subsignal
 from nmigen.vendor.lattice_ice40 import LatticeICE40Platform
 from nmigen_boards.resources import LEDResources
 from nmigen_boards.test.blinky import Blinky
-from luna.gateware.platform.core import LUNAPlatform
 
 from FPGAG.constants import getbytesingcode
 from FPGAG.resources import StepperResource, StepperRecord
 
 
-class TestPlatform(LUNAPlatform):
+class TestPlatform:
     name = 'Test'
     motors = 1 
     bytesingcode = getbytesingcode(motors)
@@ -25,7 +24,7 @@ class TestPlatform(LUNAPlatform):
     steppers = [StepperRecord()]
     aux = Signal(8)
 
-class Firestarter(LatticeICE40Platform, LUNAPlatform):
+class Firestarter(LatticeICE40Platform):
     '''Kicad board available at
        https://github.com/hstarmans/firestarter/tree/master/pi_hat
     '''
@@ -74,4 +73,4 @@ class Firestarter(LatticeICE40Platform, LUNAPlatform):
             subprocess.check_call([icezprog, bitstream_filename])
 
 if __name__ == "__main__":
-    Firestarter().build(Blinky(), do_program=True)
+    Firestarter().build(Blinky(), do_program=True, verbose=True)
