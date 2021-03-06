@@ -206,11 +206,11 @@ class Polynomal(Elaboratable):
         The current count of the polynomal is determined with
         integrating counters.
     """
-    def __init__(self, platform=None, motors=3, order=2,
+    def __init__(self, platform=None, motors=3,
                  bitshift=6, max_steps=10_000, max_time=100_000):
         # NOTE: you should use dict unpack or something
         self.platform = platform
-        self.order = order
+        self.order = 2 # this cannot be changed or change code!
         self.motors = motors
         self.numb_coeff = motors*order
         self.bitshift = bitshift
