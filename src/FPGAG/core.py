@@ -192,137 +192,106 @@ class Dispatcher(Elaboratable):
         return m
 
 
-class Casteljau(Elaboratable):
-    """ Sets motor states using Casteljau algorithm up to second order
+class Polynomal(Elaboratable):
+    """ Sets motor states using a polynomal algorithm
 
-        It is assumed that step speed is smaller than clock speed
-        That implies that the step position can change at most one tick for each
-        clock cycle.
+        A polynomal, e.g. x^2+x, is evaluated
+        using the assumption that x starts at 0
+        and y starts at 0.
+        The polynomal determines the stepper position.
+        The bitshift bit, i.e. the sixth bit, determines
+        the position.
+        In every tick the step can at most increase with one
+        count.
+        The current count of the polynomal is determined with
+        integrating counters.
     """
-    def __init__(self, platform=None):
-        """
-        platform  -- used to pass test platform
-        """ 
+    def __init__(self, platform=None, motors=3, order=2,
+                 bitshift=6, max_steps=10_000, max_time=100_000):
+        # NOTE: you should use dict unpack or something
         self.platform = platform
-        self.numb_coeff = platform.motors*(BEZIER_DEGREE+1)
-        self.max_time = 100_000
-        self.max_steps = 10_000
+        self.order = order
+        self.motors = motors
+        self.numb_coeff = motors*order
+        self.bitshift = bitshift
+        self.max_time = max_time
+        self.max_steps = max_steps
         # inputs
         self.coeff = Array(Signal(32) for _ in range(self.numb_coeff))
-        self.time = Signal(self.max_time.bit_length())
         self.start = Signal()
         # output
         self.busy = Signal()
-        self.valid = Signal()
-        self.motorstate = Array(Signal(signed(self.max_steps.bit_length())) for _ in range(platform.motors))
-        self.temp = Signal(1)
-        self.dir = Array(Signal() for _ in range(platform.motors))
-        self.step = Array(Signal() for _ in range(platform.motors))
+        self.finished = Signal()
+        self.totalsteps = Array(Signal(signed(max_steps.bit_length())) for _ in range(motors))
+        self.dir = Array(Signal() for _ in range(motors))
+        self.step = Array(Signal() for _ in range(motors))
 
     def elaborate(self, platform):
         m = Module()
-        # get direction and step
-        motorstate_d = Array(Signal(2) for _ in range(platform.motors))
-        for idx, motorstate in enumerate(self.motorstate):
-            m.d.sync += motorstate_d[idx].eq(motorstate[-2:])
         if platform:
-            led = [res.o for res in get_all_resources(platform, "led")]
             steppers = [res for res in get_all_resources(platform, "stepper")]
-            for idx, motorstate in enumerate(self.motorstate):
-                m.d.comb += [steppers[idx].step.eq(motorstate_d[idx][-1]!=motorstate[-1])]
-                             # direction should include the sign
-                             #steppers[idx].dir.eq(motorstate_d[idx][-1]!=motorstate[-1])]
         else:
-            platform = self.platform
-        # NOTE: yosys have its own way of doing multiplication or can use multiply blocks
-        #       you should ask about this
-        #       also ask if you uses understands that 2*a = a + a
-        max_time = self.max_time
-        mtrcnt = Signal(range(platform.motors))
-        coefcnt = Signal(range(self.numb_coeff))
-        timesquare = Signal(signed((max_time**2).bit_length()))
-        max_temp_time = 2*(max_time**2)+2*(max_time)+2
-        time_temp = Signal(signed(max_temp_time.bit_length()))
-        motor_temp = Signal(signed((max_temp_time*self.max_steps).bit_length()))
-        if motor_temp.width>=64:
-            raise Exception(f"Bits required {motor_temp.width} > 64")
-        with m.FSM(reset='RESET', name='casteljau'):
+            steppers = self.platform.stepers
+
+        for idx, stepper in enumerate(steppers):
+            m.d.comb += [stepper.step.eq(self.step[idx]),
+                         stepper.dir.eq(self.dir[idx])]
+
+        # pos
+        max_bits = (self.max_steps<<self.bitshift).bit_length()
+        counters = Array(Signal(signed(max_bits)) for _ in range(self.numb_coeff+self.motors))
+        assert max_bits <= 64
+        time = Signal(self.max_time.bit_length())
+        # steps
+        for motor in range(self.motors):
+            m.d.comb += [self.step[motor].eq(counters[motor*self.order][-self.bitshift]),
+                         self.totalsteps[motor].eq(counters[motor*self.order][:-self.bitshift])]
+        # directions
+        counter_d = Array(Signal(signed(max_bits)) for _ in range(self.motors))
+        for motor in range(self.motors):
+            m.d.sync += counter_d[motor].eq(counters[motor*self.order])
+            with m.If(counter_d[motor]>counters[motor*self.order]):
+                m.d.sync += self.dir[motor].eq(0)
+            with m.Elif(counter_d[motor]<counters[motor*self.order]):
+                m.d.sync += self.dir[motor].eq(1)
+
+        with m.FSM(reset='RESET', name='polynomen'):
             with m.State('RESET'):
                 m.next = 'WAIT_START'
-                m.d.sync += [self.busy.eq(0), self.valid.eq(0)]
+                m.d.sync += [self.busy.eq(0),
+                             self.finished.eq(0)]
             with m.State('WAIT_START'):
                 with m.If(self.start):
-                    m.d.sync += [self.busy.eq(1), self.valid.eq(0), coefcnt.eq(0)]
-                    m.next = 'TSQUARE'
+                    m.d.sync += [self.busy.eq(1),
+                                 time.eq(0),
+                                 self.finished.eq(0)]
+                    m.next = 'RUNNING'
             # NOTE: you can do this in on clock with combinatorial
-            with m.State('TSQUARE'):
-                m.d.sync += timesquare.eq(self.time*self.time)
-                m.next = 'TIME0'
-            with m.State('TIME0'):
-                m.d.sync += time_temp.eq(timesquare-2*self.time+1)
-                m.next = 'COEF0'
-            with m.State('COEF0'):
-                with m.If(mtrcnt<platform.motors):
-                    m.d.sync += [motor_temp.eq(self.coeff[coefcnt]*time_temp),
-                                 coefcnt.eq(coefcnt+platform.motors),
-                                 mtrcnt.eq(mtrcnt+1)]
+            with m.State('RUNNING'):
+                with m.If(time<self.max_time):
+                    m.d.sync += time.eq(time+1)
+                    for motor in range(self.motors):
+                        start = motor*self.order
+                        m.d.sync += [counters[start+2].eq(self.coeff[start+1]+counters[start+2]),
+                                     counters[start+1].eq(self.coeff[start]+counters[start+2]+counters[start+1]),
+                                     counters[start].eq(counters[start+1]+counters[start])]
                 with m.Else():
-                    m.next = 'TIME1'
-                    m.d.sync += [mtrcnt.eq(0), coefcnt.eq(1)]
-            with m.State('TIME1'):
-                m.d.sync += time_temp.eq(-2*timesquare+2*self.time)
-                m.next = 'COEF1'
-            with m.State('COEF1'):
-                with m.If(mtrcnt<platform.motors):
-                    m.d.sync += [motor_temp.eq(self.coeff[coefcnt]*time_temp+motor_temp),
-                                 coefcnt.eq(coefcnt+platform.motors),
-                                 mtrcnt.eq(mtrcnt+1)]
-                with m.Else():
-                    m.next = 'COEF2'
-                    m.d.sync += [mtrcnt.eq(0), coefcnt.eq(2)]
-            # you already know t2
-            with m.State('COEF2'):
-                with m.If(mtrcnt<platform.motors):
-                    #TODO: dont forget to add!
-                    m.d.sync += [self.motorstate[mtrcnt].eq(self.coeff[coefcnt]*timesquare+motor_temp),
-                                 coefcnt.eq(coefcnt+platform.motors),
-                                 mtrcnt.eq(mtrcnt+1)]
-                with m.Else():
-                    m.next = 'WAIT_START'
-                    m.d.sync += [self.busy.eq(0), self.valid.eq(1), self.busy.eq(0)]
+                     m.d.sync += [time.eq(0),
+                                  self.busy.eq(0),
+                                  self.finished.eq(1)]
+                     m.next = 'WAIT_START'
         return m
 
-# combine this with cabeljau
-    
-#             # Motor States: each motor has a state and four bezier coefficients
-#         mstate = Array(Signal(32) for _ in range(len(steppers)))
-#         # Step Generator
-#         enable = Signal()
-#         for idx, stepper in enumerate(steppers):
-#             m.d.comb += stepper.step.eq(mstate[idx][-1]&enable)
-    
-    
-    
-    
+
 # Overview:
 #  the hardware consists out of the following elements
 #  -- SPI command interface
 #  -- transactionalized FIFO
 #  -- SPI parser (basically an extension of SPI command interface)
 #  -- Dispatcher --> dispatches signals to actual hardware
+#  -- Polynomal integrator --> determines position via integrating polynomen
 
 # TODO:
-#   -- delay cycle shit
-#   -- accel series index
-
-# -- contemplate upon why the byte widths are what they are
-#     16 bit voor loop accel  65535 --> 0.06 seconden bewegen op, done multiple times
-#                                       you don't disable between loops
-#   TODO:  this creates counting issue
-# how to use multiple motors or select them --> this is done via the fractions
-# the enable is only a safety signal for a trigger by the switches
-# add readout of fractions, fix pll add
-# -- add this to docs + limitation of uniform acceleration
-# -- create a second circuit with a clock of 1 MHz
-# -- test move
-# -- write a controller class
+#   -- motor should be updated with certain freq
+#   -- connect modules
+#   -- do live test

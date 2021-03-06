@@ -6,7 +6,7 @@ from luna.gateware.interface.spi import SPIGatewareTestCase
 from luna.gateware.test.utils import sync_test_case
 from luna.gateware.test import LunaGatewareTestCase
 
-from FPGAG.core import Dispatcher, SPIParser, Casteljau
+from FPGAG.core import Dispatcher, SPIParser, Polynomal
 from FPGAG.board import Firestarter, TestPlatform
 from FPGAG.resources import StepperRecord
 from FPGAG.constants import (COMMANDS, BEZIER_DEGREE,
@@ -14,9 +14,12 @@ from FPGAG.constants import (COMMANDS, BEZIER_DEGREE,
                              COMMAND_SIZE, WORD_BYTES)
 
 
-class TestCasteljau(LunaGatewareTestCase):
+class TestPolynomal(LunaGatewareTestCase):
+    ''' Nmigen cannot now how you implement multiplication
+        These results might be misleading!!
+    '''
     platform = TestPlatform()
-    FRAGMENT_UNDER_TEST = Casteljau
+    FRAGMENT_UNDER_TEST = Polynomal
     FRAGMENT_ARGUMENTS = {'platform': platform}
 
     @sync_test_case
@@ -172,9 +175,9 @@ class TestBuild(unittest.TestCase):
         platform = Firestarter()
         platform.build(Dispatcher(), do_program=False, verbose=True)
     
-    def test_casteljau(self):
+    def test_polynomal(self):
         platform = Firestarter()
-        platform.build(Casteljau(Firestarter()), do_program=False, verbose=True)
+        platform.build(Polynomal(Firestarter()), do_program=False, verbose=True)
 
 if __name__ == "__main__":
     unittest.main()
