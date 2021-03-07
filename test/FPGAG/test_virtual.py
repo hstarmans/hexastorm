@@ -20,25 +20,30 @@ class TestPolynomal(LunaGatewareTestCase):
     '''
     platform = TestPlatform()
     FRAGMENT_UNDER_TEST = Polynomal
-    FRAGMENT_ARGUMENTS = {'platform': platform}
+    FRAGMENT_ARGUMENTS = {'platform': platform, 'max_time': 20,
+                          'motors': platform.motors}
 
     @sync_test_case
-    def test_calculation(self):
-        yield self.dut.time.eq(1000)
-        # we r doing 10_000 steps in 100_000 timesteps, this is a simple line move
-        coefs = [0, 5000, 10_000]
-        numb_coeff = self.platform.motors*(BEZIER_DEGREE+1)
+    def test_calculation(self, a=2, b=3):
+        ''' Test a simple relation e.g. bx^2+ax '''
+        coefs = [a, b]
+        numb_coeff = self.platform.motors*self.dut.order
         # load coefficients
         for motor in range(self.platform.motors):
-            for coef in range(BEZIER_DEGREE+1):
+            for coef in range(self.dut.order):
                 yield self.dut.coeff[coef].eq(coefs[coef])
         yield from self.pulse(self.dut.start)
         while (yield self.dut.busy) == 1:
             yield
-        self.assertEqual((yield self.dut.valid), 1)
-        # does not seem to be correct!
-        for motor in range(self.platform.motors):
-            print((yield self.dut.motorstate[motor]))
+        max_time = self.FRAGMENT_ARGUMENTS['max_time']
+        self.assertEqual((yield self.dut.finished), 1)
+        self.assertEqual((yield self.dut.counters[1]), coefs[1]*2*max_time)
+        self.assertEqual((yield self.dut.counters[0]), a*max_time+b*pow(max_time, 2))
+        #self.assertEqual((yield self.dut.counters[0]), pow(self.FRAGMENT_ARGUMENTS['max_time'], 2))
+        #print((yield self.dut.counters[0]))
+        # # does not seem to be correct!
+        # for stepper in self.dut.step:
+        #     print((yield stepper))
 
 
 class TestParser(SPIGatewareTestCase):

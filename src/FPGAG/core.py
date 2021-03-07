@@ -212,7 +212,7 @@ class Polynomal(Elaboratable):
         self.platform = platform
         self.order = 2 # this cannot be changed or change code!
         self.motors = motors
-        self.numb_coeff = motors*order
+        self.numb_coeff = motors*self.order
         self.bitshift = bitshift
         self.max_time = max_time
         self.max_steps = max_steps
@@ -228,20 +228,20 @@ class Polynomal(Elaboratable):
 
     def elaborate(self, platform):
         m = Module()
-        if platform:
-            steppers = [res for res in get_all_resources(platform, "stepper")]
-        else:
-            steppers = self.platform.stepers
-
-        for idx, stepper in enumerate(steppers):
-            m.d.comb += [stepper.step.eq(self.step[idx]),
-                         stepper.dir.eq(self.dir[idx])]
-
         # pos
         max_bits = (self.max_steps<<self.bitshift).bit_length()
         counters = Array(Signal(signed(max_bits)) for _ in range(self.numb_coeff+self.motors))
         assert max_bits <= 64
         time = Signal(self.max_time.bit_length())
+        if platform:
+            steppers = [res for res in get_all_resources(platform, "stepper")]
+        else:
+            steppers = self.platform.steppers
+            self.time = time
+            self.counters = counters
+        for idx, stepper in enumerate(steppers):
+            m.d.comb += [stepper.step.eq(self.step[idx]),
+                         stepper.dir.eq(self.dir[idx])]
         # steps
         for motor in range(self.motors):
             m.d.comb += [self.step[motor].eq(counters[motor*self.order][-self.bitshift]),
@@ -254,7 +254,7 @@ class Polynomal(Elaboratable):
                 m.d.sync += self.dir[motor].eq(0)
             with m.Elif(counter_d[motor]<counters[motor*self.order]):
                 m.d.sync += self.dir[motor].eq(1)
-
+        tmp = Signal(32)
         with m.FSM(reset='RESET', name='polynomen'):
             with m.State('RESET'):
                 m.next = 'WAIT_START'
@@ -263,7 +263,6 @@ class Polynomal(Elaboratable):
             with m.State('WAIT_START'):
                 with m.If(self.start):
                     m.d.sync += [self.busy.eq(1),
-                                 time.eq(0),
                                  self.finished.eq(0)]
                     m.next = 'RUNNING'
             # NOTE: you can do this in on clock with combinatorial
@@ -272,9 +271,8 @@ class Polynomal(Elaboratable):
                     m.d.sync += time.eq(time+1)
                     for motor in range(self.motors):
                         start = motor*self.order
-                        m.d.sync += [counters[start+2].eq(self.coeff[start+1]+counters[start+2]),
-                                     counters[start+1].eq(self.coeff[start]+counters[start+2]+counters[start+1]),
-                                     counters[start].eq(counters[start+1]+counters[start])]
+                        m.d.sync += [counters[start+1].eq(2*self.coeff[start+1]+counters[start+1]),
+                                     counters[start].eq(self.coeff[start]+self.coeff[start+1]+counters[start+1]+counters[start])]
                 with m.Else():
                      m.d.sync += [time.eq(0),
                                   self.busy.eq(0),
