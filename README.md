@@ -18,32 +18,25 @@ The following commands are possible;
 
 ## Move command
 The word of a move command cannot store all the instructions. So a MOVE instruction 
-consists out of multiple commands in series, with words of 32 bits.
+consists out of multiple commands and words in series.
 If prior to the sequence, the memory is already full or there is a parsing error, a status word is sent back.
 If the reply is zero, the peripheral is operating normally. The following
-commands must be sent over;
+information must be sent over;
 | data | number of bytes | description
 |---|---|---|
 | COMMAND | 1 | type of commmand, to allow other commands than GCODE
 | AUX | 2 | auxilliary bits, to enable lights etc.
-| STEPS | 4 | number of steps in move
+| TICKS | 4 | number of ticks in a move
 | C00 | 4 | motor 0, coeff 0
 | C01 | 4 | motor 0, coeff 1
 | C02 | 4 | motor 0, coeff 2
 
 The motor will then the follow the path, coef_0 * t + coef_1 * t^2 + coef_2 * t^3.
 Coef_0 can be interpreted as the velocity, coef_1 as the acceleration and coef_2 is known as the jerk.
-The trajectory of a motor is divided in multiple paths where a path length is typically 100_000 steps, 
-i.e 0.1 seconds. The length of a path segment is included in the instruction with steps.
-If multiple motors are used; steps, C00, C01, C02 are repeated.
-
-# Accuracy
-If scale is set to 1 micron, position is defined in 32 bit signed, the range is +/- 2147 meters.
-In de casteljau's, time is a float between 0 an 1. Let's assume, 10 samples are taken per second,
-the update frequency is 1 MHZ. The float needs to be able to carry 100E3. Looking at the formula
-the max is (-2*pow(100E3, 2)) which is accounted for in 32 bit arithmetic.
-To account for the floats; we do a bitshit of 17 as (2,17) equals 131K.
-It might be an option to set B00 equal to zero, set the scale to steps... but this is for later..
+The trajectory of a motor is divided in multiple paths where a path length is typically 100_000 ticks, 
+i.e 0.1 seconds. If is longer, it is repeated. If it is shorted, this is communicated.
+The length of a path segment is included in the instruction with ticks.
+If multiple motors are used; ticks, C00, C01, C02 are repeated.
 
 # Installation
  Although deprecated tools are installed via apio;
