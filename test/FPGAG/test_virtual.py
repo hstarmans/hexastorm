@@ -15,18 +15,16 @@ from FPGAG.constants import (COMMANDS, BEZIER_DEGREE,
 
 
 class TestPolynomal(LunaGatewareTestCase):
-    ''' Nmigen cannot now how you implement multiplication
-        These results might be misleading!!
-    '''
     platform = TestPlatform()
     FRAGMENT_UNDER_TEST = Polynomal
-    FRAGMENT_ARGUMENTS = {'platform': platform, 'max_time': 20,
+    FRAGMENT_ARGUMENTS = {'platform': platform,
+                          'max_time': 30,
                           'motors': platform.motors}
 
     @sync_test_case
-    def test_calculation(self, a=2, b=3):
-        ''' Test a simple relation e.g. bx^2+ax '''
-        coefs = [a, b]
+    def test_calculation(self, a=2, b=3, c=4):
+        ''' Test a simple relation e.g. cx^3+bx^2+ax '''
+        coefs = [a, b, c]
         numb_coeff = self.platform.motors*self.dut.order
         # load coefficients
         for motor in range(self.platform.motors):
@@ -37,14 +35,7 @@ class TestPolynomal(LunaGatewareTestCase):
             yield
         max_time = self.FRAGMENT_ARGUMENTS['max_time']
         self.assertEqual((yield self.dut.finished), 1)
-        self.assertEqual((yield self.dut.counters[1]), coefs[1]*2*max_time)
-        self.assertEqual((yield self.dut.counters[0]), a*max_time+b*pow(max_time, 2))
-        #self.assertEqual((yield self.dut.counters[0]), pow(self.FRAGMENT_ARGUMENTS['max_time'], 2))
-        #print((yield self.dut.counters[0]))
-        # # does not seem to be correct!
-        # for stepper in self.dut.step:
-        #     print((yield stepper))
-
+        self.assertEqual((yield self.dut.counters[0]), a*max_time+b*pow(max_time, 2)+c*pow(max_time, 3))
 
 class TestParser(SPIGatewareTestCase):
     platform = TestPlatform()

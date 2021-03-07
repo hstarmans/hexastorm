@@ -195,22 +195,18 @@ class Dispatcher(Elaboratable):
 class Polynomal(Elaboratable):
     """ Sets motor states using a polynomal algorithm
 
-        A polynomal, e.g. x^2+x, is evaluated
-        using the assumption that x starts at 0
-        and y starts at 0.
-        The polynomal determines the stepper position.
-        The bitshift bit, i.e. the sixth bit, determines
-        the position.
-        In every tick the step can at most increase with one
-        count.
-        The current count of the polynomal is determined with
-        integrating counters.
+        A polynomal up to 3 order, e.g. c*x^3+b*x^2+a*x,
+        is evaluated using the assumption that x starts at 0
+        and y starts at 0. The polynomal determines the stepper
+        position. The bitshift bit, i.e. the sixth bit, determines
+        the position. In every tick the step can at most increase
+        with one count.
     """
     def __init__(self, platform=None, motors=3,
                  bitshift=6, max_steps=10_000, max_time=100_000):
         # NOTE: you should use dict unpack or something
         self.platform = platform
-        self.order = 2 # this cannot be changed or change code!
+        self.order = 3 # this cannot be changed or change code!
         self.motors = motors
         self.numb_coeff = motors*self.order
         self.bitshift = bitshift
@@ -271,8 +267,10 @@ class Polynomal(Elaboratable):
                     m.d.sync += time.eq(time+1)
                     for motor in range(self.motors):
                         start = motor*self.order
-                        m.d.sync += [counters[start+1].eq(2*self.coeff[start+1]+counters[start+1]),
-                                     counters[start].eq(self.coeff[start]+self.coeff[start+1]+counters[start+1]+counters[start])]
+                        m.d.sync += [counters[start+2].eq(3*2*self.coeff[start+2]+counters[start+2]),
+                                     counters[start+1].eq(counters[start+2]+2*self.coeff[start+1]+counters[start+1]),
+                                     counters[start].eq(self.coeff[start+2]+self.coeff[start+1]+self.coeff[start]+counters[start+2]+
+                                                        counters[start+1]+counters[start])]
                 with m.Else():
                      m.d.sync += [time.eq(0),
                                   self.busy.eq(0),
