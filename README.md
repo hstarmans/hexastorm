@@ -12,9 +12,11 @@ The following commands are possible;
 | command | reply |
 |---|---|
 | STATUS | send back the status of the peripheral|
-| START | enable execution of gcode |
-| STOP | halt execution of gcode |
-| GCODE | sent over the GCODE instruction |
+| START | enable execution of instruction stored in SRAM |
+| STOP | halt execution of instructions stor in SRAM |
+| WRITE | sent over an instruction and store it in SRAM |
+
+At the moment, only the move instruction is supported.
 
 ## Move command
 The word of a move command cannot store all the instructions. So a MOVE instruction 
