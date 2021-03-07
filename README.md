@@ -26,7 +26,7 @@ If the reply is zero, the peripheral is operating normally. The following
 information must be sent over;
 | data | number of bytes | description
 |---|---|---|
-| COMMAND | 1 | type of commmand, to allow other commands than GCODE
+| COMMAND | 1 | type of instructions, to allow other instructions then move
 | AUX | 2 | auxilliary bits, to enable lights etc.
 | TICKS | 4 | number of ticks in a move
 | C00 | 4 | motor 0, coeff 0
