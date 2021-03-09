@@ -50,6 +50,7 @@ export PATH=/home/pi/.apio/packages/toolchain-ice40/bin:$PATH
 ## Background
 Splines, Bezier, B-splines, and NURBS (Non-Uniform Rational B-splines) curves are the common parametric techniques 
 used for tool path [design](https://zero.sci-hub.se/2496/cb390d406cc077ef156deb76b34099af/desantiago-perez2013.pdf#lb0030).  
-A notebook on bezier is available in the notebook folder.
-This is finally all ignored. The controller gets a number of points along curve. The curve is divided in segments and this 
-segment is approximated with a polynomal of third degree.
+A notebook on bezier is available in the notebook folder. This is finally all ignored. 
+The controller gets a number of points along curve. The curve is divided in segments and this 
+segment is approximated with a polynomal of third degree. Note that there are no multipliers, DSP,
+on the ICE40HX4k chip used for this project.

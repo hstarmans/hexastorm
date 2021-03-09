@@ -203,7 +203,7 @@ class Polynomal(Elaboratable):
         with one count.
     """
     def __init__(self, platform=None, motors=3,
-                 bitshift=6, max_steps=10_000, max_time=100_000):
+                 bitshift=41, max_time=10_000):
         # NOTE: you should use dict unpack or something
         self.platform = platform
         self.order = 3 # this cannot be changed or change code!
@@ -211,14 +211,14 @@ class Polynomal(Elaboratable):
         self.numb_coeff = motors*self.order
         self.bitshift = bitshift
         self.max_time = max_time
-        self.max_steps = max_steps
+        self.max_steps = int(10_000 / 2) # Nyquist
         # inputs
         self.coeff = Array(Signal(32) for _ in range(self.numb_coeff))
         self.start = Signal()
         # output
         self.busy = Signal()
         self.finished = Signal()
-        self.totalsteps = Array(Signal(signed(max_steps.bit_length())) for _ in range(motors))
+        self.totalsteps = Array(Signal(signed(self.max_steps.bit_length())) for _ in range(motors))
         self.dir = Array(Signal() for _ in range(motors))
         self.step = Array(Signal() for _ in range(motors))
 
