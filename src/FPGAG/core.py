@@ -13,7 +13,8 @@ from luna.gateware.memory import TransactionalizedFIFO
 
 from FPGAG.resources import StepperLayout, get_all_resources
 from FPGAG.constants import (COMMAND_SIZE, WORD_SIZE, STATE,
-                             MEMWIDTH, COMMANDS, BEZIER_DEGREE)
+                             MEMWIDTH, COMMANDS, DEGREE, BIT_SHIFT,
+                             MAX_TIME)
 
 
 class SPIParser(Elaboratable):
@@ -203,7 +204,7 @@ class Polynomal(Elaboratable):
         with one count.
     """
     def __init__(self, platform=None, motors=3,
-                 bitshift=41, max_time=10_000):
+                 bitshift=BIT_SHIFT, max_time=MAX_TIME):
         # NOTE: you should use dict unpack or something
         self.platform = platform
         self.order = 3 # this cannot be changed or change code!
@@ -211,9 +212,9 @@ class Polynomal(Elaboratable):
         self.numb_coeff = motors*self.order
         self.bitshift = bitshift
         self.max_time = max_time
-        self.max_steps = int(10_000 / 2) # Nyquist
+        self.max_steps = int(max_time/2) # Nyquist
         # inputs
-        self.coeff = Array(Signal(32) for _ in range(self.numb_coeff))
+        self.coeff = Array(Signal(signed(32)) for _ in range(self.numb_coeff))
         self.start = Signal()
         # output
         self.busy = Signal()
@@ -241,7 +242,7 @@ class Polynomal(Elaboratable):
         # steps
         for motor in range(self.motors):
             m.d.comb += [self.step[motor].eq(counters[motor*self.order][-self.bitshift]),
-                         self.totalsteps[motor].eq(counters[motor*self.order][:-self.bitshift])]
+                         self.totalsteps[motor].eq(counters[motor*self.order][-self.bitshift::-1])]
         # directions
         counter_d = Array(Signal(signed(max_bits)) for _ in range(self.motors))
         for motor in range(self.motors):
@@ -261,7 +262,6 @@ class Polynomal(Elaboratable):
                     m.d.sync += [self.busy.eq(1),
                                  self.finished.eq(0)]
                     m.next = 'RUNNING'
-            # NOTE: you can do this in on clock with combinatorial
             with m.State('RUNNING'):
                 with m.If(time<self.max_time):
                     m.d.sync += time.eq(time+1)

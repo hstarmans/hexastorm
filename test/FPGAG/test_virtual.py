@@ -1,3 +1,4 @@
+from nmigen.asserts import Rose
 import unittest
 from struct import pack, unpack
 from math import ceil
@@ -9,8 +10,8 @@ from luna.gateware.test import LunaGatewareTestCase
 from FPGAG.core import Dispatcher, SPIParser, Polynomal
 from FPGAG.board import Firestarter, TestPlatform
 from FPGAG.resources import StepperRecord
-from FPGAG.constants import (COMMANDS, BEZIER_DEGREE,
-                             WORD_SIZE, G_CODE,
+from FPGAG.constants import (COMMANDS, DEGREE, MAX_TIME, BIT_SHIFT,
+                             WORD_SIZE, MOVE_INSTRUCTION,
                              COMMAND_SIZE, WORD_BYTES)
 
 
@@ -18,25 +19,28 @@ class TestPolynomal(LunaGatewareTestCase):
     platform = TestPlatform()
     FRAGMENT_UNDER_TEST = Polynomal
     FRAGMENT_ARGUMENTS = {'platform': platform,
-                          'max_time': 10_000,
+                          'max_time': MAX_TIME,
                           'motors': platform.motors}
 
-    @sync_test_case
-    def test_calculation(self, a=2, b=3, c=4):
-        ''' Test a simple relation e.g. cx^3+bx^2+ax '''
+    def send_coefficients(self, a, b, c):
         coefs = [a, b, c]
-        numb_coeff = self.platform.motors*self.dut.order
         # load coefficients
         for motor in range(self.platform.motors):
             for coef in range(self.dut.order):
                 yield self.dut.coeff[coef].eq(coefs[coef])
         yield from self.pulse(self.dut.start)
+
+    @sync_test_case
+    def test_calculation(self, a=2, b=3, c=4):
+        ''' Test a simple relation e.g. cx^3+bx^2+ax '''
+        
+        numb_coeff = self.platform.motors*self.dut.order
+        yield from self.send_coefficients(a, b, c)
+        max_time = self.FRAGMENT_ARGUMENTS['max_time']
         while (yield self.dut.busy) == 1:
             yield
-        max_time = self.FRAGMENT_ARGUMENTS['max_time']
         self.assertEqual((yield self.dut.finished), 1)
         self.assertEqual((yield self.dut.counters[0]), a*max_time+b*pow(max_time, 2)+c*pow(max_time, 3))
-
 
     @sync_test_case
     def test_accuracy(self):
@@ -49,33 +53,51 @@ class TestPolynomal(LunaGatewareTestCase):
         You sent to the controller however;
             x = a*t + b*t^2 + c*t^3
         Assume there can be no more than 10_000 ticks in a move,
-        Max accuracy required is defined by c . For a pure c move, one step
-        c would be 1E-12. The bitshift is set set at 40+1 bits.
+        Max accuracy required is defined by c . For a pure jerk move with one step,
+        c needs to be 1E-12. The bitshift is set set at 40+1 bits.
         Hence, coefficients can not be smaller than 1E-12!
         Step speed must be lower than 1/2 oscillator speed (Nyquist criterion)
-        So for a typical stepper motor (https://blog.prusaprinters.org/calculator_3416/)
+        For a typical stepper motor (https://blog.prusaprinters.org/calculator_3416/)
         with 400 steps per mm, max speed is 3.125 m/s with an
         oscillator frequency of 1 MHz.
         If other properties are desired, alter max_ticks per step, bit_length or
         oscillator frequency.
-
-        # Suppose you want to do one tick
-        1>>43
         '''
-        c = round((1<<41)/pow(10_000, 3))
-        coefs = [0, 0, c]
-        numb_coeff = self.platform.motors*self.dut.order
-        # load coefficients
-        for motor in range(self.platform.motors):
-            for coef in range(self.dut.order):
-                yield self.dut.coeff[coef].eq(coefs[coef])
-        yield from self.pulse(self.dut.start)
+        max_time = self.FRAGMENT_ARGUMENTS['max_time']
+        c = round((1<<BIT_SHIFT)/pow(max_time, 3))
+        yield from self.send_coefficients(0, 0, c)
         while (yield self.dut.busy) == 1:
             yield
-        max_time = self.FRAGMENT_ARGUMENTS['max_time']
         self.assertEqual((yield self.dut.finished), 1)
         count = (yield self.dut.counters[0])
-        self.assertEqual(int(bin(count)[-41]), 1)
+        self.assertEqual(int(bin(count)[-BIT_SHIFT]), 1)
+        self.assertEqual((yield self.dut.totalsteps[0]), 1)
+
+    @sync_test_case
+    def test_move(self):
+        '''Movement
+
+        Back and forth movement
+        '''
+        steps = 1000
+        max_time = self.FRAGMENT_ARGUMENTS['max_time']
+        a = round((steps<<BIT_SHIFT)/pow(max_time, 1))
+        yield from self.send_coefficients(a, 0, 0)
+        count = 0
+        while (yield self.dut.busy):
+            old = (yield self.dut.step[0])
+            yield
+            if (old==1) and ((yield self.dut.step[0])==0):
+                count+=1
+        #self.assertEqual(count, steps)
+        self.assertEqual((yield self.dut.totalsteps[0]), steps)
+        yield from self.send_coefficients(-a, 0, 0)
+        while (yield self.dut.busy):
+            old = (yield self.dut.step[0])
+            yield
+            if (old==1) and ((yield self.dut.step[0])==0):
+                count+=1
+        self.assertEqual(count, steps)
 
 
 class TestParser(SPIGatewareTestCase):

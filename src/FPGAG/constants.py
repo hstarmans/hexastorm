@@ -1,7 +1,7 @@
 from collections import namedtuple
 import numpy as np
 
-COMMANDS = namedtuple('COMMANDS', ['EMPTY', 'GCODE', 'STATUS', 'START', 'STOP'],
+COMMANDS = namedtuple('COMMANDS', ['EMPTY', 'WRITE', 'STATUS', 'START', 'STOP'],
                       defaults=range(5))()
 STATE = namedtuple('STATE', ['FULL', 'DISPATCHERROR'], defaults=range(2))()
 # one block is 4K there are 32 blocks (officially 20 in HX4K)
@@ -12,28 +12,28 @@ COMMAND_SIZE = 8
 WORD_SIZE = 32
 WORD_BYTES = round(WORD_SIZE/8)
 FREQ = 1 # speed of motor speed update in Mhz
-G_CODE = {'COMMAND': 1, 'AUX': 1, 'EMTY': 2}
-BEZIER_DEGREE = 2
+MOVE_INSTRUCTION = {'INSTRUCTION': 1, 'AUX': 1, 'EMTY': 2}
+DEGREE = 3  # only third degree polynomal
+
+BIT_SHIFT = 41
+MAX_TIME = 10_000
 
 # TODO: move this to board
 VARIABLES = {'CRYSTAL_HZ': 50E6}
 
-def getbytesingcode(motors):
-    bytesingcode =(sum(G_CODE.values())
-                   + motors*(BEZIER_DEGREE+1)*4)
+def getbytesinmove(motors):
+    bytesingcode =(sum(MOVE_INSTRUCTION.values())
+                   + motors*DEGREE*4)
     bytesingcode += bytesingcode%WORD_BYTES
     return bytesingcode
-                          
-def getgcodecommanddct(motors):
-    dct = G_CODE
+
+def getmovedct(motors):
+    dct = MOVE_INSTRUCTION
     for i in range(motors):
-        motor_command = {f'B{i}0': 4}
-        for j in range(BEZIER_DEGREE):
+        motor_command = {f'C{i}0': 4}
+        for j in range(DEGREE):
             motor_command.update({f'B{i}{j+1}':4})
         dct.update(MOTOR_COMMAND)
-
-
-
 
 # NOTE: following doesnt work due to bug in pylint https://github.com/PyCQA/pylint/issues/3876
 # def customnamedtuple(typename, field_names) -> namedtuple:

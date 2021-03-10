@@ -12,15 +12,15 @@ from nmigen.vendor.lattice_ice40 import LatticeICE40Platform
 from nmigen_boards.resources import LEDResources
 from nmigen_boards.test.blinky import Blinky
 
-from FPGAG.constants import getbytesingcode
+from FPGAG.constants import getbytesinmove
 from FPGAG.resources import StepperResource, StepperRecord
 
 
 class TestPlatform:
     name = 'Test'
     motors = 1 
-    bytesingcode = getbytesingcode(motors)
-    memdepth =  ceil(bytesingcode/4)*2
+    bytesinmove = getbytesinmove(motors)
+    memdepth =  ceil(bytesinmove/4)*2
     steppers = [StepperRecord()]
     aux = Signal(8)
 
@@ -31,7 +31,7 @@ class Firestarter(LatticeICE40Platform):
     name = "firestarter"
     memdepth = 256
     motors = 3
-    bytesingcode = getbytesingcode(motors=3)
+    bytesinmove = getbytesinmove(motors=3)
     device = 'iCE40HX4K'
     package = 'TQ144'
     default_clk = 'clk100_mhz'
