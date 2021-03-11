@@ -219,7 +219,7 @@ class Polynomal(Elaboratable):
         # output
         self.busy = Signal()
         self.finished = Signal()
-        self.totalsteps = Array(Signal(signed(self.max_steps.bit_length())) for _ in range(motors))
+        self.totalsteps = Array(Signal(signed(self.max_steps.bit_length()+1)) for _ in range(motors))
         self.dir = Array(Signal() for _ in range(motors))
         self.step = Array(Signal() for _ in range(motors))
 
@@ -227,7 +227,7 @@ class Polynomal(Elaboratable):
         m = Module()
         # pos
         max_bits = (self.max_steps<<self.bitshift).bit_length()
-        counters = Array(Signal(signed(max_bits)) for _ in range(self.numb_coeff+self.motors))
+        counters = Array(Signal(signed(max_bits+1)) for _ in range(self.numb_coeff+self.motors))
         assert max_bits <= 64
         time = Signal(self.max_time.bit_length())
         if platform:
@@ -241,8 +241,8 @@ class Polynomal(Elaboratable):
                          stepper.dir.eq(self.dir[idx])]
         # steps
         for motor in range(self.motors):
-            m.d.comb += [self.step[motor].eq(counters[motor*self.order][-self.bitshift]),
-                         self.totalsteps[motor].eq(counters[motor*self.order][-self.bitshift::-1])]
+            m.d.comb += [self.step[motor].eq(counters[motor*self.order][self.bitshift]),
+                         self.totalsteps[motor].eq(counters[motor*self.order]>>self.bitshift)]
         # directions
         counter_d = Array(Signal(signed(max_bits)) for _ in range(self.motors))
         for motor in range(self.motors):
