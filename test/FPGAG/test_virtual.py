@@ -21,8 +21,18 @@ class TestPolynomal(LunaGatewareTestCase):
     FRAGMENT_ARGUMENTS = {'platform': platform,
                           'max_time': MAX_TIME,
                           'motors': platform.motors}
-
+    
+    def steps_compute(self, steps):
+        '''computes count for a given number of step
+        
+        You need to count slightly over the threshold. That is why
+        +1 is added.
+        '''
+        count = (steps<<BIT_SHIFT)+(1<<(BIT_SHIFT-1))
+        return count
+        
     def send_coefficients(self, a, b, c):
+        'Execute moves with cx^3+bx^2+ax'
         coefs = [a, b, c]
         # load coefficients
         for motor in range(self.platform.motors):
@@ -44,7 +54,7 @@ class TestPolynomal(LunaGatewareTestCase):
 
     @sync_test_case
     def test_accuracy(self):
-        '''Movement
+        '''Test lower limit of c, i.e. the jerk
 
         Assuming, coefficients are constant along a move 
         the position is defined with;
@@ -53,7 +63,8 @@ class TestPolynomal(LunaGatewareTestCase):
         You sent to the controller however;
             x = a*t + b*t^2 + c*t^3
         Assume there can be no more than 10_000 ticks in a move,
-        Max accuracy required is defined by c . For a pure jerk move with one step,
+        Max accuracy required is defined by c, as it blows up the fastest.
+        For a pure jerk move with one step,
         c needs to be 1E-12. The bitshift is set set at 40+1 bits.
         Hence, coefficients can not be smaller than 1E-12!
         Step speed must be lower than 1/2 oscillator speed (Nyquist criterion)
@@ -64,24 +75,26 @@ class TestPolynomal(LunaGatewareTestCase):
         oscillator frequency.
         '''
         max_time = self.FRAGMENT_ARGUMENTS['max_time']
-        c = round((1<<BIT_SHIFT)/pow(max_time, 3))
+        steps = 1
+        c = round(self.steps_compute(steps)/pow(max_time, 3))
         yield from self.send_coefficients(0, 0, c)
         while (yield self.dut.busy) == 1:
             yield
         self.assertEqual((yield self.dut.finished), 1)
-        count = (yield self.dut.counters[0])
-        self.assertEqual(int(bin(count)[-BIT_SHIFT]), 1)
-        self.assertEqual((yield self.dut.totalsteps[0]), 1)
+        dut_count = (yield self.dut.counters[0])
+        self.assertEqual(dut_count>>BIT_SHIFT, steps)
+        self.assertEqual((yield self.dut.totalsteps[0]), steps)
 
     @sync_test_case
     def test_move(self):
         '''Movement
-
-        Back and forth movement
+        
+        Test forward and backward move and upper limit
+        supported in one motion
         '''
-        steps = 1000
+        steps = 30
         max_time = self.FRAGMENT_ARGUMENTS['max_time']
-        a = round((steps<<BIT_SHIFT)/pow(max_time, 1))
+        a = round((steps<<BIT_SHIFT)/max_time)
         yield from self.send_coefficients(a, 0, 0)
         count = 0
         while (yield self.dut.busy):
@@ -89,7 +102,7 @@ class TestPolynomal(LunaGatewareTestCase):
             yield
             if (old==1) and ((yield self.dut.step[0])==0):
                 count+=1
-        #self.assertEqual(count, steps)
+        self.assertEqual(count, steps)
         self.assertEqual((yield self.dut.totalsteps[0]), steps)
         yield from self.send_coefficients(-a, 0, 0)
         while (yield self.dut.busy):
