@@ -15,8 +15,8 @@ FREQ = 1 # speed of motor speed update in Mhz
 MOVE_INSTRUCTION = {'INSTRUCTION': 1, 'AUX': 1, 'EMTY': 2}
 DEGREE = 3  # only third degree polynomal
 
-BIT_SHIFT = 46
-MAX_TIME = 10_000
+BIT_SHIFT = 31   # 36
+MAX_TIME = 1_600
 
 # TODO: move this to board
 VARIABLES = {'CRYSTAL_HZ': 50E6}

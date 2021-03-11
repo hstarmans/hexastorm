@@ -32,7 +32,9 @@ class TestPolynomal(LunaGatewareTestCase):
         return count
         
     def send_coefficients(self, a, b, c):
-        'Execute moves with cx^3+bx^2+ax'
+        '''send coefficients [a,b,c] for cx^3+bx^2+ax
+         and pulse start
+        '''
         coefs = [a, b, c]
         # load coefficients
         for motor in range(self.platform.motors):
@@ -41,7 +43,8 @@ class TestPolynomal(LunaGatewareTestCase):
         yield from self.pulse(self.dut.start)
 
     @sync_test_case
-    def test_calculation(self, a=2, b=3, c=4):
+    # 461794883
+    def test_calculation(self, a=4617948837, b=0, c=0):
         ''' Test a simple relation e.g. cx^3+bx^2+ax '''
         
         numb_coeff = self.platform.motors*self.dut.order
@@ -53,7 +56,7 @@ class TestPolynomal(LunaGatewareTestCase):
         self.assertEqual((yield self.dut.counters[0]), a*max_time+b*pow(max_time, 2)+c*pow(max_time, 3))
 
     @sync_test_case
-    def test_accuracy(self):
+    def test_smallest(self):
         '''Test lower limit of c, i.e. the jerk
 
         Assuming, coefficients are constant along a move 
@@ -85,6 +88,11 @@ class TestPolynomal(LunaGatewareTestCase):
         self.assertEqual(dut_count>>BIT_SHIFT, steps)
         self.assertEqual((yield self.dut.totalsteps[0]), steps)
 
+    # add test for limits
+    #  limits are a single step with jerk
+    #         a pure v move with max_time/2
+        
+        
     @sync_test_case
     def test_move(self):
         '''Movement
@@ -92,9 +100,10 @@ class TestPolynomal(LunaGatewareTestCase):
         Test forward and backward move and upper limit
         supported in one motion
         '''
-        steps = 30
+        steps = 800
         max_time = self.FRAGMENT_ARGUMENTS['max_time']
-        a = round((steps<<BIT_SHIFT)/max_time)
+        a = round(self.steps_compute(steps)/max_time)
+        self.assertEqual(steps, (max_time*a)>>BIT_SHIFT)
         yield from self.send_coefficients(a, 0, 0)
         count = 0
         while (yield self.dut.busy):
@@ -102,15 +111,21 @@ class TestPolynomal(LunaGatewareTestCase):
             yield
             if (old==1) and ((yield self.dut.step[0])==0):
                 count+=1
-        self.assertEqual(count, steps)
+       # self.assertEqual(count, steps)
+        dut_count = (yield self.dut.counters[0])
+        print(dut_count)
+        self.assertEqual(dut_count>>BIT_SHIFT, steps)
         self.assertEqual((yield self.dut.totalsteps[0]), steps)
         yield from self.send_coefficients(-a, 0, 0)
-        while (yield self.dut.busy):
-            old = (yield self.dut.step[0])
-            yield
-            if (old==1) and ((yield self.dut.step[0])==0):
-                count+=1
-        self.assertEqual(count, steps)
+#         while (yield self.dut.busy):
+#             old = (yield self.dut.step[0])
+#             yield
+#             if (old==1) and ((yield self.dut.step[0])==0):
+#                 count+=1
+#         #self.assertEqual(count, steps)
+#         dut_count = (yield self.dut.counters[0])
+#         self.assertEqual(dut_count>>BIT_SHIFT, -steps)
+#         self.assertEqual((yield self.dut.totalsteps[0]), -steps)
 
 
 class TestParser(SPIGatewareTestCase):
