@@ -124,19 +124,19 @@ class TestParser(SPIGatewareTestCase):
         yield self.dut.spi.cs.eq(0)
 
     def write_command(self, data):
-        'convenience function for writing command to controller'
+        'convenience function for sending command to controller'
         assert len(data) == (WORD_SIZE+COMMAND_SIZE)/8
         read_data = yield from self.spi_exchange_data(data)
         return unpack('!I', read_data[1:])[0]
 
     @sync_test_case
-    def test_writegcode(self):
-        'write GCODE and verify fifo is no longer empty'
+    def test_writemoveinstruction(self):
+        'write move instruction and verify FIFO is no longer empty'
         self.assertEqual((yield self.dut.empty), 1)
-        # write GCODE command with data
+        # write move instruction with data
         bytes_sent = 0
-        while bytes_sent != self.platform.bytesingcode:
-            writedata = [COMMANDS.GCODE, 1, 2, 3, 4]
+        while bytes_sent != self.platform.bytesinmove:
+            writedata = [COMMANDS.WRITE, 1, 2, 3, 4]
             bytes_sent += 4
             _ = yield from self.spi_exchange_data(writedata)
         while (yield self.dut.empty) == 1:
@@ -145,17 +145,17 @@ class TestParser(SPIGatewareTestCase):
         self.assertEqual((yield self.dut.empty), 0)
         self.assertEqual((yield self.dut.fifo.space_available),
                          (self.platform.memdepth
-                          -self.platform.bytesingcode/(WORD_SIZE/8)
+                          -self.platform.bytesinmove/(WORD_SIZE/8)
                           ))
 
     @sync_test_case
     def test_memfull(self):
         'write GCODE until memory is full'
         self.assertEqual((yield self.dut.empty), 1)
-        # write GCODE command with data
+        # write data
         bytes_sent = 0
-        writedata = [COMMANDS.GCODE, 1, 2, 3, 4]
-        while bytes_sent < self.platform.bytesingcode*2:
+        writedata = [COMMANDS.WRITE, 1, 2, 3, 4]
+        while bytes_sent < self.platform.bytesinmove*2:
             bytes_sent += 4
             read_data = yield from self.write_command(writedata)
             self.assertEqual(read_data, 0)

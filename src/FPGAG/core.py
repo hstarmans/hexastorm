@@ -74,11 +74,11 @@ class SPIParser(Elaboratable):
                      self.empty.eq(fifo.empty)]
         # set state
         state = Signal(COMMAND_SIZE) # max is actually word_size
-        m.d.sync += [state[STATE.FULL].eq(fifo.space_available<ceil(platform.bytesingcode/4)),
+        m.d.sync += [state[STATE.FULL].eq(fifo.space_available<ceil(platform.bytesinmove/4)),
                      state[STATE.DISPATCHERROR].eq(self.dispatcherror)
                     ]
         # Parser
-        bytesreceived = Signal(range(platform.bytesingcode+1))
+        bytesreceived = Signal(range(platform.bytesinmove+1))
         with m.FSM(reset='RESET', name='parser'):
             with m.State('RESET'):
                 m.d.sync += self.execute.eq(0)
@@ -94,7 +94,7 @@ class SPIParser(Elaboratable):
                     with m.Elif(interface.command==COMMANDS.STOP):
                         m.next = 'WAIT_COMMAND'
                         m.d.sync += self.execute.eq(0)
-                    with m.Elif(interface.command==COMMANDS.GCODE):
+                    with m.Elif(interface.command==COMMANDS.WRITE):
                         with m.If((state[STATE.FULL]==0)|(bytesreceived!=0)):
                             m.next = 'WAIT_WORD'
                         with m.Else():
@@ -113,7 +113,7 @@ class SPIParser(Elaboratable):
             with m.State('WRITE'):
                 m.d.sync += [fifo.write_en.eq(0)]
                 m.next = 'WAIT_COMMAND'
-                with m.If(bytesreceived==platform.bytesingcode):
+                with m.If(bytesreceived==platform.bytesinmove):
                     m.d.sync += [bytesreceived.eq(0),
                                  fifo.write_commit.eq(1)]
         return m
