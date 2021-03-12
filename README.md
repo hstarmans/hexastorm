@@ -53,6 +53,9 @@ export PATH=/home/pi/.apio/packages/toolchain-yosys/bin:$PATH
 export PATH=/home/pi/.apio/packages/toolchain-ice40/bin:$PATH
 ``` 
 
+# Limitations
+Add maximum-length linear-feedback shift register sequence and CRC check.
+
 ## Background
 Splines, Bezier, B-splines, and NURBS (Non-Uniform Rational B-splines) curves are the common parametric techniques 
 used for tool path [design](https://zero.sci-hub.se/2496/cb390d406cc077ef156deb76b34099af/desantiago-perez2013.pdf#lb0030).  

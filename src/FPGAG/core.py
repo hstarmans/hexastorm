@@ -14,8 +14,7 @@ from luna.gateware.memory import TransactionalizedFIFO
 from FPGAG.resources import StepperLayout, get_all_resources
 from FPGAG.constants import (COMMAND_SIZE, WORD_SIZE, STATE,
                              MEMWIDTH, COMMANDS, DEGREE, BIT_SHIFT,
-                             MAX_TIME)
-
+                             MAX_TIME, DEGREE)
 
 class SPIParser(Elaboratable):
     """ Parses and replies to commands over SPI
@@ -120,9 +119,11 @@ class SPIParser(Elaboratable):
 
 
 class Dispatcher(Elaboratable):
-    """ Instruction are buffered in SRAM
-        This module reads the commands and dispatches them
-        to other modules"""
+    """ Dispatches instructions to right submodule
+    
+        Instruction are buffered in SRAM. This module checks the buffer
+        and dispatches the instructions to other modules.
+        This is the top module"""
     def __init__(self, platform=None):
         """
         platform  -- used to pass test platform
@@ -151,7 +152,7 @@ class Dispatcher(Elaboratable):
         m.submodules.parser = parser
         m.d.comb  += parser.spi.connect(spi)
         # coeff for decaljau algo
-        numb_coeff = platform.motors*(BEZIER_DEGREE+1)
+        numb_coeff = platform.motors*DEGREE
         coeff = Array(Signal(32) for _ in range(numb_coeff))
         coeffcnt = Signal(range(numb_coeff))
         if platform.name == 'Test':
@@ -168,7 +169,7 @@ class Dispatcher(Elaboratable):
             # check which command we r handling
             with m.State('PARSEHEAD'):
                 #TODO: if you sent them differently there would not be this problem
-                with m.If(parser.read_data[-8:] == COMMANDS.GCODE):
+                with m.If(parser.read_data[-8:] == COMMANDS.WRITE): #TODO: this is wrong!
                     if aux is not None:
                         m.d.sync += aux.eq(parser.read_data[-16:-8])
                     m.d.sync += [parser.read_en.eq(0),

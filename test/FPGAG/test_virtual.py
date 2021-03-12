@@ -47,8 +47,9 @@ class TestPolynomal(LunaGatewareTestCase):
         return count
         
     def send_coefficients(self, a, b, c):
-        '''send coefficients [a,b,c] for cx^3+bx^2+ax
-         and pulse start
+        '''send coefficients and pulse start
+        
+        [a,b,c] for cx^3+bx^2+ax
         '''
         coefs = [a, b, c]
         # load coefficients
@@ -183,8 +184,8 @@ class TestDispatcher(SPIGatewareTestCase):
         '''verify invalid spi command via spi'''
         # write invalid GCODE command with data
         bytes_sent = 0
-        while bytes_sent != self.platform.bytesingcode:
-            writedata = [COMMANDS.GCODE, 0, 0, 0, 0]
+        while bytes_sent != self.platform.bytesinmove:
+            writedata = [COMMANDS.WRITE, 0, 0, 0, 0]
             bytes_sent += 4
             yield from self.spi_exchange_data(writedata)
         # wait for data to be committed
@@ -202,7 +203,7 @@ class TestDispatcher(SPIGatewareTestCase):
         self.assertEqual((yield self.dut.parser.dispatcherror), 1)
         # let's request the status
         bytes_sent = 0
-        while bytes_sent != self.platform.bytesingcode:
+        while bytes_sent != self.platform.bytesinmove:
             writedata = [COMMANDS.STATUS, 0, 0, 0, 0]
             bytes_sent += 4
             read_data = yield from self.write_command(writedata)
@@ -213,13 +214,13 @@ class TestDispatcher(SPIGatewareTestCase):
     def test_commandreceival(self):
         'verify command is processed correctly'
         #TODO: you write in the wrong direction!
-        writedata = [COMMANDS.GCODE, COMMANDS.GCODE,
+        writedata = [COMMANDS.WRITE, COMMANDS.WRITE,
                      int('10101010', 2), 0, 0]
         yield from self.spi_exchange_data(writedata)
         # write coefficients for each motor
         for motor in range(self.platform.motors):
-            for coef in range(BEZIER_DEGREE+1):
-                writedata = [COMMANDS.GCODE, 0,
+            for coef in range(DEGREE+1):
+                writedata = [COMMANDS.WRITE, 0,
                               0, 0, motor+coef]
                 yield from self.spi_exchange_data(writedata)
         # wait till instruction is received
@@ -235,8 +236,8 @@ class TestDispatcher(SPIGatewareTestCase):
         # confirm receival
         self.assertEqual((yield self.dut.aux), int('10101010', 2))
         for motor in range(self.platform.motors):
-            for coef in range(BEZIER_DEGREE+1):
-                indx = motor*(BEZIER_DEGREE+1)+coef
+            for coef in range(DEGREE):
+                indx = motor*(DEGREE)+coef
                 self.assertEqual((yield self.dut.coeff[indx]), motor+coef)
 
 
