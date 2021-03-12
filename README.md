@@ -19,7 +19,7 @@ The following commands are possible;
 At the moment, only the move instruction is supported.
 
 ## Move instruction
-A word cannot store all information for a move instruction. So a MOVE instruction 
+A word cannot store all information for a move instruction. So a move instruction 
 consists out of multiple commands and words in series.
 If prior to the sequence, the memory is already full or there is a parsing error, a status word is sent back.
 If the reply is zero, the peripheral is operating normally. The following
@@ -34,10 +34,16 @@ information must be sent over;
 | C02 | 4 | motor 0, coeff 2
 
 The motor will then the follow the path, coef_0 * t + coef_1 * t^2 + coef_2 * t^3.
-The coefficients can be interpreted as; velocity, acceleration and jerk.
-The trajectory of a motor is divided in multiple segments where a segment length is typically 100_000 ticks, 
-i.e 0.1 seconds. If is longer, it is repeated. If it is shorter, this is communicated by setting ticks to lower than 100_000.
+The coefficients can be interpreted as; velocity, acceleration and jerk. These are slightly different.
+If the position is x, then in the formula x = v*t + 1/2*a*t^2 + 1/3*1/2*b*t^3 ; v, a and b are the velocity
+accelartion and jerk respectively.
+The trajectory of a motor is divided in multiple segments where a segment length is typically 1_100 ticks. 
+If is longer, it is repeated. If it is shorter, this is communicated by setting ticks to lower than 1_100.
 If multiple motors are used; ticks, C00, C01, C02 are repeated.
+Step speed must be lower than 1/2 oscillator speed (Nyquist criterion).
+For a typical stepper motor (https://blog.prusaprinters.org/calculator_3416/) with 400 steps per mm,
+max speed is 3.125 m/s with an oscillator frequency of 1 MHz.
+If other properties are desired, alter max_ticks per step, bit_length or oscillator frequency.
 
 # Installation
 Although deprecated tools are installed via apio;

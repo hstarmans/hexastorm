@@ -15,8 +15,10 @@ FREQ = 1 # speed of motor speed update in Mhz
 MOVE_INSTRUCTION = {'INSTRUCTION': 1, 'AUX': 1, 'EMTY': 2}
 DEGREE = 3  # only third degree polynomal
 
-BIT_SHIFT = 31   # 36
-MAX_TIME = 1_600
+# these numbers must be tested with minimum
+# jerk and maximum velocity move
+BIT_SHIFT = 30  
+MAX_TIME = 1100
 
 # TODO: move this to board
 VARIABLES = {'CRYSTAL_HZ': 50E6}

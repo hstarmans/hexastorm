@@ -22,12 +22,27 @@ class TestPolynomal(LunaGatewareTestCase):
                           'max_time': MAX_TIME,
                           'motors': platform.motors}
     
+    def count_steps(self, motor):
+        '''counts steps in a move with direction'''
+        count = 0
+        while (yield self.dut.busy):
+            old = (yield self.dut.step[motor])
+            yield
+            if (old==1) and ((yield self.dut.step[motor])==0):
+                if (yield self.dut.dir[motor]):
+                    count +=1
+                else:
+                    count -=1 
+        return count
+    
     def steps_compute(self, steps):
         '''computes count for a given number of step
         
+        Shift is needed as two ticks per step is required
         You need to count slightly over the threshold. That is why
         +1 is added.
         '''
+        steps = steps << 1
         count = (steps<<BIT_SHIFT)+(1<<(BIT_SHIFT-1))
         return count
         
@@ -43,7 +58,6 @@ class TestPolynomal(LunaGatewareTestCase):
         yield from self.pulse(self.dut.start)
 
     @sync_test_case
-    # 461794883
     def test_calculation(self, a=4617948837, b=0, c=0):
         ''' Test a simple relation e.g. cx^3+bx^2+ax '''
         
@@ -56,26 +70,13 @@ class TestPolynomal(LunaGatewareTestCase):
         self.assertEqual((yield self.dut.counters[0]), a*max_time+b*pow(max_time, 2)+c*pow(max_time, 3))
 
     @sync_test_case
-    def test_smallest(self):
+    def test_jerk(self):
         '''Test lower limit of c, i.e. the jerk
+        
+        Smallest value required is defined by pure jerk move 
+        with 1 step.
 
-        Assuming, coefficients are constant along a move 
-        the position is defined with;
-            x = v*t + 1/2*a*t^2 + 1/3*1/2*b*t^3
-        Here, v is velocity, a is acceleration and b is jerk.
-        You sent to the controller however;
-            x = a*t + b*t^2 + c*t^3
-        Assume there can be no more than 10_000 ticks in a move,
-        Max accuracy required is defined by c, as it blows up the fastest.
-        For a pure jerk move with one step,
-        c needs to be 1E-12. The bitshift is set set at 40+1 bits.
-        Hence, coefficients can not be smaller than 1E-12!
-        Step speed must be lower than 1/2 oscillator speed (Nyquist criterion)
-        For a typical stepper motor (https://blog.prusaprinters.org/calculator_3416/)
-        with 400 steps per mm, max speed is 3.125 m/s with an
-        oscillator frequency of 1 MHz.
-        If other properties are desired, alter max_ticks per step, bit_length or
-        oscillator frequency.
+        Test if jerk move can be executed with one step.
         '''
         max_time = self.FRAGMENT_ARGUMENTS['max_time']
         steps = 1
@@ -85,47 +86,33 @@ class TestPolynomal(LunaGatewareTestCase):
             yield
         self.assertEqual((yield self.dut.finished), 1)
         dut_count = (yield self.dut.counters[0])
-        self.assertEqual(dut_count>>BIT_SHIFT, steps)
+        self.assertEqual(dut_count>>BIT_SHIFT, steps*2)
         self.assertEqual((yield self.dut.totalsteps[0]), steps)
-
-    # add test for limits
-    #  limits are a single step with jerk
-    #         a pure v move with max_time/2
-        
         
     @sync_test_case
     def test_move(self):
         '''Movement
         
-        Test forward and backward move and upper limit
-        supported in one motion
+        Test forward and backward move with constant speed
+        supported in one motion.
+        The largest coefficient is determined by pure velocity
+        move with half time limit as steps.
         '''
-        steps = 800
         max_time = self.FRAGMENT_ARGUMENTS['max_time']
+        steps = round(0.45*max_time)
         a = round(self.steps_compute(steps)/max_time)
-        self.assertEqual(steps, (max_time*a)>>BIT_SHIFT)
         yield from self.send_coefficients(a, 0, 0)
-        count = 0
-        while (yield self.dut.busy):
-            old = (yield self.dut.step[0])
-            yield
-            if (old==1) and ((yield self.dut.step[0])==0):
-                count+=1
-       # self.assertEqual(count, steps)
+        count = (yield from self.count_steps(0))
+        self.assertEqual(count, steps)
         dut_count = (yield self.dut.counters[0])
-        print(dut_count)
-        self.assertEqual(dut_count>>BIT_SHIFT, steps)
+        self.assertEqual(dut_count>>BIT_SHIFT, steps*2)
         self.assertEqual((yield self.dut.totalsteps[0]), steps)
         yield from self.send_coefficients(-a, 0, 0)
-#         while (yield self.dut.busy):
-#             old = (yield self.dut.step[0])
-#             yield
-#             if (old==1) and ((yield self.dut.step[0])==0):
-#                 count+=1
-#         #self.assertEqual(count, steps)
-#         dut_count = (yield self.dut.counters[0])
-#         self.assertEqual(dut_count>>BIT_SHIFT, -steps)
-#         self.assertEqual((yield self.dut.totalsteps[0]), -steps)
+        count = (yield from self.count_steps(0))
+        self.assertEqual(count, -steps)
+        dut_count = (yield self.dut.counters[0])
+        self.assertEqual(dut_count>>BIT_SHIFT, 0)
+        self.assertEqual((yield self.dut.totalsteps[0]), 0)
 
 
 class TestParser(SPIGatewareTestCase):

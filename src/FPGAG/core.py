@@ -199,9 +199,18 @@ class Polynomal(Elaboratable):
         A polynomal up to 3 order, e.g. c*x^3+b*x^2+a*x,
         is evaluated using the assumption that x starts at 0
         and y starts at 0. The polynomal determines the stepper
-        position. The bitshift bit, i.e. the sixth bit, determines
+        position. The bitshift bit determines
         the position. In every tick the step can at most increase
         with one count.
+        
+        I/O signals:
+        I: coeff          -- polynomal coefficients
+        I: start          -- start signal
+        O: busy           -- busy signal
+        O: finished       -- finished signal
+        O: total steps    -- total steps executed in move
+        O: dir            -- direction; 1 is postive and 0 is negative
+        O: step           -- step signal
     """
     def __init__(self, platform=None, motors=3,
                  bitshift=BIT_SHIFT, max_time=MAX_TIME):
@@ -242,16 +251,17 @@ class Polynomal(Elaboratable):
         # steps
         for motor in range(self.motors):
             m.d.comb += [self.step[motor].eq(counters[motor*self.order][self.bitshift]),
-                         self.totalsteps[motor].eq(counters[motor*self.order]>>self.bitshift)]
+                         self.totalsteps[motor].eq(counters[motor*self.order]>>(self.bitshift+1))]
         # directions
-        counter_d = Array(Signal(signed(max_bits)) for _ in range(self.motors))
+        counter_d = Array(Signal(signed(max_bits+1)) for _ in range(self.motors))
         for motor in range(self.motors):
             m.d.sync += counter_d[motor].eq(counters[motor*self.order])
+            # negative case --> decreasing
             with m.If(counter_d[motor]>counters[motor*self.order]):
                 m.d.sync += self.dir[motor].eq(0)
+            # positive case --> increasing
             with m.Elif(counter_d[motor]<counters[motor*self.order]):
                 m.d.sync += self.dir[motor].eq(1)
-        tmp = Signal(32)
         with m.FSM(reset='RESET', name='polynomen'):
             with m.State('RESET'):
                 m.next = 'WAIT_START'
