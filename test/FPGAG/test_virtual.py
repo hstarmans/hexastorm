@@ -1,7 +1,5 @@
-from nmigen.asserts import Rose
 import unittest
-from struct import pack, unpack
-from math import ceil
+from struct import unpack
 
 from luna.gateware.interface.spi import SPIGatewareTestCase
 from luna.gateware.test.utils import sync_test_case
@@ -9,10 +7,8 @@ from luna.gateware.test import LunaGatewareTestCase
 
 from FPGAG.core import Dispatcher, SPIParser, Polynomal
 from FPGAG.board import Firestarter, TestPlatform
-from FPGAG.resources import StepperRecord
 from FPGAG.constants import (COMMANDS, DEGREE, MAX_TIME, BIT_SHIFT,
-                             WORD_SIZE, MOVE_INSTRUCTION,
-                             COMMAND_SIZE, WORD_BYTES)
+                             WORD_SIZE, COMMAND_SIZE)
 
 
 class TestPolynomal(LunaGatewareTestCase):
@@ -21,34 +17,34 @@ class TestPolynomal(LunaGatewareTestCase):
     FRAGMENT_ARGUMENTS = {'platform': platform,
                           'max_time': MAX_TIME,
                           'motors': platform.motors}
-    
+
     def count_steps(self, motor):
         '''counts steps in a move with direction'''
         count = 0
         while (yield self.dut.busy):
             old = (yield self.dut.step[motor])
             yield
-            if (old==1) and ((yield self.dut.step[motor])==0):
+            if (old == 1) and ((yield self.dut.step[motor]) == 0):
                 if (yield self.dut.dir[motor]):
-                    count +=1
+                    count += 1
                 else:
-                    count -=1 
+                    count -= 1
         return count
-    
+
     def steps_compute(self, steps):
         '''computes count for a given number of step
-        
+
         Shift is needed as two ticks per step is required
         You need to count slightly over the threshold. That is why
         +1 is added.
         '''
         steps = steps << 1
-        count = (steps<<BIT_SHIFT)+(1<<(BIT_SHIFT-1))
+        count = (steps << BIT_SHIFT)+(1 << (BIT_SHIFT-1))
         return count
-        
+
     def send_coefficients(self, a, b, c):
         '''send coefficients and pulse start
-        
+
         [a,b,c] for cx^3+bx^2+ax
         '''
         coefs = [a, b, c]
@@ -59,22 +55,21 @@ class TestPolynomal(LunaGatewareTestCase):
         yield from self.pulse(self.dut.start)
 
     @sync_test_case
-    def test_calculation(self, a=4617948837, b=0, c=0):
+    def test_calculation(self, a=2, b=3, c=1):
         ''' Test a simple relation e.g. cx^3+bx^2+ax '''
-        
-        numb_coeff = self.platform.motors*self.dut.order
         yield from self.send_coefficients(a, b, c)
         max_time = self.FRAGMENT_ARGUMENTS['max_time']
         while (yield self.dut.busy) == 1:
             yield
         self.assertEqual((yield self.dut.finished), 1)
-        self.assertEqual((yield self.dut.counters[0]), a*max_time+b*pow(max_time, 2)+c*pow(max_time, 3))
+        self.assertEqual((yield self.dut.cntrs[0]),
+                         a*max_time+b*pow(max_time, 2)+c*pow(max_time, 3))
 
     @sync_test_case
     def test_jerk(self):
         '''Test lower limit of c, i.e. the jerk
-        
-        Smallest value required is defined by pure jerk move 
+
+        Smallest value required is defined by pure jerk move
         with 1 step.
 
         Test if jerk move can be executed with one step.
@@ -86,14 +81,14 @@ class TestPolynomal(LunaGatewareTestCase):
         while (yield self.dut.busy) == 1:
             yield
         self.assertEqual((yield self.dut.finished), 1)
-        dut_count = (yield self.dut.counters[0])
-        self.assertEqual(dut_count>>BIT_SHIFT, steps*2)
+        dut_count = (yield self.dut.cntrs[0])
+        self.assertEqual(dut_count >> BIT_SHIFT, steps*2)
         self.assertEqual((yield self.dut.totalsteps[0]), steps)
-        
+
     @sync_test_case
     def test_move(self):
         '''Movement
-        
+
         Test forward and backward move with constant speed
         supported in one motion.
         The largest coefficient is determined by pure velocity
@@ -105,14 +100,14 @@ class TestPolynomal(LunaGatewareTestCase):
         yield from self.send_coefficients(a, 0, 0)
         count = (yield from self.count_steps(0))
         self.assertEqual(count, steps)
-        dut_count = (yield self.dut.counters[0])
-        self.assertEqual(dut_count>>BIT_SHIFT, steps*2)
+        dut_count = (yield self.dut.cntrs[0])
+        self.assertEqual(dut_count >> BIT_SHIFT, steps*2)
         self.assertEqual((yield self.dut.totalsteps[0]), steps)
         yield from self.send_coefficients(-a, 0, 0)
         count = (yield from self.count_steps(0))
         self.assertEqual(count, -steps)
-        dut_count = (yield self.dut.counters[0])
-        self.assertEqual(dut_count>>BIT_SHIFT, 0)
+        dut_count = (yield self.dut.cntrs[0])
+        self.assertEqual(dut_count >> BIT_SHIFT, 0)
         self.assertEqual((yield self.dut.totalsteps[0]), 0)
 
 
@@ -145,8 +140,8 @@ class TestParser(SPIGatewareTestCase):
         # Instruction ready
         self.assertEqual((yield self.dut.empty), 0)
         self.assertEqual((yield self.dut.fifo.space_available),
-                         (self.platform.memdepth
-                          -self.platform.bytesinmove/(WORD_SIZE/8)
+                         (self.platform.memdepth -
+                          self.platform.bytesinmove/(WORD_SIZE/8)
                           ))
 
     @sync_test_case
@@ -178,7 +173,7 @@ class TestDispatcher(SPIGatewareTestCase):
         assert len(data) == (WORD_SIZE+COMMAND_SIZE)/8
         read_data = yield from self.spi_exchange_data(data)
         return unpack('!I', read_data[1:])[0]
-   
+
     @sync_test_case
     def test_invalidcommand(self):
         '''verify invalid spi command via spi'''
@@ -209,11 +204,11 @@ class TestDispatcher(SPIGatewareTestCase):
             read_data = yield from self.write_command(writedata)
             # TODO: provide parser for status
             self.assertEqual(read_data, 2)
-      
+
     @sync_test_case
     def test_commandreceival(self):
         'verify command is processed correctly'
-        #TODO: you write in the wrong direction!
+        # TODO: you write in the wrong direction!
         writedata = [COMMANDS.WRITE, COMMANDS.WRITE,
                      int('10101010', 2), 0, 0]
         yield from self.spi_exchange_data(writedata)
@@ -221,7 +216,7 @@ class TestDispatcher(SPIGatewareTestCase):
         for motor in range(self.platform.motors):
             for coef in range(DEGREE+1):
                 writedata = [COMMANDS.WRITE, 0,
-                              0, 0, motor+coef]
+                             0, 0, motor+coef]
                 yield from self.spi_exchange_data(writedata)
         # wait till instruction is received
         while (yield self.dut.parser.empty) == 1:
@@ -249,10 +244,12 @@ class TestBuild(unittest.TestCase):
     def test_dispatcher(self):
         platform = Firestarter()
         platform.build(Dispatcher(), do_program=False, verbose=True)
-    
+
     def test_polynomal(self):
         platform = Firestarter()
-        platform.build(Polynomal(Firestarter()), do_program=False, verbose=True)
+        platform.build(Polynomal(Firestarter()), do_program=False,
+                       verbose=True)
+
 
 if __name__ == "__main__":
     unittest.main()

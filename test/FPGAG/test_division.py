@@ -1,7 +1,3 @@
-""" test for divider
-
-NOTE: trigger the creation of VCD files via export GENERATE_VCDS=1
-"""
 import unittest
 import random
 
@@ -26,7 +22,7 @@ class MultiplicationTest(LunaGatewareTestCase):
 
 class DivisorTest(LunaGatewareTestCase):
     FRAGMENT_UNDER_TEST = Divisor
-    FRAGMENT_ARGUMENTS = {'width':6}
+    FRAGMENT_ARGUMENTS = {'width': 6}
 
     def do_devision(self, x, y):
         bits = self.FRAGMENT_ARGUMENTS['width']
@@ -38,7 +34,8 @@ class DivisorTest(LunaGatewareTestCase):
         yield
         yield self.dut.start.eq(0)
         yield
-        while (yield self.dut.valid)==0 | (yield self.dut.dbz)==0:
+        while (yield self.dut.valid) == 0 |
+               (yield self.dut.dbz) == 0):
             yield
         if (yield self.dut.valid)==1:
             self.assertEqual((yield self.dut.q), x//y)
@@ -51,7 +48,7 @@ class DivisorTest(LunaGatewareTestCase):
         yield from self.do_devision(14, 3)
         yield from self.do_devision(14, 7)
         yield from self.do_devision(4, 2)
-        yield from self.do_devision(4,5)
+        yield from self.do_devision(4, 5)
         yield from self.do_devision(12, 13)
         yield from self.do_devision(15, 3)
         yield from self.do_devision(15, 0)
@@ -63,6 +60,7 @@ class DivisorTest(LunaGatewareTestCase):
         y = random.randint(0, maxint)
         for _ in range(100):
             yield from self.do_devision(x, y)
+
 
 if __name__ == "__main__":
     unittest.main()
