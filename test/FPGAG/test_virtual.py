@@ -8,7 +8,7 @@ from luna.gateware.test import LunaGatewareTestCase
 from FPGAG.core import Dispatcher, SPIParser, Polynomal
 from FPGAG.board import Firestarter, TestPlatform
 from FPGAG.constants import (COMMANDS, DEGREE, MAX_TIME, BIT_SHIFT,
-                             WORD_SIZE, COMMAND_SIZE)
+                             WORD_SIZE, COMMAND_SIZE, INSTRUCTIONS)
 
 
 class TestPolynomal(LunaGatewareTestCase):
@@ -206,15 +206,15 @@ class TestDispatcher(SPIGatewareTestCase):
             self.assertEqual(read_data, 2)
 
     @sync_test_case
-    def test_commandreceival(self):
+    def test_instructionreceival(self):
         'verify command is processed correctly'
         # TODO: you write in the wrong direction!
-        writedata = [COMMANDS.WRITE, COMMANDS.WRITE,
-                     int('10101010', 2), 0, 0]
+        writedata = [COMMANDS.WRITE, 0, 0,
+                     int('10101010', 2), INSTRUCTIONS.MOVE]
         yield from self.spi_exchange_data(writedata)
         # write coefficients for each motor
         for motor in range(self.platform.motors):
-            for coef in range(DEGREE+1):
+            for coef in range(DEGREE):
                 writedata = [COMMANDS.WRITE, 0,
                              0, 0, motor+coef]
                 yield from self.spi_exchange_data(writedata)
@@ -228,7 +228,7 @@ class TestDispatcher(SPIGatewareTestCase):
         # data should now be parsed and empty become 1
         while (yield self.dut.parser.empty) == 0:
             yield
-        # confirm receival
+        # confirm receipt
         self.assertEqual((yield self.dut.aux), int('10101010', 2))
         for motor in range(self.platform.motors):
             for coef in range(DEGREE):

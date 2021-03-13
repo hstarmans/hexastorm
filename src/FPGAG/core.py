@@ -10,7 +10,7 @@ from luna.gateware.interface.spi import SPICommandInterface, SPIBus
 from luna.gateware.memory import TransactionalizedFIFO
 
 from FPGAG.resources import get_all_resources
-from FPGAG.constants import (COMMAND_SIZE, WORD_SIZE, STATE,
+from FPGAG.constants import (COMMAND_SIZE, WORD_SIZE, STATE, INSTRUCTIONS,
                              MEMWIDTH, COMMANDS, DEGREE, BIT_SHIFT,
                              MAX_TIME)
 
@@ -74,8 +74,7 @@ class SPIParser(Elaboratable):
         state = Signal(COMMAND_SIZE)  # max is actually word_size
         m.d.sync += [state[STATE.FULL].eq(
                      fifo.space_available < ceil(platform.bytesinmove/4)),
-                     state[STATE.DISPATCHERROR].eq(self.dispatcherror)
-                    ]
+                     state[STATE.DISPATCHERROR].eq(self.dispatcherror)]
         # Parser
         bytesreceived = Signal(range(platform.bytesinmove+1))
         with m.FSM(reset='RESET', name='parser'):
@@ -169,13 +168,9 @@ class Dispatcher(Elaboratable):
                     m.next = 'PARSEHEAD'
             # check which instruction we r handling
             with m.State('PARSEHEAD'):
-                # TODO: if you sent them differently there would not be
-                #       this problem
-                #      you would not have the -8 notation
-                # TODO: this is wrong!
-                with m.If(parser.read_data[-8:] == COMMANDS.WRITE):
+                with m.If(parser.read_data[:8] == INSTRUCTIONS.MOVE):
                     if aux is not None:
-                        m.d.sync += aux.eq(parser.read_data[-16:-8])
+                        m.d.sync += aux.eq(parser.read_data[8:16])
                     m.d.sync += [parser.read_en.eq(0),
                                  coeffcnt.eq(0)]
                     m.next = 'MOVE_POLYNOMAL'

@@ -18,11 +18,12 @@ from FPGAG.resources import StepperResource, StepperRecord
 
 class TestPlatform:
     name = 'Test'
-    motors = 1 
+    motors = 1
     bytesinmove = getbytesinmove(motors)
-    memdepth =  ceil(bytesinmove/4)*2
+    memdepth = ceil(bytesinmove/4)*2
     steppers = [StepperRecord()]
     aux = Signal(8)
+
 
 class Firestarter(LatticeICE40Platform):
     '''Kicad board available at
@@ -47,30 +48,31 @@ class Firestarter(LatticeICE40Platform):
                # NOTE: there is a proper resource in nmigen_boards
                #       this is used as it is also done by nmigen
                Resource("debug_spi", 0,
-                        Subsignal("sck", Pins( "79", dir="i")),
-                        Subsignal("sdi", Pins( "90", dir="i")),
-                        Subsignal("sdo", Pins( "87", dir="o")),
+                        Subsignal("sck", Pins("79", dir="i")),
+                        Subsignal("sdi", Pins("90", dir="i")),
+                        Subsignal("sdo", Pins("87", dir="o")),
                         Subsignal("cs", PinsN("85", dir="i")),
-                        Attrs(IO_STANDARD="SB_LVCMOS")
-               ),
+                        Attrs(IO_STANDARD="SB_LVCMOS")),
                # x-stepper
-               StepperResource(number=0, step="38", direction="37", limit='110',
-                               attrs=Attrs(IO_STANDARD="SB_LVTTL")
-               ),
+               StepperResource(number=0, step="38", direction="37",
+                               limit='110',
+                               attrs=Attrs(IO_STANDARD="SB_LVTTL")),
                # y-stepper
-               StepperResource(number=1, step="19", direction="18", limit='124',
-                               attrs=Attrs(IO_STANDARD="SB_LVTTL")
-               ),
+               StepperResource(number=1, step="19", direction="18",
+                               limit='124',
+                               attrs=Attrs(IO_STANDARD="SB_LVTTL")),
                # z-stepper
-               StepperResource(number=2, step="143", direction="142", limit='130',
-                               attrs=Attrs(IO_STANDARD="SB_LVTTL")
-               )
+               StepperResource(number=2, step="143", direction="142",
+                               limit='130',
+                               attrs=Attrs(IO_STANDARD="SB_LVTTL"))
                ]
     connectors = []
+
     def toolchain_program(self, products, name, **kwargs):
         icezprog = os.environ.get("ICEZPROG", "icezprog")
         with products.extract("{}.bin".format(name)) as bitstream_filename:
             subprocess.check_call([icezprog, bitstream_filename])
+
 
 if __name__ == "__main__":
     Firestarter().build(Blinky(), do_program=True, verbose=True)
