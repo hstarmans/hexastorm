@@ -22,7 +22,7 @@ class SPIParser(Elaboratable):
       status -- send back state of the peripheriral
       start  -- enable execution of gcode
       stop   -- halt execution of gcode
-      gcode  -- write instruction to FIFO or report memory is full
+      write  -- write instruction to FIFO or report memory is full
 
     I/O signals:
         I: dispatcherror  -- error while processing stored command from spi
@@ -106,8 +106,7 @@ class SPIParser(Elaboratable):
                 with m.If(interface.word_complete):
                     m.d.sync += [bytesreceived.eq(bytesreceived+4),
                                  fifo.write_en.eq(1),
-                                 fifo.write_data.eq(interface.word_received)
-                                ]
+                                 fifo.write_data.eq(interface.word_received)]
                     m.next = 'WRITE'
             with m.State('WRITE'):
                 m.d.sync += [fifo.write_en.eq(0)]
@@ -115,81 +114,6 @@ class SPIParser(Elaboratable):
                 with m.If(bytesreceived == platform.bytesinmove):
                     m.d.sync += [bytesreceived.eq(0),
                                  fifo.write_commit.eq(1)]
-        return m
-
-
-class Dispatcher(Elaboratable):
-    """ Dispatches instructions to right submodule
-
-        Instruction are buffered in SRAM. This module checks the buffer
-        and dispatches the instructions to other modules.
-        This is the top module"""
-    def __init__(self, platform=None):
-        """
-        platform  -- used to pass test platform
-        """
-        self.platform = platform
-
-    def elaborate(self, platform):
-        m = Module()
-        if platform:
-            board_spi = platform.request("debug_spi")
-            spi = synchronize(m, board_spi)
-            steppers = [res for res in get_all_resources(platform, "steppers")]
-            try:
-                aux = platform.request("AUX")
-            except ResourceError:
-                aux = None
-        else:
-            platform = self.platform
-            self.spi = SPIBus()
-            spi = synchronize(m, self.spi)
-            steppers = platform.steppers
-            aux = platform.aux
-            self.aux = aux
-        # Connect Parser
-        parser = SPIParser(self.platform)
-        m.submodules.parser = parser
-        m.d.comb += parser.spi.connect(spi)
-        # coeff for polynomal move
-        numb_coeff = platform.motors*DEGREE
-        coeff = Array(Signal(32) for _ in range(numb_coeff))
-        coeffcnt = Signal(range(numb_coeff))
-        if platform.name == 'Test':
-            self.parser = parser
-            self.coeff = coeff
-        with m.FSM(reset='RESET', name='dispatcher'):
-            with m.State('RESET'):
-                m.next = 'WAIT_INSTRUCTION'
-            with m.State('WAIT_INSTRUCTION'):
-                m.d.sync += parser.read_commit.eq(0)
-                with m.If((parser.empty == 0) & parser.execute):
-                    m.d.sync += parser.read_en.eq(1)
-                    m.next = 'PARSEHEAD'
-            # check which instruction we r handling
-            with m.State('PARSEHEAD'):
-                with m.If(parser.read_data[:8] == INSTRUCTIONS.MOVE):
-                    if aux is not None:
-                        m.d.sync += aux.eq(parser.read_data[8:16])
-                    m.d.sync += [parser.read_en.eq(0),
-                                 coeffcnt.eq(0)]
-                    m.next = 'MOVE_POLYNOMAL'
-                with m.Else():
-                    # NOTE: system never recovers user must reset
-                    m.d.sync += parser.dispatcherror.eq(1)
-            with m.State('MOVE_POLYNOMAL'):
-                with m.If(parser.read_en == 0):
-                    m.d.sync += parser.read_en.eq(1)
-                with m.Elif(coeffcnt < numb_coeff):
-                    m.d.sync += [coeff[coeffcnt].eq(parser.read_data),
-                                 coeffcnt.eq(coeffcnt+1),
-                                 parser.read_en.eq(0)]
-                # signal there is a new instruction!!
-                # ideally you can keep two instruction in memory
-                with m.Else():
-                    m.next = 'WAIT_INSTRUCTION'
-                    m.d.sync += [parser.read_commit.eq(1),
-                                 parser.read_en.eq(0)]
         return m
 
 
@@ -214,9 +138,10 @@ class Polynomal(Elaboratable):
     """
     def __init__(self, platform=None, motors=3,
                  bitshift=BIT_SHIFT, max_time=MAX_TIME):
-        # NOTE: you should use dict unpack or something
         self.platform = platform
-        self.order = 3  # this cannot be changed or change code!
+        self.order = DEGREE
+        # change code for other orders
+        assert self.order == 3
         self.motors = motors
         self.numb_coeff = motors*self.order
         self.bitshift = bitshift
@@ -296,6 +221,83 @@ class Polynomal(Elaboratable):
                                  self.busy.eq(0),
                                  self.finished.eq(1)]
                     m.next = 'WAIT_START'
+        return m
+
+
+class Dispatcher(Elaboratable):
+    """ Dispatches instructions to right submodule
+
+        Instructions are buffered in SRAM. This module checks the buffer
+        and dispatches the instructions to the corresponding module.
+        This is the top module"""
+    def __init__(self, platform=None):
+        """
+        platform  -- used to pass test platform
+        """
+        self.platform = platform
+
+    def elaborate(self, platform):
+        m = Module()
+        if platform:
+            board_spi = platform.request("debug_spi")
+            spi = synchronize(m, board_spi)
+            steppers = [res for res in get_all_resources(platform, "steppers")]
+            try:
+                aux = platform.request("AUX")
+            except ResourceError:
+                aux = None
+        else:
+            platform = self.platform
+            self.spi = SPIBus()
+            spi = synchronize(m, self.spi)
+            steppers = platform.steppers
+            aux = platform.aux
+            self.aux = aux
+        # Connect Parser
+        parser = SPIParser(self.platform)
+        m.submodules.parser = parser
+        m.d.comb += parser.spi.connect(spi)
+        # Connect Polynomal Move module
+        polynomal = Polynomal(self.platform)
+        m.submodules.polynomal = polynomal
+        # coeff for polynomal move
+        coeffcnt = Signal(range(len(polynomal.coeff)))
+        if platform.name == 'Test':
+            self.parser = parser
+            self.coeff = polynomal.coeff
+        with m.FSM(reset='RESET', name='dispatcher'):
+            with m.State('RESET'):
+                m.next = 'WAIT_INSTRUCTION'
+            with m.State('WAIT_INSTRUCTION'):
+                m.d.sync += parser.read_commit.eq(0)
+                with m.If((parser.empty == 0) & parser.execute):
+                    m.d.sync += parser.read_en.eq(1)
+                    m.next = 'PARSEHEAD'
+            # check which instruction we r handling
+            with m.State('PARSEHEAD'):
+                with m.If(parser.read_data[:8] == INSTRUCTIONS.MOVE):
+                    if aux is not None:
+                        m.d.sync += aux.eq(parser.read_data[8:16])
+                    m.d.sync += [parser.read_en.eq(0),
+                                 coeffcnt.eq(0)]
+                    m.next = 'MOVE_POLYNOMAL'
+                with m.Else():
+                    # NOTE: system never recovers user must reset
+                    m.d.sync += parser.dispatcherror.eq(1)
+            with m.State('MOVE_POLYNOMAL'):
+                with m.If(parser.read_en == 0):
+                    m.d.sync += parser.read_en.eq(1)
+                with m.Elif(coeffcnt < len(polynomal.coeff)):
+                    m.d.sync += [polynomal.coeff[coeffcnt].eq(
+                                 parser.read_data),
+                                 coeffcnt.eq(coeffcnt+1),
+                                 parser.read_en.eq(0)]
+                # signal there is a new instruction!!
+                # ideally you can keep two instruction in memory
+                with m.Else():
+                    m.next = 'WAIT_INSTRUCTION'
+                    m.d.sync += [parser.read_commit.eq(1),
+                                 parser.read_en.eq(0)]
         return m
 
 
