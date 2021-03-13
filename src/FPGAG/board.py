@@ -18,7 +18,8 @@ from FPGAG.resources import StepperResource, StepperRecord
 
 class TestPlatform:
     name = 'Test'
-    motors = 1
+    stepspermm = {'x': 400}
+    motors = len(stepspermm.keys())
     bytesinmove = getbytesinmove(motors)
     memdepth = ceil(bytesinmove/4)*2
     steppers = [StepperRecord()]
@@ -31,8 +32,9 @@ class Firestarter(LatticeICE40Platform):
     '''
     name = "firestarter"
     memdepth = 256
-    motors = 3
-    bytesinmove = getbytesinmove(motors=3)
+    stepspermm = {'x': 400, 'y': 400, 'z': 400}
+    motors = len(stepspermm.keys())
+    bytesinmove = getbytesinmove(motors=motors)
     device = 'iCE40HX4K'
     package = 'TQ144'
     default_clk = 'clk100_mhz'

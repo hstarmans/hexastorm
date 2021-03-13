@@ -260,8 +260,10 @@ class Dispatcher(Elaboratable):
         # Connect Polynomal Move module
         polynomal = Polynomal(self.platform)
         m.submodules.polynomal = polynomal
-        # coeff for polynomal move
         coeffcnt = Signal(range(len(polynomal.coeff)))
+        # Busy signal
+        busy = Signal()
+        m.d.comb += busy.eq(polynomal.busy)
         if platform.name == 'Test':
             self.parser = parser
             self.coeff = polynomal.coeff
@@ -269,7 +271,7 @@ class Dispatcher(Elaboratable):
             with m.State('RESET'):
                 m.next = 'WAIT_INSTRUCTION'
             with m.State('WAIT_INSTRUCTION'):
-                m.d.sync += parser.read_commit.eq(0)
+                m.d.sync += [parser.read_commit.eq(0), polynomal.start.eq(0)]
                 with m.If((parser.empty == 0) & parser.execute):
                     m.d.sync += parser.read_en.eq(1)
                     m.next = 'PARSEHEAD'
@@ -287,16 +289,17 @@ class Dispatcher(Elaboratable):
             with m.State('MOVE_POLYNOMAL'):
                 with m.If(parser.read_en == 0):
                     m.d.sync += parser.read_en.eq(1)
+                with m.Elif(busy):
+                    m.next = 'MOVE_POLYNOMAL'
                 with m.Elif(coeffcnt < len(polynomal.coeff)):
                     m.d.sync += [polynomal.coeff[coeffcnt].eq(
                                  parser.read_data),
                                  coeffcnt.eq(coeffcnt+1),
                                  parser.read_en.eq(0)]
-                # signal there is a new instruction!!
-                # ideally you can keep two instruction in memory
                 with m.Else():
                     m.next = 'WAIT_INSTRUCTION'
-                    m.d.sync += [parser.read_commit.eq(1),
+                    m.d.sync += [polynomal.start.eq(1),
+                                 parser.read_commit.eq(1),
                                  parser.read_en.eq(0)]
         return m
 

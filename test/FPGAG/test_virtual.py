@@ -5,6 +5,7 @@ from luna.gateware.interface.spi import SPIGatewareTestCase
 from luna.gateware.test.utils import sync_test_case
 from luna.gateware.test import LunaGatewareTestCase
 
+from FPGAG.controller import Host
 from FPGAG.core import Dispatcher, SPIParser, Polynomal
 from FPGAG.board import Firestarter, TestPlatform
 from FPGAG.constants import (COMMANDS, DEGREE, MAX_TIME, BIT_SHIFT,
@@ -117,6 +118,8 @@ class TestParser(SPIGatewareTestCase):
     FRAGMENT_ARGUMENTS = {'platform': platform}
 
     def initialize_signals(self):
+        self.host = Host()
+        self.host.spi_exchange_data = self.spi_exchange_data
         yield self.dut.spi.cs.eq(0)
 
     def write_command(self, data):
@@ -168,16 +171,16 @@ class TestDispatcher(SPIGatewareTestCase):
         yield self.dut.spi.cs.eq(0)
 
     # NOTE REFACTOR
-    def write_command(self, data):
+    def write_instruction(self, data):
         'convenience function for writing command to controller'
         assert len(data) == (WORD_SIZE+COMMAND_SIZE)/8
         read_data = yield from self.spi_exchange_data(data)
         return unpack('!I', read_data[1:])[0]
 
     @sync_test_case
-    def test_invalidcommand(self):
-        '''verify invalid spi command via spi'''
-        # write invalid GCODE command with data
+    def test_invalidinstruction(self):
+        '''write invalid instruction and check flag is raised'''
+        # write command with invalid data
         bytes_sent = 0
         while bytes_sent != self.platform.bytesinmove:
             writedata = [COMMANDS.WRITE, 0, 0, 0, 0]
@@ -201,12 +204,12 @@ class TestDispatcher(SPIGatewareTestCase):
         while bytes_sent != self.platform.bytesinmove:
             writedata = [COMMANDS.STATUS, 0, 0, 0, 0]
             bytes_sent += 4
-            read_data = yield from self.write_command(writedata)
+            read_data = yield from self.write_instruction(writedata)
             # TODO: provide parser for status
             self.assertEqual(read_data, 2)
 
     @sync_test_case
-    def test_instructionreceival(self):
+    def test_instructionreceipt(self):
         'verify command is processed correctly'
         # TODO: you write in the wrong direction!
         writedata = [COMMANDS.WRITE, 0, 0,
