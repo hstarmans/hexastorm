@@ -31,6 +31,9 @@ class Firestarter(LatticeICE40Platform):
        https://github.com/hstarmans/firestarter/tree/master/pi_hat
     '''
     name = "firestarter"
+    ic_dev_nr = 1      # spi connection
+    ic_address = 0x28  # spi address
+    enable_pin = 11    # enable pin for stepper motors
     memdepth = 256
     stepspermm = {'x': 400, 'y': 400, 'z': 400}
     motors = len(stepspermm.keys())

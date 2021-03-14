@@ -55,6 +55,7 @@ export PATH=/home/pi/.apio/packages/toolchain-ice40/bin:$PATH
 
 # Limitations
 Add maximum-length linear-feedback shift register sequence and CRC check.
+If you do a sequence of very short moves, e.g. 10 steps, you might notice high-latency due to SPI communcation. 
 
 ## Background
 Splines, Bezier, B-splines, and NURBS (Non-Uniform Rational B-splines) curves are the common parametric techniques 
