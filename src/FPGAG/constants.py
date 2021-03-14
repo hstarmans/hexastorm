@@ -21,14 +21,13 @@ WORD_SIZE = 32
 WORD_BYTES = round(WORD_SIZE/8)
 TOTAL_BYTES = WORD_BYTES + COMMAND_SIZE/8
 FREQ = 1E6  # motor move interpolation freq in Hz
-MOVE_TICKS = 10E3  # ticks in move
 MOVE_INSTRUCTION = {'INSTRUCTION': 1, 'AUX': 1, 'EMTY': 2}
 DEGREE = 3  # only third degree polynomal
 
 # these numbers must be tested with minimum
 # jerk and maximum velocity move
-BIT_SHIFT = 30
-MAX_TIME = 1100
+BIT_SHIFT = 40
+MOVE_TICKS = 10_000
 
 # TODO: move this to board
 VARIABLES = {'CRYSTAL_HZ': 50E6}

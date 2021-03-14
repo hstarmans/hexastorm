@@ -16,34 +16,42 @@ The following commands are possible;
 | STOP | halt execution of instructions stored in SRAM |
 | WRITE | sent over an instruction and store it in SRAM |
 
-At the moment, only the move instruction is supported.
 
-## Move instruction
-A word cannot store all information for a move instruction. So a move instruction 
+# Instructions
+A word can often not store all information for an instruction. So an instruction 
 consists out of multiple commands and words in series.
 If prior to the sequence, the memory is already full or there is a parsing error, a status word is sent back.
-If the reply is zero, the peripheral is operating normally. The following
-information must be sent over;
+If the reply is zero, the peripheral is operating normally. The information to be sent over is indicated for
+each instruction
+
+## Move instruction
 | data | number of bytes | description
 |---|---|---|
-| INSTRUCTION | 1 | type of instructions, to allow other instructions then move
-| AUX | 2 | auxilliary bits, to enable lights etc.
-| TICKS | 4 | number of ticks in a move
-| C00 | 4 | motor 0, coeff 0
-| C01 | 4 | motor 0, coeff 1
-| C02 | 4 | motor 0, coeff 2
+| INSTRUCTION | 1 | type of instructions, here move instruction
+| TICKS | 3 | number of ticks in a move, cannot be larger than TICKS_MOVE, i.e. 10_000
+| C00 | 8 | motor 0, coeff 0
+| C01 | 8 | motor 0, coeff 1
+| C02 | 8 | motor 0, coeff 2
 
 The motor will then the follow the path, coef_0 * t + coef_1 * t^2 + coef_2 * t^3.
 The coefficients can be interpreted as; velocity, acceleration and jerk. These are slightly different.
 If the position is x, then in the formula x = v*t + 1/2*a*t^2 + 1/3*1/2*b*t^3 ; v, a and b are the velocity
-accelartion and jerk respectively.
-The trajectory of a motor is divided in multiple segments where a segment length is typically 1_100 ticks. 
-If is longer, it is repeated. If it is shorter, this is communicated by setting ticks to lower than 1_100.
-If multiple motors are used; ticks, C00, C01, C02 are repeated.
+acceleration and jerk respectively.
+The trajectory of a motor is divided in multiple segments where a segment length is typically 10_000 ticks. 
+If is longer, it is repeated. If it is shorter, this is communicated by setting ticks to lower than 10_000.
+If multiple motors are used; TICKS, C00, C01, C02 are repeated.
 Step speed must be lower than 1/2 oscillator speed (Nyquist criterion).
-For a typical stepper motor (https://blog.prusaprinters.org/calculator_3416/) with 400 steps per mm,
+For a [typical stepper motor](https://blog.prusaprinters.org/calculator_3416/) with 400 steps per mm,
 max speed is 3.125 m/s with an oscillator frequency of 1 MHz.
-If other properties are desired, alter max_ticks per step, bit_length or oscillator frequency.
+If other properties are desired, alter max_ticks per step, bit_length or motor sampling frequency.
+The default motor sampling frequency is 1 MHz.
+
+## Pin instruction
+| data | number of bytes | description
+|---|---|---|
+| INSTRUCTION | 1 | type of instructions, here pin instruction
+| AUX | 3 | number of ticks in a move, cannot be larger than TICKS_MOVE, i.e. 10_000
+This allows one to set pins directy to a value. For example, turn on the laser or the prism motor.
 
 # Installation
 Although deprecated tools are installed via apio;

@@ -8,16 +8,14 @@ from luna.gateware.test import LunaGatewareTestCase
 from FPGAG.controller import Host
 from FPGAG.core import Dispatcher, SPIParser, Polynomal
 from FPGAG.board import Firestarter, TestPlatform
-from FPGAG.constants import (COMMANDS, DEGREE, MAX_TIME, BIT_SHIFT,
+from FPGAG.constants import (COMMANDS, DEGREE, MOVE_TICKS, BIT_SHIFT,
                              WORD_SIZE, COMMAND_SIZE, INSTRUCTIONS)
 
 
 class TestPolynomal(LunaGatewareTestCase):
     platform = TestPlatform()
     FRAGMENT_UNDER_TEST = Polynomal
-    FRAGMENT_ARGUMENTS = {'platform': platform,
-                          'max_time': MAX_TIME,
-                          'motors': platform.motors}
+    FRAGMENT_ARGUMENTS = {'platform': platform}
 
     def count_steps(self, motor):
         '''counts steps in a move with direction'''
@@ -25,7 +23,7 @@ class TestPolynomal(LunaGatewareTestCase):
         while (yield self.dut.busy):
             old = (yield self.dut.step[motor])
             yield
-            if (old == 1) and ((yield self.dut.step[motor]) == 0):
+            if old and ((yield self.dut.step[motor]) == 0):
                 if (yield self.dut.dir[motor]):
                     count += 1
                 else:
@@ -59,12 +57,11 @@ class TestPolynomal(LunaGatewareTestCase):
     def test_calculation(self, a=2, b=3, c=1):
         ''' Test a simple relation e.g. cx^3+bx^2+ax '''
         yield from self.send_coefficients(a, b, c)
-        max_time = self.FRAGMENT_ARGUMENTS['max_time']
-        while (yield self.dut.busy) == 1:
+        while (yield self.dut.busy):
             yield
         self.assertEqual((yield self.dut.finished), 1)
-        self.assertEqual((yield self.dut.cntrs[0]),
-                         a*max_time+b*pow(max_time, 2)+c*pow(max_time, 3))
+        self.assertEqual((yield self.dut.cntrs[0]), a*MOVE_TICKS
+                         + b*pow(MOVE_TICKS, 2)+c*pow(MOVE_TICKS, 3))
 
     @sync_test_case
     def test_jerk(self):
@@ -75,11 +72,10 @@ class TestPolynomal(LunaGatewareTestCase):
 
         Test if jerk move can be executed with one step.
         '''
-        max_time = self.FRAGMENT_ARGUMENTS['max_time']
         steps = 1
-        c = round(self.steps_compute(steps)/pow(max_time, 3))
+        c = round(self.steps_compute(steps)/pow(MOVE_TICKS, 3))
         yield from self.send_coefficients(0, 0, c)
-        while (yield self.dut.busy) == 1:
+        while (yield self.dut.busy):
             yield
         self.assertEqual((yield self.dut.finished), 1)
         dut_count = (yield self.dut.cntrs[0])
@@ -95,9 +91,8 @@ class TestPolynomal(LunaGatewareTestCase):
         The largest coefficient is determined by pure velocity
         move with half time limit as steps.
         '''
-        max_time = self.FRAGMENT_ARGUMENTS['max_time']
-        steps = round(0.45*max_time)
-        a = round(self.steps_compute(steps)/max_time)
+        steps = round(0.4*MOVE_TICKS)
+        a = round(self.steps_compute(steps)/MOVE_TICKS)
         yield from self.send_coefficients(a, 0, 0)
         count = (yield from self.count_steps(0))
         self.assertEqual(count, steps)
@@ -118,7 +113,7 @@ class TestParser(SPIGatewareTestCase):
     FRAGMENT_ARGUMENTS = {'platform': platform}
 
     def initialize_signals(self):
-        self.host = Host()
+        self.host = Host(self.platform)
         self.host.spi_exchange_data = self.spi_exchange_data
         yield self.dut.spi.cs.eq(0)
 

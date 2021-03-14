@@ -12,7 +12,7 @@ from luna.gateware.memory import TransactionalizedFIFO
 from FPGAG.resources import get_all_resources
 from FPGAG.constants import (COMMAND_SIZE, WORD_SIZE, STATE, INSTRUCTIONS,
                              MEMWIDTH, COMMANDS, DEGREE, BIT_SHIFT,
-                             MAX_TIME)
+                             MOVE_TICKS)
 
 
 class SPIParser(Elaboratable):
@@ -136,36 +136,36 @@ class Polynomal(Elaboratable):
         O: dir            -- direction; 1 is postive and 0 is negative
         O: step           -- step signal
     """
-    def __init__(self, platform=None, motors=3,
-                 bitshift=BIT_SHIFT, max_time=MAX_TIME):
+    def __init__(self, platform=None):
         self.platform = platform
         self.order = DEGREE
         # change code for other orders
         assert self.order == 3
-        self.motors = motors
-        self.numb_coeff = motors*self.order
-        self.bitshift = bitshift
-        self.max_time = max_time
-        self.max_steps = int(max_time/2)  # Nyquist
+        self.motors = platform.motors
+        self.max_steps = int(MOVE_TICKS/2)  # Nyquist
         # inputs
-        self.coeff = Array(Signal(signed(32)) for _ in range(self.numb_coeff))
+        self.coeff = Array()
+        for _ in range(self.motors):
+            self.coeff.extend([Signal(signed(64)),
+                               Signal(signed(64)),
+                               Signal(signed(64))])
         self.start = Signal()
         # output
         self.busy = Signal()
         self.finished = Signal()
         self.totalsteps = Array(Signal(signed(self.max_steps.bit_length()+1))
-                                for _ in range(motors))
-        self.dir = Array(Signal() for _ in range(motors))
-        self.step = Array(Signal() for _ in range(motors))
+                                for _ in range(self.motors))
+        self.dir = Array(Signal() for _ in range(self.motors))
+        self.step = Array(Signal() for _ in range(self.motors))
 
     def elaborate(self, platform):
         m = Module()
         # pos
-        max_bits = (self.max_steps << self.bitshift).bit_length()
+        max_bits = (self.max_steps << BIT_SHIFT).bit_length()
         cntrs = Array(Signal(signed(max_bits+1))
-                      for _ in range(self.numb_coeff+self.motors))
+                      for _ in range(len(self.coeff)))
         assert max_bits <= 64
-        time = Signal(self.max_time.bit_length())
+        time = Signal(MOVE_TICKS.bit_length())
         if platform:
             steppers = [res for res in get_all_resources(platform, "stepper")]
         else:
@@ -178,9 +178,9 @@ class Polynomal(Elaboratable):
         # steps
         for motor in range(self.motors):
             m.d.comb += [self.step[motor].eq(
-                         cntrs[motor*self.order][self.bitshift]),
+                         cntrs[motor*self.order][BIT_SHIFT]),
                          self.totalsteps[motor].eq(
-                         cntrs[motor*self.order] >> (self.bitshift+1))]
+                         cntrs[motor*self.order] >> (BIT_SHIFT+1))]
         # directions
         counter_d = Array(Signal(signed(max_bits+1))
                           for _ in range(self.motors))
@@ -203,7 +203,7 @@ class Polynomal(Elaboratable):
                                  self.finished.eq(0)]
                     m.next = 'RUNNING'
             with m.State('RUNNING'):
-                with m.If(time < self.max_time):
+                with m.If(time < MOVE_TICKS):
                     m.d.sync += time.eq(time+1)
                     for motor in range(self.motors):
                         start = motor*self.order

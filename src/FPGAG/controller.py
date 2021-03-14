@@ -3,14 +3,14 @@ from gpiozero import LED
 
 from FPGAG.constants import (INSTRUCTIONS, COMMANDS, FREQ, STATUS_BIT,
                              MOVE_TICKS, TOTAL_BYTES)
-from FPGA.board import Firestarter
+from FPGAG.board import Firestarter
 
 
 class Host:
     'Class for sending instructions to core'
 
     def __init__(self, board=None):
-        if not board:
+        if board is None:
             self.board = Firestarter()
         else:
             self.board = board
