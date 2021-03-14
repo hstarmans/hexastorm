@@ -51,6 +51,7 @@ The default motor sampling frequency is 1 MHz.
 |---|---|---|
 | INSTRUCTION | 1 | type of instructions, here pin instruction
 | AUX | 3 | number of ticks in a move, cannot be larger than TICKS_MOVE, i.e. 10_000
+
 This allows one to set pins directy to a value. For example, turn on the laser or the prism motor.
 
 # Installation
