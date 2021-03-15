@@ -117,22 +117,11 @@ class TestParser(SPIGatewareTestCase):
         self.host.spi_exchange_data = self.spi_exchange_data
         yield self.dut.spi.cs.eq(0)
 
-    def write_command(self, data):
-        'convenience function for sending command to controller'
-        assert len(data) == WORD_BYTES+COMMAND_BYTES
-        read_data = yield from self.spi_exchange_data(data)
-        return unpack('!Q', read_data[1:])[0]
-
     @sync_test_case
     def test_writemoveinstruction(self):
         'write move instruction and verify FIFO is no longer empty'
         self.assertEqual((yield self.dut.empty), 1)
-        # write move instruction with data
-        bytes_sent = 0
-        while bytes_sent != self.platform.bytesinmove:
-            writedata = [COMMANDS.WRITE] + WORD_BYTES*[1]
-            bytes_sent += WORD_BYTES
-            _ = yield from self.spi_exchange_data(writedata)
+        yield from self.host.send_move([1000], [1], [2], [3])
         while (yield self.dut.empty) == 1:
             yield
         # Instruction ready
@@ -146,17 +135,11 @@ class TestParser(SPIGatewareTestCase):
     def test_memfull(self):
         'write move instruction until memory is full'
         self.assertEqual((yield self.dut.empty), 1)
-        self.assertEqual(self.platform.memdepth,
-                         (self.platform.bytesinmove/8)*2)
-        self.assertEqual(self.platform.bytesinmove, 8*3+8)
-        # write data
-        bytes_sent = 0
+        # platform memory is on default 2 move instructions
+        yield from self.host.send_move([1000], [1], [2], [3])
+        yield from self.host.send_move([1000], [1], [2], [3])
         writedata = [COMMANDS.WRITE]+[1]*WORD_BYTES
-        while bytes_sent < self.platform.bytesinmove*2:
-            bytes_sent += WORD_BYTES
-            read_data = yield from self.write_command(writedata)
-            self.assertEqual(read_data, 0)
-        read_data = yield from self.write_command(writedata)
+        read_data = yield from self.host.send_command(writedata)
         self.assertEqual(read_data, 1)
 
 

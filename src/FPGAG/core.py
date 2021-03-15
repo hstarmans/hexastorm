@@ -98,7 +98,7 @@ class SPIParser(Elaboratable):
                                   (bytesreceived != 0)):
                             m.next = 'WAIT_WORD'
                         with m.Else():
-                            # TODO: memfull check should only happen on start of transaction!
+                            # ensure memfull only passed if not accepted
                             m.d.sync += interface.word_to_send.eq(state)
                             m.next = 'WAIT_COMMAND'
                     with m.Elif(interface.command == COMMANDS.STATUS):

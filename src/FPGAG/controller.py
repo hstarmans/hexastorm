@@ -1,3 +1,5 @@
+from struct import unpack
+
 import numpy as np
 from gpiozero import LED
 
@@ -90,26 +92,34 @@ class Host:
 
         data -- data received from peripheral
         '''
-        return bool(bin(data[0])[STATE.FULL])
+        bits = "{:08b}".format(data)
+        return int(bits[STATE.FULL])
 
-    def send_move(self, data):
+    def send_command(self, data):
+        assert len(data) == WORD_BYTES+COMMAND_BYTES
+        read_data = yield from self.spi_exchange_data(data)
+        return unpack('!Q', read_data[1:])[0]
+
+    def send_move(self, ticks, a, b, c, iterations=100):
         '''send move instruction with data
 
+        data            -- coefficients for polynomal move
+        iterations      -- number of trials
         This method is blocking and keeps sending data
-        even axes has hit a switch
         '''
-        for i in range(0, len(data), WORD_BYTES+COMMAND_BYTES):
-            trials = 0
-            data_out = [255]
-            while self.memfull(data_out):
-                data_out = (yield from
-                            self.spi_exchange_data(data[i, i+TOTAL_BYTES]))
-                trials += 1
-                if trials > 100:
-                    raise Exception("Too many trials needed")
+        commands = self.move_commands(ticks, a, b, c)
+        trials = 0
+        data_out = 255
+        while self.memfull(data_out):
+            data_out = (yield from self.send_command(commands[0]))
+            trials += 1
+            if trials > iterations:
+                raise Exception("Too many trials needed")
+        for i in range(1, len(commands)):
+            yield from self.send_command(commands[i])
 
-    def move_data(self, ticks, a, b, c):
-        '''get data for move instruction with
+    def move_commands(self, ticks, a, b, c):
+        '''get list of commands for move instruction with
            [a,b,c] for ax+bx^2+cx^3
 
            ticks        -- ticks in move
@@ -118,13 +128,16 @@ class Host:
            postion      -- list with position in mm
         '''
         assert len(ticks) == len(a) == len(b) == len(c) == self.board.motors
+        write_byte = COMMANDS.WRITE.to_bytes(1, 'big')
+        move_byte = INSTRUCTIONS.MOVE.to_bytes(1, 'big')
+        commands = []
         for motor in range(self.board.motors):
-            data = [COMMANDS.WRITE, INSTRUCTIONS.MOVE, 0, 0, 0]
-            data += [ticks[motor].to_bytes(4, byteorder='big', signed=True)]
-            data += [a[motor].to_bytes(4, byteorder='big', signed=True)]
-            data += [b[motor].to_bytes(4, byteorder='big', signed=True)]
-            data += [c[motor].to_bytes(4, byteorder='big', signed=True)]
-        return data
+            commands += [write_byte + move_byte +
+                         ticks[motor].to_bytes(7, 'big')]
+            commands += [write_byte + a[motor].to_bytes(8, 'big', signed=True)]
+            commands += [write_byte + b[motor].to_bytes(8, 'big', signed=True)]
+            commands += [write_byte + c[motor].to_bytes(8, 'big', signed=True)]
+        return commands
 
     def spi_exchange_data(data):
         '''writes data to peripheral, returns reply'''

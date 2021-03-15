@@ -41,7 +41,7 @@ def getmovedct(motors):
     dct = MOVE_INSTRUCTION
     for i in range(motors):
         for j in range(DEGREE):
-            dct.update({f'C{i}{j}': 4})
+            dct.update({f'C{i}{j}': 8})
 
 # NOTE: following doesnt work due to bug
 # in pylint https://github.com/PyCQA/pylint/issues/3876
