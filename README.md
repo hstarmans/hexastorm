@@ -28,7 +28,7 @@ each instruction
 | data | number of bytes | description
 |---|---|---|
 | INSTRUCTION | 1 | type of instructions, here move instruction
-| TICKS | 3 | number of ticks in a move, cannot be larger than TICKS_MOVE, i.e. 10_000
+| TICKS | 7 | number of ticks in a move, cannot be larger than TICKS_MOVE, i.e. 10_000
 | C00 | 8 | motor 0, coeff 0
 | C01 | 8 | motor 0, coeff 1
 | C02 | 8 | motor 0, coeff 2
