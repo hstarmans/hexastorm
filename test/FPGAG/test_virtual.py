@@ -9,7 +9,7 @@ from FPGAG.controller import Host
 from FPGAG.core import Dispatcher, SPIParser, Polynomal
 from FPGAG.board import Firestarter, TestPlatform
 from FPGAG.constants import (COMMANDS, DEGREE, MOVE_TICKS, BIT_SHIFT,
-                             WORD_BYTES, COMMAND_BYTES, INSTRUCTIONS)
+                             WORD_BYTES, INSTRUCTIONS)
 
 
 class TestPolynomal(LunaGatewareTestCase):
