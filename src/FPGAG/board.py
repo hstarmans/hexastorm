@@ -12,7 +12,7 @@ from nmigen.vendor.lattice_ice40 import LatticeICE40Platform
 from nmigen_boards.resources import LEDResources
 from nmigen_boards.test.blinky import Blinky
 
-from FPGAG.constants import getbytesinmove
+from FPGAG.constants import getbytesinmove, WORD_BYTES
 from FPGAG.resources import StepperResource, StepperRecord
 
 
@@ -21,7 +21,7 @@ class TestPlatform:
     stepspermm = {'x': 400}
     motors = len(stepspermm.keys())
     bytesinmove = getbytesinmove(motors)
-    memdepth = ceil(bytesinmove/4)*2
+    memdepth = ceil(bytesinmove/WORD_BYTES)*2
     steppers = [StepperRecord()]
     aux = Signal(8)
 

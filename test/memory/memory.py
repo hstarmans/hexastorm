@@ -6,6 +6,7 @@ from nmigen import Elaboratable, Memory, Module, Signal
 from FPGAG.board import Firestarter
 from FPGAG.constants import MEMWIDTH, MEMDEPTH
 
+
 class Memtest(Elaboratable):
     def __init__(self):
         self.mem = Memory(width=MEMWIDTH, depth=MEMDEPTH)
@@ -20,7 +21,7 @@ class Memtest(Elaboratable):
         with m.Else():
             m.d.comb += led0.eq(1)
         timer = Signal(range(round(100E6)))
-        with m.If(timer>100):
+        with m.If(timer > 100):
             m.d.comb += rdport.addr.eq(100)
         with m.Else():
             m.d.comb += rdport.addr.eq(0)

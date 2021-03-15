@@ -10,7 +10,7 @@ from luna.gateware.interface.spi import SPICommandInterface, SPIBus
 from luna.gateware.memory import TransactionalizedFIFO
 
 from FPGAG.resources import get_all_resources
-from FPGAG.constants import (COMMAND_SIZE, WORD_SIZE, STATE, INSTRUCTIONS,
+from FPGAG.constants import (COMMAND_BYTES, WORD_BYTES, STATE, INSTRUCTIONS,
                              MEMWIDTH, COMMANDS, DEGREE, BIT_SHIFT,
                              MOVE_TICKS)
 
@@ -56,8 +56,8 @@ class SPIParser(Elaboratable):
         if self.platform:
             platform = self.platform
         spi = self.spi
-        interface = SPICommandInterface(command_size=COMMAND_SIZE,
-                                        word_size=WORD_SIZE)
+        interface = SPICommandInterface(command_size=COMMAND_BYTES*8,
+                                        word_size=WORD_BYTES*8)
         m.d.comb += interface.spi.connect(spi)
         m.submodules.interface = interface
         # Connect fifo
@@ -71,9 +71,10 @@ class SPIParser(Elaboratable):
                      fifo.read_en.eq(self.read_en),
                      self.empty.eq(fifo.empty)]
         # set state
-        state = Signal(COMMAND_SIZE)  # max is actually word_size
+        state = Signal(WORD_BYTES*8)
         m.d.sync += [state[STATE.FULL].eq(
-                     fifo.space_available < ceil(platform.bytesinmove/4)),
+                     fifo.space_available <
+                     ceil(platform.bytesinmove/WORD_BYTES)),
                      state[STATE.DISPATCHERROR].eq(self.dispatcherror)]
         # Parser
         bytesreceived = Signal(range(platform.bytesinmove+1))
@@ -97,19 +98,20 @@ class SPIParser(Elaboratable):
                                   (bytesreceived != 0)):
                             m.next = 'WAIT_WORD'
                         with m.Else():
+                            # TODO: memfull check should only happen on start of transaction!
+                            m.d.sync += interface.word_to_send.eq(state)
                             m.next = 'WAIT_COMMAND'
-                            m.d.sync += [interface.word_to_send.eq(state)]
                     with m.Elif(interface.command == COMMANDS.STATUS):
-                        m.d.sync += [interface.word_to_send.eq(state)]
+                        m.d.sync += interface.word_to_send.eq(state)
                         m.next = 'WAIT_COMMAND'
             with m.State('WAIT_WORD'):
                 with m.If(interface.word_complete):
-                    m.d.sync += [bytesreceived.eq(bytesreceived+4),
+                    m.d.sync += [bytesreceived.eq(bytesreceived+WORD_BYTES),
                                  fifo.write_en.eq(1),
                                  fifo.write_data.eq(interface.word_received)]
                     m.next = 'WRITE'
             with m.State('WRITE'):
-                m.d.sync += [fifo.write_en.eq(0)]
+                m.d.sync += fifo.write_en.eq(0)
                 m.next = 'WAIT_COMMAND'
                 with m.If(bytesreceived == platform.bytesinmove):
                     m.d.sync += [bytesreceived.eq(0),

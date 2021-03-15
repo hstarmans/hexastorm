@@ -9,7 +9,7 @@ from FPGAG.controller import Host
 from FPGAG.core import Dispatcher, SPIParser, Polynomal
 from FPGAG.board import Firestarter, TestPlatform
 from FPGAG.constants import (COMMANDS, DEGREE, MOVE_TICKS, BIT_SHIFT,
-                             WORD_SIZE, COMMAND_SIZE, INSTRUCTIONS)
+                             WORD_BYTES, COMMAND_BYTES, INSTRUCTIONS)
 
 
 class TestPolynomal(LunaGatewareTestCase):
@@ -18,7 +18,7 @@ class TestPolynomal(LunaGatewareTestCase):
     FRAGMENT_ARGUMENTS = {'platform': platform}
 
     def count_steps(self, motor):
-        '''counts steps in a move with direction'''
+        '''counts steps in a move taking direction into account'''
         count = 0
         while (yield self.dut.busy):
             old = (yield self.dut.step[motor])
@@ -31,9 +31,11 @@ class TestPolynomal(LunaGatewareTestCase):
         return count
 
     def steps_compute(self, steps):
-        '''computes count for a given number of step
+        '''compute count for a given number of steps
 
-        Shift is needed as two ticks per step is required
+        - steps
+
+        Shift is needed as two ticks per step are required
         You need to count slightly over the threshold. That is why
         +1 is added.
         '''
@@ -44,7 +46,7 @@ class TestPolynomal(LunaGatewareTestCase):
     def send_coefficients(self, a, b, c):
         '''send coefficients and pulse start
 
-        [a,b,c] for cx^3+bx^2+ax
+        - a,b,c  for cx^3+bx^2+ax
         '''
         coefs = [a, b, c]
         # load coefficients
@@ -69,7 +71,6 @@ class TestPolynomal(LunaGatewareTestCase):
 
         Smallest value required is defined by pure jerk move
         with 1 step.
-
         Test if jerk move can be executed with one step.
         '''
         steps = 1
@@ -86,10 +87,9 @@ class TestPolynomal(LunaGatewareTestCase):
     def test_move(self):
         '''Movement
 
-        Test forward and backward move with constant speed
-        supported in one motion.
-        The largest coefficient is determined by pure velocity
-        move with half time limit as steps.
+        Test forward and backward move with constant speed.
+        The largest constant in polynomal is determined by pure
+        velocity move with half time limit as steps.
         '''
         steps = round(0.4*MOVE_TICKS)
         a = round(self.steps_compute(steps)/MOVE_TICKS)
@@ -119,9 +119,9 @@ class TestParser(SPIGatewareTestCase):
 
     def write_command(self, data):
         'convenience function for sending command to controller'
-        assert len(data) == (WORD_SIZE+COMMAND_SIZE)/8
+        assert len(data) == WORD_BYTES+COMMAND_BYTES
         read_data = yield from self.spi_exchange_data(data)
-        return unpack('!I', read_data[1:])[0]
+        return unpack('!Q', read_data[1:])[0]
 
     @sync_test_case
     def test_writemoveinstruction(self):
@@ -130,8 +130,8 @@ class TestParser(SPIGatewareTestCase):
         # write move instruction with data
         bytes_sent = 0
         while bytes_sent != self.platform.bytesinmove:
-            writedata = [COMMANDS.WRITE, 1, 2, 3, 4]
-            bytes_sent += 4
+            writedata = [COMMANDS.WRITE] + WORD_BYTES*[1]
+            bytes_sent += WORD_BYTES
             _ = yield from self.spi_exchange_data(writedata)
         while (yield self.dut.empty) == 1:
             yield
@@ -139,18 +139,21 @@ class TestParser(SPIGatewareTestCase):
         self.assertEqual((yield self.dut.empty), 0)
         self.assertEqual((yield self.dut.fifo.space_available),
                          (self.platform.memdepth -
-                          self.platform.bytesinmove/(WORD_SIZE/8)
+                          self.platform.bytesinmove/WORD_BYTES
                           ))
 
     @sync_test_case
     def test_memfull(self):
-        'write GCODE until memory is full'
+        'write move instruction until memory is full'
         self.assertEqual((yield self.dut.empty), 1)
+        self.assertEqual(self.platform.memdepth,
+                         (self.platform.bytesinmove/8)*2)
+        self.assertEqual(self.platform.bytesinmove, 8*3+8)
         # write data
         bytes_sent = 0
-        writedata = [COMMANDS.WRITE, 1, 2, 3, 4]
+        writedata = [COMMANDS.WRITE]+[1]*WORD_BYTES
         while bytes_sent < self.platform.bytesinmove*2:
-            bytes_sent += 4
+            bytes_sent += WORD_BYTES
             read_data = yield from self.write_command(writedata)
             self.assertEqual(read_data, 0)
         read_data = yield from self.write_command(writedata)
@@ -206,7 +209,6 @@ class TestDispatcher(SPIGatewareTestCase):
     @sync_test_case
     def test_instructionreceipt(self):
         'verify command is processed correctly'
-        # TODO: you write in the wrong direction!
         writedata = [COMMANDS.WRITE, 0, 0,
                      int('10101010', 2), INSTRUCTIONS.MOVE]
         yield from self.spi_exchange_data(writedata)

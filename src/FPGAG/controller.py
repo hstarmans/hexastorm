@@ -1,8 +1,8 @@
 import numpy as np
 from gpiozero import LED
 
-from FPGAG.constants import (INSTRUCTIONS, COMMANDS, FREQ, STATUS_BIT,
-                             MOVE_TICKS, TOTAL_BYTES)
+from FPGAG.constants import (INSTRUCTIONS, COMMANDS, FREQ, STATE,
+                             MOVE_TICKS, WORD_BYTES, COMMAND_BYTES)
 from FPGAG.board import Firestarter
 
 
@@ -90,7 +90,7 @@ class Host:
 
         data -- data received from peripheral
         '''
-        return bool(bin(data[0])[STATUS_BIT.FULL])
+        return bool(bin(data[0])[STATE.FULL])
 
     def send_move(self, data):
         '''send move instruction with data
@@ -98,7 +98,7 @@ class Host:
         This method is blocking and keeps sending data
         even axes has hit a switch
         '''
-        for i in range(0, len(data), TOTAL_BYTES):
+        for i in range(0, len(data), WORD_BYTES+COMMAND_BYTES):
             trials = 0
             data_out = [255]
             while self.memfull(data_out):
