@@ -16,8 +16,11 @@ class TestPolynomal(LunaGatewareTestCase):
     FRAGMENT_UNDER_TEST = Polynomal
     FRAGMENT_ARGUMENTS = {'platform': platform}
 
+    def initialize_signals(self):
+        yield self.dut.ticklimit.eq(MOVE_TICKS)
+
     def count_steps(self, motor):
-        '''counts steps in a move taking direction into account'''
+        '''counts steps in accounting for direction'''
         count = 0
         while (yield self.dut.busy):
             old = (yield self.dut.step[motor])
@@ -32,7 +35,7 @@ class TestPolynomal(LunaGatewareTestCase):
     def steps_compute(self, steps):
         '''compute count for a given number of steps
 
-        - steps
+        steps  -- motor moves in small steps
 
         Shift is needed as two ticks per step are required
         You need to count slightly over the threshold. That is why
@@ -45,7 +48,7 @@ class TestPolynomal(LunaGatewareTestCase):
     def send_coefficients(self, a, b, c):
         '''send coefficients and pulse start
 
-        - a,b,c  for cx^3+bx^2+ax
+        a,b,c --  for cx^3+bx^2+ax
         '''
         coefs = [a, b, c]
         # load coefficients

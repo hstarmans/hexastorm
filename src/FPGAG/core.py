@@ -153,6 +153,7 @@ class Polynomal(Elaboratable):
                                Signal(signed(64)),
                                Signal(signed(64))])
         self.start = Signal()
+        self.ticklimit = Signal(MOVE_TICKS.bit_length())
         # output
         self.busy = Signal()
         self.finished = Signal()
@@ -168,12 +169,12 @@ class Polynomal(Elaboratable):
         cntrs = Array(Signal(signed(max_bits+1))
                       for _ in range(len(self.coeff)))
         assert max_bits <= 64
-        time = Signal(MOVE_TICKS.bit_length())
+        ticks = Signal(MOVE_TICKS.bit_length())
         if platform:
             steppers = [res for res in get_all_resources(platform, "stepper")]
         else:
             steppers = self.platform.steppers
-            self.time = time
+            self.ticks = ticks
             self.cntrs = cntrs
         for idx, stepper in enumerate(steppers):
             m.d.comb += [stepper.step.eq(self.step[idx]),
@@ -206,8 +207,8 @@ class Polynomal(Elaboratable):
                                  self.finished.eq(0)]
                     m.next = 'RUNNING'
             with m.State('RUNNING'):
-                with m.If(time < MOVE_TICKS):
-                    m.d.sync += time.eq(time+1)
+                with m.If(ticks < self.ticklimit):
+                    m.d.sync += ticks.eq(ticks+1)
                     for motor in range(self.motors):
                         start = motor*self.order
                         op3 = 3*2*self.coeff[start+2] + cntrs[start+2]
@@ -220,7 +221,7 @@ class Polynomal(Elaboratable):
                                      cntrs[start+1].eq(op2),
                                      cntrs[start].eq(op1)]
                 with m.Else():
-                    m.d.sync += [time.eq(0),
+                    m.d.sync += [ticks.eq(0),
                                  self.busy.eq(0),
                                  self.finished.eq(1)]
                     m.next = 'WAIT_START'
