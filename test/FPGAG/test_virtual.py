@@ -58,6 +58,18 @@ class TestPolynomal(LunaGatewareTestCase):
         yield from self.pulse(self.dut.start)
 
     @sync_test_case
+    def test_ticklimit(self):
+        ''' Test different upper tick limits'''
+        def limittest(limit):
+            yield self.dut.ticklimit.eq(limit)
+            yield from self.send_coefficients(1, 0, 0)
+            while (yield self.dut.busy):
+                yield
+            self.assertEqual((yield self.dut.cntrs[0]), limit)
+        yield from limittest(10)
+        yield from limittest(30)
+
+    @sync_test_case
     def test_calculation(self, a=2, b=3, c=1):
         ''' Test a simple relation e.g. cx^3+bx^2+ax '''
         yield from self.send_coefficients(a, b, c)
@@ -95,6 +107,7 @@ class TestPolynomal(LunaGatewareTestCase):
         '''
         steps = round(0.4*MOVE_TICKS)
         a = round(self.steps_compute(steps)/MOVE_TICKS)
+        # NOTE: refactor code clone
         yield from self.send_coefficients(a, 0, 0)
         count = (yield from self.count_steps(0))
         self.assertEqual(count, steps)
@@ -105,8 +118,8 @@ class TestPolynomal(LunaGatewareTestCase):
         count = (yield from self.count_steps(0))
         self.assertEqual(count, -steps)
         dut_count = (yield self.dut.cntrs[0])
-        self.assertEqual(dut_count >> BIT_SHIFT, 0)
-        self.assertEqual((yield self.dut.totalsteps[0]), 0)
+        self.assertEqual(dut_count >> BIT_SHIFT, -steps*2)
+        self.assertEqual((yield self.dut.totalsteps[0]), -steps)
 
 
 class TestParser(SPIGatewareTestCase):

@@ -153,7 +153,7 @@ class Polynomal(Elaboratable):
                                Signal(signed(64)),
                                Signal(signed(64))])
         self.start = Signal()
-        self.ticklimit = Signal(MOVE_TICKS.bit_length())
+        self.ticklimit = Signal(MOVE_TICKS.bit_length())  # above MOVE_TICKS might not work correctly
         # output
         self.busy = Signal()
         self.finished = Signal()
@@ -203,6 +203,9 @@ class Polynomal(Elaboratable):
                              self.finished.eq(0)]
             with m.State('WAIT_START'):
                 with m.If(self.start):
+                    for motor in range(self.motors):
+                        m.d.sync += [cntrs[motor*self.order].eq(0),
+                                     counter_d[motor].eq(0)]
                     m.d.sync += [self.busy.eq(1),
                                  self.finished.eq(0)]
                     m.next = 'RUNNING'
