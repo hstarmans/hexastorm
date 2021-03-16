@@ -162,7 +162,7 @@ class TestDispatcher(SPIGatewareTestCase):
 
     @sync_test_case
     def test_invalidwrite(self):
-        '''write with word which does not contain a valid instruction'''
+        '''write invalid instruction and verify error is raised'''
         command = [COMMANDS.WRITE] + [0]*WORD_BYTES
         for _ in range(DEGREE+1):
             yield from self.host.send_command(command)
