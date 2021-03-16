@@ -72,7 +72,8 @@ class SPIParser(Elaboratable):
                      self.empty.eq(fifo.empty)]
         # set state
         state = Signal(WORD_BYTES*8)
-        m.d.sync += [state[STATE.FULL].eq(
+        m.d.sync += [state[STATE.PARSING].eq(self.execute),
+                     state[STATE.FULL].eq(
                      fifo.space_available <
                      ceil(platform.bytesinmove/WORD_BYTES)),
                      state[STATE.DISPATCHERROR].eq(self.dispatcherror)]
@@ -262,7 +263,7 @@ class Dispatcher(Elaboratable):
         # Connect Polynomal Move module
         polynomal = Polynomal(self.platform)
         m.submodules.polynomal = polynomal
-        coeffcnt = Signal(range(len(polynomal.coeff)))
+        coeffcnt = Signal(2)
         # Busy signal
         busy = Signal()
         m.d.comb += busy.eq(polynomal.busy)
@@ -280,13 +281,14 @@ class Dispatcher(Elaboratable):
             # check which instruction we r handling
             with m.State('PARSEHEAD'):
                 with m.If(parser.read_data[:8] == INSTRUCTIONS.MOVE):
-                    if aux is not None:
-                        m.d.sync += aux.eq(parser.read_data[8:16])
+                    # NOTE: add ticks here
+                    # if aux is not None:
+                    #    m.d.sync += aux.eq(parser.read_data[8:16])
                     m.d.sync += [parser.read_en.eq(0),
                                  coeffcnt.eq(0)]
                     m.next = 'MOVE_POLYNOMAL'
                 with m.Else():
-                    # NOTE: system never recovers user must reset
+                    m.next = 'ERROR'
                     m.d.sync += parser.dispatcherror.eq(1)
             with m.State('MOVE_POLYNOMAL'):
                 with m.If(parser.read_en == 0):
@@ -303,6 +305,9 @@ class Dispatcher(Elaboratable):
                     m.d.sync += [polynomal.start.eq(1),
                                  parser.read_commit.eq(1),
                                  parser.read_en.eq(0)]
+            # NOTE: system never recovers user must reset
+            with m.State('ERROR'):
+                m.next = 'ERROR'
         return m
 
 
@@ -315,7 +320,9 @@ class Dispatcher(Elaboratable):
 #  -- Polynomal integrator --> determines position via integrating polynomen
 
 # TODO:
+#   -- connect modules & test
+#   -- move test and check count
+#   -- blocking behaviour during move
+#   -- homing test
 #   -- motor should be updated with certain freq
-#   -- connect modules
-#   -- homing
-#   -- you can now do too few steps in a move
+#   -- build test

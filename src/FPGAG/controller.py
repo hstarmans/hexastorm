@@ -19,6 +19,14 @@ class Host:
         self.potion = np.array([0]*board.motors)
 
     @property
+    def dispatcherror(self):
+        '''retrieves dispatch error status of FPGA via SPI'''
+        read_data = (yield from self.send_command([COMMANDS.STATUS] +
+                                                  WORD_BYTES*[0]))
+        bits = "{:08b}".format(read_data)
+        return int(bits[-STATE.DISPATCHERROR-1])
+
+    @property
     def enable_steppers(self):
         '''get status enables pin motors
 
@@ -44,6 +52,35 @@ class Host:
         else:
             enable.off()
             yield from self.spi_exchange_data([COMMANDS.DISABLE]+3*[0])
+
+    @property
+    def execution(self):
+        '''determine wether code in SRAM is dispatched
+
+        The dispachter on the FPGA can be on or off
+        '''
+        read_data = (yield from self.send_command([COMMANDS.STATUS] +
+                                                  WORD_BYTES*[0]))
+        bits = "{:08b}".format(read_data)
+        return int(bits[-STATE.PARSING-1])
+
+    def _executionsetter(self, val):
+        'not able to call execution with yield from'
+        assert type(val) == bool
+        command = []
+        if val:
+            command.append(COMMANDS.START)
+        else:
+            command.append(COMMANDS.STOP)
+        yield from self.send_command(command+WORD_BYTES*[0])
+
+    @execution.setter
+    def execution(self, val):
+        '''set dispatcher on or of
+
+        val -- True, dispatcher is enabled
+        '''
+        self._executionsetter(val)
 
     def home_axes(axes, speed):
         '''home given axes
@@ -111,12 +148,12 @@ class Host:
         trials = 0
         data_out = 255
         while self.memfull(data_out):
-            data_out = (yield from self.send_command(commands[0]))
+            data_out = (yield from self.send_command(commands.pop(0)))
             trials += 1
             if trials > iterations:
                 raise Exception("Too many trials needed")
-        for i in range(1, len(commands)):
-            yield from self.send_command(commands[i])
+        for command in commands:
+            yield from self.send_command(command)
 
     def move_commands(self, ticks, a, b, c):
         '''get list of commands for move instruction with
@@ -132,8 +169,8 @@ class Host:
         move_byte = INSTRUCTIONS.MOVE.to_bytes(1, 'big')
         commands = []
         for motor in range(self.board.motors):
-            commands += [write_byte + move_byte +
-                         ticks[motor].to_bytes(7, 'big')]
+            commands += [write_byte +
+                         ticks[motor].to_bytes(7, 'big') + move_byte]
             commands += [write_byte + a[motor].to_bytes(8, 'big', signed=True)]
             commands += [write_byte + b[motor].to_bytes(8, 'big', signed=True)]
             commands += [write_byte + c[motor].to_bytes(8, 'big', signed=True)]

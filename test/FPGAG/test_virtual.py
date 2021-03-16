@@ -1,5 +1,4 @@
 import unittest
-from struct import unpack
 
 from luna.gateware.interface.spi import SPIGatewareTestCase
 from luna.gateware.test.utils import sync_test_case
@@ -9,7 +8,7 @@ from FPGAG.controller import Host
 from FPGAG.core import Dispatcher, SPIParser, Polynomal
 from FPGAG.board import Firestarter, TestPlatform
 from FPGAG.constants import (COMMANDS, DEGREE, MOVE_TICKS, BIT_SHIFT,
-                             WORD_BYTES, INSTRUCTIONS)
+                             WORD_BYTES)
 
 
 class TestPolynomal(LunaGatewareTestCase):
@@ -132,6 +131,14 @@ class TestParser(SPIGatewareTestCase):
                           ))
 
     @sync_test_case
+    def test_enableparser(self):
+        '''enables SRAM parser via command and verifies status with
+        different command'''
+        yield from self.host._executionsetter(True)
+        self.assertEqual((yield self.dut.execute), 1)
+        self.assertEqual((yield from self.host.execution), True)
+
+    @sync_test_case
     def test_memfull(self):
         'write move instruction until memory is full'
         self.assertEqual((yield self.dut.empty), 1)
@@ -149,74 +156,44 @@ class TestDispatcher(SPIGatewareTestCase):
     FRAGMENT_ARGUMENTS = {'platform': platform}
 
     def initialize_signals(self):
+        self.host = Host(self.platform)
+        self.host.spi_exchange_data = self.spi_exchange_data
         yield self.dut.spi.cs.eq(0)
 
-    # NOTE REFACTOR
-    def write_instruction(self, data):
-        'convenience function for writing command to controller'
-        assert len(data) == (WORD_SIZE+COMMAND_SIZE)/8
-        read_data = yield from self.spi_exchange_data(data)
-        return unpack('!I', read_data[1:])[0]
-
     @sync_test_case
-    def test_invalidinstruction(self):
-        '''write invalid instruction and check flag is raised'''
-        # write command with invalid data
-        bytes_sent = 0
-        while bytes_sent != self.platform.bytesinmove:
-            writedata = [COMMANDS.WRITE, 0, 0, 0, 0]
-            bytes_sent += 4
-            yield from self.spi_exchange_data(writedata)
-        # wait for data to be committed
-        while (yield self.dut.parser.empty) == 1:
-            yield
+    def test_invalidwrite(self):
+        '''write with word which does not contain a valid instruction'''
+        command = [COMMANDS.WRITE] + [0]*WORD_BYTES
+        for _ in range(DEGREE+1):
+            yield from self.host.send_command(command)
         # enable dispatching of code
-        writedata = [COMMANDS.START, 0, 0, 0, 0]
-        yield from self.spi_exchange_data(writedata)
-        # data should now be prossed from sram and empty become 1
+        yield from self.host._executionsetter(True)
+        # data should now be processed from sram and empty become 1
         while (yield self.dut.parser.empty) == 0:
             yield
         # 2 clocks needed for error to propagate
         yield
         yield
-        self.assertEqual((yield self.dut.parser.dispatcherror), 1)
-        # let's request the status
-        bytes_sent = 0
-        while bytes_sent != self.platform.bytesinmove:
-            writedata = [COMMANDS.STATUS, 0, 0, 0, 0]
-            bytes_sent += 4
-            read_data = yield from self.write_instruction(writedata)
-            # TODO: provide parser for status
-            self.assertEqual(read_data, 2)
+        self.assertEqual((yield self.dut.parser.dispatcherror), True)
 
     @sync_test_case
-    def test_instructionreceipt(self):
-        'verify command is processed correctly'
-        writedata = [COMMANDS.WRITE, 0, 0,
-                     int('10101010', 2), INSTRUCTIONS.MOVE]
-        yield from self.spi_exchange_data(writedata)
-        # write coefficients for each motor
-        for motor in range(self.platform.motors):
-            for coef in range(DEGREE):
-                writedata = [COMMANDS.WRITE, 0,
-                             0, 0, motor+coef]
-                yield from self.spi_exchange_data(writedata)
+    def test_moveinstructionreceipt(self):
+        'verify move instruction is parsed correctly'
+        yield from self.host.send_move([0], [1], [2], [3])
         # wait till instruction is received
         while (yield self.dut.parser.empty) == 1:
             yield
         yield
-        # enable dispatching of buffered code
-        writedata = [COMMANDS.START, 0, 0, 0, 0]
-        _ = yield from self.spi_exchange_data(writedata)
+        # enable dispatching of code
+        yield from self.host._executionsetter(True)
         # data should now be parsed and empty become 1
         while (yield self.dut.parser.empty) == 0:
             yield
         # confirm receipt
-        self.assertEqual((yield self.dut.aux), int('10101010', 2))
         for motor in range(self.platform.motors):
             for coef in range(DEGREE):
                 indx = motor*(DEGREE)+coef
-                self.assertEqual((yield self.dut.coeff[indx]), motor+coef)
+                self.assertEqual((yield self.dut.coeff[indx]), motor+coef+1)
 
 
 class TestBuild(unittest.TestCase):
