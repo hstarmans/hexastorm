@@ -1,6 +1,6 @@
 from math import ceil
 
-from nmigen import Signal, Elaboratable, signed
+from nmigen import Signal, Elaboratable, signed, Cat
 from nmigen.build.res import ResourceError
 from nmigen import Module
 from nmigen.hdl.mem import Array
@@ -25,12 +25,13 @@ class SPIParser(Elaboratable):
       write  -- write instruction to FIFO or report memory is full
 
     I/O signals:
-        I: dispatcherror  -- error while processing stored command from spi
-        O: execute        -- start processing gcode
         I/O: Spibus       -- spi bus connected to peripheral
-        O: read_data      -- read data from transactionalizedfifo
+        I: pin state      -- state of certain pins
         I: read_commit    -- finalize read transactionalizedfifo
         I: read_en        -- enable read transactionalizedfifo
+        I: dispatcherror  -- error while processing stored command from spi
+        O: execute        -- start processing gcode
+        O: read_data      -- read data from transactionalizedfifo
         O: empty          -- transactionalizedfifo is empty
     """
     def __init__(self, platform=None, top=False):
@@ -39,12 +40,14 @@ class SPIParser(Elaboratable):
         """
         self.platform = platform
         self.top = top
-        self.dispatcherror = Signal()
-        self.execute = Signal()
+
         self.spi = SPIBus()
-        self.read_data = Signal(MEMWIDTH)
+        self.pinstate = Signal(8)
         self.read_commit = Signal()
         self.read_en = Signal()
+        self.dispatcherror = Signal()
+        self.execute = Signal()
+        self.read_data = Signal(MEMWIDTH)
         self.empty = Signal()
 
     def elaborate(self, platform):
@@ -60,7 +63,7 @@ class SPIParser(Elaboratable):
                                         word_size=WORD_BYTES*8)
         m.d.comb += interface.spi.connect(spi)
         m.submodules.interface = interface
-        # Connect fifo
+        # FIFO connection
         fifo = TransactionalizedFIFO(width=MEMWIDTH,
                                      depth=platform.memdepth)
         if platform.name == 'Test':
@@ -70,8 +73,8 @@ class SPIParser(Elaboratable):
                      fifo.read_commit.eq(self.read_commit),
                      fifo.read_en.eq(self.read_en),
                      self.empty.eq(fifo.empty)]
-        # set state
-        state = Signal(WORD_BYTES*8)
+        # Peripheral state
+        state = Signal(8)
         m.d.sync += [state[STATE.PARSING].eq(self.execute),
                      state[STATE.FULL].eq(
                      fifo.space_available <
@@ -100,10 +103,14 @@ class SPIParser(Elaboratable):
                             m.next = 'WAIT_WORD'
                         with m.Else():
                             # ensure memfull only passed if not accepted
+                            # memfull is already triggered during the last
+                            # which fills the memory
                             m.d.sync += interface.word_to_send.eq(state)
                             m.next = 'WAIT_COMMAND'
-                    with m.Elif(interface.command == COMMANDS.STATUS):
-                        m.d.sync += interface.word_to_send.eq(state)
+                    with m.Elif(interface.command == COMMANDS.READ):
+                        m.d.sync += interface.word_to_send.eq(Cat(state,
+                                                                  self.pinstate
+                                                                  ))
                         m.next = 'WAIT_COMMAND'
             with m.State('WAIT_WORD'):
                 with m.If(interface.word_complete):

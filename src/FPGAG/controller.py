@@ -18,12 +18,25 @@ class Host:
             self.board = board
         self.potion = np.array([0]*board.motors)
 
+    def _read_state(self):
+        '''reads the state and returns bits'''
+        read_data = (yield from self.send_command([COMMANDS.READ] +
+                                                  WORD_BYTES*[0]))
+        return "{:08b}".format(read_data)
+
+    @property
+    def pinstate(self):
+        '''retrieves pin state as dictionary'''
+        bits = (yield from self._read_state())
+        dct = {'x': int(bits[0]),
+               'y': int(bits[1]),
+               'z': int(bits[2])}
+        return dct
+
     @property
     def dispatcherror(self):
         '''retrieves dispatch error status of FPGA via SPI'''
-        read_data = (yield from self.send_command([COMMANDS.STATUS] +
-                                                  WORD_BYTES*[0]))
-        bits = "{:08b}".format(read_data)
+        bits = self._read_state()
         return int(bits[-STATE.DISPATCHERROR-1])
 
     @property
@@ -59,9 +72,7 @@ class Host:
 
         The dispachter on the FPGA can be on or off
         '''
-        read_data = (yield from self.send_command([COMMANDS.STATUS] +
-                                                  WORD_BYTES*[0]))
-        bits = "{:08b}".format(read_data)
+        bits = self._read_state()
         return int(bits[-STATE.PARSING-1])
 
     def _executionsetter(self, val):

@@ -5,7 +5,7 @@ Constants are more related to the actual implementation on the FPGA.
 """
 from collections import namedtuple
 
-COMMANDS = namedtuple('COMMANDS', ['EMPTY', 'WRITE', 'STATUS',
+COMMANDS = namedtuple('COMMANDS', ['EMPTY', 'WRITE', 'READ',
                                    'START', 'STOP'],
                       defaults=range(5))()
 INSTRUCTIONS = namedtuple('INSTRUCTIONS', ['MOVE'], defaults=[1])()

@@ -145,6 +145,19 @@ class TestParser(SPIGatewareTestCase):
                           ))
 
     @sync_test_case
+    def test_readpinstate(self):
+        '''retrieve pin state'''
+        dct = (yield from self.host.pinstate)
+        dct['x'] = 1
+        dct['z'] = 1
+        bitlist = dct.values()
+        b = int("".join(str(i) for i in bitlist), 2)
+        yield self.dut.pinstate.eq(b)
+        yield
+        newdct = (yield from self.host.pinstate)
+        self.assertDictEqual(dct, newdct)
+
+    @sync_test_case
     def test_enableparser(self):
         '''enables SRAM parser via command and verifies status with
         different command'''
