@@ -12,7 +12,7 @@ Typically, the word received by the host is empty unless the memory is full or a
 The following commands are possible;
 | command | reply |
 |---|---|
-| READ | send back the state of the peripheral and the settings of certain pins|
+| READ | send back the state of the peripheral and the settings of certain pins |
 | START | enable execution of instructions stored in SRAM |
 | STOP | halt execution of instructions stored in SRAM |
 | WRITE | sent over an instruction and store it in SRAM |
@@ -49,11 +49,11 @@ max speed is 3.125 m/s with an oscillator frequency of 1 MHz.
 If other properties are desired, alter max_ticks per step, bit_length or motor sampling frequency.
 The default motor sampling frequency is 1 MHz.
 
-## Pin write instruction
+## Pin instruction
 | data | number of bytes | description
 |---|---|---|
 | INSTRUCTION | 1 | type of instructions, here pin instruction
-| AUX | 7 | number of ticks in a move, cannot be larger than TICKS_MOVE, i.e. 10_000
+| AUX | 7 | pins to set equal to 1 or 0
 
 A user can read but not write directly to pins. This ensures that the host
 can establish precedence between instructions.
