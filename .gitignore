@@ -5,6 +5,10 @@
 *.vcd
 build*
 
+# GTKWave
+*.gtkw
+*.vcd
+
 # Optical camera images
 tests/images*
 
