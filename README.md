@@ -18,7 +18,7 @@ The following commands are possible;
 | WRITE | sent over an instruction and store it in SRAM |
 
 
-# WRITE
+## Write
 A write commmand is followed by an instruction which is placed in the SRAM.
 If the dispatcher is enabled, these instructions are carried out unless an error is raised..
 A word can often not store all information for an instruction. So an instruction 
@@ -27,7 +27,7 @@ If prior to the sequence, the memory is already full or there is a parsing error
 If the reply is zero, the peripheral is operating normally. The information to be sent over is indicated for
 each instruction
 
-## Move instruction
+### Move instruction
 | data | number of bytes | description
 |---|---|---|
 | INSTRUCTION | 1 | type of instructions, here move instruction
@@ -49,7 +49,7 @@ max speed is 3.125 m/s with an oscillator frequency of 1 MHz.
 If other properties are desired, alter max_ticks per step, bit_length or motor sampling frequency.
 The default motor sampling frequency is 1 MHz.
 
-## Pin instruction
+### Pin instruction
 | data | number of bytes | description
 |---|---|---|
 | INSTRUCTION | 1 | type of instructions, here pin instruction
