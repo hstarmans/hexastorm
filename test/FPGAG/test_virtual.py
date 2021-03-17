@@ -105,21 +105,19 @@ class TestPolynomal(LunaGatewareTestCase):
         The largest constant in polynomal is determined by pure
         velocity move with half time limit as steps.
         '''
+        def do_move(steps):
+            # NOTE: (a = s/t) != -1*(-s/t)
+            #       might be due to rounding and bitshift
+            a = round(self.steps_compute(steps)/MOVE_TICKS)
+            yield from self.send_coefficients(a, 0, 0)
+            count = (yield from self.count_steps(0))
+            self.assertEqual(count, steps)
+            dut_count = (yield self.dut.cntrs[0])
+            self.assertEqual(dut_count >> BIT_SHIFT, steps*2)
+            self.assertEqual((yield self.dut.totalsteps[0]), steps)
         steps = round(0.4*MOVE_TICKS)
-        a = round(self.steps_compute(steps)/MOVE_TICKS)
-        # NOTE: refactor code clone
-        yield from self.send_coefficients(a, 0, 0)
-        count = (yield from self.count_steps(0))
-        self.assertEqual(count, steps)
-        dut_count = (yield self.dut.cntrs[0])
-        self.assertEqual(dut_count >> BIT_SHIFT, steps*2)
-        self.assertEqual((yield self.dut.totalsteps[0]), steps)
-        yield from self.send_coefficients(-a, 0, 0)
-        count = (yield from self.count_steps(0))
-        self.assertEqual(count, -steps)
-        dut_count = (yield self.dut.cntrs[0])
-        self.assertEqual(dut_count >> BIT_SHIFT, -steps*2)
-        self.assertEqual((yield self.dut.totalsteps[0]), -steps)
+        yield from do_move(steps)
+        yield from do_move(-steps)
 
 
 class TestParser(SPIGatewareTestCase):

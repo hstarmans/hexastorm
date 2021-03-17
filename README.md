@@ -61,6 +61,14 @@ export PATH=/home/pi/.local/bin:$PATH
 export PATH=/home/pi/.apio/packages/toolchain-yosys/bin:$PATH
 export PATH=/home/pi/.apio/packages/toolchain-ice40/bin:$PATH
 ``` 
+Code partially depends on Luna. Firstarter board can be selected via
+```
+export LUNA_PLATFORM="FPGAG.board:Firestarter"
+```
+Signal traces for GTKWave can be generated via;
+```
+export GENERATE_VCDS=1
+```
 
 # Limitations
 Add maximum-length linear-feedback shift register sequence and CRC check.

@@ -153,7 +153,7 @@ class Polynomal(Elaboratable):
                                Signal(signed(64)),
                                Signal(signed(64))])
         self.start = Signal()
-        self.ticklimit = Signal(MOVE_TICKS.bit_length())  # above MOVE_TICKS might not work correctly
+        self.ticklimit = Signal(MOVE_TICKS.bit_length())
         # output
         self.busy = Signal()
         self.finished = Signal()
