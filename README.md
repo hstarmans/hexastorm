@@ -5,19 +5,22 @@ This is to combine prism scanner with other techniques.
 
 # Brief Description
 The controller sends over a command with a word to the peripheral which updates the motor state.
-The command is 8 bits long and the word 32 bits.
+The command is 8 bits long and the word 32 bits. Only for write commands, word is not empty.
+Typically, the word received by the host is empty unless the memory is full or a read command is issued.
 
 # Commands
 The following commands are possible;
 | command | reply |
 |---|---|
-| STATUS | send back the status of the peripheral|
+| READ | send back the state of the peripheral and the settings of certain pins|
 | START | enable execution of instructions stored in SRAM |
 | STOP | halt execution of instructions stored in SRAM |
 | WRITE | sent over an instruction and store it in SRAM |
 
 
-# Instructions
+# WRITE
+A write commmand is followed by an instruction which is placed in the SRAM.
+If the dispatcher is enabled, these instructions are carried out unless an error is raised..
 A word can often not store all information for an instruction. So an instruction 
 consists out of multiple commands and words in series.
 If prior to the sequence, the memory is already full or there is a parsing error, a status word is sent back.
@@ -46,13 +49,14 @@ max speed is 3.125 m/s with an oscillator frequency of 1 MHz.
 If other properties are desired, alter max_ticks per step, bit_length or motor sampling frequency.
 The default motor sampling frequency is 1 MHz.
 
-## Pin instruction
+## Pin write instruction
 | data | number of bytes | description
 |---|---|---|
 | INSTRUCTION | 1 | type of instructions, here pin instruction
-| AUX | 3 | number of ticks in a move, cannot be larger than TICKS_MOVE, i.e. 10_000
+| AUX | 7 | number of ticks in a move, cannot be larger than TICKS_MOVE, i.e. 10_000
 
-This allows one to set pins directy to a value. For example, turn on the laser or the prism motor.
+A user can read but not write directly to pins. This ensures that the host
+can establish precedence between instructions.
 
 # Installation
 Although deprecated tools are installed via apio;
