@@ -214,9 +214,9 @@ class TestDispatcher(SPIGatewareTestCase):
         self.assertEqual((yield self.dut.parser.dispatcherror), True)
 
     @sync_test_case
-    def test_moveinstructionreceipt(self):
-        'verify move instruction is parsed correctly'
-        yield from self.host.send_move([0], [1], [2], [3])
+    def test_movereceipt(self, ticks=10_000, a=1, b=2, c=3):
+        'verify move instruction send over with send_move'
+        yield from self.host.send_move([ticks], [a], [b], [c])
         # wait till instruction is received
         while (yield self.dut.parser.empty) == 1:
             yield
@@ -226,11 +226,17 @@ class TestDispatcher(SPIGatewareTestCase):
         # data should now be parsed and empty become 1
         while (yield self.dut.parser.empty) == 0:
             yield
-        # confirm receipt
+        # confirm receipt tick limit and coefficients
+        self.assertEqual((yield self.dut.pol.ticklimit), 10_000)
         for motor in range(self.platform.motors):
             for coef in range(DEGREE):
                 indx = motor*(DEGREE)+coef
-                self.assertEqual((yield self.dut.coeff[indx]), motor+coef+1)
+                self.assertEqual((yield self.dut.pol.coeff[indx]),
+                                 motor+coef+1)
+        while (yield self.dut.pol.busy):
+            yield
+        self.assertEqual((yield self.dut.pol.cntrs[0]), a*ticks
+                         + b*pow(ticks, 2)+c*pow(ticks, 3))
 
 
 class TestBuild(unittest.TestCase):

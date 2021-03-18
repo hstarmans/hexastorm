@@ -292,7 +292,7 @@ class Dispatcher(Elaboratable):
         m.d.comb += busy.eq(polynomal.busy)
         if platform.name == 'Test':
             self.parser = parser
-            self.coeff = polynomal.coeff
+            self.pol = polynomal
         with m.FSM(reset='RESET', name='dispatcher'):
             with m.State('RESET'):
                 m.next = 'WAIT_INSTRUCTION'
@@ -304,10 +304,8 @@ class Dispatcher(Elaboratable):
             # check which instruction we r handling
             with m.State('PARSEHEAD'):
                 with m.If(parser.read_data[:8] == INSTRUCTIONS.MOVE):
-                    # NOTE: add ticks here
-                    # if aux is not None:
-                    #    m.d.sync += aux.eq(parser.read_data[8:16])
-                    m.d.sync += [parser.read_en.eq(0),
+                    m.d.sync += [polynomal.ticklimit.eq(parser.read_data[8:]),
+                                 parser.read_en.eq(0),
                                  coeffcnt.eq(0)]
                     m.next = 'MOVE_POLYNOMAL'
                 with m.Else():
@@ -340,13 +338,17 @@ class Dispatcher(Elaboratable):
 #  -- transactionalized FIFO
 #  -- SPI parser (basically an extension of SPI command interface)
 #  -- Dispatcher --> dispatches signals to actual hardware
-#  -- Polynomal integrator --> determines position via integrating polynomen
+#  -- Polynomal integrator --> determines position via integrating counters
 
 # TODO:
-#   -- move with full module, check step count
-#   -- execute multiple moves and verify subsequent moves are correctly added
+#   -- execute point to point move which consists out of 2 instructions
+#        verify subsequent moves are correctly added and can be received by "host"
+#   -- implement a test for the homing procedure
+
+#   -- build test
+#   -- configure stepper drivers of motor
+#   -- do move on real hardware
 
 #   -- simulate blocking due to full memory during a move
 #   -- verify homing procedure of controller
 #   -- motor should be updated with certain freq
-#   -- build test
