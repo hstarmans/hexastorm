@@ -3,7 +3,7 @@ from struct import unpack
 import numpy as np
 from gpiozero import LED
 
-from FPGAG.constants import (INSTRUCTIONS, COMMANDS, FREQ, STATE,
+from FPGAG.constants import (INSTRUCTIONS, COMMANDS, FREQ, STATE, BIT_SHIFT,
                              MOVE_TICKS, WORD_BYTES, COMMAND_BYTES)
 from FPGAG.board import Firestarter
 
@@ -111,8 +111,7 @@ class Host:
         '''
         pass
 
-    def gotopoint(self, position, absolute=True,
-                  speed=None):
+    def gotopoint(self, position, speed, absolute=True):
         '''move steppers to point with constant speed
 
         postion      -- list with coordinate or distance in mm
@@ -123,13 +122,21 @@ class Host:
         if speed is not None:
             assert len(speed) == self.board.motors
         else:
-            speed = np.array([10, 10, 10])
+            speed = [10]*self.board.motors
+
         if absolute:
-            dist = np.array([position]) - self.position
+            dist = np.array(position) - np.array(self.position)
         else:
             dist = np.array([position])
+        speed = np.array(speed)
         t = dist/speed
-        ticks = t*FREQ
+        ticks = round(t*FREQ)
+
+        # mm -> steps
+        steps = speed*np.array(self.platform.stepspermm.values())
+        # steps -> count
+        cnts = (steps << (1+BIT_SHIFT))+(1 << (BIT_SHIFT-1))
+        a = round(cnts/ticks)
 
         def get_ticks(x):
             if x >= MOVE_TICKS:
@@ -137,13 +144,19 @@ class Host:
             else:
                 return x
         get_ticks_v = np.vectorize(get_ticks)
-        while ticks != np.array([0, 0, 0]):
+
+        yield from self._executionsetter(True)
+        while ticks.sum() > 0:
             ticks_move = get_ticks_v(ticks)
-            ticks = ticks - MOVE_TICKS
+            ticks -= MOVE_TICKS
             ticks[ticks < 0] = 0
-            data = self.move_data(ticks_move.to_list(), speed.to_list(),
-                                  [0]*3, [0]*3)
+            data = self.move_data(ticks_move.to_list(),
+                                  a.to_list(),
+                                  [0]*3,
+                                  [0]*3)
             yield from self.send_move(data)
+
+        self._positions = self._positions + dist
 
     def memfull(self, data):
         '''check if memory is full
@@ -158,11 +171,11 @@ class Host:
         read_data = yield from self.spi_exchange_data(data)
         return unpack(format, read_data[1:])[0]
 
-    def send_move(self, ticks, a, b, c, iterations=100):
+    def send_move(self, ticks, a, b, c, maxtrials=100):
         '''send move instruction with data
 
         data            -- coefficients for polynomal move
-        iterations      -- number of trials
+        maxtrials       -- max number of communcation trials
         This method is blocking and keeps sending data
         '''
         commands = self.move_commands(ticks, a, b, c)
@@ -171,8 +184,9 @@ class Host:
         while self.memfull(data_out):
             data_out = (yield from self.send_command(commands.pop(0)))
             trials += 1
-            if trials > iterations:
-                raise Exception("Too many trials needed")
+            # NOTE: check parser is enabled
+            if trials > maxtrials:
+                raise Exception("Too many trials needed, FPGA seems busy")
         for command in commands:
             yield from self.send_command(command)
 

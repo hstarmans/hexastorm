@@ -341,6 +341,7 @@ class Dispatcher(Elaboratable):
 #  -- Polynomal integrator --> determines position via integrating counters
 
 # TODO:
+#   -- positions if retrieved need back conversion
 #   -- execute point to point move which consists out of 2 instructions
 #        verify subsequent moves are correctly added and can be received by "host"
 #   -- implement a test for the homing procedure

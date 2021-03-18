@@ -42,8 +42,7 @@ class TestPolynomal(LunaGatewareTestCase):
         You need to count slightly over the threshold. That is why
         +1 is added.
         '''
-        steps = steps << 1
-        count = (steps << BIT_SHIFT)+(1 << (BIT_SHIFT-1))
+        count = (steps << (1+BIT_SHIFT))+(1 << (BIT_SHIFT-1))
         return count
 
     def send_coefficients(self, a, b, c):
@@ -218,7 +217,7 @@ class TestDispatcher(SPIGatewareTestCase):
         'verify move instruction send over with send_move'
         yield from self.host.send_move([ticks], [a], [b], [c])
         # wait till instruction is received
-        while (yield self.dut.parser.empty) == 1:
+        while (yield self.dut.parser.empty):
             yield
         yield
         # enable dispatching of code
