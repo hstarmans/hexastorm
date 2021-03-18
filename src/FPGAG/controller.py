@@ -16,13 +16,23 @@ class Host:
             self.board = Firestarter()
         else:
             self.board = board
-        self.potion = np.array([0]*board.motors)
+        self._positions = [0]*board.motors
 
     def _read_state(self):
         '''reads the state and returns bits'''
         read_data = (yield from self.send_command([COMMANDS.READ] +
                                                   WORD_BYTES*[0]))
         return "{:08b}".format(read_data)
+
+    @property
+    def positions(self):
+        '''retrieves and updates position'''
+        for i in range(self.board.motors):
+            read_data = (yield from self.send_command([COMMANDS.POSITION] +
+                                                      WORD_BYTES*[0],
+                                                      format='!q'))
+            self._positions[i] = read_data
+        return self._positions
 
     @property
     def pinstate(self):
@@ -143,10 +153,10 @@ class Host:
         bits = "{:08b}".format(data)
         return int(bits[STATE.FULL])
 
-    def send_command(self, data):
+    def send_command(self, data, format='!Q'):
         assert len(data) == WORD_BYTES+COMMAND_BYTES
         read_data = yield from self.spi_exchange_data(data)
-        return unpack('!Q', read_data[1:])[0]
+        return unpack(format, read_data[1:])[0]
 
     def send_move(self, ticks, a, b, c, iterations=100):
         '''send move instruction with data

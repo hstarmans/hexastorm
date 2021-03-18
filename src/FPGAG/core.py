@@ -26,6 +26,7 @@ class SPIParser(Elaboratable):
 
     I/O signals:
         I/O: Spibus       -- spi bus connected to peripheral
+        I: positions      -- positions of stepper motors
         I: pin state      -- state of certain pins
         I: read_commit    -- finalize read transactionalizedfifo
         I: read_en        -- enable read transactionalizedfifo
@@ -42,6 +43,8 @@ class SPIParser(Elaboratable):
         self.top = top
 
         self.spi = SPIBus()
+        self.positions = Array(Signal(signed(64))
+                               for _ in range(platform.motors))
         self.pinstate = Signal(8)
         self.read_commit = Signal()
         self.read_en = Signal()
@@ -81,6 +84,7 @@ class SPIParser(Elaboratable):
                      ceil(platform.bytesinmove/WORD_BYTES)),
                      state[STATE.DISPATCHERROR].eq(self.dispatcherror)]
         # Parser
+        mtrcntr = Signal(range(platform.motors))
         bytesreceived = Signal(range(platform.bytesinmove+1))
         with m.FSM(reset='RESET', name='parser'):
             with m.State('RESET'):
@@ -111,6 +115,14 @@ class SPIParser(Elaboratable):
                         m.d.sync += interface.word_to_send.eq(Cat(state,
                                                                   self.pinstate
                                                                   ))
+                        m.next = 'WAIT_COMMAND'
+                    with m.Elif(interface.command == COMMANDS.POSITION):
+                        with m.If(mtrcntr < platform.motors):
+                            m.d.sync += mtrcntr.eq(mtrcntr+1)
+                        with m.Else():
+                            m.d.sync += mtrcntr.eq(0)
+                        m.d.sync += interface.word_to_send.eq(
+                                                self.positions[mtrcntr])
                         m.next = 'WAIT_COMMAND'
             with m.State('WAIT_WORD'):
                 with m.If(interface.word_complete):
@@ -331,9 +343,10 @@ class Dispatcher(Elaboratable):
 #  -- Polynomal integrator --> determines position via integrating polynomen
 
 # TODO:
-#   -- connect modules & test
-#   -- move test and check count
-#   -- blocking behaviour during move
-#   -- homing test
+#   -- move with full module, check step count
+#   -- execute multiple moves and verify subsequent moves are correctly added
+
+#   -- simulate blocking due to full memory during a move
+#   -- verify homing procedure of controller
 #   -- motor should be updated with certain freq
 #   -- build test

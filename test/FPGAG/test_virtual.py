@@ -1,4 +1,5 @@
 import unittest
+from random import randint
 
 from luna.gateware.interface.spi import SPIGatewareTestCase
 from luna.gateware.test.utils import sync_test_case
@@ -129,6 +130,15 @@ class TestParser(SPIGatewareTestCase):
         self.host = Host(self.platform)
         self.host.spi_exchange_data = self.spi_exchange_data
         yield self.dut.spi.cs.eq(0)
+
+    @sync_test_case
+    def test_getposition(self):
+        positions = [randint(-2000, 2000) for _ in range(self.platform.motors)]
+        for idx, pos in enumerate(self.dut.positions):
+            yield pos.eq(positions[idx])
+        lst = (yield from self.host.positions)
+        self.assertListEqual(list(lst),
+                             positions)
 
     @sync_test_case
     def test_writemoveinstruction(self):

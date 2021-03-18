@@ -12,7 +12,8 @@ Typically, the word received by the host is empty unless the memory is full or a
 The following commands are possible;
 | command | reply |
 |---|---|
-| READ | send back the state of the peripheral and the settings of certain pins |
+| POSITION | get position of all motors |
+| READ | get state of the peripheral and settings of certain pins |
 | START | enable execution of instructions stored in SRAM |
 | STOP | halt execution of instructions stored in SRAM |
 | WRITE | sent over an instruction and store it in SRAM |
