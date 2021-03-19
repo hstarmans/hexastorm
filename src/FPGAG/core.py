@@ -43,6 +43,7 @@ class SPIParser(Elaboratable):
         self.top = top
 
         self.spi = SPIBus()
+        # TODO: rename to position
         self.positions = Array(Signal(signed(64))
                                for _ in range(platform.motors))
         self.pinstate = Signal(8)
@@ -221,6 +222,7 @@ class Polynomal(Elaboratable):
                 m.d.sync += [self.busy.eq(0),
                              self.finished.eq(0)]
             with m.State('WAIT_START'):
+                m.d.sync += self.finished.eq(0)
                 with m.If(self.start):
                     for motor in range(self.motors):
                         m.d.sync += [cntrs[motor*self.order].eq(0),
@@ -281,6 +283,9 @@ class Dispatcher(Elaboratable):
             self.aux = aux
         # Connect Parser
         parser = SPIParser(self.platform)
+        # TODO: remove
+        self.parser = parser
+
         m.submodules.parser = parser
         m.d.comb += parser.spi.connect(spi)
         # Connect Polynomal Move module
@@ -290,6 +295,13 @@ class Dispatcher(Elaboratable):
         # Busy signal
         busy = Signal()
         m.d.comb += busy.eq(polynomal.busy)
+
+        # TODO: this will not work if they operate at different clock speeds
+        # position adder
+        with m.If(polynomal.finished):
+            for idx, position in enumerate(parser.positions):
+                m.d.sync += position.eq(position+polynomal.totalsteps[idx])
+
         if platform.name == 'Test':
             self.parser = parser
             self.pol = polynomal

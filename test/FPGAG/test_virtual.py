@@ -1,6 +1,7 @@
 import unittest
 from random import randint
 
+import numpy as np
 from luna.gateware.interface.spi import SPIGatewareTestCase
 from luna.gateware.test.utils import sync_test_case
 from luna.gateware.test import LunaGatewareTestCase
@@ -9,7 +10,7 @@ from FPGAG.controller import Host
 from FPGAG.core import Dispatcher, SPIParser, Polynomal
 from FPGAG.board import Firestarter, TestPlatform
 from FPGAG.constants import (COMMANDS, DEGREE, MOVE_TICKS, BIT_SHIFT,
-                             WORD_BYTES)
+                             WORD_BYTES, FREQ)
 
 
 class TestPolynomal(LunaGatewareTestCase):
@@ -101,7 +102,7 @@ class TestPolynomal(LunaGatewareTestCase):
     def test_move(self):
         '''Movement
 
-        Test forward and backward move with constant speed.
+        Test forward and backward move at constant speed.
         The largest constant in polynomal is determined by pure
         velocity move with half time limit as steps.
         '''
@@ -211,6 +212,24 @@ class TestDispatcher(SPIGatewareTestCase):
         yield
         yield
         self.assertEqual((yield self.dut.parser.dispatcherror), True)
+
+    @sync_test_case
+    def test_ptpmove(self, steps=[400], ticks=[15_000]):
+        'verify point to point move'
+        mm = np.array(steps)*np.array(list(self.platform.stepspermm.values()))
+        time = np.array(ticks)/FREQ
+        speed = mm/time
+        yield from self.host.gotopoint(mm.tolist(),
+                                       speed.tolist())
+        while (yield self.dut.pol.busy):
+            yield
+        yield
+        for i in range(self.platform.motors):
+            print((yield self.dut.pol.totalsteps[i]))
+            print((yield self.dut.pol.cntrs[i]))
+
+        for i in range(self.platform.motors):
+            print((yield self.dut.parser.positions[i]))
 
     @sync_test_case
     def test_movereceipt(self, ticks=10_000, a=1, b=2, c=3):

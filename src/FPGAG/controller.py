@@ -16,7 +16,7 @@ class Host:
             self.board = Firestarter()
         else:
             self.board = board
-        self._positions = [0]*board.motors
+        self._position = [0]*board.motors
 
     def _read_state(self):
         '''reads the state and returns bits'''
@@ -25,14 +25,14 @@ class Host:
         return "{:08b}".format(read_data)
 
     @property
-    def positions(self):
+    def position(self):
         '''retrieves and updates position'''
         for i in range(self.board.motors):
             read_data = (yield from self.send_command([COMMANDS.POSITION] +
                                                       WORD_BYTES*[0],
                                                       format='!q'))
-            self._positions[i] = read_data
-        return self._positions
+            self._position[i] = read_data
+        return self._position
 
     @property
     def pinstate(self):
@@ -80,7 +80,7 @@ class Host:
     def execution(self):
         '''determine wether code in SRAM is dispatched
 
-        The dispachter on the FPGA can be on or off
+        The dispatcher on the FPGA can be on or off
         '''
         bits = self._read_state()
         return int(bits[-STATE.PARSING-1])
@@ -125,18 +125,20 @@ class Host:
             speed = [10]*self.board.motors
 
         if absolute:
-            dist = np.array(position) - np.array(self.position)
+            dist = np.array(position) - np.array(self._position)
         else:
-            dist = np.array([position])
+            dist = np.array(position)
         speed = np.array(speed)
         t = dist/speed
-        ticks = round(t*FREQ)
+        ticks = (t*FREQ).round().astype(int)
 
         # mm -> steps
-        steps = speed*np.array(self.platform.stepspermm.values())
+        speed_step = (speed *
+                      np.array(list(self.board.stepspermm.values())))
+        speed_step = speed_step.round().astype(int)
         # steps -> count
-        cnts = (steps << (1+BIT_SHIFT))+(1 << (BIT_SHIFT-1))
-        a = round(cnts/ticks)
+        cnts = (speed_step << (1+BIT_SHIFT))+(1 << (BIT_SHIFT-1))
+        a = (cnts/ticks).round().astype('uint64')
 
         def get_ticks(x):
             if x >= MOVE_TICKS:
@@ -150,13 +152,11 @@ class Host:
             ticks_move = get_ticks_v(ticks)
             ticks -= MOVE_TICKS
             ticks[ticks < 0] = 0
-            data = self.move_data(ticks_move.to_list(),
-                                  a.to_list(),
-                                  [0]*3,
-                                  [0]*3)
-            yield from self.send_move(data)
-
-        self._positions = self._positions + dist
+            yield from self.send_move(ticks_move.tolist(),
+                                      a.tolist(),
+                                      [0]*self.board.motors,
+                                      [0]*self.board.motors)
+        self._position = self._position + dist
 
     def memfull(self, data):
         '''check if memory is full
