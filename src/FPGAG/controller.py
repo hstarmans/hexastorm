@@ -133,11 +133,13 @@ class Host:
         ticks = (t*FREQ).round().astype(int)
 
         # mm -> steps
-        speed_step = (speed *
+        dist_steps = (dist *
                       np.array(list(self.board.stepspermm.values())))
-        speed_step = speed_step.round().astype(int)
+        dist_steps = dist_steps.round().astype('uint64')
+
         # steps -> count
-        cnts = (speed_step << (1+BIT_SHIFT))+(1 << (BIT_SHIFT-1))
+        cnts = (dist_steps << (1+BIT_SHIFT))+(1 << (BIT_SHIFT-1))
+
         a = (cnts/ticks).round().astype('uint64')
 
         def get_ticks(x):

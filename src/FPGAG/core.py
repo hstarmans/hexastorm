@@ -295,10 +295,11 @@ class Dispatcher(Elaboratable):
         # Busy signal
         busy = Signal()
         m.d.comb += busy.eq(polynomal.busy)
-
-        # TODO: this will not work if they operate at different clock speeds
         # position adder
-        with m.If(polynomal.finished):
+        pol_finished_d = Signal()
+        m.d.sync += pol_finished_d.eq(polynomal.finished)
+
+        with m.If((pol_finished_d == 0) & polynomal.finished):
             for idx, position in enumerate(parser.positions):
                 m.d.sync += position.eq(position+polynomal.totalsteps[idx])
 
@@ -310,7 +311,7 @@ class Dispatcher(Elaboratable):
                 m.next = 'WAIT_INSTRUCTION'
             with m.State('WAIT_INSTRUCTION'):
                 m.d.sync += [parser.read_commit.eq(0), polynomal.start.eq(0)]
-                with m.If((parser.empty == 0) & parser.execute):
+                with m.If((parser.empty == 0) & parser.execute & (busy == 0)):
                     m.d.sync += parser.read_en.eq(1)
                     m.next = 'PARSEHEAD'
             # check which instruction we r handling
@@ -326,8 +327,6 @@ class Dispatcher(Elaboratable):
             with m.State('MOVE_POLYNOMAL'):
                 with m.If(parser.read_en == 0):
                     m.d.sync += parser.read_en.eq(1)
-                with m.Elif(busy):
-                    m.next = 'MOVE_POLYNOMAL'
                 with m.Elif(coeffcnt < len(polynomal.coeff)):
                     m.d.sync += [polynomal.coeff[coeffcnt].eq(
                                  parser.read_data),

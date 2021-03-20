@@ -216,20 +216,22 @@ class TestDispatcher(SPIGatewareTestCase):
     @sync_test_case
     def test_ptpmove(self, steps=[400], ticks=[15_000]):
         'verify point to point move'
-        mm = np.array(steps)*np.array(list(self.platform.stepspermm.values()))
+        mm = np.array(steps)/np.array(list(self.platform.stepspermm.values()))
         time = np.array(ticks)/FREQ
         speed = mm/time
         yield from self.host.gotopoint(mm.tolist(),
                                        speed.tolist())
-        while (yield self.dut.pol.busy):
+        while (((yield self.dut.parser.empty) == 0)
+                or (yield self.dut.pol.busy)):
+            yield
+        for _ in range(100):
+            yield
+        while (((yield self.dut.parser.empty) == 0)
+                or (yield self.dut.pol.busy)):
             yield
         yield
-        for i in range(self.platform.motors):
-            print((yield self.dut.pol.totalsteps[i]))
-            print((yield self.dut.pol.cntrs[i]))
-
-        for i in range(self.platform.motors):
-            print((yield self.dut.parser.positions[i]))
+        pos = (yield from self.host.position)
+        self.assertEqual(pos, steps)
 
     @sync_test_case
     def test_movereceipt(self, ticks=10_000, a=1, b=2, c=3):
