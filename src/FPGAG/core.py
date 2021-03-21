@@ -292,7 +292,7 @@ class Dispatcher(Elaboratable):
             self.parser = parser
             self.pol = polynomal
             spi = synchronize(m, self.spi)
-            steppers = platform.steppers
+            self.steppers = steppers = platform.steppers
             aux = platform.aux
             self.aux = aux
             self.busy = busy
@@ -353,8 +353,10 @@ class Dispatcher(Elaboratable):
 #  -- Polynomal integrator --> determines position via integrating counters
 
 # TODO:
-#   -- flip bit order for state parser
+
 #   -- rename board to platform to line op with luna
+#   -- propagation of home switch should improve
+#   -- two challenges home procedure test does not fail
 #   -- implement a test for the homing procedure
 
 #   -- build test

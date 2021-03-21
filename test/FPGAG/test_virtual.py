@@ -211,6 +211,18 @@ class TestDispatcher(SPIGatewareTestCase):
             yield
 
     @sync_test_case
+    def test_home(self):
+        '''verify homing procedure works correctly'''
+        self.host._position = np.array([100]*self.platform.motors)
+        for i in range(self.platform.motors):
+            yield self.dut.steppers[i].limit.eq(1)
+        yield
+        yield from self.host.home_axes(axes=np.array([1]*self.platform.motors),
+                                       speed=None)
+        assert_array_equal(self.host._position,
+                           np.array([0]*self.platform.motors))
+
+    @sync_test_case
     def test_invalidwrite(self):
         '''write invalid instruction and verify error is raised'''
         command = [COMMANDS.WRITE] + [0]*WORD_BYTES

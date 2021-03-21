@@ -114,9 +114,9 @@ class Host:
         speed -- speed in mm/s used to home
         '''
         if speed is not None:
-            assert len(speed) == self.platform.motors
+            assert len(speed) == self.board.motors
         else:
-            speed = [10]*self.platform.motors
+            speed = [10]*self.board.motors
         assert len(axes) == self.board.motors
         dist = np.array(axes)*np.array([-200]*self.board.motors)
         yield from self.gotopoint(dist, speed)
@@ -196,7 +196,8 @@ class Host:
         data            -- coefficients for polynomal move
         maxtrials       -- max number of communcation trials
 
-        returns array with home switches hit
+        returns array with status home switches
+        Zero implies home switch is hit
         '''
         commands = self.move_commands(ticks, a, b, c)
         trials = 0
@@ -205,9 +206,14 @@ class Host:
         while self.memfull(data_out):
             data_out = (yield from self.send_command(commands.pop(0)))
             trials += 1
-            bits = "{:08b}".format(data_out)
-            #home_bits = np.array(bits[1:1+self.board.motors])
-            # NOTE: check parser is enabled
+            bits = [int(i) for i in "{:08b}".format(data_out >> 8)]
+            print('some of these bits should be 1')
+            print(bits)
+            input()
+            # home switch hit --> bit is 1
+            # proper is masking operation like
+            #  if x & 0b10:  # explicitly: x & 0b0010 != 0
+            home_bits -= np.array(bits[:self.board.motors])
             if trials > maxtrials:
                 raise Exception("Too many trials needed")
         for command in commands:
