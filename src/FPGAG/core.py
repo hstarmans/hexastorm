@@ -193,13 +193,13 @@ class Polynomal(Elaboratable):
         ticks = Signal(MOVE_TICKS.bit_length())
         if platform:
             steppers = [res for res in get_all_resources(platform, "stepper")]
+            for idx, stepper in enumerate(steppers):
+                m.d.comb += [stepper.step.eq(self.step[idx]),
+                             stepper.dir.eq(self.dir[idx])]
         else:
-            steppers = self.platform.steppers
             self.ticks = ticks
             self.cntrs = cntrs
-        for idx, stepper in enumerate(steppers):
-            m.d.comb += [stepper.step.eq(self.step[idx]),
-                         stepper.dir.eq(self.dir[idx])]
+
         # steps
         for motor in range(self.motors):
             m.d.comb += [self.step[motor].eq(
@@ -268,47 +268,45 @@ class Dispatcher(Elaboratable):
 
     def elaborate(self, platform):
         m = Module()
-        if platform:
-            board_spi = platform.request("debug_spi")
-            spi = synchronize(m, board_spi)
-            steppers = [res for res in get_all_resources(platform, "steppers")]
-            try:
-                aux = platform.request("AUX")
-            except ResourceError:
-                aux = None
-        else:
-            platform = self.platform
-            self.spi = SPIBus()
-            spi = synchronize(m, self.spi)
-            steppers = platform.steppers
-            aux = platform.aux
-            self.aux = aux
         # Connect Parser
         parser = SPIParser(self.platform)
-        # TODO: remove
-        self.parser = parser
         m.submodules.parser = parser
-        m.d.comb += parser.spi.connect(spi)
         # Connect Polynomal Move module
         polynomal = Polynomal(self.platform)
         m.submodules.polynomal = polynomal
         coeffcnt = Signal(2)
         # Busy signal
         busy = Signal()
-        if platform.name == 'Test':
-            self.busy = busy
         m.d.comb += busy.eq(polynomal.busy)
         # position adder
         pol_finished_d = Signal()
         m.d.sync += pol_finished_d.eq(polynomal.finished)
 
+        if platform:
+            board_spi = platform.request("debug_spi")
+            spi = synchronize(m, board_spi)
+            steppers = [res for res in get_all_resources(platform, "steppers")]
+        else:
+            platform = self.platform
+            self.spi = SPIBus()
+            self.parser = parser
+            self.pol = polynomal
+            spi = synchronize(m, self.spi)
+            steppers = platform.steppers
+            aux = platform.aux
+            self.aux = aux
+            self.busy = busy
+        # connect motors
+        for idx, stepper in enumerate(steppers):
+            m.d.comb += [stepper.step.eq(polynomal.step[idx] &
+                                         (stepper.limit == 0)),
+                         stepper.dir.eq(polynomal.dir[idx]),
+                         parser.pinstate[idx].eq(stepper.limit)]
+        # connect spi
+        m.d.comb += parser.spi.connect(spi)
         with m.If((pol_finished_d == 0) & polynomal.finished):
             for idx, position in enumerate(parser.position):
                 m.d.sync += position.eq(position+polynomal.totalsteps[idx])
-
-        if platform.name == 'Test':
-            self.parser = parser
-            self.pol = polynomal
         with m.FSM(reset='RESET', name='dispatcher'):
             with m.State('RESET'):
                 m.next = 'WAIT_INSTRUCTION'
@@ -355,9 +353,6 @@ class Dispatcher(Elaboratable):
 #  -- Polynomal integrator --> determines position via integrating counters
 
 # TODO:
-#   -- positions if retrieved need back conversion
-#   -- execute point to point move which consists out of 2 instructions
-#        verify subsequent moves are correctly added and can be received by "host"
 #   -- implement a test for the homing procedure
 
 #   -- build test

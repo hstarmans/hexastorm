@@ -21,7 +21,7 @@ The following commands are possible;
 
 ## Write
 A write commmand is followed by an instruction which is placed in the SRAM.
-If the dispatcher is enabled, these instructions are carried out unless an error is raised..
+If the dispatcher is enabled, these instructions are carried out unless an error is raised.
 A word can often not store all information for an instruction. So an instruction 
 consists out of multiple commands and words in series.
 If prior to the sequence, the memory is already full or there is a parsing error, a status word is sent back.
