@@ -16,7 +16,7 @@ class Host:
             self.board = Firestarter()
         else:
             self.board = board
-        self._position = [0]*board.motors
+        self._position = np.array([0]*board.motors)
 
     def _read_state(self):
         '''reads the state and returns bits'''
@@ -32,6 +32,10 @@ class Host:
                                                       WORD_BYTES*[0],
                                                       format='!q'))
             self._position[i] = read_data
+        # step --> mm
+        self._position = (self._position /
+                          np.array(list(self.board.stepspermm.values())))
+
         return self._position
 
     @property
@@ -46,7 +50,7 @@ class Host:
     @property
     def dispatcherror(self):
         '''retrieves dispatch error status of FPGA via SPI'''
-        bits = self._read_state()
+        bits = (yield from self._read_state())
         return int(bits[-STATE.DISPATCHERROR-1])
 
     @property
@@ -82,7 +86,7 @@ class Host:
 
         The dispatcher on the FPGA can be on or off
         '''
-        bits = self._read_state()
+        bits = (yield from self._read_state())
         return int(bits[-STATE.PARSING-1])
 
     def _executionsetter(self, val):
@@ -125,7 +129,7 @@ class Host:
             speed = [10]*self.board.motors
 
         if absolute:
-            dist = np.array(position) - np.array(self._position)
+            dist = np.array(position) - self._position
         else:
             dist = np.array(position)
         speed = np.array(speed)
@@ -135,12 +139,6 @@ class Host:
         # mm -> steps
         dist_steps = (dist *
                       np.array(list(self.board.stepspermm.values())))
-        dist_steps = dist_steps.round().astype('uint64')
-
-        # steps -> count
-        cnts = (dist_steps << (1+BIT_SHIFT))+(1 << (BIT_SHIFT-1))
-
-        a = (cnts/ticks).round().astype('uint64')
 
         def get_ticks(x):
             if x >= MOVE_TICKS:
@@ -149,16 +147,26 @@ class Host:
                 return x
         get_ticks_v = np.vectorize(get_ticks)
 
+        ticks_total = np.copy(ticks)
+        steps_total = np.zeros_like(dist_steps)
         yield from self._executionsetter(True)
         while ticks.sum() > 0:
             ticks_move = get_ticks_v(ticks)
+            # steps -> count
+            steps_move = dist_steps*(ticks_move/ticks_total)
+            steps_move = steps_move.round().astype('uint64')
+            steps_total += steps_move
+            cnts = (steps_move << (1+BIT_SHIFT))+(1 << (BIT_SHIFT-1))
+            a = (cnts/ticks_move).round().astype('uint64')
             ticks -= MOVE_TICKS
             ticks[ticks < 0] = 0
             yield from self.send_move(ticks_move.tolist(),
                                       a.tolist(),
                                       [0]*self.board.motors,
                                       [0]*self.board.motors)
-        self._position = self._position + dist
+
+        dist_mm = dist / np.array(list(self.board.stepspermm.values()))
+        self._position = self._position + dist_mm
 
     def memfull(self, data):
         '''check if memory is full

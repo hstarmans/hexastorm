@@ -2,6 +2,7 @@ import unittest
 from random import randint
 
 import numpy as np
+from numpy.testing import assert_array_equal
 from luna.gateware.interface.spi import SPIGatewareTestCase
 from luna.gateware.test.utils import sync_test_case
 from luna.gateware.test import LunaGatewareTestCase
@@ -61,14 +62,15 @@ class TestPolynomal(LunaGatewareTestCase):
     @sync_test_case
     def test_ticklimit(self):
         ''' Test different upper tick limits'''
-        def limittest(limit):
+        def limittest(limit, steps):
+            a = round(self.steps_compute(steps)/limit)
             yield self.dut.ticklimit.eq(limit)
-            yield from self.send_coefficients(1, 0, 0)
+            yield from self.send_coefficients(a, 0, 0)
             while (yield self.dut.busy):
                 yield
-            self.assertEqual((yield self.dut.cntrs[0]), limit)
-        yield from limittest(10)
-        yield from limittest(30)
+            self.assertEqual((yield self.dut.totalsteps[0]), steps)
+        yield from limittest(5000, 10)
+        yield from limittest(2000, 30)
 
     @sync_test_case
     def test_calculation(self, a=2, b=3, c=1):
@@ -133,12 +135,13 @@ class TestParser(SPIGatewareTestCase):
 
     @sync_test_case
     def test_getposition(self):
+        decimals = 3
         position = [randint(-2000, 2000) for _ in range(self.platform.motors)]
         for idx, pos in enumerate(self.dut.position):
             yield pos.eq(position[idx])
-        lst = (yield from self.host.position)
-        self.assertListEqual(list(lst),
-                             position)
+        lst = (yield from self.host.position).round(decimals)
+        stepspermm = np.array(list(self.platform.stepspermm.values()))
+        assert_array_equal(lst, (position/stepspermm).round(decimals))
 
     @sync_test_case
     def test_writemoveinstruction(self):
@@ -197,6 +200,16 @@ class TestDispatcher(SPIGatewareTestCase):
         self.host.spi_exchange_data = self.spi_exchange_data
         yield self.dut.spi.cs.eq(0)
 
+    def wait_complete(self):
+        '''helper method to wait for completion'''
+        cntr = 0
+        while (yield self.dut.busy) or (cntr < 100):
+            if (yield self.dut.pol.busy):
+                cntr = 0
+            else:
+                cntr += 1
+            yield
+
     @sync_test_case
     def test_invalidwrite(self):
         '''write invalid instruction and verify error is raised'''
@@ -221,16 +234,9 @@ class TestDispatcher(SPIGatewareTestCase):
         speed = mm/time
         yield from self.host.gotopoint(mm.tolist(),
                                        speed.tolist())
-        cntr = 0
-        #TODO: use this as default method for completion
-        while (yield self.dut.busy) or (cntr < 100):
-            if (yield self.dut.pol.busy):
-                cntr = 0
-            else:
-                cntr += 1
-            yield
+        yield from self.wait_complete()
         pos = (yield from self.host.position)
-        self.assertEqual(pos, steps)
+        self.assertEqual(self.host._position, pos)
 
     @sync_test_case
     def test_movereceipt(self, ticks=10_000, a=1, b=2, c=3):

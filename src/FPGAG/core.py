@@ -227,7 +227,7 @@ class Polynomal(Elaboratable):
                 with m.If(self.start):
                     for motor in range(self.motors):
                         coef0 = motor*self.order
-                        m.d.sync += [cntrs[coef0][BIT_SHIFT+1:].eq(0),
+                        m.d.sync += [cntrs[coef0].eq(0),
                                      counter_d[motor].eq(0)]
                     m.d.sync += [self.busy.eq(1),
                                  self.finished.eq(0)]
