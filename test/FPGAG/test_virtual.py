@@ -224,7 +224,7 @@ class TestDispatcher(SPIGatewareTestCase):
         # 2 clocks needed for error to propagate
         yield
         yield
-        self.assertEqual((yield self.dut.parser.dispatcherror), True)
+        self.assertEqual((yield from self.host.dispatcherror), True)
 
     @sync_test_case
     def test_ptpmove(self, steps=[400], ticks=[15_000]):

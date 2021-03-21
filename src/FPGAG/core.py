@@ -112,7 +112,7 @@ class SPIParser(Elaboratable):
                             m.d.sync += interface.word_to_send.eq(state)
                             m.next = 'WAIT_COMMAND'
                     with m.Elif(interface.command == COMMANDS.READ):
-                        m.d.sync += interface.word_to_send.eq(Cat(state,
+                        m.d.sync += interface.word_to_send.eq(Cat(state[::-1],
                                                                   self.pinstate
                                                                   ))
                         m.next = 'WAIT_COMMAND'
@@ -353,6 +353,8 @@ class Dispatcher(Elaboratable):
 #  -- Polynomal integrator --> determines position via integrating counters
 
 # TODO:
+#   -- flip bit order for state parser
+#   -- rename board to platform to line op with luna
 #   -- implement a test for the homing procedure
 
 #   -- build test

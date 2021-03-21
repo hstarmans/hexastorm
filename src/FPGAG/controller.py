@@ -51,7 +51,7 @@ class Host:
     def dispatcherror(self):
         '''retrieves dispatch error status of FPGA via SPI'''
         bits = (yield from self._read_state())
-        return int(bits[-STATE.DISPATCHERROR-1])
+        return int(bits[STATE.DISPATCHERROR])
 
     @property
     def enable_steppers(self):
@@ -87,7 +87,7 @@ class Host:
         The dispatcher on the FPGA can be on or off
         '''
         bits = (yield from self._read_state())
-        return int(bits[-STATE.PARSING-1])
+        return int(bits[STATE.PARSING])
 
     def _executionsetter(self, val):
         'not able to call execution with yield from'
@@ -107,13 +107,19 @@ class Host:
         '''
         self._executionsetter(val)
 
-    def home_axes(axes, speed):
+    def home_axes(self, axes, speed):
         '''home given axes
 
         axes  -- list with axes numbers to home
         speed -- speed in mm/s used to home
         '''
-        pass
+        if speed is not None:
+            assert len(speed) == self.platform.motors
+        else:
+            speed = [10]*self.platform.motors
+        assert len(axes) == self.board.motors
+        dist = np.array(axes)*np.array([-200]*self.board.motors)
+        yield from self.gotopoint(dist, speed)
 
     def gotopoint(self, position, speed, absolute=True):
         '''move steppers to point with constant speed
@@ -150,6 +156,7 @@ class Host:
         ticks_total = np.copy(ticks)
         steps_total = np.zeros_like(dist_steps)
         yield from self._executionsetter(True)
+        hit_home = np.zeros_like(dist_steps)
         while ticks.sum() > 0:
             ticks_move = get_ticks_v(ticks)
             # steps -> count
@@ -160,13 +167,15 @@ class Host:
             a = (cnts/ticks_move).round().astype('uint64')
             ticks -= MOVE_TICKS
             ticks[ticks < 0] = 0
-            yield from self.send_move(ticks_move.tolist(),
-                                      a.tolist(),
-                                      [0]*self.board.motors,
-                                      [0]*self.board.motors)
-
+            hit_home = (yield from self.send_move(ticks_move.tolist(),
+                                                  a.tolist(),
+                                                  [0]*self.board.motors,
+                                                  [0]*self.board.motors))
+            dist_steps = dist_steps*hit_home
+            if dist_steps.sum() == 0:
+                break
         dist_mm = dist / np.array(list(self.board.stepspermm.values()))
-        self._position = self._position + dist_mm
+        self._position = (self._position + dist_mm)*hit_home
 
     def memfull(self, data):
         '''check if memory is full
@@ -186,19 +195,24 @@ class Host:
 
         data            -- coefficients for polynomal move
         maxtrials       -- max number of communcation trials
-        This method is blocking and keeps sending data
+
+        returns array with home switches hit
         '''
         commands = self.move_commands(ticks, a, b, c)
         trials = 0
         data_out = 255
+        home_bits = np.zeros([1]*self.board.motors)
         while self.memfull(data_out):
             data_out = (yield from self.send_command(commands.pop(0)))
             trials += 1
+            bits = "{:08b}".format(data_out)
+            #home_bits = np.array(bits[1:1+self.board.motors])
             # NOTE: check parser is enabled
             if trials > maxtrials:
-                raise Exception("Too many trials needed, FPGA seems busy")
+                raise Exception("Too many trials needed")
         for command in commands:
             yield from self.send_command(command)
+        return home_bits
 
     def move_commands(self, ticks, a, b, c):
         '''get list of commands for move instruction with
