@@ -133,12 +133,12 @@ class TestParser(SPIGatewareTestCase):
 
     @sync_test_case
     def test_getposition(self):
-        positions = [randint(-2000, 2000) for _ in range(self.platform.motors)]
-        for idx, pos in enumerate(self.dut.positions):
-            yield pos.eq(positions[idx])
-        lst = (yield from self.host.positions)
+        position = [randint(-2000, 2000) for _ in range(self.platform.motors)]
+        for idx, pos in enumerate(self.dut.position):
+            yield pos.eq(position[idx])
+        lst = (yield from self.host.position)
         self.assertListEqual(list(lst),
-                             positions)
+                             position)
 
     @sync_test_case
     def test_writemoveinstruction(self):
@@ -221,15 +221,14 @@ class TestDispatcher(SPIGatewareTestCase):
         speed = mm/time
         yield from self.host.gotopoint(mm.tolist(),
                                        speed.tolist())
-        while (((yield self.dut.parser.empty) == 0)
-                or (yield self.dut.pol.busy)):
+        cntr = 0
+        #TODO: use this as default method for completion
+        while (yield self.dut.busy) or (cntr < 100):
+            if (yield self.dut.pol.busy):
+                cntr = 0
+            else:
+                cntr += 1
             yield
-        for _ in range(100):
-            yield
-        while (((yield self.dut.parser.empty) == 0)
-                or (yield self.dut.pol.busy)):
-            yield
-        yield
         pos = (yield from self.host.position)
         self.assertEqual(pos, steps)
 
