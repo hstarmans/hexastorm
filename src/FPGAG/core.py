@@ -350,8 +350,6 @@ class Dispatcher(Elaboratable):
 
 # TODO:
 
-#   -- rename board to platform to line op with luna
-
 #   -- build test
 #   -- configure stepper drivers of motor
 #   -- motor should be updated with certain freq

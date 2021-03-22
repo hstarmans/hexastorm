@@ -5,18 +5,18 @@ from gpiozero import LED
 
 from FPGAG.constants import (INSTRUCTIONS, COMMANDS, FREQ, STATE, BIT_SHIFT,
                              MOVE_TICKS, WORD_BYTES, COMMAND_BYTES)
-from FPGAG.board import Firestarter
+from FPGAG.platforms import Firestarter
 
 
 class Host:
     'Class for sending instructions to core'
 
-    def __init__(self, board=None):
-        if board is None:
-            self.board = Firestarter()
+    def __init__(self, platform=None):
+        if platform is None:
+            self.platform = Firestarter()
         else:
-            self.board = board
-        self._position = np.array([0]*board.motors)
+            self.platform = platform
+        self._position = np.array([0]*platform.motors)
 
     def _read_state(self):
         '''reads the state and returns bits'''
@@ -27,14 +27,14 @@ class Host:
     @property
     def position(self):
         '''retrieves and updates position'''
-        for i in range(self.board.motors):
+        for i in range(self.platform.motors):
             read_data = (yield from self.send_command([COMMANDS.POSITION] +
                                                       WORD_BYTES*[0],
                                                       format='!q'))
             self._position[i] = read_data
         # step --> mm
         self._position = (self._position /
-                          np.array(list(self.board.stepspermm.values())))
+                          np.array(list(self.platform.stepspermm.values())))
 
         return self._position
 
@@ -59,20 +59,20 @@ class Host:
 
         Execution might still be disabled on the FPGA
         '''
-        enable = LED(self.board.enable_pin)
+        enable = LED(self.platform.enable_pin)
         return enable.value
 
     @enable_steppers.setter
     def enable_steppers(self, val):
         '''disable stepper motors
 
-        sets enable pin on raspberry pi board
+        sets enable pin on raspberry pi platform
         send enable or disable command to FPGA core
 
         val -- boolean, True enables steppers
         '''
         assert type(val) == bool
-        enable = LED(self.board.enable_pin)
+        enable = LED(self.platform.enable_pin)
         if val:
             enable.on()
             yield from self.spi_exchange_data([COMMANDS.ENABLE]+3*[0])
@@ -114,8 +114,8 @@ class Host:
         speed -- speed in mm/s used to home
         pos   -- position to home to
         '''
-        assert len(axes) == self.board.motors
-        dist = np.array(axes)*np.array([pos]*self.board.motors)
+        assert len(axes) == self.platform.motors
+        dist = np.array(axes)*np.array([pos]*self.platform.motors)
         yield from self.gotopoint(dist, speed)
 
     def gotopoint(self, position, speed, absolute=True):
@@ -125,11 +125,11 @@ class Host:
         absolute     -- absolute position otherwise coordinate is distance
         speed        -- speed in mm/s
         '''
-        assert len(position) == self.board.motors
+        assert len(position) == self.platform.motors
         if speed is not None:
-            assert len(speed) == self.board.motors
+            assert len(speed) == self.platform.motors
         else:
-            speed = [10]*self.board.motors
+            speed = [10]*self.platform.motors
         if absolute:
             dist = np.array(position) - self._position
         else:
@@ -137,9 +137,9 @@ class Host:
         speed = np.array(speed)
         t = np.absolute((dist/speed))
         ticks = (t*FREQ).round().astype(int)
+        steps_per_mm = np.array(list(self.platform.stepspermm.values()))
         # mm -> steps
-        dist_steps = (dist *
-                      np.array(list(self.board.stepspermm.values())))
+        dist_steps = dist * steps_per_mm
 
         def get_ticks(x):
             if x >= MOVE_TICKS:
@@ -164,12 +164,12 @@ class Host:
             ticks[ticks < 0] = 0
             hit_home = (yield from self.send_move(ticks_move.tolist(),
                                                   a.tolist(),
-                                                  [0]*self.board.motors,
-                                                  [0]*self.board.motors))
+                                                  [0]*self.platform.motors,
+                                                  [0]*self.platform.motors))
             dist_steps = dist_steps*hit_home
             if dist_steps.sum() == 0:
                 break
-        dist_mm = steps_total / np.array(list(self.board.stepspermm.values()))
+        dist_mm = steps_total / steps_per_mm
         self._position = (self._position + dist_mm)*hit_home
 
     def memfull(self, data):
@@ -197,12 +197,12 @@ class Host:
         commands = self.move_commands(ticks, a, b, c)
         trials = 0
         data_out = 255
-        home_bits = np.ones([1]*self.board.motors)
+        home_bits = np.ones([1]*self.platform.motors)
         while self.memfull(data_out):
             data_out = (yield from self.send_command(commands.pop(0)))
             trials += 1
             bits = [int(i) for i in "{:08b}".format(data_out >> 8)]
-            home_bits -= np.array(bits[:self.board.motors])
+            home_bits -= np.array(bits[:self.platform.motors])
             if trials > maxtrials:
                 raise Exception("Too many trials needed")
         for command in commands:
@@ -218,11 +218,11 @@ class Host:
            acceleration -- acceleration in mm/s2
            postion      -- list with position in mm
         '''
-        assert len(ticks) == len(a) == len(b) == len(c) == self.board.motors
+        assert len(ticks) == len(a) == len(b) == len(c) == self.platform.motors
         write_byte = COMMANDS.WRITE.to_bytes(1, 'big')
         move_byte = INSTRUCTIONS.MOVE.to_bytes(1, 'big')
         commands = []
-        for motor in range(self.board.motors):
+        for motor in range(self.platform.motors):
             commands += [write_byte +
                          ticks[motor].to_bytes(7, 'big') + move_byte]
             commands += [write_byte + a[motor].to_bytes(8, 'big', signed=True)]

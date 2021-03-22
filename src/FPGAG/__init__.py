@@ -1,2 +1,2 @@
-from . import (board, core, constants, controller,
+from . import (platforms, core, constants, controller,
                resources, notused)

@@ -9,7 +9,7 @@ from luna.gateware.test import LunaGatewareTestCase
 
 from FPGAG.controller import Host
 from FPGAG.core import Dispatcher, SPIParser, Polynomal
-from FPGAG.board import Firestarter, TestPlatform
+from FPGAG.platforms import Firestarter, TestPlatform
 from FPGAG.constants import (COMMANDS, DEGREE, MOVE_TICKS, BIT_SHIFT,
                              WORD_BYTES, FREQ)
 
