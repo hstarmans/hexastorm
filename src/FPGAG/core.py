@@ -93,6 +93,7 @@ class SPIParser(Elaboratable):
             with m.State('WAIT_COMMAND'):
                 m.d.sync += [fifo.write_commit.eq(0)]
                 with m.If(interface.command_ready):
+                    word = Cat(state[::-1], self.pinstate[::-1])
                     with m.If(interface.command == COMMANDS.EMPTY):
                         m.next = 'WAIT_COMMAND'
                     with m.Elif(interface.command == COMMANDS.START):
@@ -102,19 +103,14 @@ class SPIParser(Elaboratable):
                         m.next = 'WAIT_COMMAND'
                         m.d.sync += self.execute.eq(0)
                     with m.Elif(interface.command == COMMANDS.WRITE):
+                        m.d.sync += interface.word_to_send.eq(word)
                         with m.If((state[STATE.FULL] == 0) |
                                   (bytesreceived != 0)):
                             m.next = 'WAIT_WORD'
                         with m.Else():
-                            # ensure memfull only passed if not accepted
-                            # memfull is already triggered during the last
-                            # which fills the memory
-                            m.d.sync += interface.word_to_send.eq(state)
                             m.next = 'WAIT_COMMAND'
                     with m.Elif(interface.command == COMMANDS.READ):
-                        m.d.sync += interface.word_to_send.eq(Cat(state[::-1],
-                                                                  self.pinstate
-                                                                  ))
+                        m.d.sync += interface.word_to_send.eq(word)
                         m.next = 'WAIT_COMMAND'
                     with m.Elif(interface.command == COMMANDS.POSITION):
                         # position is requested multiple times for multiple
@@ -355,14 +351,13 @@ class Dispatcher(Elaboratable):
 # TODO:
 
 #   -- rename board to platform to line op with luna
-#   -- propagation of home switch should improve
-#   -- two challenges home procedure test does not fail
-#   -- implement a test for the homing procedure
 
 #   -- build test
 #   -- configure stepper drivers of motor
-#   -- do move on real hardware
+#   -- motor should be updated with certain freq
+#   -- add tests for real hardware
 
+#   -- luna splits modules over files and adds one test per file
+#      this is probably cleaner than put all in one file approach
 #   -- simulate blocking due to full memory during a move
 #   -- verify homing procedure of controller
-#   -- motor should be updated with certain freq

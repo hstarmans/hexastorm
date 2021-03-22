@@ -107,18 +107,15 @@ class Host:
         '''
         self._executionsetter(val)
 
-    def home_axes(self, axes, speed):
+    def home_axes(self, axes, speed, pos=-200):
         '''home given axes
 
         axes  -- list with axes numbers to home
         speed -- speed in mm/s used to home
+        pos   -- position to home to
         '''
-        if speed is not None:
-            assert len(speed) == self.board.motors
-        else:
-            speed = [10]*self.board.motors
         assert len(axes) == self.board.motors
-        dist = np.array(axes)*np.array([-200]*self.board.motors)
+        dist = np.array(axes)*np.array([pos]*self.board.motors)
         yield from self.gotopoint(dist, speed)
 
     def gotopoint(self, position, speed, absolute=True):
@@ -133,15 +130,13 @@ class Host:
             assert len(speed) == self.board.motors
         else:
             speed = [10]*self.board.motors
-
         if absolute:
             dist = np.array(position) - self._position
         else:
             dist = np.array(position)
         speed = np.array(speed)
-        t = dist/speed
+        t = np.absolute((dist/speed))
         ticks = (t*FREQ).round().astype(int)
-
         # mm -> steps
         dist_steps = (dist *
                       np.array(list(self.board.stepspermm.values())))
@@ -154,17 +149,17 @@ class Host:
         get_ticks_v = np.vectorize(get_ticks)
 
         ticks_total = np.copy(ticks)
-        steps_total = np.zeros_like(dist_steps)
+        steps_total = np.zeros_like(dist_steps, dtype='int64')
         yield from self._executionsetter(True)
         hit_home = np.zeros_like(dist_steps)
         while ticks.sum() > 0:
             ticks_move = get_ticks_v(ticks)
             # steps -> count
             steps_move = dist_steps*(ticks_move/ticks_total)
-            steps_move = steps_move.round().astype('uint64')
+            steps_move = steps_move.round().astype('int64')
             steps_total += steps_move
             cnts = (steps_move << (1+BIT_SHIFT))+(1 << (BIT_SHIFT-1))
-            a = (cnts/ticks_move).round().astype('uint64')
+            a = (cnts/ticks_move).round().astype('int64')
             ticks -= MOVE_TICKS
             ticks[ticks < 0] = 0
             hit_home = (yield from self.send_move(ticks_move.tolist(),
@@ -174,7 +169,7 @@ class Host:
             dist_steps = dist_steps*hit_home
             if dist_steps.sum() == 0:
                 break
-        dist_mm = dist / np.array(list(self.board.stepspermm.values()))
+        dist_mm = steps_total / np.array(list(self.board.stepspermm.values()))
         self._position = (self._position + dist_mm)*hit_home
 
     def memfull(self, data):
@@ -182,7 +177,7 @@ class Host:
 
         data -- data received from peripheral
         '''
-        bits = "{:08b}".format(data)
+        bits = "{:08b}".format(data & 0xff)
         return int(bits[STATE.FULL])
 
     def send_command(self, data, format='!Q'):
@@ -202,17 +197,11 @@ class Host:
         commands = self.move_commands(ticks, a, b, c)
         trials = 0
         data_out = 255
-        home_bits = np.zeros([1]*self.board.motors)
+        home_bits = np.ones([1]*self.board.motors)
         while self.memfull(data_out):
             data_out = (yield from self.send_command(commands.pop(0)))
             trials += 1
             bits = [int(i) for i in "{:08b}".format(data_out >> 8)]
-            print('some of these bits should be 1')
-            print(bits)
-            input()
-            # home switch hit --> bit is 1
-            # proper is masking operation like
-            #  if x & 0b10:  # explicitly: x & 0b0010 != 0
             home_bits -= np.array(bits[:self.board.motors])
             if trials > maxtrials:
                 raise Exception("Too many trials needed")

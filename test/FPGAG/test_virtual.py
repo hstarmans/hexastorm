@@ -187,7 +187,7 @@ class TestParser(SPIGatewareTestCase):
         yield from self.host.send_move([1000], [1], [2], [3])
         writedata = [COMMANDS.WRITE]+[1]*WORD_BYTES
         read_data = yield from self.host.send_command(writedata)
-        self.assertEqual(read_data, 1)
+        self.assertEqual(self.host.memfull(read_data), True)
 
 
 class TestDispatcher(SPIGatewareTestCase):
@@ -213,12 +213,15 @@ class TestDispatcher(SPIGatewareTestCase):
     @sync_test_case
     def test_home(self):
         '''verify homing procedure works correctly'''
-        self.host._position = np.array([100]*self.platform.motors)
+        self.host._position = np.array([0.1]*self.platform.motors)
         for i in range(self.platform.motors):
             yield self.dut.steppers[i].limit.eq(1)
         yield
+        self.assertEqual((yield self.dut.parser.pinstate[0]), 1)
+
         yield from self.host.home_axes(axes=np.array([1]*self.platform.motors),
-                                       speed=None)
+                                       speed=None,
+                                       pos=-0.1)
         assert_array_equal(self.host._position,
                            np.array([0]*self.platform.motors))
 
