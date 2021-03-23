@@ -282,11 +282,13 @@ class TestDispatcher(SPIGatewareTestCase):
 class TestBuild(unittest.TestCase):
     def test_parser(self):
         platform = Firestarter()
-        platform.build(SPIParser(), do_program=False, verbose=True)
+        platform.build(SPIParser(Firestarter(), top=True),
+                       do_program=False, verbose=True)
 
     def test_dispatcher(self):
         platform = Firestarter()
-        platform.build(Dispatcher(), do_program=False, verbose=True)
+        platform.build(Dispatcher(Firestarter()),
+                       do_program=False, verbose=True)
 
     def test_polynomal(self):
         platform = Firestarter()

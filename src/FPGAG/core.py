@@ -1,7 +1,6 @@
 from math import ceil
 
 from nmigen import Signal, Elaboratable, signed, Cat
-from nmigen.build.res import ResourceError
 from nmigen import Module
 from nmigen.hdl.mem import Array
 
@@ -35,7 +34,7 @@ class SPIParser(Elaboratable):
         O: read_data      -- read data from transactionalizedfifo
         O: empty          -- transactionalizedfifo is empty
     """
-    def __init__(self, platform=None, top=False):
+    def __init__(self, platform, top=False):
         """
         platform  -- used to pass test platform
         """
@@ -351,8 +350,8 @@ class Dispatcher(Elaboratable):
 # TODO:
 
 #   -- build test
-#   -- configure stepper drivers of motor
 #   -- motor should be updated with certain freq
+#   -- configure stepper drivers of motor
 #   -- add tests for real hardware
 
 #   -- luna splits modules over files and adds one test per file
