@@ -13,7 +13,6 @@ from nmigen.hdl import ClockSignal, ResetSignal
 from nmigen.vendor.lattice_ice40 import LatticeICE40Platform
 from nmigen_boards.resources import LEDResources
 from nmigen_boards.test.blinky import Blinky
-from luna.gateware.platform.core import LUNAPlatform
 
 from FPGAG.constants import getbytesinmove, WORD_BYTES
 from FPGAG.resources import StepperResource, StepperRecord
@@ -49,9 +48,9 @@ class FirestarterDomainGenerator(Elaboratable):
     def compute_config(self, clkin_freq, clkout_freq, margin=1e-2):
         ''' compute settings for desired clkout given clkin
 
-        clkin_freq  clock in frequency in MHz
-        clkout_freq clock out frequency in MHz
-        margin      max error, 1e-2 is 1 percent
+        clkin_freq  -- clock in frequency in MHz
+        clkout_freq -- clock out frequency in MHz
+        margin      -- max error, 1e-2 is 1 percent
         '''
         (clki_freq_min, clki_freq_max) = self.clki_freq_range
         assert clkin_freq >= clki_freq_min
@@ -100,7 +99,7 @@ class FirestarterDomainGenerator(Elaboratable):
         # clocks 50 MHz circuit
         #         1 MHz update frequency motor
         clk50 = Signal()
-        #clk1 = Signal()
+        # clk1 = Signal()
         # details see iCE40 sysCLOCK PLL Design and Usage
         # settings comment out are for SB_PLL40_2F_CORE
         m.submodules.pll = \
@@ -123,10 +122,9 @@ class FirestarterDomainGenerator(Elaboratable):
 
         # ... and constrain them to their new frequencies.
         platform.add_clock_constraint(clk50, 50e6)
-        #platform.add_clock_constraint(clk1, 1e6)
+        # platform.add_clock_constraint(clk1, 1e6)
 
         # We'll use our 50MHz clock for everything _except_ the polynomal
-        #m.
         # which create ticks for the motors
         m.d.comb += [
             #ClockSignal("pol").eq(clk1),
@@ -138,7 +136,7 @@ class FirestarterDomainGenerator(Elaboratable):
         return m
 
 
-class Firestarter(LatticeICE40Platform, LUNAPlatform):
+class Firestarter(LatticeICE40Platform):
     '''Kicad board available at
        https://github.com/hstarmans/firestarter/tree/master/pi_hat
     '''
@@ -156,7 +154,7 @@ class Firestarter(LatticeICE40Platform, LUNAPlatform):
     clock_domain_generator = FirestarterDomainGenerator
     resources = [
                Resource("clk100_mhz", 0, Pins("61", dir="i"),
-                        Clock(50e6), Attrs(IO_STANDARD="SB_LVCMOS")),
+                        Clock(100e6), Attrs(IO_STANDARD="SB_LVCMOS")),
                *LEDResources(pins='8 3',
                              attrs=Attrs(IO_STANDARD="SB_LVCMOS")),
                # NOTE: there is a proper resource in nmigen_boards
