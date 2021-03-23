@@ -28,6 +28,7 @@ class TestPlatform:
     aux = Signal(8)
 
 
+# other option is kbob nmigen-examples nmigen_lib pll
 class FirestarterDomainGenerator(Elaboratable):
     """ Creates clock domains for Firestarter
 

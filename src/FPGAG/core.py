@@ -155,7 +155,11 @@ class Polynomal(Elaboratable):
         O: dir            -- direction; 1 is postive and 0 is negative
         O: step           -- step signal
     """
-    def __init__(self, platform=None):
+    def __init__(self, platform=None, divider=50):
+        ''' divider -- if sys clk is 50 MHz and divider is 50
+                       motor state is update with 1 Mhz
+        '''
+        self.divider = divider
         self.platform = platform
         self.order = DEGREE
         # change code for other orders
@@ -180,6 +184,8 @@ class Polynomal(Elaboratable):
 
     def elaborate(self, platform):
         m = Module()
+        # add 1 MHZ clock domain
+        cntr = Signal(range(self.divider))
         # pos
         max_bits = (self.max_steps << BIT_SHIFT).bit_length()
         cntrs = Array(Signal(signed(max_bits+1))
@@ -228,8 +234,9 @@ class Polynomal(Elaboratable):
                                  self.finished.eq(0)]
                     m.next = 'RUNNING'
             with m.State('RUNNING'):
-                with m.If(ticks < self.ticklimit):
-                    m.d.sync += ticks.eq(ticks+1)
+                with m.If((ticks < self.ticklimit) & (cntr >= self.divider-1)):
+                    m.d.sync += [ticks.eq(ticks+1),
+                                 cntr.eq(0)]
                     for motor in range(self.motors):
                         start = motor*self.order
                         op3 = 3*2*self.coeff[start+2] + cntrs[start+2]
@@ -241,6 +248,8 @@ class Polynomal(Elaboratable):
                         m.d.sync += [cntrs[start+2].eq(op3),
                                      cntrs[start+1].eq(op2),
                                      cntrs[start].eq(op1)]
+                with m.Elif(ticks < self.ticklimit):
+                    m.d.sync += cntr.eq(cntr+1)
                 with m.Else():
                     m.d.sync += [ticks.eq(0),
                                  self.busy.eq(0),
@@ -255,11 +264,14 @@ class Dispatcher(Elaboratable):
         Instructions are buffered in SRAM. This module checks the buffer
         and dispatches the instructions to the corresponding module.
         This is the top module"""
-    def __init__(self, platform=None):
+    def __init__(self, platform=None, divider=50):
         """
         platform  -- used to pass test platform
+        divider   -- if sys clk is 50 MHz and divider is 50
+                     motor state is update with 1 Mhz
         """
         self.platform = platform
+        self.divider = divider
 
     def elaborate(self, platform):
         m = Module()
@@ -267,7 +279,7 @@ class Dispatcher(Elaboratable):
         parser = SPIParser(self.platform)
         m.submodules.parser = parser
         # Connect Polynomal Move module
-        polynomal = Polynomal(self.platform)
+        polynomal = Polynomal(self.platform, self.divider)
         m.submodules.polynomal = polynomal
         coeffcnt = Signal(2)
         # Busy signal
@@ -350,8 +362,6 @@ class Dispatcher(Elaboratable):
 
 # TODO:
 
-#   -- build test
-#   -- motor should be updated with certain freq
 #   -- configure stepper drivers of motor
 #   -- add tests for real hardware
 
@@ -359,3 +369,4 @@ class Dispatcher(Elaboratable):
 #      this is probably cleaner than put all in one file approach
 #   -- simulate blocking due to full memory during a move
 #   -- verify homing procedure of controller
+#   -- use CRC packet for tranmission failure

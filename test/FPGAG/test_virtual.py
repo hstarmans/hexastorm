@@ -17,7 +17,7 @@ from FPGAG.constants import (COMMANDS, DEGREE, MOVE_TICKS, BIT_SHIFT,
 class TestPolynomal(LunaGatewareTestCase):
     platform = TestPlatform()
     FRAGMENT_UNDER_TEST = Polynomal
-    FRAGMENT_ARGUMENTS = {'platform': platform}
+    FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1}
 
     def initialize_signals(self):
         yield self.dut.ticklimit.eq(MOVE_TICKS)
@@ -193,7 +193,7 @@ class TestParser(SPIGatewareTestCase):
 class TestDispatcher(SPIGatewareTestCase):
     platform = TestPlatform()
     FRAGMENT_UNDER_TEST = Dispatcher
-    FRAGMENT_ARGUMENTS = {'platform': platform}
+    FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1}
 
     def initialize_signals(self):
         self.host = Host(self.platform)
