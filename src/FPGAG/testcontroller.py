@@ -1,57 +1,30 @@
 from struct import unpack
-from time import sleep
 
-import spidev
-from smbus2 import SMBus
 import numpy as np
-from gpiozero import LED
-
 from FPGAG.constants import (INSTRUCTIONS, COMMANDS, FREQ, STATE, BIT_SHIFT,
                              MOVE_TICKS, WORD_BYTES, COMMAND_BYTES)
-from FPGAG.platforms import Firestarter
-from FPGAG.core import Dispatcher
 
 
-class Host:
-    'Class for sending instructions to core'
+class TestHost:
+    'Test class for sending instructions to core'
 
-    def __init__(self):
-        self.platform = Firestarter()
-        # IC bus used to set power laser
-        self.bus = SMBus(self.platform.ic_dev_nr)
-        # SPI to sent data to scanner
-        self.spi = spidev.SpiDev()
-        self.spi.open(0, 0)
-        self.spi.max_speed_hz = round(1E6)
-        self.spi.cshigh = False
+    def __init__(self, platform=None):
+        self.platform = platform
         self._position = np.array([0]*self.platform.motors)
-
-    def build(self, do_program=True, verbose=True):
-        self.platform = Firestarter()
-        self.platform.build(Dispatcher(Firestarter()),
-                            do_program=do_program, verbose=verbose)
-
-    def reset(self):
-        'reset the chip by raising and lowering the reset pin'
-        reset_pin = LED(self.platform.reset_pin)
-        reset_pin.off()
-        sleep(1)
-        reset_pin.on()
-        sleep(1)
 
     def _read_state(self):
         '''reads the state and returns bits'''
-        read_data = (self.send_command([COMMANDS.READ] +
-                                       WORD_BYTES*[0]))
+        read_data = (yield from self.send_command([COMMANDS.READ] +
+                                                  WORD_BYTES*[0]))
         return "{:08b}".format(read_data)
 
     @property
     def position(self):
         '''retrieves and updates position'''
         for i in range(self.platform.motors):
-            read_data = (self.send_command([COMMANDS.POSITION] +
-                         WORD_BYTES*[0],
-                         format='!q'))
+            read_data = (yield from self.send_command([COMMANDS.POSITION] +
+                                                      WORD_BYTES*[0],
+                                                      format='!q'))
             self._position[i] = read_data
         # step --> mm
         self._position = (self._position /
@@ -62,7 +35,7 @@ class Host:
     @property
     def pinstate(self):
         '''retrieves pin state as dictionary'''
-        bits = self._read_state()
+        bits = (yield from self._read_state())
         dct = {'x': int(bits[0]),
                'y': int(bits[1]),
                'z': int(bits[2])}
@@ -71,7 +44,7 @@ class Host:
     @property
     def dispatcherror(self):
         '''retrieves dispatch error status of FPGA via SPI'''
-        bits = self._read_state()
+        bits = (yield from self._read_state())
         return int(bits[STATE.DISPATCHERROR])
 
     @property
@@ -80,8 +53,7 @@ class Host:
 
         Execution might still be disabled on the FPGA
         '''
-        enable = LED(self.platform.enable_pin)
-        return enable.value
+        pass
 
     @enable_steppers.setter
     def enable_steppers(self, val):
@@ -93,13 +65,10 @@ class Host:
         val -- boolean, True enables steppers
         '''
         assert type(val) == bool
-        enable = LED(self.platform.enable_pin)
         if val:
-            enable.on()
-            self.spi_exchange_data([COMMANDS.ENABLE]+3*[0])
+            yield from self.spi_exchange_data([COMMANDS.ENABLE]+3*[0])
         else:
-            enable.off()
-            self.spi_exchange_data([COMMANDS.DISABLE]+3*[0])
+            yield from self.spi_exchange_data([COMMANDS.DISABLE]+3*[0])
 
     @property
     def execution(self):
@@ -107,7 +76,7 @@ class Host:
 
         The dispatcher on the FPGA can be on or off
         '''
-        bits = self._read_state()
+        bits = (yield from self._read_state())
         return int(bits[STATE.PARSING])
 
     def _executionsetter(self, val):
@@ -118,7 +87,7 @@ class Host:
             command.append(COMMANDS.START)
         else:
             command.append(COMMANDS.STOP)
-        self.send_command(command+WORD_BYTES*[0])
+        yield from self.send_command(command+WORD_BYTES*[0])
 
     @execution.setter
     def execution(self, val):
@@ -137,7 +106,7 @@ class Host:
         '''
         assert len(axes) == self.platform.motors
         dist = np.array(axes)*np.array([pos]*self.platform.motors)
-        self.gotopoint(dist, speed)
+        yield from self.gotopoint(dist, speed)
 
     def gotopoint(self, position, speed, absolute=True):
         '''move steppers to point with constant speed
@@ -171,7 +140,7 @@ class Host:
 
         ticks_total = np.copy(ticks)
         steps_total = np.zeros_like(dist_steps, dtype='int64')
-        self._executionsetter(True)
+        yield from self._executionsetter(True)
         hit_home = np.zeros_like(dist_steps)
         while ticks.sum() > 0:
             ticks_move = get_ticks_v(ticks)
@@ -183,10 +152,10 @@ class Host:
             a = (cnts/ticks_move).round().astype('int64')
             ticks -= MOVE_TICKS
             ticks[ticks < 0] = 0
-            hit_home = self.send_move(ticks_move.tolist(),
-                                      a.tolist(),
-                                      [0]*self.platform.motors,
-                                      [0]*self.platform.motors)
+            hit_home = (yield from self.send_move(ticks_move.tolist(),
+                                                  a.tolist(),
+                                                  [0]*self.platform.motors,
+                                                  [0]*self.platform.motors))
             dist_steps = dist_steps*hit_home
             if dist_steps.sum() == 0:
                 break
@@ -203,7 +172,7 @@ class Host:
 
     def send_command(self, data, format='!Q'):
         assert len(data) == WORD_BYTES+COMMAND_BYTES
-        read_data = self.spi_exchange_data(data)
+        read_data = yield from self.spi_exchange_data(data)
         return unpack(format, read_data[1:])[0]
 
     def send_move(self, ticks, a, b, c, maxtrials=100):
@@ -218,16 +187,16 @@ class Host:
         commands = self.move_commands(ticks, a, b, c)
         trials = 0
         data_out = 255
-        home_bits = np.ones((self.platform.motors))
+        home_bits = np.ones([1]*self.platform.motors)
         while self.memfull(data_out):
-            data_out = self.send_command(commands.pop(0))
+            data_out = (yield from self.send_command(commands.pop(0)))
             trials += 1
             bits = [int(i) for i in "{:08b}".format(data_out >> 8)]
             home_bits -= np.array(bits[:self.platform.motors])
             if trials > maxtrials:
                 raise Exception("Too many trials needed")
         for command in commands:
-            self.send_command(command)
+            yield from self.send_command(command)
         return home_bits
 
     def move_commands(self, ticks, a, b, c):
@@ -256,5 +225,4 @@ class Host:
         response = bytearray()
         for byte in data:
             response.append(self.spi.xfer([byte])[0])
-        print(response)
         return response

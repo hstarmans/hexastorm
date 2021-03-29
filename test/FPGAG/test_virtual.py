@@ -7,7 +7,7 @@ from luna.gateware.interface.spi import SPIGatewareTestCase
 from luna.gateware.test.utils import sync_test_case
 from luna.gateware.test import LunaGatewareTestCase
 
-from FPGAG.controller import Host
+from FPGAG.testcontroller import TestHost
 from FPGAG.core import Dispatcher, SPIParser, Polynomal
 from FPGAG.platforms import Firestarter, TestPlatform
 from FPGAG.constants import (COMMANDS, DEGREE, MOVE_TICKS, BIT_SHIFT,
@@ -129,7 +129,7 @@ class TestParser(SPIGatewareTestCase):
     FRAGMENT_ARGUMENTS = {'platform': platform}
 
     def initialize_signals(self):
-        self.host = Host(self.platform)
+        self.host = TestHost(self.platform)
         self.host.spi_exchange_data = self.spi_exchange_data
         yield self.dut.spi.cs.eq(0)
 
@@ -196,7 +196,7 @@ class TestDispatcher(SPIGatewareTestCase):
     FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1}
 
     def initialize_signals(self):
-        self.host = Host(self.platform)
+        self.host = TestHost(self.platform)
         self.host.spi_exchange_data = self.spi_exchange_data
         yield self.dut.spi.cs.eq(0)
 
