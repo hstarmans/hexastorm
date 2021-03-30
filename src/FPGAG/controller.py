@@ -22,9 +22,13 @@ class Host:
         # SPI to sent data to scanner
         self.spi = spidev.SpiDev()
         self.spi.open(0, 0)
+        self.spi.mode = 1
         self.spi.max_speed_hz = round(1E6)
-        self.spi.cshigh = False
+        self.spi.no_cs = False
         self._position = np.array([0]*self.platform.motors)
+        # NOTE: this line is key and this is not well understood
+        #       it seems that "owning" the pin is sufficient
+        self.chip_select = LED(8)
 
     def build(self, do_program=True, verbose=True):
         self.platform = Firestarter()
@@ -193,11 +197,13 @@ class Host:
         dist_mm = steps_total / steps_per_mm
         self._position = (self._position + dist_mm)*hit_home
 
-    def memfull(self, data):
+    def memfull(self, data=None):
         '''check if memory is full
 
         data -- data received from peripheral
         '''
+        if data is None:
+            data = int(self._read_state())
         bits = "{:08b}".format(data & 0xff)
         return int(bits[STATE.FULL])
 
@@ -206,7 +212,7 @@ class Host:
         read_data = self.spi_exchange_data(data)
         return unpack(format, read_data[1:])[0]
 
-    def send_move(self, ticks, a, b, c, maxtrials=100):
+    def send_move(self, ticks, a, b, c, maxtrials=1E5, delay=0.1):
         '''send move instruction with data
 
         data            -- coefficients for polynomal move
@@ -219,8 +225,9 @@ class Host:
         trials = 0
         data_out = 255
         home_bits = np.ones((self.platform.motors))
+        command = commands.pop(0)
         while self.memfull(data_out):
-            data_out = self.send_command(commands.pop(0))
+            data_out = self.send_command(command)
             trials += 1
             bits = [int(i) for i in "{:08b}".format(data_out >> 8)]
             home_bits -= np.array(bits[:self.platform.motors])
@@ -253,8 +260,6 @@ class Host:
 
     def spi_exchange_data(self, data):
         '''writes data to peripheral, returns reply'''
-        response = bytearray()
-        for byte in data:
-            response.append(self.spi.xfer([byte])[0])
-        print(response)
+        assert len(data) == (COMMAND_BYTES + WORD_BYTES)
+        response = bytearray(self.spi.xfer(data))
         return response
