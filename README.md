@@ -60,6 +60,8 @@ A user can read but not write directly to pins. This ensures that the host
 can establish precedence between instructions.
 
 # Installation
+
+## FPGA Toolchain
 Although deprecated tools are installed via apio;
 ```
 export PATH=/home/pi/.local/bin:$PATH
@@ -75,6 +77,9 @@ Signal traces for GTKWave can be generated via;
 export GENERATE_VCDS=1
 ```
 
+## Stepper drivers
+Install the python wrapper for TMC stepper [drivers](https://github.com/hstarmans/TMCStepper).
+
 # Limitations
 Add maximum-length linear-feedback shift register sequence and CRC check.
 If you do a sequence of very short moves, e.g. 10 steps, you might notice high-latency due to SPI communcation. 
@@ -84,5 +89,5 @@ Splines, Bezier, B-splines, and NURBS (Non-Uniform Rational B-splines) curves ar
 used for tool path [design](https://zero.sci-hub.se/2496/cb390d406cc077ef156deb76b34099af/desantiago-perez2013.pdf#lb0030).  
 A notebook on bezier is available in the notebook folder. This is finally all ignored. 
 The controller gets a number of points along curve. The curve is divided in segments and this 
-segment is approximated with a polynomal of third degree. Note that there are no multipliers, DSP,
-on the ICE40HX4k chip used for this project.
+segment is approximated with a polynomal of third degree. There are no multipliers, DSP,
+on the ICE40HX4k chip used for this project. As a result, it is has not been implemented.

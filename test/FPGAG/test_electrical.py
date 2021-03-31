@@ -1,4 +1,6 @@
 import unittest
+from time import sleep
+
 from FPGAG.controller import Host
 from FPGAG.platforms import Firestarter
 from FPGAG.constants import DEGREE
@@ -16,15 +18,25 @@ class Tests(unittest.TestCase):
             print("Resetting the machine")
             cls.host.reset()
 
-    def test_readpin(self):
-        '''test if you can detect triggers of the limit switches'''
-        from time import sleep
+    def readpin(self):
+        '''test if you can detect triggers of the limit switches
+
+        This is typically executed manually by placing a sheet of paper
+        in the cavity of the optical switch.
+        '''
         while True:
             print(self.host.pinstate)
             sleep(1)
 
+    def motorenable(self):
+        '''test if motors are enabled'''
+        self.host.enable_steppers = True
+        print('check manually if axes are blocked and hard to move')
+        input()
+        self.host.enable_steppers = False
+
     def test_memfull(self):
-        '''write move instruction until memory is full'''
+        '''write move instruction until static memory is full'''
         limit = round(Firestarter.memdepth/(Firestarter.motors*(DEGREE+1)))
         motors = Firestarter.motors
         for _ in range(limit):

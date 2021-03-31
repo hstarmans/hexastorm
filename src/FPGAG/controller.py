@@ -10,6 +10,7 @@ from FPGAG.constants import (INSTRUCTIONS, COMMANDS, FREQ, STATE, BIT_SHIFT,
                              MOVE_TICKS, WORD_BYTES, COMMAND_BYTES)
 from FPGAG.platforms import Firestarter
 from FPGAG.core import Dispatcher
+import steppers
 
 
 class Host:
@@ -32,6 +33,24 @@ class Host:
         #       at the moment there is one SPI device so chip select is
         #       not that importatn
         self.chip_select = LED(8)
+        self.init_steppers()
+
+    def init_steppers(self):
+        '''configure steppers via SPI using teemuatflut CPP library'''
+        self.motors = [steppers.TMC2130(link_index=i)
+                       for i in range(1, 1+self.platform.motors)]
+        steppers.bcm2835_init()
+        for motor in self.motors:
+            motor.begin()
+            motor.toff(5)
+            # ideally should be 0
+            # on working equipment it is always 2
+            assert motor.test_connection() == 2
+            motor.rms_current(600)
+            motor.microsteps(16)
+            motor.en_pwm_mode(True)
+        # close bcm2835
+        steppers.bcm2835_close()
 
     def build(self, do_program=True, verbose=True):
         self.platform = Firestarter()
@@ -102,11 +121,11 @@ class Host:
         assert type(val) == bool
         enable = LED(self.platform.enable_pin)
         if val:
-            enable.on()
-            self.spi_exchange_data([COMMANDS.ENABLE]+3*[0])
-        else:
             enable.off()
-            self.spi_exchange_data([COMMANDS.DISABLE]+3*[0])
+            self.spi_exchange_data([COMMANDS.START]+WORD_BYTES*[0])
+        else:
+            enable.on()
+            self.spi_exchange_data([COMMANDS.STOP]+WORD_BYTES*[0])
 
     @property
     def execution(self):

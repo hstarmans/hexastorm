@@ -144,7 +144,7 @@ class Firestarter(LatticeICE40Platform):
     name = "firestarter"
     ic_dev_nr = 1      # spi connection
     ic_address = 0x28  # spi address
-    enable_pin = 11    # enable pin for stepper motors
+    enable_pin = 17    # enable pin for stepper motors
     reset_pin = 26     # can be used to reset FPGA
     memdepth = 256
     stepspermm = {'x': 400, 'y': 400, 'z': 400}
