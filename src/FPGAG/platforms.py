@@ -169,16 +169,16 @@ class Firestarter(LatticeICE40Platform):
                         Attrs(IO_STANDARD="SB_LVCMOS")),
                # x-stepper
                StepperResource(number=0, step="38", direction="37",
-                               limit='110',
-                               attrs=Attrs(IO_STANDARD="SB_LVTTL")),
+                               limit="110",
+                               attrs=Attrs(IO_STANDARD="SB_LVCMOS")),
                # y-stepper
                StepperResource(number=1, step="19", direction="18",
-                               limit='124',
-                               attrs=Attrs(IO_STANDARD="SB_LVTTL")),
+                               limit="124",
+                               attrs=Attrs(IO_STANDARD="SB_LVCMOS")),
                # z-stepper
                StepperResource(number=2, step="143", direction="142",
-                               limit='130',
-                               attrs=Attrs(IO_STANDARD="SB_LVTTL"))
+                               limit="130",
+                               attrs=Attrs(IO_STANDARD="SB_LVCMOS"))
                ]
     connectors = []
 

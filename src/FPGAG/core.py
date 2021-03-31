@@ -293,7 +293,8 @@ class Dispatcher(Elaboratable):
             board_spi = platform.request("debug_spi")
             spi = synchronize(m, board_spi)
             m.submodules.car = platform.clock_domain_generator()
-            steppers = [res for res in get_all_resources(platform, "steppers")]
+            steppers = [res for res in get_all_resources(platform, "stepper")]
+            assert len(steppers) != 0
         else:
             platform = self.platform
             self.spi = SPIBus()

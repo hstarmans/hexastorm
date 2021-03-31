@@ -24,10 +24,13 @@ class Host:
         self.spi.open(0, 0)
         self.spi.mode = 1
         self.spi.max_speed_hz = round(1E6)
-        self.spi.no_cs = False
         self._position = np.array([0]*self.platform.motors)
-        # NOTE: this line is key and this is not well understood
-        #       it seems that "owning" the pin is sufficient
+        # TODO: this line is key and not well understood
+        #       chip select on or of does not affect results
+        #       "owning" the pin and transfering ownership from spi is
+        #       important
+        #       at the moment there is one SPI device so chip select is
+        #       not that importatn
         self.chip_select = LED(8)
 
     def build(self, do_program=True, verbose=True):
@@ -261,5 +264,5 @@ class Host:
     def spi_exchange_data(self, data):
         '''writes data to peripheral, returns reply'''
         assert len(data) == (COMMAND_BYTES + WORD_BYTES)
-        response = bytearray(self.spi.xfer(data))
+        response = bytearray(self.spi.xfer2(data))
         return response

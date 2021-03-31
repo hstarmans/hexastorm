@@ -63,7 +63,6 @@ def StepperResource(*args, step, direction, limit, number=None,
               conn=conn, assert_width=1)))
     if attrs is not None:
         io.append(attrs)
-    print(f"creating {number}")
     return Resource.family(*args, number, default_name="stepper", ios=io)
 
 

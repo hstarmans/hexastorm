@@ -8,13 +8,20 @@ class Tests(unittest.TestCase):
     '''Test on a real scanhead with a FPGA'''
 
     @classmethod
-    def setUpClass(cls, flash=False):
+    def setUpClass(cls, flash=True):
         cls.host = Host()
         if flash:
             cls.host.build()
         else:
             print("Resetting the machine")
             cls.host.reset()
+
+    def test_readpin(self):
+        '''test if you can detect triggers of the limit switches'''
+        from time import sleep
+        while True:
+            print(self.host.pinstate)
+            sleep(1)
 
     def test_memfull(self):
         '''write move instruction until memory is full'''
