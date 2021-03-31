@@ -155,10 +155,11 @@ class Polynomal(Elaboratable):
         O: dir            -- direction; 1 is postive and 0 is negative
         O: step           -- step signal
     """
-    def __init__(self, platform=None, divider=50):
+    def __init__(self, platform=None, divider=50, top=False):
         ''' divider -- if sys clk is 50 MHz and divider is 50
                        motor state is update with 1 Mhz
         '''
+        self.top = top
         self.divider = divider
         self.platform = platform
         self.order = DEGREE
@@ -192,8 +193,9 @@ class Polynomal(Elaboratable):
                       for _ in range(len(self.coeff)))
         assert max_bits <= 64
         ticks = Signal(MOVE_TICKS.bit_length())
-        if platform:
+        if self.top:
             steppers = [res for res in get_all_resources(platform, "stepper")]
+            assert len(steppers) != 0
             for idx, stepper in enumerate(steppers):
                 m.d.comb += [stepper.step.eq(self.step[idx]),
                              stepper.dir.eq(self.dir[idx])]
