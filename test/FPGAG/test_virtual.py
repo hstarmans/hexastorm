@@ -1,5 +1,6 @@
 import unittest
 from random import randint
+from copy import deepcopy
 
 import numpy as np
 from numpy.testing import assert_array_equal
@@ -244,19 +245,28 @@ class TestDispatcher(SPIGatewareTestCase):
     @sync_test_case
     def test_ptpmove(self, steps=[400], ticks=[15_000]):
         'verify point to point move'
+        steps = steps*self.platform.motors
         mm = np.array(steps)/np.array(list(self.platform.stepspermm.values()))
         time = np.array(ticks)/FREQ
         speed = mm/time
         yield from self.host.gotopoint(mm.tolist(),
                                        speed.tolist())
         yield from self.wait_complete()
-        pos = (yield from self.host.position)
-        self.assertEqual(self.host._position, pos)
+        calculated = deepcopy(self.host._position)
+        assert calculated.sum() > 0
+        assert_array_equal((yield from self.host.position),
+                           calculated)
 
     @sync_test_case
-    def test_movereceipt(self, ticks=10_000, a=1, b=2, c=3):
+    def test_movereceipt(self, ticks=10_000):
         'verify move instruction send over with send_move'
-        yield from self.host.send_move([ticks], [a], [b], [c])
+        a = list(range(1, self.platform.motors+1))
+        b = list(range(3, self.platform.motors+3))
+        c = list(range(5, self.platform.motors+5))
+        yield from self.host.send_move([ticks],
+                                       a,
+                                       b,
+                                       c)
         # wait till instruction is received
         while (yield self.dut.parser.empty):
             yield
@@ -268,15 +278,21 @@ class TestDispatcher(SPIGatewareTestCase):
             yield
         # confirm receipt tick limit and coefficients
         self.assertEqual((yield self.dut.pol.ticklimit), 10_000)
+        coefficients = [a, b, c]
         for motor in range(self.platform.motors):
+            print(motor)
             for coef in range(DEGREE):
+                print(f"MOTOR {motor} with {coef}")
+                input()
                 indx = motor*(DEGREE)+coef
                 self.assertEqual((yield self.dut.pol.coeff[indx]),
-                                 motor+coef+1)
+                                 coefficients[coef][motor])
         while (yield self.dut.pol.busy):
             yield
-        self.assertEqual((yield self.dut.pol.cntrs[0]), a*ticks
-                         + b*pow(ticks, 2)+c*pow(ticks, 3))
+        for motor in range(self.platform.motors):
+            self.assertEqual((yield self.dut.pol.cntrs[motor]),
+                             a[motor]*ticks + b[motor]*pow(ticks, 2)
+                             + c[motor]*pow(ticks, 3))
 
 
 class TestBuild(unittest.TestCase):

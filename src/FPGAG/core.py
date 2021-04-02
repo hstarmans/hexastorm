@@ -283,7 +283,6 @@ class Dispatcher(Elaboratable):
         # Connect Polynomal Move module
         polynomal = Polynomal(self.platform, self.divider)
         m.submodules.polynomal = polynomal
-        coeffcnt = Signal(2)
         # Busy signal
         busy = Signal()
         m.d.comb += busy.eq(polynomal.busy)
@@ -307,6 +306,7 @@ class Dispatcher(Elaboratable):
             aux = platform.aux
             self.aux = aux
             self.busy = busy
+        coeffcnt = Signal(range(len(polynomal.coeff)*platform.motors+1))
         # connect motors
         for idx, stepper in enumerate(steppers):
             m.d.comb += [stepper.step.eq(polynomal.step[idx] &
@@ -339,7 +339,7 @@ class Dispatcher(Elaboratable):
             with m.State('MOVE_POLYNOMAL'):
                 with m.If(parser.read_en == 0):
                     m.d.sync += parser.read_en.eq(1)
-                with m.Elif(coeffcnt < len(polynomal.coeff)):
+                with m.Elif(coeffcnt < len(polynomal.coeff)*platform.motors):
                     m.d.sync += [polynomal.coeff[coeffcnt].eq(
                                  parser.read_data),
                                  coeffcnt.eq(coeffcnt+1),
@@ -377,3 +377,5 @@ class Dispatcher(Elaboratable):
 #   -- the way word_bytes is counted in spi_parser is not clean
 #   -- xfer3 is faster in transaction
 #   -- if you chip select is released parsers should return to initial state
+#   -- number of ticks per motor is uniform
+#   -- code clones between testcontroller and controller is ugly

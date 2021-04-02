@@ -125,7 +125,8 @@ class TestHost:
         else:
             dist = np.array(position)
         speed = np.array(speed)
-        t = np.absolute((dist/speed))
+        # NOTE: ticks is equal for all axes
+        t = np.array([np.absolute((dist/speed))[0]])
         ticks = (t*FREQ).round().astype(int)
         steps_per_mm = np.array(list(self.platform.stepspermm.values()))
         # mm -> steps
@@ -187,9 +188,10 @@ class TestHost:
         commands = self.move_commands(ticks, a, b, c)
         trials = 0
         data_out = 255
-        home_bits = np.ones([1]*self.platform.motors)
+        home_bits = np.ones((self.platform.motors))
+        command = commands.pop(0)
         while self.memfull(data_out):
-            data_out = (yield from self.send_command(commands.pop(0)))
+            data_out = (yield from self.send_command(command))
             trials += 1
             bits = [int(i) for i in "{:08b}".format(data_out >> 8)]
             home_bits -= np.array(bits[:self.platform.motors])
@@ -208,13 +210,14 @@ class TestHost:
            acceleration -- acceleration in mm/s2
            postion      -- list with position in mm
         '''
-        assert len(ticks) == len(a) == len(b) == len(c) == self.platform.motors
+        assert len(ticks) == 1
+        assert len(a) == len(b) == len(c) == self.platform.motors
         write_byte = COMMANDS.WRITE.to_bytes(1, 'big')
         move_byte = INSTRUCTIONS.MOVE.to_bytes(1, 'big')
         commands = []
+        commands += [write_byte +
+                     ticks[0].to_bytes(7, 'big') + move_byte]
         for motor in range(self.platform.motors):
-            commands += [write_byte +
-                         ticks[motor].to_bytes(7, 'big') + move_byte]
             commands += [write_byte + a[motor].to_bytes(8, 'big', signed=True)]
             commands += [write_byte + b[motor].to_bytes(8, 'big', signed=True)]
             commands += [write_byte + c[motor].to_bytes(8, 'big', signed=True)]
