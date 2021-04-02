@@ -229,7 +229,7 @@ class TestDispatcher(SPIGatewareTestCase):
     def test_invalidwrite(self):
         '''write invalid instruction and verify error is raised'''
         command = [COMMANDS.WRITE] + [0]*WORD_BYTES
-        for _ in range(DEGREE+1):
+        for _ in range(round(self.host.platform.bytesinmove/WORD_BYTES)):
             yield from self.host.send_command(command)
         # enable dispatching of code
         yield from self.host._executionsetter(True)

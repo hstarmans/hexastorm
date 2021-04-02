@@ -87,7 +87,7 @@ class SPIParser(Elaboratable):
         bytesreceived = Signal(range(platform.bytesinmove+1))
         with m.FSM(reset='RESET', name='parser'):
             with m.State('RESET'):
-                m.d.sync += self.execute.eq(0)
+                m.d.sync += [self.execute.eq(0), bytesreceived.eq(0)]
                 m.next = 'WAIT_COMMAND'
             with m.State('WAIT_COMMAND'):
                 m.d.sync += [fifo.write_commit.eq(0)]
@@ -123,14 +123,14 @@ class SPIParser(Elaboratable):
                         m.next = 'WAIT_COMMAND'
             with m.State('WAIT_WORD'):
                 with m.If(interface.word_complete):
-                    m.d.sync += [bytesreceived.eq(bytesreceived+WORD_BYTES),
-                                 fifo.write_en.eq(1),
+                    m.d.sync += [fifo.write_en.eq(1),
+                                 bytesreceived.eq(bytesreceived+WORD_BYTES),
                                  fifo.write_data.eq(interface.word_received)]
                     m.next = 'WRITE'
             with m.State('WRITE'):
                 m.d.sync += fifo.write_en.eq(0)
                 m.next = 'WAIT_COMMAND'
-                with m.If(bytesreceived == platform.bytesinmove):
+                with m.If(bytesreceived >= platform.bytesinmove):
                     m.d.sync += [bytesreceived.eq(0),
                                  fifo.write_commit.eq(1)]
         return m
@@ -240,16 +240,16 @@ class Polynomal(Elaboratable):
                     m.d.sync += [ticks.eq(ticks+1),
                                  cntr.eq(0)]
                     for motor in range(self.motors):
-                        start = motor*self.order
-                        op3 = 3*2*self.coeff[start+2] + cntrs[start+2]
-                        op2 = (cntrs[start+2] + 2*self.coeff[start+1]
-                               + cntrs[start+1])
-                        op1 = (self.coeff[start+2] + self.coeff[start+1]
-                               + self.coeff[start] + cntrs[start+2] +
-                               cntrs[start+1] + cntrs[start])
-                        m.d.sync += [cntrs[start+2].eq(op3),
-                                     cntrs[start+1].eq(op2),
-                                     cntrs[start].eq(op1)]
+                        idx = motor*self.order
+                        op3 = 3*2*self.coeff[idx+2] + cntrs[idx+2]
+                        op2 = (cntrs[idx+2] + 2*self.coeff[idx+1]
+                               + cntrs[idx+1])
+                        op1 = (self.coeff[idx+2] + self.coeff[idx+1]
+                               + self.coeff[idx] + cntrs[idx+2] +
+                               cntrs[idx+1] + cntrs[idx])
+                        m.d.sync += [cntrs[idx+2].eq(op3),
+                                     cntrs[idx+1].eq(op2),
+                                     cntrs[idx].eq(op1)]
                 with m.Elif(ticks < self.ticklimit):
                     m.d.sync += cntr.eq(cntr+1)
                 with m.Else():
@@ -372,4 +372,8 @@ class Dispatcher(Elaboratable):
 #      this is probably cleaner than put all in one file approach
 #   -- simulate blocking due to full memory during a move
 #   -- verify homing procedure of controller
-#   -- use CRC packet for tranmission failure
+#   -- use CRC packet for tranmission failure (it is in litex but not luna)
+#   -- try to replace value == 0 with ~value
+#   -- the way word_bytes is counted in spi_parser is not clean
+#   -- xfer3 is faster in transaction
+#   -- if you chip select is released parsers should return to initial state

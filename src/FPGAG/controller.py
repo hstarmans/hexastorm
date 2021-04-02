@@ -1,5 +1,6 @@
 from struct import unpack
 from time import sleep
+from copy import deepcopy
 
 import spidev
 from smbus2 import SMBus
@@ -283,5 +284,9 @@ class Host:
     def spi_exchange_data(self, data):
         '''writes data to peripheral, returns reply'''
         assert len(data) == (COMMAND_BYTES + WORD_BYTES)
-        response = bytearray(self.spi.xfer2(data))
+        self.chip_select.off()
+        # spidev changes calling values
+        datachanged = deepcopy(data)
+        response = bytearray(self.spi.xfer2(datachanged))
+        self.chip_select.on()
         return response
