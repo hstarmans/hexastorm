@@ -306,7 +306,7 @@ class Dispatcher(Elaboratable):
             aux = platform.aux
             self.aux = aux
             self.busy = busy
-        coeffcnt = Signal(range(len(polynomal.coeff)*platform.motors+1))
+        coeffcnt = Signal(range(len(polynomal.coeff)))
         # connect motors
         for idx, stepper in enumerate(steppers):
             m.d.comb += [stepper.step.eq(polynomal.step[idx] &
@@ -339,7 +339,7 @@ class Dispatcher(Elaboratable):
             with m.State('MOVE_POLYNOMAL'):
                 with m.If(parser.read_en == 0):
                     m.d.sync += parser.read_en.eq(1)
-                with m.Elif(coeffcnt < len(polynomal.coeff)*platform.motors):
+                with m.Elif(coeffcnt < len(polynomal.coeff)):
                     m.d.sync += [polynomal.coeff[coeffcnt].eq(
                                  parser.read_data),
                                  coeffcnt.eq(coeffcnt+1),

@@ -1,6 +1,7 @@
 import unittest
 from random import randint
 from copy import deepcopy
+from math import floor
 
 import numpy as np
 from numpy.testing import assert_array_equal
@@ -148,7 +149,10 @@ class TestParser(SPIGatewareTestCase):
     def test_writemoveinstruction(self):
         'write move instruction and verify FIFO is no longer empty'
         self.assertEqual((yield self.dut.empty), 1)
-        yield from self.host.send_move([1000], [1], [2], [3])
+        yield from self.host.send_move([1000],
+                                       [1]*self.platform.motors,
+                                       [2]*self.platform.motors,
+                                       [3]*self.platform.motors)
         while (yield self.dut.empty) == 1:
             yield
         # Instruction ready
@@ -182,10 +186,15 @@ class TestParser(SPIGatewareTestCase):
     @sync_test_case
     def test_memfull(self):
         'write move instruction until memory is full'
+        platform = self.platform
         self.assertEqual((yield self.dut.empty), 1)
         # platform memory is on default 2 move instructions
-        yield from self.host.send_move([1000], [1], [2], [3])
-        yield from self.host.send_move([1000], [1], [2], [3])
+        for _ in range(floor(platform.memdepth
+                       / (platform.bytesinmove/WORD_BYTES))):
+            yield from self.host.send_move([1000],
+                                           [1]*platform.motors,
+                                           [2]*platform.motors,
+                                           [3]*platform.motors)
         writedata = [COMMANDS.WRITE]+[1]*WORD_BYTES
         read_data = yield from self.host.send_command(writedata)
         self.assertEqual(self.host.memfull(read_data), True)
@@ -244,7 +253,10 @@ class TestDispatcher(SPIGatewareTestCase):
 
     @sync_test_case
     def test_ptpmove(self, steps=[400], ticks=[15_000]):
-        'verify point to point move'
+        '''verify point to point move
+
+        If ticks is longer than tick limit the moves is broken up.
+        '''
         steps = steps*self.platform.motors
         mm = np.array(steps)/np.array(list(self.platform.stepspermm.values()))
         time = np.array(ticks)/FREQ
@@ -280,17 +292,14 @@ class TestDispatcher(SPIGatewareTestCase):
         self.assertEqual((yield self.dut.pol.ticklimit), 10_000)
         coefficients = [a, b, c]
         for motor in range(self.platform.motors):
-            print(motor)
             for coef in range(DEGREE):
-                print(f"MOTOR {motor} with {coef}")
-                input()
                 indx = motor*(DEGREE)+coef
                 self.assertEqual((yield self.dut.pol.coeff[indx]),
                                  coefficients[coef][motor])
         while (yield self.dut.pol.busy):
             yield
         for motor in range(self.platform.motors):
-            self.assertEqual((yield self.dut.pol.cntrs[motor]),
+            self.assertEqual((yield self.dut.pol.cntrs[motor*DEGREE]),
                              a[motor]*ticks + b[motor]*pow(ticks, 2)
                              + c[motor]*pow(ticks, 3))
 

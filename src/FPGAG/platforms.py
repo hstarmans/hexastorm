@@ -20,11 +20,11 @@ from FPGAG.resources import StepperResource, StepperRecord
 
 class TestPlatform:
     name = 'Test'
-    stepspermm = {'x': 400} #'y': 400}
+    stepspermm = {'x': 400, 'y': 400}
     motors = len(stepspermm.keys())
     bytesinmove = getbytesinmove(motors)
     memdepth = ceil(bytesinmove/WORD_BYTES)*2
-    steppers = [StepperRecord()]
+    steppers = [StepperRecord()]*motors
     aux = Signal(8)
 
 
