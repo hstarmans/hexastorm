@@ -8,7 +8,7 @@ from FPGAG.constants import (INSTRUCTIONS, COMMANDS, FREQ, STATE, BIT_SHIFT,
 class TestHost:
     'Test class for sending instructions to core'
 
-    def __init__(self, platform=None):
+    def __init__(self, platform):
         self.platform = platform
         self._position = np.array([0]*self.platform.motors)
 

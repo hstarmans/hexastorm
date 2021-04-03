@@ -1,5 +1,6 @@
 import unittest
 from time import sleep
+from math import floor
 
 from FPGAG.controller import Host
 from FPGAG.platforms import Firestarter
@@ -43,16 +44,21 @@ class Tests(unittest.TestCase):
         self.assertEqual(self.host.dispatcherror, False)
         # with false check if this results in block
         # you can do a blink test to verify move
-        # self.host.enable_steppers = True
+        self.host.enable_steppers = True
+        motors = Firestarter.motors
+        self.host.send_move([10000],
+                            [10]*motors,
+                            [0]*motors,
+                            [0]*motors)
         # print('all axes should move')
         # input()
         # self.host.gotopoint(position=[1, 1, 1],
         #                     speed=[1]*3,
         #                     absolute=False)
-        # print('retrieving position, should not be zero')
+        print('retrieving position, should not be zero')
         print(self.host.position)
         input()
-        # self.host.enable_steppers = False
+        self.host.enable_steppers = False
 
     def test_invalidinstruction(self):
         '''write invalid instruction and verify it passes dispatcher'''
@@ -68,10 +74,11 @@ class Tests(unittest.TestCase):
 
     def test_memfull(self):
         '''write move instruction until static memory is full'''
-        limit = round(Firestarter.memdepth/(Firestarter.motors*(DEGREE+1)))
+        limit = floor(Firestarter.memdepth /
+                      (self.host.platform.bytesinmove/WORD_BYTES))
         motors = Firestarter.motors
         for _ in range(limit):
-            self.host.send_move([1000]*motors,
+            self.host.send_move([1000],
                                 [1]*motors,
                                 [2]*motors,
                                 [3]*motors)
