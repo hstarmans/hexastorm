@@ -2,7 +2,6 @@
 To use it, you'll need to set your LUNA_PLATFORM variable:
     > export LUNA_PLATFORM="FPGAG.board:Firestarter"
 """
-from math import ceil
 import os
 import subprocess
 
@@ -14,7 +13,7 @@ from nmigen.vendor.lattice_ice40 import LatticeICE40Platform
 from nmigen_boards.resources import LEDResources
 from nmigen_boards.test.blinky import Blinky
 
-from FPGAG.constants import getbytesinmove, WORD_BYTES
+from FPGAG.constants import wordsinmove
 from FPGAG.resources import StepperResource, StepperRecord
 
 
@@ -22,8 +21,8 @@ class TestPlatform:
     name = 'Test'
     stepspermm = {'x': 400, 'y': 400}
     motors = len(stepspermm.keys())
-    bytesinmove = getbytesinmove(motors)
-    memdepth = ceil(bytesinmove/WORD_BYTES)*2
+    wordsinmove = wordsinmove(motors)
+    memdepth = wordsinmove*2
     steppers = [StepperRecord()]*motors
     aux = Signal(8)
 
@@ -149,7 +148,7 @@ class Firestarter(LatticeICE40Platform):
     memdepth = 256
     stepspermm = {'x': 400, 'y': 400, 'z': 400}
     motors = len(stepspermm.keys())
-    bytesinmove = getbytesinmove(motors=motors)
+    wordsinmove = wordsinmove(motors=motors)
     device = 'iCE40HX4K'
     package = 'TQ144'
     default_clk = 'clk100_mhz'

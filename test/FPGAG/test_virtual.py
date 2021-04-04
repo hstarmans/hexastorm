@@ -159,7 +159,7 @@ class TestParser(SPIGatewareTestCase):
         self.assertEqual((yield self.dut.empty), 0)
         self.assertEqual((yield self.dut.fifo.space_available),
                          (self.platform.memdepth -
-                          self.platform.bytesinmove/WORD_BYTES
+                          self.platform.wordsinmove
                           ))
 
     @sync_test_case
@@ -190,7 +190,7 @@ class TestParser(SPIGatewareTestCase):
         self.assertEqual((yield self.dut.empty), 1)
         # platform memory is on default 2 move instructions
         for _ in range(floor(platform.memdepth
-                       / (platform.bytesinmove/WORD_BYTES))):
+                       / platform.wordsinmove)):
             yield from self.host.send_move([1000],
                                            [1]*platform.motors,
                                            [2]*platform.motors,
@@ -239,7 +239,7 @@ class TestDispatcher(SPIGatewareTestCase):
     def test_invalidwrite(self):
         '''write invalid instruction and verify error is raised'''
         command = [COMMANDS.WRITE] + [0]*WORD_BYTES
-        for _ in range(round(self.host.platform.bytesinmove/WORD_BYTES)):
+        for _ in range(self.host.platform.wordsinmove):
             yield from self.host.send_command(command)
         # enable dispatching of code
         yield from self.host._executionsetter(True)

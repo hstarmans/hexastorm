@@ -1,5 +1,3 @@
-from math import ceil
-
 from nmigen import Signal, Elaboratable, signed, Cat
 from nmigen import Module
 from nmigen.hdl.mem import Array
@@ -79,15 +77,14 @@ class SPIParser(Elaboratable):
         state = Signal(8)
         m.d.sync += [state[STATE.PARSING].eq(self.execute),
                      state[STATE.FULL].eq(
-                     fifo.space_available <
-                     ceil(platform.bytesinmove/WORD_BYTES)),
+                     fifo.space_available < platform.wordsinmove),
                      state[STATE.DISPATCHERROR].eq(self.dispatcherror)]
         # Parser
         mtrcntr = Signal(range(platform.motors))
-        bytesreceived = Signal(range(platform.bytesinmove+1))
+        wordsreceived = Signal(range(platform.wordsinmove+1))
         with m.FSM(reset='RESET', name='parser'):
             with m.State('RESET'):
-                m.d.sync += [self.execute.eq(0), bytesreceived.eq(0)]
+                m.d.sync += [self.execute.eq(0), wordsreceived.eq(0)]
                 m.next = 'WAIT_COMMAND'
             with m.State('WAIT_COMMAND'):
                 m.d.sync += [fifo.write_commit.eq(0)]
@@ -104,7 +101,7 @@ class SPIParser(Elaboratable):
                     with m.Elif(interface.command == COMMANDS.WRITE):
                         m.d.sync += interface.word_to_send.eq(word)
                         with m.If((state[STATE.FULL] == 0) |
-                                  (bytesreceived != 0)):
+                                  (wordsreceived != 0)):
                             m.next = 'WAIT_WORD'
                         with m.Else():
                             m.next = 'WAIT_COMMAND'
@@ -124,14 +121,14 @@ class SPIParser(Elaboratable):
             with m.State('WAIT_WORD'):
                 with m.If(interface.word_complete):
                     m.d.sync += [fifo.write_en.eq(1),
-                                 bytesreceived.eq(bytesreceived+WORD_BYTES),
+                                 wordsreceived.eq(wordsreceived+1),
                                  fifo.write_data.eq(interface.word_received)]
                     m.next = 'WRITE'
             with m.State('WRITE'):
                 m.d.sync += fifo.write_en.eq(0)
                 m.next = 'WAIT_COMMAND'
-                with m.If(bytesreceived >= platform.bytesinmove):
-                    m.d.sync += [bytesreceived.eq(0),
+                with m.If(wordsreceived >= platform.wordsinmove):
+                    m.d.sync += [wordsreceived.eq(0),
                                  fifo.write_commit.eq(1)]
         return m
 
@@ -374,8 +371,8 @@ class Dispatcher(Elaboratable):
 #   -- verify homing procedure of controller
 #   -- use CRC packet for tranmission failure (it is in litex but not luna)
 #   -- try to replace value == 0 with ~value
-#   -- the way word_bytes is counted in spi_parser is not clean
 #   -- xfer3 is faster in transaction
 #   -- if you chip select is released parsers should return to initial state
 #   -- number of ticks per motor is uniform
 #   -- code clones between testcontroller and controller is ugly
+#   -- detect parser error during a move

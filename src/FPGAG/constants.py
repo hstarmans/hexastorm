@@ -4,6 +4,7 @@ Settings of the implementation are saved in board.by and constants.py.
 Constants are more related to the actual implementation on the FPGA.
 """
 from collections import namedtuple
+from math import ceil
 
 COMMANDS = namedtuple('COMMANDS', ['EMPTY', 'WRITE', 'READ', 'POSITION',
                                    'START', 'STOP'],
@@ -31,11 +32,12 @@ MOVE_TICKS = 10_000
 VARIABLES = {'CRYSTAL_HZ': 50E6}
 
 
-def getbytesinmove(motors):
+def wordsinmove(motors):
+    '''calcuates number of words for a single move instruction'''
     bytesingcode = (sum(MOVE_INSTRUCTION.values())
                     + motors*DEGREE*WORD_BYTES)
     bytesingcode += bytesingcode % WORD_BYTES
-    return bytesingcode
+    return ceil(bytesingcode/WORD_BYTES)
 
 
 def getmovedct(motors):
