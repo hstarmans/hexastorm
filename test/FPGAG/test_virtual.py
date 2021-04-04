@@ -252,10 +252,12 @@ class TestDispatcher(SPIGatewareTestCase):
         self.assertEqual((yield from self.host.dispatcherror), True)
 
     @sync_test_case
-    def test_ptpmove(self, steps=[400], ticks=[15_000]):
+    def test_ptpmove(self, steps=[800], ticks=[30_000]):
         '''verify point to point move
 
         If ticks is longer than tick limit the moves is broken up.
+        If the number of instruction is larger than memdepth it
+        also test blocking behaviour.
         '''
         steps = steps*self.platform.motors
         mm = np.array(steps)/np.array(list(self.platform.stepspermm.values()))

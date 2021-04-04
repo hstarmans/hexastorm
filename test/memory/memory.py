@@ -3,13 +3,13 @@
 If you run the code below an sram is synthesized by Yosys
 """
 from nmigen import Elaboratable, Memory, Module, Signal
-from FPGAG.board import Firestarter
-from FPGAG.constants import MEMWIDTH, MEMDEPTH
+from FPGAG.platforms import Firestarter
+from FPGAG.constants import MEMWIDTH
 
 
 class Memtest(Elaboratable):
     def __init__(self):
-        self.mem = Memory(width=MEMWIDTH, depth=MEMDEPTH)
+        self.mem = Memory(width=MEMWIDTH, depth=Firestarter.memdepth)
 
     def elaborate(self, platform):
         m = Module()

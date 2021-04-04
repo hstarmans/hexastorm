@@ -253,6 +253,9 @@ class Host:
         while self.memfull(data_out):
             data_out = self.send_command(command)
             trials += 1
+            bits = "{:08b}".format(data_out)
+            if int(bits[STATE.DISPATCHERROR]):
+                raise Exception("Parsing error")
             bits = [int(i) for i in "{:08b}".format(data_out >> 8)]
             home_bits -= np.array(bits[:self.platform.motors])
             if trials > maxtrials:
@@ -287,7 +290,7 @@ class Host:
         '''writes data to peripheral, returns reply'''
         assert len(data) == (COMMAND_BYTES + WORD_BYTES)
         self.chip_select.off()
-        # spidev changes calling values
+        # spidev changes values passed to it
         datachanged = deepcopy(data)
         response = bytearray(self.spi.xfer2(datachanged))
         self.chip_select.on()

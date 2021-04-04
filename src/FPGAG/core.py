@@ -334,18 +334,18 @@ class Dispatcher(Elaboratable):
                     m.next = 'ERROR'
                     m.d.sync += parser.dispatcherror.eq(1)
             with m.State('MOVE_POLYNOMAL'):
-                with m.If(parser.read_en == 0):
-                    m.d.sync += parser.read_en.eq(1)
-                with m.Elif(coeffcnt < len(polynomal.coeff)):
-                    m.d.sync += [polynomal.coeff[coeffcnt].eq(
-                                 parser.read_data),
-                                 coeffcnt.eq(coeffcnt+1),
-                                 parser.read_en.eq(0)]
+                with m.If(coeffcnt < len(polynomal.coeff)):
+                    with m.If(parser.read_en == 0):
+                        m.d.sync += parser.read_en.eq(1)
+                    with m.Else():
+                        m.d.sync += [polynomal.coeff[coeffcnt].eq(
+                                     parser.read_data),
+                                     coeffcnt.eq(coeffcnt+1),
+                                     parser.read_en.eq(0)]
                 with m.Else():
                     m.next = 'WAIT_INSTRUCTION'
                     m.d.sync += [polynomal.start.eq(1),
-                                 parser.read_commit.eq(1),
-                                 parser.read_en.eq(0)]
+                                 parser.read_commit.eq(1)]
             # NOTE: system never recovers user must reset
             with m.State('ERROR'):
                 m.next = 'ERROR'
@@ -367,7 +367,6 @@ class Dispatcher(Elaboratable):
 
 #   -- luna splits modules over files and adds one test per file
 #      this is probably cleaner than put all in one file approach
-#   -- simulate blocking due to full memory during a move
 #   -- verify homing procedure of controller
 #   -- use CRC packet for tranmission failure (it is in litex but not luna)
 #   -- try to replace value == 0 with ~value
@@ -375,4 +374,4 @@ class Dispatcher(Elaboratable):
 #   -- if you chip select is released parsers should return to initial state
 #   -- number of ticks per motor is uniform
 #   -- code clones between testcontroller and controller is ugly
-#   -- detect parser error during a move
+#   -- yosys does not give an error if you try to synthesize memroy which can't be synthesized

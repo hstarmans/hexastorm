@@ -145,10 +145,10 @@ class Firestarter(LatticeICE40Platform):
     ic_address = 0x28  # spi address
     enable_pin = 17    # enable pin for stepper motors
     reset_pin = 26     # can be used to reset FPGA
-    memdepth = 256
     stepspermm = {'x': 400, 'y': 400, 'z': 400}
     motors = len(stepspermm.keys())
     wordsinmove = wordsinmove(motors=motors)
+    memdepth = 256
     device = 'iCE40HX4K'
     package = 'TQ144'
     default_clk = 'clk100_mhz'
