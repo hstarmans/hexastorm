@@ -153,8 +153,9 @@ class Polynomal(Elaboratable):
         O: step           -- step signal
     """
     def __init__(self, platform=None, divider=50, top=False):
-        ''' divider -- if sys clk is 50 MHz and divider is 50
-                       motor state is update with 1 Mhz
+        ''' divider -- original clock of 100 MHz via PLL reduced to 50 MHz
+                       if this is divided by 50 motor state updated
+                       with 1 Mhz
         '''
         self.top = top
         self.divider = divider
@@ -174,7 +175,6 @@ class Polynomal(Elaboratable):
         self.ticklimit = Signal(MOVE_TICKS.bit_length())
         # output
         self.busy = Signal()
-        self.finished = Signal()
         self.totalsteps = Array(Signal(signed(self.max_steps.bit_length()+1))
                                 for _ in range(self.motors))
         self.dir = Array(Signal() for _ in range(self.motors))
@@ -220,17 +220,17 @@ class Polynomal(Elaboratable):
         with m.FSM(reset='RESET', name='polynomen'):
             with m.State('RESET'):
                 m.next = 'WAIT_START'
-                m.d.sync += [self.busy.eq(0),
-                             self.finished.eq(0)]
+                m.d.sync += self.busy.eq(0)
             with m.State('WAIT_START'):
-                m.d.sync += self.finished.eq(0)
+                m.d.sync += self.busy.eq(0)
                 with m.If(self.start):
                     for motor in range(self.motors):
                         coef0 = motor*self.order
-                        m.d.sync += [cntrs[coef0].eq(0),
+                        m.d.sync += [cntrs[coef0+2].eq(0),
+                                     cntrs[coef0+1].eq(0),
+                                     cntrs[coef0].eq(0),
                                      counter_d[motor].eq(0)]
-                    m.d.sync += [self.busy.eq(1),
-                                 self.finished.eq(0)]
+                    m.d.sync += self.busy.eq(1)
                     m.next = 'RUNNING'
             with m.State('RUNNING'):
                 with m.If((ticks < self.ticklimit) & (cntr >= self.divider-1)):
@@ -250,9 +250,7 @@ class Polynomal(Elaboratable):
                 with m.Elif(ticks < self.ticklimit):
                     m.d.sync += cntr.eq(cntr+1)
                 with m.Else():
-                    m.d.sync += [ticks.eq(0),
-                                 self.busy.eq(0),
-                                 self.finished.eq(1)]
+                    m.d.sync += ticks.eq(0)
                     m.next = 'WAIT_START'
         return m
 
@@ -284,8 +282,8 @@ class Dispatcher(Elaboratable):
         busy = Signal()
         m.d.comb += busy.eq(polynomal.busy)
         # position adder
-        pol_finished_d = Signal()
-        m.d.sync += pol_finished_d.eq(polynomal.finished)
+        busy_d = Signal()
+        m.d.sync += busy_d.eq(polynomal.busy)
 
         if platform:
             board_spi = platform.request("debug_spi")
@@ -312,7 +310,7 @@ class Dispatcher(Elaboratable):
                          parser.pinstate[idx].eq(stepper.limit)]
         # connect spi
         m.d.comb += parser.spi.connect(spi)
-        with m.If((pol_finished_d == 0) & polynomal.finished):
+        with m.If((busy_d == 1) & (busy == 0)):
             for idx, position in enumerate(parser.position):
                 m.d.sync += position.eq(position+polynomal.totalsteps[idx])
         with m.FSM(reset='RESET', name='dispatcher'):
@@ -343,9 +341,13 @@ class Dispatcher(Elaboratable):
                                      coeffcnt.eq(coeffcnt+1),
                                      parser.read_en.eq(0)]
                 with m.Else():
-                    m.next = 'WAIT_INSTRUCTION'
+                    m.next = 'WAIT'
                     m.d.sync += [polynomal.start.eq(1),
                                  parser.read_commit.eq(1)]
+            # NOTE: you need to wait for busy to be raised
+            #       in time
+            with m.State('WAIT'):
+                m.next = 'WAIT_INSTRUCTION'
             # NOTE: system never recovers user must reset
             with m.State('ERROR'):
                 m.next = 'ERROR'
@@ -361,10 +363,8 @@ class Dispatcher(Elaboratable):
 #  -- Polynomal integrator --> determines position via integrating counters
 
 # TODO:
-
-#   -- configure stepper drivers of motor
 #   -- add tests for real hardware
-
+#   -- there is error with the memory full
 #   -- luna splits modules over files and adds one test per file
 #      this is probably cleaner than put all in one file approach
 #   -- verify homing procedure of controller
@@ -375,3 +375,6 @@ class Dispatcher(Elaboratable):
 #   -- number of ticks per motor is uniform
 #   -- code clones between testcontroller and controller is ugly
 #   -- yosys does not give an error if you try to synthesize memroy which can't be synthesized
+#   -- read / write commit is not perfect
+#   -- simulations do not always agree with reality, around edges
+#   -- test execution speed to ensure the right PLL is propagated

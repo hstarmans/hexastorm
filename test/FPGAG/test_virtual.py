@@ -22,6 +22,7 @@ class TestPolynomal(LunaGatewareTestCase):
     FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1}
 
     def initialize_signals(self):
+        self.host = TestHost(self.platform)
         yield self.dut.ticklimit.eq(MOVE_TICKS)
 
     def count_steps(self, motor):
@@ -35,18 +36,6 @@ class TestPolynomal(LunaGatewareTestCase):
                     count += 1
                 else:
                     count -= 1
-        return count
-
-    def steps_compute(self, steps):
-        '''compute count for a given number of steps
-
-        steps  -- motor moves in small steps
-
-        Shift is needed as two ticks per step are required
-        You need to count slightly over the threshold. That is why
-        +1 is added.
-        '''
-        count = (steps << (1+BIT_SHIFT))+(1 << (BIT_SHIFT-1))
         return count
 
     def send_coefficients(self, a, b, c):
@@ -65,7 +54,7 @@ class TestPolynomal(LunaGatewareTestCase):
     def test_ticklimit(self):
         ''' Test different upper tick limits'''
         def limittest(limit, steps):
-            a = round(self.steps_compute(steps)/limit)
+            a = round(self.host.steps_to_count(steps)/limit)
             yield self.dut.ticklimit.eq(limit)
             yield from self.send_coefficients(a, 0, 0)
             while (yield self.dut.busy):
@@ -80,7 +69,6 @@ class TestPolynomal(LunaGatewareTestCase):
         yield from self.send_coefficients(a, b, c)
         while (yield self.dut.busy):
             yield
-        self.assertEqual((yield self.dut.finished), 1)
         self.assertEqual((yield self.dut.cntrs[0]), a*MOVE_TICKS
                          + b*pow(MOVE_TICKS, 2)+c*pow(MOVE_TICKS, 3))
 
@@ -93,11 +81,10 @@ class TestPolynomal(LunaGatewareTestCase):
         Test if jerk move can be executed with one step.
         '''
         steps = 1
-        c = round(self.steps_compute(steps)/pow(MOVE_TICKS, 3))
+        c = round(self.host.steps_to_count(steps)/pow(MOVE_TICKS, 3))
         yield from self.send_coefficients(0, 0, c)
         while (yield self.dut.busy):
             yield
-        self.assertEqual((yield self.dut.finished), 1)
         dut_count = (yield self.dut.cntrs[0])
         self.assertEqual(dut_count >> BIT_SHIFT, steps*2)
         self.assertEqual((yield self.dut.totalsteps[0]), steps)
@@ -113,7 +100,7 @@ class TestPolynomal(LunaGatewareTestCase):
         def do_move(steps):
             # NOTE: (a = s/t) != -1*(-s/t)
             #       might be due to rounding and bitshift
-            a = round(self.steps_compute(steps)/MOVE_TICKS)
+            a = round(self.host.steps_to_count(steps)/MOVE_TICKS)
             yield from self.send_coefficients(a, 0, 0)
             count = (yield from self.count_steps(0))
             self.assertEqual(count, steps)

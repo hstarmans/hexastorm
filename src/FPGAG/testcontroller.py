@@ -108,6 +108,18 @@ class TestHost:
         dist = np.array(axes)*np.array([pos]*self.platform.motors)
         yield from self.gotopoint(dist, speed)
 
+    def steps_to_count(self, steps):
+        '''compute count for a given number of steps
+
+        steps  -- motor moves in small steps
+
+        Shift is needed as two ticks per step are required
+        You need to count slightly over the threshold. That is why
+        +1 is added.
+        '''
+        count = (steps << (1+BIT_SHIFT))+(1 << (BIT_SHIFT-1))
+        return count
+
     def gotopoint(self, position, speed, absolute=True):
         '''move steppers to point with constant speed
 
