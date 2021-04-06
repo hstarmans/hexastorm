@@ -304,7 +304,7 @@ class Dispatcher(Elaboratable):
         coeffcnt = Signal(range(len(polynomal.coeff)))
         # connect motors
         for idx, stepper in enumerate(steppers):
-            m.d.comb += [stepper.step.eq(polynomal.step[idx] &
+            m.d.sync += [stepper.step.eq(polynomal.step[idx] &
                                          (stepper.limit == 0)),
                          stepper.dir.eq(polynomal.dir[idx]),
                          parser.pinstate[idx].eq(stepper.limit)]

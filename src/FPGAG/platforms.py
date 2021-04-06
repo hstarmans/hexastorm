@@ -145,7 +145,7 @@ class Firestarter(LatticeICE40Platform):
     ic_address = 0x28  # spi address
     enable_pin = 17    # enable pin for stepper motors
     reset_pin = 26     # can be used to reset FPGA
-    stepspermm = {'x': 400, 'y': 400, 'z': 400}
+    stepspermm = {'x': 76.2, 'y': 76.2, 'z': 1600}
     motors = len(stepspermm.keys())
     wordsinmove = wordsinmove(motors=motors)
     memdepth = 256

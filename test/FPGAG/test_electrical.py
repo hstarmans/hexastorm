@@ -13,7 +13,7 @@ class Tests(unittest.TestCase):
     '''Test on a real scanhead with a FPGA'''
 
     @classmethod
-    def setUpClass(cls, flash=False):
+    def setUpClass(cls, flash=True):
         cls.host = Host()
         if flash:
             cls.host.build()

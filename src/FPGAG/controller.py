@@ -35,6 +35,7 @@ class Host:
         #       not that importatn
         self.chip_select = LED(8)
         self.init_steppers()
+        self.enable = LED(self.platform.enable_pin)
 
     def init_steppers(self):
         '''configure steppers via SPI using teemuatflut CPP library'''
@@ -120,12 +121,11 @@ class Host:
         val -- boolean, True enables steppers
         '''
         assert type(val) == bool
-        enable = LED(self.platform.enable_pin)
         if val:
-            enable.off()
+            self.enable.off()
             self.spi_exchange_data([COMMANDS.START]+WORD_BYTES*[0])
         else:
-            enable.on()
+            self.enable.on()
             self.spi_exchange_data([COMMANDS.STOP]+WORD_BYTES*[0])
 
     @property
@@ -158,6 +158,7 @@ class Host:
     def home_axes(self, axes, speed, pos=-200):
         '''home given axes
 
+        e.g. axes = [1,0,1] will home x and z
         axes  -- list with axes numbers to home
         speed -- speed in mm/s used to home
         pos   -- position to home to
