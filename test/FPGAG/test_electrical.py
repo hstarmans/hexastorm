@@ -97,8 +97,7 @@ class Tests(unittest.TestCase):
             self.host.send_command(command)
         sleep(3)
         self.host._executionsetter(False)
-        # TODO: strange that memory is full!???
-        self.assertEqual(self.host.memfull(), True)
+        self.assertEqual(self.host.memfull(), False)
         self.assertEqual(self.host.dispatcherror, True)
 
 

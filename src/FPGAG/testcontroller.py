@@ -13,19 +13,18 @@ class TestHost:
         self._position = np.array([0]*self.platform.motors)
 
     def _read_state(self):
-        '''reads the state and returns bits'''
+        '''reads the state and returns bytearray'''
         read_data = (yield from self.send_command([COMMANDS.READ] +
                                                   WORD_BYTES*[0]))
-        return "{:08b}".format(read_data)
+        return read_data
 
     @property
     def position(self):
         '''retrieves and updates position'''
         for i in range(self.platform.motors):
             read_data = (yield from self.send_command([COMMANDS.POSITION] +
-                                                      WORD_BYTES*[0],
-                                                      format='!q'))
-            self._position[i] = read_data
+                                                      WORD_BYTES*[0]))
+            self._position[i] = unpack('!q', read_data[1:])[0]
         # step --> mm
         self._position = (self._position /
                           np.array(list(self.platform.stepspermm.values())))
@@ -35,7 +34,8 @@ class TestHost:
     @property
     def pinstate(self):
         '''retrieves pin state as dictionary'''
-        bits = (yield from self._read_state())
+        data = (yield from self._read_state())
+        bits = "{:08b}".format(data[-2])
         dct = {'x': int(bits[0]),
                'y': int(bits[1]),
                'z': int(bits[2])}
@@ -44,7 +44,8 @@ class TestHost:
     @property
     def dispatcherror(self):
         '''retrieves dispatch error status of FPGA via SPI'''
-        bits = (yield from self._read_state())
+        data = (yield from self._read_state())
+        bits = "{:08b}".format(data[-1])
         return int(bits[STATE.DISPATCHERROR])
 
     @property
@@ -76,7 +77,8 @@ class TestHost:
 
         The dispatcher on the FPGA can be on or off
         '''
-        bits = (yield from self._read_state())
+        data = (yield from self._read_state())
+        bits = "{:08b}".format(data[-1])
         return int(bits[STATE.PARSING])
 
     def _executionsetter(self, val):
@@ -180,13 +182,13 @@ class TestHost:
 
         data -- data received from peripheral
         '''
-        bits = "{:08b}".format(data & 0xff)
+        bits = "{:08b}".format(data[-1])
         return int(bits[STATE.FULL])
 
-    def send_command(self, data, format='!Q'):
+    def send_command(self, data):
         assert len(data) == WORD_BYTES+COMMAND_BYTES
         read_data = yield from self.spi_exchange_data(data)
-        return unpack(format, read_data[1:])[0]
+        return read_data
 
     def send_move(self, ticks, a, b, c, maxtrials=100):
         '''send move instruction with data
@@ -199,14 +201,15 @@ class TestHost:
         '''
         commands = self.move_commands(ticks, a, b, c)
         trials = 0
-        data_out = 255
         home_bits = np.ones((self.platform.motors))
         command = commands.pop(0)
-        while self.memfull(data_out):
+        while True:
             data_out = (yield from self.send_command(command))
             trials += 1
-            bits = [int(i) for i in "{:08b}".format(data_out >> 8)]
+            bits = [int(i) for i in "{:08b}".format(data_out[-2])]
             home_bits -= np.array(bits[:self.platform.motors])
+            if not self.memfull(data_out):
+                break
             if trials > maxtrials:
                 raise Exception("Too many trials needed")
         for command in commands:
