@@ -27,6 +27,7 @@ class Tests(unittest.TestCase):
         This is typically executed manually by placing a sheet of paper
         in the cavity of the optical switch.
         '''
+        self.host.enable_steppers = False
         while True:
             print(self.host.pinstate)
             sleep(1)
@@ -44,7 +45,7 @@ class Tests(unittest.TestCase):
     def multiplemove(self):
         '''test if motors move'''
         motors = Firestarter.motors
-        position = np.array([1]*motors)
+        position = np.array([10, 10, 0])
         self.assertEqual(self.host.dispatcherror, False)
         self.host.enable_steppers = True
         self.host.gotopoint(position=position,

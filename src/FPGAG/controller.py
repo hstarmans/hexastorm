@@ -27,12 +27,6 @@ class Host:
         self.spi.mode = 1
         self.spi.max_speed_hz = round(1E6)
         self._position = np.array([0]*self.platform.motors)
-        # TODO: this line is key and not well understood
-        #       chip select on or of does not affect results
-        #       "owning" the pin and transfering ownership from spi is
-        #       important
-        #       at the moment there is one SPI device so chip select is
-        #       not that importatn
         self.chip_select = LED(8)
         self.init_steppers()
         self.enable = LED(self.platform.enable_pin)
@@ -167,7 +161,8 @@ class Host:
         '''
         assert len(axes) == self.platform.motors
         dist = np.array(axes)*np.array([pos]*self.platform.motors)
-        self.gotopoint(dist, speed)
+        self.gotopoint(position=dist.tolist(),
+                       speed=speed, absolute=False)
 
     def steps_to_count(self, steps):
         '''compute count for a given number of steps
@@ -184,6 +179,9 @@ class Host:
     def gotopoint(self, position, speed, absolute=True):
         '''move steppers to point with constant speed
 
+        Multiple axes can move in same instruction but ticks has to be uniform.
+        To simplify calculation each axes is moved independently
+
         postion      -- list with coordinate or distance in mm
         absolute     -- absolute position otherwise coordinate is distance
         speed        -- speed in mm/s
@@ -198,43 +196,48 @@ class Host:
         else:
             dist = np.array(position)
         speed = np.array(speed)
-        # NOTE: ticks is equal for all axes
-        t = np.array([np.absolute((dist/speed))[0]])
-        ticks = (t*FREQ).round().astype(int)
-        steps_per_mm = np.array(list(self.platform.stepspermm.values()))
-        # mm -> steps
-        dist_steps = dist * steps_per_mm
+        for idx, _ in enumerate(position):
+            if dist[idx] == 0:
+                continue
+            # NOTE: ticks is equal for all axes
+            t = np.array([np.absolute((dist/speed))[idx]])
+            ticks = (t*FREQ).round().astype(int)
+            steps_per_mm = np.array(list(self.platform.stepspermm.values()))
+            # select axis
+            select = np.zeros_like(position, dtype='int64')
+            select[idx] = 1
+            # mm -> steps
+            dist_steps = dist * steps_per_mm * select
 
-        def get_ticks(x):
-            if x >= MOVE_TICKS:
-                return MOVE_TICKS
-            else:
-                return x
-        get_ticks_v = np.vectorize(get_ticks)
+            def get_ticks(x):
+                if x >= MOVE_TICKS:
+                    return MOVE_TICKS
+                else:
+                    return x
+            get_ticks_v = np.vectorize(get_ticks)
 
-        ticks_total = np.copy(ticks)
-        steps_total = np.zeros_like(dist_steps, dtype='int64')
-        self._executionsetter(True)
-        hit_home = np.zeros_like(dist_steps)
-        while ticks.sum() > 0:
-            ticks_move = get_ticks_v(ticks)
-            # steps -> count
-            steps_move = dist_steps*(ticks_move/ticks_total)
-            steps_move = steps_move.round().astype('int64')
-            steps_total += steps_move
-            cnts = self.steps_to_count(steps_move)
-            a = (cnts/ticks_move).round().astype('int64')
-            ticks -= MOVE_TICKS
-            ticks[ticks < 0] = 0
-            hit_home = self.send_move(ticks_move.tolist(),
-                                      a.tolist(),
-                                      [0]*self.platform.motors,
-                                      [0]*self.platform.motors)
-            dist_steps = dist_steps*hit_home
-            if dist_steps.sum() == 0:
-                break
-        dist_mm = steps_total / steps_per_mm
-        self._position = (self._position + dist_mm)*hit_home
+            ticks_total = np.copy(ticks)
+            steps_total = np.zeros_like(dist_steps, dtype='int64')
+            self._executionsetter(True)
+            hit_home = np.zeros_like(dist_steps, dtype='int64')
+            while ticks.sum() > 0:
+                ticks_move = get_ticks_v(ticks)
+                # steps -> count
+                steps_move = dist_steps*(ticks_move/ticks_total)
+                steps_move = steps_move.round().astype('int64')
+                steps_total += steps_move
+                cnts = self.steps_to_count(steps_move)
+                a = (cnts/ticks_move).round().astype('int64')
+                ticks -= MOVE_TICKS
+                ticks[ticks < 0] = 0
+                hit_home = self.send_move(ticks_move.tolist(),
+                                          a.tolist(),
+                                          [0]*self.platform.motors,
+                                          [0]*self.platform.motors)
+                if dist_steps[(hit_home == 0) | (a > 0)].sum() == 0:
+                    break
+            dist_mm = steps_total / steps_per_mm
+            self._position = (self._position + dist_mm)*hit_home
 
     def memfull(self, data=None):
         '''check if memory is full
@@ -262,7 +265,6 @@ class Host:
         '''
         commands = self.move_commands(ticks, a, b, c)
         trials = 0
-        home_bits = np.ones((self.platform.motors))
         command = commands.pop(0)
         while True:
             data_out = self.send_command(command)
@@ -271,7 +273,7 @@ class Host:
             if int(bits[STATE.DISPATCHERROR]):
                 raise Exception("Parsing error")
             bits = [int(i) for i in "{:08b}".format(data_out[-2])]
-            home_bits -= np.array(bits[:self.platform.motors])
+            home_bits = np.array(bits[:self.platform.motors])
             if not self.memfull(data_out):
                 break
             if trials > maxtrials:

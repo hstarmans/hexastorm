@@ -305,7 +305,7 @@ class Dispatcher(Elaboratable):
         # connect motors
         for idx, stepper in enumerate(steppers):
             m.d.comb += [stepper.step.eq(polynomal.step[idx] &
-                                         (stepper.limit == 0)),
+                                         ((stepper.limit == 0) | stepper.dir)),
                          stepper.dir.eq(polynomal.dir[idx]),
                          parser.pinstate[idx].eq(stepper.limit)]
         # connect spi
@@ -364,7 +364,6 @@ class Dispatcher(Elaboratable):
 
 # TODO:
 #   -- add tests for real hardware
-#   -- there is error with the memory full
 #   -- luna splits modules over files and adds one test per file
 #      this is probably cleaner than put all in one file approach
 #   -- verify homing procedure of controller
@@ -372,9 +371,10 @@ class Dispatcher(Elaboratable):
 #   -- try to replace value == 0 with ~value
 #   -- xfer3 is faster in transaction
 #   -- if you chip select is released parsers should return to initial state
+#      now you get an error if you abort the transaction
 #   -- number of ticks per motor is uniform
 #   -- code clones between testcontroller and controller is ugly
-#   -- yosys does not give an error if you try to synthesize memroy which can't be synthesized
+#   -- yosys does not give an error if you try to synthesize invalid memory
 #   -- read / write commit is not perfect
 #   -- simulations do not always agree with reality, around edges
 #   -- test execution speed to ensure the right PLL is propagated
