@@ -1,7 +1,10 @@
 # FPGA G
 
-The goal of this project is to replace the PRU core of [BeagleG](https://github.com/hzeller/beagleg) with a FPGA core.
-This is to combine prism scanner with other techniques.
+The goal of this project is to create nmigen core for CNC control. This is needed for my [laser scanner project](https://github.com/hstarmans/hexastorm).  
+A proof of concept video is shown below;
+
+[![Proof of concept not showing ](http://img.youtube.com/vi/-0uB2MydtrE/0.jpg)](https://youtu.be/-0uB2MydtrE "Proof of woking code")
+
 
 # Brief Description
 The controller sends over a command with a word to the peripheral which updates the motor state.
