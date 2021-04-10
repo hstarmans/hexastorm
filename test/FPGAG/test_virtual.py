@@ -9,7 +9,7 @@ from luna.gateware.interface.spi import SPIGatewareTestCase
 from luna.gateware.test.utils import sync_test_case
 from luna.gateware.test import LunaGatewareTestCase
 
-from FPGAG.testcontroller import TestHost
+from FPGAG.controller import Host
 from FPGAG.core import Dispatcher, SPIParser, Polynomal
 from FPGAG.platforms import Firestarter, TestPlatform
 from FPGAG.constants import (COMMANDS, DEGREE, MOVE_TICKS, BIT_SHIFT,
@@ -22,7 +22,7 @@ class TestPolynomal(LunaGatewareTestCase):
     FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1}
 
     def initialize_signals(self):
-        self.host = TestHost(self.platform)
+        self.host = Host(self.platform)
         yield self.dut.ticklimit.eq(MOVE_TICKS)
 
     def count_steps(self, motor):
@@ -118,7 +118,7 @@ class TestParser(SPIGatewareTestCase):
     FRAGMENT_ARGUMENTS = {'platform': platform}
 
     def initialize_signals(self):
-        self.host = TestHost(self.platform)
+        self.host = Host(self.platform)
         self.host.spi_exchange_data = self.spi_exchange_data
         yield self.dut.spi.cs.eq(0)
 
@@ -184,7 +184,7 @@ class TestParser(SPIGatewareTestCase):
                                            [3]*platform.motors)
         writedata = [COMMANDS.WRITE]+[1]*WORD_BYTES
         read_data = yield from self.host.send_command(writedata)
-        self.assertEqual(self.host.memfull(read_data), True)
+        self.assertEqual((yield from self.host.memfull(read_data)), True)
 
 
 class TestDispatcher(SPIGatewareTestCase):
@@ -193,7 +193,7 @@ class TestDispatcher(SPIGatewareTestCase):
     FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1}
 
     def initialize_signals(self):
-        self.host = TestHost(self.platform)
+        self.host = Host(self.platform)
         self.host.spi_exchange_data = self.spi_exchange_data
         yield self.dut.spi.cs.eq(0)
 

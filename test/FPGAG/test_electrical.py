@@ -13,7 +13,7 @@ class Tests(unittest.TestCase):
     '''Test on a real scanhead with a FPGA'''
 
     @classmethod
-    def setUpClass(cls, flash=True):
+    def setUpClass(cls, flash=False):
         cls.host = Host()
         if flash:
             cls.host.build()
@@ -29,7 +29,7 @@ class Tests(unittest.TestCase):
         '''
         self.host.enable_steppers = False
         while True:
-            print(self.host.pinstate)
+            print((yield from self.host.pinstate))
             sleep(1)
 
     def motorenable(self):
@@ -98,9 +98,12 @@ class Tests(unittest.TestCase):
             self.host.send_command(command)
         sleep(3)
         self.host._executionsetter(False)
-        self.assertEqual(self.host.memfull(), False)
-        self.assertEqual(self.host.dispatcherror, True)
+        self.assertEqual((yield from self.host.memfull()), False)
+        self.assertEqual((yield from self.host.dispatcherror), True)
 
 
 if __name__ == "__main__":
-    unittest.main()
+    #unittest.main()
+    test = Tests()
+    test.setUpClass()
+    list(test.test_invalidinstruction())
