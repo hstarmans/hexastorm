@@ -76,10 +76,7 @@ class Host:
         '''retrieves and updates position'''
         command = [COMMANDS.POSITION] + WORD_BYTES*[0]
         for i in range(self.platform.motors):
-            if self.generator:
-                read_data = (yield from self.send_command(command))
-            else:
-                read_data = self.send_command(command)
+            read_data = (yield from self.send_command(command))
             self._position[i] = unpack('!q', read_data[1:])[0]
         # step --> mm
         self._position = (self._position /
@@ -90,8 +87,6 @@ class Host:
     def pinstate(self):
         '''retrieves pin state as dictionary'''
         data = (yield from self._read_state())
-        print(data)
-        input()
         bits = "{:08b}".format(data[-2])
         dct = {'x': int(bits[0]),
                'y': int(bits[1]),
@@ -149,10 +144,7 @@ class Host:
         else:
             command = [COMMANDS.STOP]
         command += WORD_BYTES*[0]
-        if self.generator:
-            return (yield from self.send_command(command))
-        else:
-            return (self.send_command(command))
+        return (yield from self.send_command(command))
 
     @execution.setter
     def execution(self, val):
@@ -248,16 +240,10 @@ class Host:
                 a = (cnts/ticks_move).round().astype('int64')
                 ticks -= MOVE_TICKS
                 ticks[ticks < 0] = 0
-
-                def call():
-                    return self.send_move(ticks_move.tolist(),
-                                          a.tolist(),
-                                          [0]*self.platform.motors,
-                                          [0]*self.platform.motors)
-                if self.generator:
-                    hit_home = (yield from call())
-                else:
-                    hit_home = call()
+                hit_home = (yield from self.send_move(ticks_move.tolist(),
+                                                      a.tolist(),
+                                                      [0]*self.platform.motors,
+                                                      [0]*self.platform.motors))
                 if dist_steps[(hit_home == 0) | (a > 0)].sum() == 0:
                     break
             dist_mm = steps_total / steps_per_mm
@@ -277,9 +263,10 @@ class Host:
     def send_command(self, data, format='!Q'):
         assert len(data) == WORD_BYTES+COMMAND_BYTES
         if self.generator:
-            return (yield from self.spi_exchange_data(data))
+            data = (yield from self.spi_exchange_data(data))
         else:
-            return self.spi_exchange_data(data)
+            data = (self.spi_exchange_data(data))
+        return data
 
     def send_move(self, ticks, a, b, c, maxtrials=1E5, delay=0.1):
         '''send move instruction with data
@@ -296,10 +283,7 @@ class Host:
         trials = 0
         command = commands.pop(0)
         while True:
-            if self.generator:
-                data_out = (yield from self.send_command(command))
-            else:
-                data_out = self.send_command(command)
+            data_out = (yield from self.send_command(command))
             trials += 1
             bits = [int(i) for i in "{:08b}".format(data_out[-1])]
             if int(bits[STATE.DISPATCHERROR]):
@@ -311,10 +295,7 @@ class Host:
             if trials > maxtrials:
                 raise Exception("Too many trials needed")
         for command in commands:
-            if self.generator:
-                yield from self.send_command(command)
-            else:
-                self.send_command(command)
+            yield from self.send_command(command)
         return home_bits
 
     def move_commands(self, ticks, a, b, c):

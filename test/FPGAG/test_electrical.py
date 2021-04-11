@@ -20,7 +20,20 @@ class Tests(unittest.TestCase):
         else:
             print("Resetting the machine")
             cls.host.reset()
-
+            
+    def _executor(func):
+        '''executes generator until stop iteration
+        
+        Nmigen uses generator syntax and this leaks into our
+        python code. As a result, it is required to iterate.
+        '''
+        def inner(self):
+            iteration = 0
+            for _ in func(self):
+                pass
+        return inner    
+    
+    @_executor
     def readpin(self):
         '''test if you can detect triggers of the limit switches
 
@@ -31,33 +44,36 @@ class Tests(unittest.TestCase):
         while True:
             print((yield from self.host.pinstate))
             sleep(1)
-
+    
+    @_executor
     def motorenable(self):
         '''test if motors are enabled and execution is enabled/disabled
            via communication with FPGA'''
         self.host.enable_steppers = True
-        self.assertEqual(self.host.execution, True)
+        self.assertEqual((yield from self.host.execution), True)
         print('check manually if axes are blocked and hard to move')
         input()
         self.host.enable_steppers = False
-        self.assertEqual(self.host.execution, False)
-
+        self.assertEqual((yield from self.host.execution), False)
+    
+    @_executor
     def multiplemove(self):
         '''test if motors move'''
         motors = Firestarter.motors
         position = np.array([10, 10, 0])
-        self.assertEqual(self.host.dispatcherror, False)
+        self.assertEqual((yield from self.host.dispatcherror), False)
         self.host.enable_steppers = True
-        self.host.gotopoint(position=position,
-                            speed=[1]*motors,
-                            absolute=False)
+        yield from self.host.gotopoint(position=position,
+                                       speed=[1]*motors,
+                                       absolute=False)
         # NOTE: is the sleep really needed?
         print('sleep to complete')
         sleep(1)
-        assert_array_equal(self.host.position,
+        assert_array_equal((yield from self.host.position),
                            position)
         self.host.enable_steppers = False
-
+    
+    @_executor
     def test_memfull(self):
         '''test if memory can be filled and emptied
 
@@ -65,7 +81,8 @@ class Tests(unittest.TestCase):
         You fill the entire memory and see if it is properly emptied
         by ensuring that the position changes as excepted.
         '''
-        self.assertEqual(self.host.dispatcherror, False)
+        self.assertEqual((yield from self.host.dispatcherror), False)
+        self.host.enable_steppers = False
         # with false check if this results in block
         # you can do a blink test to verify move
         motors = Firestarter.motors
@@ -77,33 +94,32 @@ class Tests(unittest.TestCase):
         for _ in range(limit):
             a = ((host.steps_to_count(steps.astype('int64'))/MOVE_TICKS)
                  .round().astype('int64'))
-            host.send_move([MOVE_TICKS],
-                           a.tolist(),
-                           [0]*motors,
-                           [0]*motors)
-        self.assertEqual(self.host.memfull(), True)
-        self.host._executionsetter(True)
+            yield from host.send_move([MOVE_TICKS],
+                                      a.tolist(),
+                                      [0]*motors,
+                                      [0]*motors)
+        self.assertEqual((yield from self.host.memfull()), True)
+        yield from self.host._executionsetter(True)
         sleep(1)
-        self.assertEqual(self.host.memfull(), False)
-        assert_array_equal(self.host.position,
+        self.assertEqual((yield from self.host.memfull()), False)
+        assert_array_equal((yield from self.host.position),
                            mm*limit)
         self.host._executionsetter(False)
-        self.assertEqual(self.host.dispatcherror, False)
-
+        self.assertEqual((yield from self.host.dispatcherror), False)
+    
+    @_executor
     def test_invalidinstruction(self):
         '''write invalid instruction and verify it passes dispatcher'''
-        self.host._executionsetter(True)
+        yield from self.host._executionsetter(True)
         command = [COMMANDS.WRITE] + [0]*WORD_BYTES
         for _ in range(self.host.platform.wordsinmove):
-            self.host.send_command(command)
+            yield from self.host.send_command(command)
         sleep(3)
-        self.host._executionsetter(False)
+        yield from self.host._executionsetter(False)
         self.assertEqual((yield from self.host.memfull()), False)
         self.assertEqual((yield from self.host.dispatcherror), True)
 
 
+
 if __name__ == "__main__":
-    #unittest.main()
-    test = Tests()
-    test.setUpClass()
-    list(test.test_invalidinstruction())
+    unittest.main()

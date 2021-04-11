@@ -363,7 +363,6 @@ class Dispatcher(Elaboratable):
 #  -- Polynomal integrator --> determines position via integrating counters
 
 # TODO:
-#   -- code clones between testcontroller and controller is ugly
 #   -- fix incorrect movement
 #   -- test execution speed to ensure the right PLL is propagated
 #   -- luna splits modules over files and adds one test per file
