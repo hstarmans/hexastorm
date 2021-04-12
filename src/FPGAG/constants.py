@@ -10,7 +10,7 @@ COMMANDS = namedtuple('COMMANDS', ['EMPTY', 'WRITE', 'READ', 'POSITION',
                                    'START', 'STOP'],
                       defaults=range(6))()
 INSTRUCTIONS = namedtuple('INSTRUCTIONS', ['MOVE'], defaults=[1])()
-STATE = namedtuple('STATE', ['FULL', 'PARSING', 'DISPATCHERROR'],
+STATE = namedtuple('STATE', ['FULL', 'PARSING', 'ERROR'],
                    defaults=range(3))()
 # one block is 4K there are 32 blocks (officially 20 in HX4K)
 # max of 1 block is 16*256 but if you use a larger memwidth you seem to

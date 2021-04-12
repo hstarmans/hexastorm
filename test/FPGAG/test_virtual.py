@@ -9,7 +9,7 @@ from luna.gateware.interface.spi import SPIGatewareTestCase
 from luna.gateware.test.utils import sync_test_case
 from luna.gateware.test import LunaGatewareTestCase
 
-from FPGAG.controller import Host
+from FPGAG.controller import Host, Memfull
 from FPGAG.core import Dispatcher, SPIParser, Polynomal
 from FPGAG.platforms import Firestarter, TestPlatform
 from FPGAG.constants import (COMMANDS, DEGREE, MOVE_TICKS, BIT_SHIFT,
@@ -170,21 +170,33 @@ class TestParser(SPIGatewareTestCase):
         self.assertEqual((yield self.dut.execute), 1)
         self.assertEqual((yield from self.host.execution), True)
 
+
+    @sync_test_case
+    def test_invalidwrite(self):
+        '''write invalid instruction and verify error is raised'''
+        command = [COMMANDS.WRITE] + [0]*WORD_BYTES
+        yield from self.host.send_command(command)
+        self.assertEqual((yield from self.host.error), True)
+
+
     @sync_test_case
     def test_memfull(self):
         'write move instruction until memory is full'
         platform = self.platform
         self.assertEqual((yield self.dut.empty), 1)
-        # platform memory is on default 2 move instructions
-        for _ in range(floor(platform.memdepth
-                       / platform.wordsinmove)):
-            yield from self.host.send_move([1000],
-                                           [1]*platform.motors,
-                                           [2]*platform.motors,
-                                           [3]*platform.motors)
-        writedata = [COMMANDS.WRITE]+[1]*WORD_BYTES
-        read_data = yield from self.host.send_command(writedata)
-        self.assertEqual((yield from self.host.memfull(read_data)), True)
+        # should fill the memory as move instruction is 
+        # larger than the memdepth
+        self.assertEqual((yield from self.host.memfull()), False)
+        try:
+            for _ in range(platform.memdepth):
+                yield from self.host.send_move([1000],
+                                            [1]*platform.motors,
+                                            [2]*platform.motors,
+                                            [3]*platform.motors,
+                                            maxtrials = 1)
+        except Memfull:
+            pass
+        self.assertEqual((yield from self.host.memfull()), True)
 
 
 class TestDispatcher(SPIGatewareTestCase):
@@ -208,6 +220,35 @@ class TestDispatcher(SPIGatewareTestCase):
             yield
 
     @sync_test_case
+    def test_memfull(self):
+        '''write move instruction until memory is full, execute
+           and ensure there is no parser error i.e. error
+        '''
+        platform = self.platform
+        # should fill the memory as move instruction is 
+        # larger than the memdepth
+        self.assertEqual((yield from self.host.memfull()), False)
+        try:
+            for _ in range(platform.memdepth):
+                yield from self.host.send_move([1000],
+                                            [1]*platform.motors,
+                                            [2]*platform.motors,
+                                            [3]*platform.motors,
+                                            maxtrials = 1)
+        except Memfull:
+            pass
+        self.assertEqual((yield from self.host.memfull()), True)
+        yield from self.host._executionsetter(True)
+        # data should now be processed from sram and empty become 1
+        while (yield self.dut.parser.empty) == 0:
+            yield
+        # 2 clocks needed for error to propagate
+        yield
+        yield
+        self.assertEqual((yield from self.host.error), False)
+
+
+    @sync_test_case
     def test_home(self):
         '''verify homing procedure works correctly'''
         self.host._position = np.array([0.1]*self.platform.motors)
@@ -222,21 +263,22 @@ class TestDispatcher(SPIGatewareTestCase):
         assert_array_equal(self.host._position,
                            np.array([0]*self.platform.motors))
 
-    @sync_test_case
-    def test_invalidwrite(self):
-        '''write invalid instruction and verify error is raised'''
-        command = [COMMANDS.WRITE] + [0]*WORD_BYTES
-        for _ in range(self.host.platform.wordsinmove):
-            yield from self.host.send_command(command)
-        # enable dispatching of code
-        yield from self.host._executionsetter(True)
-        # data should now be processed from sram and empty become 1
-        while (yield self.dut.parser.empty) == 0:
-            yield
-        # 2 clocks needed for error to propagate
-        yield
-        yield
-        self.assertEqual((yield from self.host.dispatcherror), True)
+    # @sync_test_case
+    # def test_invalidwrite(self):
+    #     '''write invalid instruction and verify error is raised'''
+    #     print('not implemented dispatch error')
+    #     # command = [COMMANDS.WRITE] + [0]*WORD_BYTES
+    #     # yield from self.host.send_command(command)
+    #     # # enable dispatching of code
+    #     # yield from self.host._executionsetter(True)
+    #     # # data should now be processed from sram and empty become 1
+    #     # while (yield self.dut.parser.empty) == 0:
+    #     #     yield
+    #     # # 2 clocks needed for error to propagate
+    #     # yield
+    #     # yield
+    #     # print((yield from self.dut.dispatcherror))
+    #     # self.assertEqual((yield from self.host.dispatcherror), True)
 
     @sync_test_case
     def test_ptpmove(self, steps=[800], ticks=[30_000]):

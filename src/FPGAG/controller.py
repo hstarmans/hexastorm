@@ -14,6 +14,13 @@ from FPGAG.core import Dispatcher
 import steppers
 
 
+
+class Memfull(Exception):
+    'Custom exception for memfull'
+    pass
+
+
+
 class Host:
     'Class for sending instructions to core'
     def __init__(self, platform=None):
@@ -94,11 +101,11 @@ class Host:
         return dct
 
     @property
-    def dispatcherror(self):
+    def error(self):
         '''retrieves dispatch error status of FPGA via SPI'''
         data = (yield from self._read_state())
         bits = "{:08b}".format(data[-1])
-        return int(bits[STATE.DISPATCHERROR])
+        return int(bits[STATE.ERROR])
 
     @property
     def enable_steppers(self):
@@ -286,14 +293,14 @@ class Host:
             data_out = (yield from self.send_command(command))
             trials += 1
             bits = [int(i) for i in "{:08b}".format(data_out[-1])]
-            if int(bits[STATE.DISPATCHERROR]):
-                raise Exception("Parsing error")
+            if int(bits[STATE.ERROR]):
+                raise Exception("Error detected on FPGA")
             bits = [int(i) for i in "{:08b}".format(data_out[-2])]
             home_bits = np.array(bits[:self.platform.motors])
             if not (yield from self.memfull(data_out)):
                 break
             if trials > maxtrials:
-                raise Exception("Too many trials needed")
+                raise Memfull("Too many trials needed")
         for command in commands:
             yield from self.send_command(command)
         return home_bits

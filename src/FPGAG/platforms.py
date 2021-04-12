@@ -22,7 +22,7 @@ class TestPlatform:
     stepspermm = {'x': 400, 'y': 400}
     motors = len(stepspermm.keys())
     wordsinmove = wordsinmove(motors)
-    memdepth = wordsinmove*2
+    memdepth = wordsinmove*2+1
     steppers = [StepperRecord()]*motors
     aux = Signal(8)
 

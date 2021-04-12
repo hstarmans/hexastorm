@@ -73,18 +73,20 @@ class SPIParser(Elaboratable):
                      fifo.read_commit.eq(self.read_commit),
                      fifo.read_en.eq(self.read_en),
                      self.empty.eq(fifo.empty)]
-        # Peripheral state
-        state = Signal(8)
-        m.d.sync += [state[STATE.PARSING].eq(self.execute),
-                     state[STATE.FULL].eq(
-                     fifo.space_available < platform.wordsinmove),
-                     state[STATE.DISPATCHERROR].eq(self.dispatcherror)]
         # Parser
         mtrcntr = Signal(range(platform.motors))
         wordsreceived = Signal(range(platform.wordsinmove+1))
+        error = Signal()
+        # Peripheral state
+        state = Signal(8)
+        m.d.sync += [state[STATE.PARSING].eq(self.execute),
+                     state[STATE.FULL].eq(fifo.space_available<=1),
+                     state[STATE.ERROR].eq(self.dispatcherror|error)]
+        # remember which word we are processing
+        instruction = Signal(8)
         with m.FSM(reset='RESET', name='parser'):
             with m.State('RESET'):
-                m.d.sync += [self.execute.eq(0), wordsreceived.eq(0)]
+                m.d.sync += [self.execute.eq(0), wordsreceived.eq(0), error.eq(0)]
                 m.next = 'WAIT_COMMAND'
             with m.State('WAIT_COMMAND'):
                 m.d.sync += [fifo.write_commit.eq(0)]
@@ -100,8 +102,7 @@ class SPIParser(Elaboratable):
                         m.d.sync += self.execute.eq(0)
                     with m.Elif(interface.command == COMMANDS.WRITE):
                         m.d.sync += interface.word_to_send.eq(word)
-                        with m.If((state[STATE.FULL] == 0) |
-                                  (wordsreceived != 0)):
+                        with m.If(state[STATE.FULL] == 0):
                             m.next = 'WAIT_WORD'
                         with m.Else():
                             m.next = 'WAIT_COMMAND'
@@ -120,14 +121,27 @@ class SPIParser(Elaboratable):
                         m.next = 'WAIT_COMMAND'
             with m.State('WAIT_WORD'):
                 with m.If(interface.word_complete):
-                    m.d.sync += [fifo.write_en.eq(1),
-                                 wordsreceived.eq(wordsreceived+1),
-                                 fifo.write_data.eq(interface.word_received)]
-                    m.next = 'WRITE'
+                    byte0 = interface.word_received[:8]
+                    with m.If(wordsreceived == 0):
+                        with m.If(byte0==INSTRUCTIONS.MOVE):
+                            m.d.sync += [instruction.eq(byte0),
+                                         fifo.write_en.eq(1),
+                                         wordsreceived.eq(wordsreceived+1),
+                                         fifo.write_data.eq(interface.word_received)]
+                            m.next = 'WRITE'
+                        with m.Else():
+                            m.d.sync += error.eq(1)
+                            m.next = 'WAIT_COMMAND'
+                    with m.Else():
+                        m.d.sync += [fifo.write_en.eq(1),
+                                    wordsreceived.eq(wordsreceived+1),
+                                    fifo.write_data.eq(interface.word_received)]
+                        m.next = 'WRITE'
             with m.State('WRITE'):
                 m.d.sync += fifo.write_en.eq(0)
                 m.next = 'WAIT_COMMAND'
-                with m.If(wordsreceived >= platform.wordsinmove):
+                with m.If((instruction == INSTRUCTIONS.MOVE) & 
+                          (wordsreceived >= platform.wordsinmove)):
                     m.d.sync += [wordsreceived.eq(0),
                                  fifo.write_commit.eq(1)]
         return m
