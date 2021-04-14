@@ -133,6 +133,19 @@ class TestParser(SPIGatewareTestCase):
         assert_array_equal(lst, (position/stepspermm).round(decimals))
 
     @sync_test_case
+    def test_writepin(self):
+        'write move instruction and verify FIFO is no longer empty'
+        self.assertEqual((yield self.dut.empty), 1)
+        yield from self.host.enable_comp(laser0=True, laser1=False, polygon=False)
+        while (yield self.dut.empty) == 1:
+            yield
+        # Instruction ready
+        self.assertEqual((yield self.dut.empty), 0)
+        self.assertEqual((yield self.dut.fifo.space_available),
+                         (self.platform.memdepth - 1))
+
+
+    @sync_test_case
     def test_writemoveinstruction(self):
         'write move instruction and verify FIFO is no longer empty'
         self.assertEqual((yield self.dut.empty), 1)
@@ -249,6 +262,25 @@ class TestDispatcher(SPIGatewareTestCase):
 
 
     @sync_test_case
+    def test_writepin(self):
+        '''verify homing procedure works correctly'''
+        yield from self.host.enable_comp(laser0=True, laser1=False, polygon=False)
+        # wait till instruction is received
+        while (yield self.dut.parser.empty):
+            yield
+        yield
+        # enable dispatching of code
+        yield from self.host._executionsetter(True)
+        # data should now be parsed and empty become 1
+        while (yield self.dut.parser.empty) == 0:
+            yield
+        # ensure there is no error
+        self.assertEqual((yield from self.host.error), False)
+        self.assertEqual((yield self.dut.laserhead.laser0), 1)
+        self.assertEqual((yield self.dut.laserhead.laser1), 0)
+        self.assertEqual((yield self.dut.laserhead.en), 0)
+
+    @sync_test_case
     def test_home(self):
         '''verify homing procedure works correctly'''
         self.host._position = np.array([0.1]*self.platform.motors)
@@ -263,22 +295,25 @@ class TestDispatcher(SPIGatewareTestCase):
         assert_array_equal(self.host._position,
                            np.array([0]*self.platform.motors))
 
-    # @sync_test_case
-    # def test_invalidwrite(self):
-    #     '''write invalid instruction and verify error is raised'''
-    #     print('not implemented dispatch error')
-    #     # command = [COMMANDS.WRITE] + [0]*WORD_BYTES
-    #     # yield from self.host.send_command(command)
-    #     # # enable dispatching of code
-    #     # yield from self.host._executionsetter(True)
-    #     # # data should now be processed from sram and empty become 1
-    #     # while (yield self.dut.parser.empty) == 0:
-    #     #     yield
-    #     # # 2 clocks needed for error to propagate
-    #     # yield
-    #     # yield
-    #     # print((yield from self.dut.dispatcherror))
-    #     # self.assertEqual((yield from self.host.dispatcherror), True)
+    @sync_test_case
+    def test_invalidwrite(self):
+        '''write invalid instruction and verify error is raised'''
+        fifo = self.dut.parser.fifo
+        self.assertEqual((yield from self.host.error), False)
+        # write illegal byte to queue and commit
+        yield fifo.write_data.eq(0xAA)
+        yield from self.pulse(fifo.write_en)
+        yield from self.pulse(fifo.write_commit)
+        self.assertEqual((yield self.dut.parser.empty), 0)
+        # enable dispatching of code
+        yield from self.host._executionsetter(True)
+        # data should now be processed from sram and empty become 1
+        while (yield self.dut.parser.empty) == 0:
+            yield
+        # 2 clocks needed for error to propagate
+        yield
+        yield
+        self.assertEqual((yield from self.host.error), True)
 
     @sync_test_case
     def test_ptpmove(self, steps=[800], ticks=[30_000]):

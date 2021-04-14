@@ -275,6 +275,20 @@ class Host:
             data = (self.spi_exchange_data(data))
         return data
 
+
+    def enable_comp(self, laser0=False, laser1=False, polygon=False):
+        '''enable components
+
+        laser0   -- True enables laser channel 0
+        laser1   -- True enables laser channel 1
+        polygon  -- True enable polygon motor
+        '''
+        laser0, laser1, polygon = int(bool(laser0)), int(bool(laser1)), int(bool(polygon))
+        data = ([COMMANDS.WRITE] + [0]*(WORD_BYTES-2) + [int(f'{polygon}{laser1}{laser0}', 2)] 
+               + [INSTRUCTIONS.WRITEPIN])
+        yield from self.send_command(data)
+
+
     def send_move(self, ticks, a, b, c, maxtrials=1E5, delay=0.1):
         '''send move instruction with data
 

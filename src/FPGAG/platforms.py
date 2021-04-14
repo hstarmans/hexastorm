@@ -14,7 +14,8 @@ from nmigen_boards.resources import LEDResources
 from nmigen_boards.test.blinky import Blinky
 
 from FPGAG.constants import wordsinmove
-from FPGAG.resources import StepperResource, StepperRecord
+from FPGAG.resources import (StepperResource, StepperRecord, 
+                             LaserscannerResource, LaserscannerRecord)
 
 
 class TestPlatform:
@@ -24,8 +25,7 @@ class TestPlatform:
     wordsinmove = wordsinmove(motors)
     memdepth = wordsinmove*2+1
     steppers = [StepperRecord()]*motors
-    aux = Signal(8)
-
+    laserhead = LaserscannerRecord()
 
 # other option is kbob nmigen-examples nmigen_lib pll
 class FirestarterDomainGenerator(Elaboratable):
@@ -166,6 +166,9 @@ class Firestarter(LatticeICE40Platform):
                         Subsignal("sdo", Pins("87", dir="o")),
                         Subsignal("cs", PinsN("85", dir="i")),
                         Attrs(IO_STANDARD="SB_LVCMOS")),
+               # Laserscanner resource
+               LaserscannerResource(number=0, laser0='134', laser1='135',
+                                    photodiode='137', pwm='139', enable='141'),
                # x-stepper
                StepperResource(number=0, step="38", direction="37",
                                limit="110",

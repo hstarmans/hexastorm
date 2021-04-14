@@ -66,24 +66,48 @@ def StepperResource(*args, step, direction, limit, number=None,
     return Resource.family(*args, number, default_name="stepper", ios=io)
 
 
-def LaserscannerResource(*args, laser, photodiode, pwm, number=None,
+class LaserScannerLayout(Layout):
+    """ Layout for laser scanner """
+    def __init__(self):
+        super().__init__([
+            ("laser0", 1),
+            ("laser1", 1),
+            ("photodiode", 1),
+            ("pwm", 1),
+            ("en", 1),
+        ])
+
+
+class LaserscannerRecord(Record):
+    """ Record to test stepper motor """
+    def __init__(self):
+        super().__init__(LaserScannerLayout())
+
+
+def LaserscannerResource(*args, laser0, laser1,
+                         photodiode, pwm, enable,
+                         number=None,
                          conn=None, attrs=None):
     """ Resource for laser scanner
 
     The enable pin is currently activated via the Linux host
 
     I/O signals:
-        O: laser          -- turn on laser
+        O: laser0         -- laser channel 0
+        O: laser1         -- laser channel 1
         I: photodiode     -- photodiode used to measure position of laser
-        O: pwm            -- pwm pin to rotate polygon
+        O: pwm            -- polygon is rotated with pwm
+        O: en             -- on low polygon motor is enabled (depends on type)
     """
     io = []
-    io.append(Subsignal("laser", Pins(laser, dir="o",
+    io.append(Subsignal("laser0", Pins(laser0, dir="o",
+              conn=conn, assert_width=1)))
+    io.append(Subsignal("laser1", Pins(laser1, dir="o",
               conn=conn, assert_width=1)))
     io.append(Subsignal("photodiode",
               Pins(photodiode, dir="o", conn=conn, assert_width=1)))
     io.append(Subsignal("pwm", Pins(pwm, dir="o", conn=conn, assert_width=1)))
+    io.append(Subsignal("enable", Pins(pwm, dir="o", conn=conn, assert_width=1)))
     if attrs is not None:
         io.append(attrs)
-    return Resource.family(*args, default_name="Laserscanner",
-                           number=number, ios=io)
+    return Resource.family(*args, number, default_name="Laserscanner", ios=io)

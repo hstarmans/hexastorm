@@ -89,7 +89,6 @@ class SPIParser(Elaboratable):
                 m.d.sync += [self.execute.eq(0), wordsreceived.eq(0), error.eq(0)]
                 m.next = 'WAIT_COMMAND'
             with m.State('WAIT_COMMAND'):
-                m.d.sync += [fifo.write_commit.eq(0)]
                 with m.If(interface.command_ready):
                     word = Cat(state[::-1], self.pinstate[::-1])
                     with m.If(interface.command == COMMANDS.EMPTY):
@@ -123,7 +122,7 @@ class SPIParser(Elaboratable):
                 with m.If(interface.word_complete):
                     byte0 = interface.word_received[:8]
                     with m.If(wordsreceived == 0):
-                        with m.If(byte0==INSTRUCTIONS.MOVE):
+                        with m.If((byte0==INSTRUCTIONS.MOVE) | (byte0 == INSTRUCTIONS.WRITEPIN)):
                             m.d.sync += [instruction.eq(byte0),
                                          fifo.write_en.eq(1),
                                          wordsreceived.eq(wordsreceived+1),
@@ -134,16 +133,22 @@ class SPIParser(Elaboratable):
                             m.next = 'WAIT_COMMAND'
                     with m.Else():
                         m.d.sync += [fifo.write_en.eq(1),
-                                    wordsreceived.eq(wordsreceived+1),
-                                    fifo.write_data.eq(interface.word_received)]
+                                     wordsreceived.eq(wordsreceived+1),
+                                     fifo.write_data.eq(interface.word_received)]
                         m.next = 'WRITE'
             with m.State('WRITE'):
                 m.d.sync += fifo.write_en.eq(0)
-                m.next = 'WAIT_COMMAND'
-                with m.If((instruction == INSTRUCTIONS.MOVE) & 
-                          (wordsreceived >= platform.wordsinmove)):
+                with m.If(((instruction == INSTRUCTIONS.MOVE) & 
+                          (wordsreceived >= platform.wordsinmove))
+                          | (instruction == INSTRUCTIONS.WRITEPIN)):
                     m.d.sync += [wordsreceived.eq(0),
                                  fifo.write_commit.eq(1)]
+                    m.next = 'COMMIT'
+                with m.Else():
+                     m.next = 'WAIT_COMMAND'
+            with m.State('COMMIT'):
+                m.d.sync += fifo.write_commit.eq(0)
+                m.next = 'WAIT_COMMAND'
         return m
 
 
@@ -298,7 +303,6 @@ class Dispatcher(Elaboratable):
         # position adder
         busy_d = Signal()
         m.d.sync += busy_d.eq(polynomal.busy)
-
         if platform:
             board_spi = platform.request("debug_spi")
             spi = synchronize(m, board_spi)
@@ -311,11 +315,12 @@ class Dispatcher(Elaboratable):
             self.parser = parser
             self.pol = polynomal
             spi = synchronize(m, self.spi)
+            self.laserhead = platform.laserhead
             self.steppers = steppers = platform.steppers
-            aux = platform.aux
-            self.aux = aux
             self.busy = busy
         coeffcnt = Signal(range(len(polynomal.coeff)))
+        # connect laser
+        hexa = self.platform.laserhead
         # connect motors
         for idx, stepper in enumerate(steppers):
             m.d.comb += [stepper.step.eq(polynomal.step[idx] &
@@ -324,6 +329,15 @@ class Dispatcher(Elaboratable):
                          parser.pinstate[idx].eq(stepper.limit)]
         # connect spi
         m.d.comb += parser.spi.connect(spi)
+        # Polygon
+        polygon = Signal()
+        # TODO: add timer and move to laserhead 
+        m.d.comb += hexa.en.eq(polygon)
+        with m.If(polygon):   
+            m.d.sync += hexa.pwm.eq(~hexa.pwm)
+        with m.Else():
+            m.d.comb += hexa.en.eq(0)
+
         with m.If((busy_d == 1) & (busy == 0)):
             for idx, position in enumerate(parser.position):
                 m.d.sync += position.eq(position+polynomal.totalsteps[idx])
@@ -337,11 +351,17 @@ class Dispatcher(Elaboratable):
                     m.next = 'PARSEHEAD'
             # check which instruction we r handling
             with m.State('PARSEHEAD'):
-                with m.If(parser.read_data[:8] == INSTRUCTIONS.MOVE):
+                byte0 = parser.read_data[:8]
+                with m.If(byte0 == INSTRUCTIONS.MOVE):
                     m.d.sync += [polynomal.ticklimit.eq(parser.read_data[8:]),
                                  parser.read_en.eq(0),
                                  coeffcnt.eq(0)]
                     m.next = 'MOVE_POLYNOMAL'
+                with m.Elif(byte0 == INSTRUCTIONS.WRITEPIN):
+                    pins = Cat(hexa.laser0, hexa.laser1, polygon)
+                    m.d.sync += [pins.eq(parser.read_data[8:]),
+                                 parser.read_commit.eq(0)]
+                    m.next = 'WAIT_INSTRUCTION'
                 with m.Else():
                     m.next = 'ERROR'
                     m.d.sync += parser.dispatcherror.eq(1)
