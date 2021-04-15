@@ -14,13 +14,17 @@ from nmigen_boards.resources import LEDResources
 from nmigen_boards.test.blinky import Blinky
 
 from FPGAG.constants import wordsinmove
-from FPGAG.resources import (StepperResource, StepperRecord, 
+from FPGAG.resources import (StepperResource, StepperRecord,
                              LaserscannerResource, LaserscannerRecord)
 
 
 class TestPlatform:
     name = 'Test'
     stepspermm = {'x': 400, 'y': 400}
+    laserhead = {'RPM': 2000, 'SPINUP_TIME': 1.5, 'STABLE_TIME': 1.125,
+                 'FACETS': 4, 'CRYSTAL_HZ': 50E6, 'LASER_HZ': 100E3,
+                 'END%': 0.7, 'START%': 0.35, 'SINGLE_LINE': False,
+                 'SINGLE_FACET': False, 'DIRECTION': 0}
     motors = len(stepspermm.keys())
     wordsinmove = wordsinmove(motors)
     memdepth = wordsinmove*2+1
@@ -146,6 +150,10 @@ class Firestarter(LatticeICE40Platform):
     enable_pin = 17    # enable pin for stepper motors
     reset_pin = 26     # can be used to reset FPGA
     stepspermm = {'x': 76.2, 'y': 76.2, 'z': 1600}
+    laserhead = {'RPM': 2000, 'SPINUP_TIME': 1.5, 'STABLE_TIME': 1.125,
+                 'FACETS': 4, 'CRYSTAL_HZ': 50E6, 'LASER_HZ': 100E3,
+                 'END%': 0.7, 'START%': 0.35, 'SINGLE_LINE': False,
+                 'SINGLE_FACET': False, 'DIRECTION': 0}
     motors = len(stepspermm.keys())
     wordsinmove = wordsinmove(motors=motors)
     memdepth = 256

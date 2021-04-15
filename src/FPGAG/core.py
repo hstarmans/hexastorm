@@ -3,7 +3,7 @@ from nmigen import Module
 from nmigen.hdl.mem import Array
 
 from luna.gateware.utils.cdc import synchronize
-from luna.gateware.interface.spi import SPICommandInterface, SPIBus
+from luna.gateware.interf.spi import SPICommandInterface, SPIBus
 from luna.gateware.memory import TransactionalizedFIFO
 
 from FPGAG.resources import get_all_resources
@@ -34,7 +34,8 @@ class SPIParser(Elaboratable):
     """
     def __init__(self, platform, top=False):
         """
-        platform  -- used to pass test platform
+        platform  -- pass test platform
+        top       -- trigger synthesis of module
         """
         self.platform = platform
         self.top = top
@@ -59,10 +60,10 @@ class SPIParser(Elaboratable):
         if self.platform:
             platform = self.platform
         spi = self.spi
-        interface = SPICommandInterface(command_size=COMMAND_BYTES*8,
-                                        word_size=WORD_BYTES*8)
-        m.d.comb += interface.spi.connect(spi)
-        m.submodules.interface = interface
+        interf = SPICommandInterface(command_size=COMMAND_BYTES*8,
+                                     word_size=WORD_BYTES*8)
+        m.d.comb += interf.spi.connect(spi)
+        m.submodules.interf = interf
         # FIFO connection
         fifo = TransactionalizedFIFO(width=MEMWIDTH,
                                      depth=platform.memdepth)
@@ -80,53 +81,56 @@ class SPIParser(Elaboratable):
         # Peripheral state
         state = Signal(8)
         m.d.sync += [state[STATE.PARSING].eq(self.execute),
-                     state[STATE.FULL].eq(fifo.space_available<=1),
-                     state[STATE.ERROR].eq(self.dispatcherror|error)]
+                     state[STATE.FULL].eq(fifo.space_available <= 1),
+                     state[STATE.ERROR].eq(self.dispatcherror | error)]
         # remember which word we are processing
         instruction = Signal(8)
         with m.FSM(reset='RESET', name='parser'):
             with m.State('RESET'):
-                m.d.sync += [self.execute.eq(0), wordsreceived.eq(0), error.eq(0)]
+                m.d.sync += [self.execute.eq(0), wordsreceived.eq(0),
+                             error.eq(0)]
                 m.next = 'WAIT_COMMAND'
             with m.State('WAIT_COMMAND'):
-                with m.If(interface.command_ready):
+                with m.If(interf.command_ready):
                     word = Cat(state[::-1], self.pinstate[::-1])
-                    with m.If(interface.command == COMMANDS.EMPTY):
+                    with m.If(interf.command == COMMANDS.EMPTY):
                         m.next = 'WAIT_COMMAND'
-                    with m.Elif(interface.command == COMMANDS.START):
+                    with m.Elif(interf.command == COMMANDS.START):
                         m.next = 'WAIT_COMMAND'
                         m.d.sync += self.execute.eq(1)
-                    with m.Elif(interface.command == COMMANDS.STOP):
+                    with m.Elif(interf.command == COMMANDS.STOP):
                         m.next = 'WAIT_COMMAND'
                         m.d.sync += self.execute.eq(0)
-                    with m.Elif(interface.command == COMMANDS.WRITE):
-                        m.d.sync += interface.word_to_send.eq(word)
+                    with m.Elif(interf.command == COMMANDS.WRITE):
+                        m.d.sync += interf.word_to_send.eq(word)
                         with m.If(state[STATE.FULL] == 0):
                             m.next = 'WAIT_WORD'
                         with m.Else():
                             m.next = 'WAIT_COMMAND'
-                    with m.Elif(interface.command == COMMANDS.READ):
-                        m.d.sync += interface.word_to_send.eq(word)
+                    with m.Elif(interf.command == COMMANDS.READ):
+                        m.d.sync += interf.word_to_send.eq(word)
                         m.next = 'WAIT_COMMAND'
-                    with m.Elif(interface.command == COMMANDS.POSITION):
+                    with m.Elif(interf.command == COMMANDS.POSITION):
                         # position is requested multiple times for multiple
                         # motors
                         with m.If(mtrcntr < platform.motors):
                             m.d.sync += mtrcntr.eq(mtrcntr+1)
                         with m.Else():
                             m.d.sync += mtrcntr.eq(0)
-                        m.d.sync += interface.word_to_send.eq(
+                        m.d.sync += interf.word_to_send.eq(
                                                 self.position[mtrcntr])
                         m.next = 'WAIT_COMMAND'
             with m.State('WAIT_WORD'):
-                with m.If(interface.word_complete):
-                    byte0 = interface.word_received[:8]
+                with m.If(interf.word_complete):
+                    byte0 = interf.word_received[:8]
                     with m.If(wordsreceived == 0):
-                        with m.If((byte0==INSTRUCTIONS.MOVE) | (byte0 == INSTRUCTIONS.WRITEPIN)):
+                        with m.If((byte0 == INSTRUCTIONS.MOVE) |
+                                  (byte0 == INSTRUCTIONS.WRITEPIN)):
                             m.d.sync += [instruction.eq(byte0),
                                          fifo.write_en.eq(1),
                                          wordsreceived.eq(wordsreceived+1),
-                                         fifo.write_data.eq(interface.word_received)]
+                                         fifo.write_data.eq(
+                                             interf.word_received)]
                             m.next = 'WRITE'
                         with m.Else():
                             m.d.sync += error.eq(1)
@@ -134,18 +138,18 @@ class SPIParser(Elaboratable):
                     with m.Else():
                         m.d.sync += [fifo.write_en.eq(1),
                                      wordsreceived.eq(wordsreceived+1),
-                                     fifo.write_data.eq(interface.word_received)]
+                                     fifo.write_data.eq(interf.word_received)]
                         m.next = 'WRITE'
             with m.State('WRITE'):
                 m.d.sync += fifo.write_en.eq(0)
-                with m.If(((instruction == INSTRUCTIONS.MOVE) & 
+                with m.If(((instruction == INSTRUCTIONS.MOVE) &
                           (wordsreceived >= platform.wordsinmove))
                           | (instruction == INSTRUCTIONS.WRITEPIN)):
                     m.d.sync += [wordsreceived.eq(0),
                                  fifo.write_commit.eq(1)]
                     m.next = 'COMMIT'
                 with m.Else():
-                     m.next = 'WAIT_COMMAND'
+                    m.next = 'WAIT_COMMAND'
             with m.State('COMMIT'):
                 m.d.sync += fifo.write_commit.eq(0)
                 m.next = 'WAIT_COMMAND'
@@ -172,9 +176,12 @@ class Polynomal(Elaboratable):
         O: step           -- step signal
     """
     def __init__(self, platform=None, divider=50, top=False):
-        ''' divider -- original clock of 100 MHz via PLL reduced to 50 MHz
+        '''
+            platform  -- pass test platform
+            divider -- original clock of 100 MHz via PLL reduced to 50 MHz
                        if this is divided by 50 motor state updated
                        with 1 Mhz
+            top       -- trigger synthesis of module
         '''
         self.top = top
         self.divider = divider
@@ -274,17 +281,121 @@ class Polynomal(Elaboratable):
         return m
 
 
+class Laserhead(Elaboratable):
+    """ Controller of laser scanner with rotating mirror or prism
+
+        I/O signals:
+        O: synchronized   -- if true, laser is in sync and prism is rotating
+        O: error          -- error signal
+        O: lasers         -- laser pin
+        O: pwm            -- pulse for scanner motor
+        O: enablepin      -- enable pin scanner motor
+        I: enable         -- create pulse for scanner motor
+        I: synchronize    -- activate synchorinzation
+        I: photodiode     -- trigger for photodiode
+        O: read_commit    -- finalize read transactionalizedfifo
+        O: read_en        -- enable read transactionalizedfifo
+        I: read_data      -- read data from transactionalizedfifo
+        I: empty          -- signal wether fifo is empty
+    """
+    def __init__(self, platform=None, divider=50, top=False):
+        '''
+        top        -- trigger synthesis of module
+        platform   -- pass test platform
+        divider    -- original clock of 100 MHz via PLL reduced to 50 MHz
+                      if this is divided by 50 laser state updated
+                      with 1 MHz
+        '''
+        self.divider = divider
+        self.status = Signal()
+        self.lasers = Signal(2)
+        self.pwm = Signal()
+        self.enablepin = Signal()
+        self.enable = Signal()
+        self.synchronize = Signal()
+        self.photodiode = Signal()
+        self.read_commit = Signal()
+        self.read_en = Signal()
+        self.read_data = Signal()
+        self.empty = Signal()
+
+    def elaborate(self, platform):
+        m = Module()
+        if self.platform is not None:
+            platform = self.platform
+        var = platform.laserhead
+        # parameter creation
+        ticksinfacet = round(var['CRYSTAL_HZ']/(var['RPM']/60*var['FACETS']))
+        laserticks = int(var['CRYSTAL_HZ']/var['LASER_HZ'])
+        jitterticks = round(0.5*laserticks)
+        if var['END%'] > round(1-(self.JITTERTICKS+1)
+                               / self.ticksinfacet):
+            raise Exception("Invalid settings, END% too high")
+        bitsinscanline = round((self.ticksinfacet*(var['END%']-var['START%']))
+                               / laserticks)
+        if bitsinscanline <= 0:
+            raise Exception("Bits in scanline invalid")
+        # command byte is equal to 1
+        bytesinline = math.ceil(bitsinscanline/8)+1
+
+        # Pulse generator for prism motor
+        polyperiod = int(var['CRYSTAL_HZ']/(var['RPM']/60)/(6*2))
+        pwmcnt = Signal(range(polyperiod))
+        poly_en = Signal()
+        #TODO: always create the pwm but connect enable to poly_en etc.
+        with m.If(self.enable | poly_en):
+            with m.If(pwmcnt == 0):
+                m.d.sync += [self.pwm.eq(~self.pwm),
+                             pwmcnt.eq(polyperiod-1)]
+            with m.Else():
+                m.d.sync += pwmcnt.eq(pwmcnt+1)
+
+        spinupticks = round(var['SPINUP_TIME']*var['CRYSTAL_HZ'])
+        stableticks = round(var['STABLE_TIME']*var['CRYSTAL_HZ'])
+        stablethresh = Signal(range(stableticks))
+        lasercnt = Signal(range(laserticks))
+        scanbit = Signal(range(bitsinscanline+1))
+        tickcounter = Signal(range(self.ticksinfacet*2))
+
+        lasers = self.lasers
+        with m.FSM(reset='RESET', name='laserfsm'):
+            with m.State('RESET'):
+                m.d.sync += self.error.eq(0)
+                m.next = 'STOP'
+            with m.State('STOP'):
+                m.d.sync += [stablethresh.eq(stableticks-1),
+                             stablecntr.eq(0),
+                             poly_en.eq(0),
+                             facetcnt.eq(0),
+                             scanbit.eq(0),
+                             lasercnt.eq(0),
+                             lasers.eq(0)]
+                with m.If(self.synchronize):
+                    # laser is off, photodiode cannot be triggered
+                    # TODO: add check that fifo is not empty
+                    with m.If((self.photodiode == 0) | (self.empty)):
+                        m.d.sync += self.error.eq(1)
+                        m.next = 'STOP'
+                    with m.Else():
+                        m.d.sync += [self.error.eq(0),
+                                     poly_en.eq(1)]
+                        m.next = 'SPINUP'
+            with m.State('SPINUP'):
+                m.next = 'STOP'
+
+
 class Dispatcher(Elaboratable):
     """ Dispatches instructions to right submodule
 
         Instructions are buffered in SRAM. This module checks the buffer
         and dispatches the instructions to the corresponding module.
-        This is the top module"""
+        This is the top module
+    """
     def __init__(self, platform=None, divider=50):
         """
-        platform  -- used to pass test platform
-        divider   -- if sys clk is 50 MHz and divider is 50
-                     motor state is update with 1 Mhz
+            platform  -- used to pass test platform
+            divider   -- if sys clk is 50 MHz and divider is 50
+                        motor state is update with 1 Mhz
         """
         self.platform = platform
         self.divider = divider
@@ -331,12 +442,8 @@ class Dispatcher(Elaboratable):
         m.d.comb += parser.spi.connect(spi)
         # Polygon
         polygon = Signal()
-        # TODO: add timer and move to laserhead 
+        # TODO: add timer and move to laserhead
         m.d.comb += hexa.en.eq(polygon)
-        with m.If(polygon):   
-            m.d.sync += hexa.pwm.eq(~hexa.pwm)
-        with m.Else():
-            m.d.comb += hexa.en.eq(0)
 
         with m.If((busy_d == 1) & (busy == 0)):
             for idx, position in enumerate(parser.position):
@@ -390,14 +497,14 @@ class Dispatcher(Elaboratable):
 
 # Overview:
 #  the hardware consists out of the following elements
-#  -- SPI command interface
+#  -- SPI command interf
 #  -- transactionalized FIFO
-#  -- SPI parser (basically an extension of SPI command interface)
+#  -- SPI parser (basically an extension of SPI command interf)
 #  -- Dispatcher --> dispatches signals to actual hardware
 #  -- Polynomal integrator --> determines position via integrating counters
 
 # TODO:
-#   -- fix incorrect movement
+#   -- in practice, position is not reached with small differences like 0.02 mm
 #   -- test execution speed to ensure the right PLL is propagated
 #   -- luna splits modules over files and adds one test per file
 #      this is probably cleaner than put all in one file approach
