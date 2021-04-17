@@ -540,7 +540,7 @@ if __name__ == "__main__":
 
 # Overview:
 #  the hardware consists out of the following elements
-#  -- SPI command interf
+#  -- SPI command interface
 #  -- transactionalized FIFO
 #  -- SPI parser (basically an extension of SPI command interf)
 #  -- Dispatcher --> dispatches signals to actual hardware
