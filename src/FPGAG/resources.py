@@ -107,7 +107,8 @@ def LaserscannerResource(*args, laser0, laser1,
     io.append(Subsignal("photodiode",
               Pins(photodiode, dir="o", conn=conn, assert_width=1)))
     io.append(Subsignal("pwm", Pins(pwm, dir="o", conn=conn, assert_width=1)))
-    io.append(Subsignal("enable", Pins(pwm, dir="o", conn=conn, assert_width=1)))
+    io.append(Subsignal("enable", Pins(pwm, dir="o",
+                        conn=conn, assert_width=1)))
     if attrs is not None:
         io.append(attrs)
     return Resource.family(*args, number, default_name="Laserscanner", ios=io)

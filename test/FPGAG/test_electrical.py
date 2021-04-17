@@ -20,19 +20,18 @@ class Tests(unittest.TestCase):
         else:
             print("Resetting the machine")
             cls.host.reset()
-            
+
     def _executor(func):
         '''executes generator until stop iteration
-        
+
         Nmigen uses generator syntax and this leaks into our
         python code. As a result, it is required to iterate.
         '''
         def inner(self):
-            iteration = 0
             for _ in func(self):
                 pass
-        return inner    
-    
+        return inner
+
     @_executor
     def readpin(self):
         '''test if you can detect triggers of the limit switches
@@ -44,7 +43,7 @@ class Tests(unittest.TestCase):
         while True:
             print((yield from self.host.pinstate))
             sleep(1)
-    
+
     @_executor
     def motorenable(self):
         '''test if motors are enabled and execution is enabled/disabled
@@ -55,7 +54,7 @@ class Tests(unittest.TestCase):
         input()
         self.host.enable_steppers = False
         self.assertEqual((yield from self.host.execution), False)
-    
+
     @_executor
     def multiplemove(self):
         '''test if motors move'''
@@ -72,7 +71,7 @@ class Tests(unittest.TestCase):
         assert_array_equal((yield from self.host.position),
                            position)
         self.host.enable_steppers = False
-    
+
     @_executor
     def test_memfull(self):
         '''test if memory can be filled and emptied
@@ -106,7 +105,7 @@ class Tests(unittest.TestCase):
                            mm*limit)
         self.host._executionsetter(False)
         self.assertEqual((yield from self.host.dispatcherror), False)
-    
+
     @_executor
     def test_invalidinstruction(self):
         '''write invalid instruction and verify it passes dispatcher'''
@@ -118,7 +117,6 @@ class Tests(unittest.TestCase):
         yield from self.host._executionsetter(False)
         self.assertEqual((yield from self.host.memfull()), False)
         self.assertEqual((yield from self.host.dispatcherror), True)
-
 
 
 if __name__ == "__main__":

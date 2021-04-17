@@ -31,6 +31,7 @@ class TestPlatform:
     steppers = [StepperRecord()]*motors
     laserhead = LaserscannerRecord()
 
+
 # other option is kbob nmigen-examples nmigen_lib pll
 class FirestarterDomainGenerator(Elaboratable):
     """ Creates clock domains for Firestarter
@@ -131,9 +132,9 @@ class FirestarterDomainGenerator(Elaboratable):
         # We'll use our 50MHz clock for everything _except_ the polynomal
         # which create ticks for the motors
         m.d.comb += [
-            #ClockSignal("pol").eq(clk1),
+            # ClockSignal("pol").eq(clk1),
             ClockSignal("sync").eq(clk50),
-            #ResetSignal("pol").eq(~locked),
+            # ResetSignal("pol").eq(~locked),
             ResetSignal("sync").eq(~locked),
         ]
 

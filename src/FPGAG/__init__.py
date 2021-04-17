@@ -1,2 +1,2 @@
-from . import (platforms, core, constants, controller,
-               resources, notused)
+from . import (platforms, core, constants, controller, movement,
+               resources, arithmetic)

@@ -9,7 +9,8 @@ from math import ceil
 COMMANDS = namedtuple('COMMANDS', ['EMPTY', 'WRITE', 'READ', 'POSITION',
                                    'START', 'STOP'],
                       defaults=range(6))()
-INSTRUCTIONS = namedtuple('INSTRUCTIONS', ['MOVE', 'WRITEPIN'], defaults=[1,2])()
+INSTRUCTIONS = namedtuple('INSTRUCTIONS', ['MOVE', 'WRITEPIN'],
+                          defaults=[1, 2])()
 STATE = namedtuple('STATE', ['FULL', 'PARSING', 'ERROR'],
                    defaults=range(3))()
 # one block is 4K there are 32 blocks (officially 20 in HX4K)
