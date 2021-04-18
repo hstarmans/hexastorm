@@ -15,6 +15,7 @@ class Laserhead(Elaboratable):
         O: enablepin      -- enable pin scanner motor
         I: synchronize    -- activate synchorinzation
         I: photodiode     -- trigger for photodiode
+        O: photodiode_t   -- high if photodiode triggered in this cycle
         O: read_commit    -- finalize read transactionalizedfifo
         O: read_en        -- enable read transactionalizedfifo
         I: read_data      -- read data from transactionalizedfifo
@@ -28,14 +29,16 @@ class Laserhead(Elaboratable):
                       if this is divided by 50 laser state updated
                       with 1 MHz
         '''
+        self.platform = platform
         self.divider = divider
         self.status = Signal()
         self.lasers = Signal(2)
         self.pwm = Signal()
-        self.enablepin = Signal()
+        self.enable_prism = Signal()
         self.synchronize = Signal()
         self.error = Signal()
         self.photodiode = Signal()
+        self.photodiode_t = Signal()
         self.read_commit = Signal()
         self.read_en = Signal()
         self.read_data = Signal()
@@ -45,15 +48,15 @@ class Laserhead(Elaboratable):
         m = Module()
         if self.platform is not None:
             platform = self.platform
-        var = platform.laserhead
+        var = platform.laser_var
         # parameter creation
         ticksinfacet = round(var['CRYSTAL_HZ']/(var['RPM']/60*var['FACETS']))
         laserticks = int(var['CRYSTAL_HZ']/var['LASER_HZ'])
         jitterticks = round(0.5*laserticks)
-        if var['END%'] > round(1-(self.JITTERTICKS+1)
-                               / self.ticksinfacet):
+        if var['END%'] > round(1-(jitterticks+1)
+                               / ticksinfacet):
             raise Exception("Invalid settings, END% too high")
-        bitsinscanline = round((self.ticksinfacet*(var['END%']-var['START%']))
+        bitsinscanline = round((ticksinfacet*(var['END%']-var['START%']))
                                / laserticks)
         if bitsinscanline <= 0:
             raise Exception("Bits in scanline invalid")
@@ -61,6 +64,17 @@ class Laserhead(Elaboratable):
         polyperiod = int(var['CRYSTAL_HZ']/(var['RPM']/60)/(6*2))
         pwmcnt = Signal(range(polyperiod))
         poly_en = Signal()
+        # photodiode_triggered
+        photodiodecnt = Signal(range(ticksinfacet*2))
+        triggered = Signal()
+        with m.If(photodiodecnt < (ticksinfacet*2-1)):
+            with m.If(self.photodiode):
+                m.d.sync += triggered.eq(1)
+            m.d.sync += photodiodecnt.eq(photodiodecnt+1)
+        with m.Else():
+            m.d.sync += [self.photodiode_t.eq(triggered),
+                         photodiodecnt.eq(0),
+                         triggered.eq(0)]
         # pwm is always created but can be deactivated
         with m.If(pwmcnt == 0):
             m.d.sync += [self.pwm.eq(~self.pwm),
@@ -68,14 +82,14 @@ class Laserhead(Elaboratable):
         with m.Else():
             m.d.sync += pwmcnt.eq(pwmcnt+1)
         # Laser FSM
-        facetcnt = Signal(max=var['FACETS'])
+        facetcnt = Signal(range(var['FACETS']))
         spinupticks = round(var['SPINUP_TIME']*var['CRYSTAL_HZ'])
         stableticks = round(var['STABLE_TIME']*var['CRYSTAL_HZ'])
-        stablecntr = Signal(max=max(spinupticks, stableticks))
+        stablecntr = Signal(range(max(spinupticks, stableticks)))
         stablethresh = Signal(range(stableticks))
         lasercnt = Signal(range(laserticks))
         scanbit = Signal(range(bitsinscanline+1))
-        tickcounter = Signal(range(self.ticksinfacet*2))
+        tickcounter = Signal(range(ticksinfacet*2))
         photodiode = self.photodiode
         read_data = self.read_data
         read_old = Signal.like(read_data)
@@ -142,16 +156,16 @@ class Laserhead(Elaboratable):
                     m.d.sync += tickcounter.eq(tickcounter+1)
             with m.State('READ_INSTRUCTION'):
                 m.d.sync += tickcounter.eq(tickcounter+1)
-                with m.If(self.emtpy):
+                with m.If(self.empty):
                     m.next = 'WAIT_END'
                 with m.Else():
                     m.d.sync += self.read_en.eq(1)
                     m.next = 'PARSE_HEAD'
             with m.State('PARSE_HEAD'):
                 m.d.sync += [self.read_en.eq(0), tickcounter.eq(tickcounter+1)]
-                with m.If(read_data == INSTRUCTIONS.STOP):
-                    m.next = 'STOP'
-                with m.Elif(read_data == INSTRUCTIONS.SCAN):
+                # with m.If(read_data == INSTRUCTIONS.STOP):
+                #     m.next = 'STOP'
+                with m.If(read_data == INSTRUCTIONS.SCANLINE):
                     m.next = 'WAIT_FOR_DATA_RUN'
                 with m.Else():
                     m.d.sync += self.error.eq(1)
@@ -162,7 +176,7 @@ class Laserhead(Elaboratable):
                              scanbit.eq(0),
                              lasercnt.eq(0)]
                 tickcnt_thresh = int(var['START%']*ticksinfacet-2)
-                with m.If(self.tickcounter >= tickcnt_thresh):
+                with m.If(tickcounter >= tickcnt_thresh):
                     m.next = 'DATA_RUN'
             with m.State('DATA_RUN'):
                 m.d.sync += tickcounter.eq(tickcounter+1)
@@ -201,4 +215,5 @@ class Laserhead(Elaboratable):
                              tickcounter.eq(tickcounter+1)]
                 with m.If(tickcounter >= round(ticksinfacet-jitterticks-1)):
                     m.d.sync += lasers.eq(int('11', 2))
-                    m.next = 'STATE_WAIT_STABLE'
+                    m.next = 'WAIT_STABLE'
+        return m

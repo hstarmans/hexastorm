@@ -17,6 +17,7 @@ from FPGAG.controller import Host, Memfull
 from FPGAG.movement import Polynomal
 from FPGAG.platforms import TestPlatform
 from FPGAG.resources import get_all_resources
+from FPGAG.lasers import Laserhead
 from FPGAG.constants import (COMMAND_BYTES, WORD_BYTES, STATE, INSTRUCTIONS,
                              MEMWIDTH, COMMANDS, DEGREE, FREQ)
 
@@ -183,12 +184,18 @@ class Dispatcher(Elaboratable):
 
     def elaborate(self, platform):
         m = Module()
-        # Connect Parser
+        # Parser
         parser = SPIParser(self.platform)
         m.submodules.parser = parser
-        # Connect Polynomal Move module
+        # Polynomal Move
         polynomal = Polynomal(self.platform, self.divider)
         m.submodules.polynomal = polynomal
+        # Laserscan Head
+        laserhead = Laserhead(self.platform, self.divider)
+        m.submodules.laserhead = laserhead
+        # Local laser signal clones
+        enable_prism = Signal()
+        lasers = Signal(2)
         # Busy signal
         busy = Signal()
         m.d.comb += busy.eq(polynomal.busy)
@@ -211,8 +218,15 @@ class Dispatcher(Elaboratable):
             self.steppers = steppers = platform.steppers
             self.busy = busy
         coeffcnt = Signal(range(len(polynomal.coeff)))
-        # connect laser
+        # connect laserhead
         hexa = self.platform.laserhead
+        m.d.comb += [
+            hexa.pwm.eq(laserhead.pwm),
+            hexa.en.eq(laserhead.enable_prism | enable_prism),
+            laserhead.photodiode.eq(hexa.photodiode),
+            hexa.laser0.eq(laserhead.lasers[0] | lasers[0]),
+            hexa.laser1.eq(laserhead.lasers[1] | lasers[1])
+        ]
         # connect motors
         for idx, stepper in enumerate(steppers):
             m.d.comb += [stepper.step.eq(polynomal.step[idx] &
@@ -221,11 +235,6 @@ class Dispatcher(Elaboratable):
                          parser.pinstate[idx].eq(stepper.limit)]
         # connect spi
         m.d.comb += parser.spi.connect(spi)
-        # Polygon
-        polygon = Signal()
-        # TODO: add timer and move to laserhead
-        m.d.comb += hexa.en.eq(polygon)
-
         with m.If((busy_d == 1) & (busy == 0)):
             for idx, position in enumerate(parser.position):
                 m.d.sync += position.eq(position+polynomal.totalsteps[idx])
@@ -246,7 +255,7 @@ class Dispatcher(Elaboratable):
                                  coeffcnt.eq(0)]
                     m.next = 'MOVE_POLYNOMAL'
                 with m.Elif(byte0 == INSTRUCTIONS.WRITEPIN):
-                    pins = Cat(hexa.laser0, hexa.laser1, polygon)
+                    pins = Cat(lasers, enable_prism)
                     m.d.sync += [pins.eq(parser.read_data[8:]),
                                  parser.read_commit.eq(0)]
                     m.next = 'WAIT_INSTRUCTION'
