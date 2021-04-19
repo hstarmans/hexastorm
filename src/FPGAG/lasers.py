@@ -49,6 +49,21 @@ class Laserhead(Elaboratable):
         if self.platform is not None:
             platform = self.platform
         var = platform.laser_var
+        if self.platform.name == 'Test':
+            ticksinfacet = var['TICKSINFACET']
+            laserticks = var['LASERTICKS']
+            self.ticksinfacet = ticksinfacet
+            var['CRYSTAL_HZ'] = round(ticksinfacet*var['FACETS']
+                                      * var['RPM']/60)
+            var['LASER_HZ'] = var['CRYSTAL_HZ']/laserticks
+            var['SPINUP_TIME'] = 10/var['CRYSTAL_HZ']
+            # TODO: stop scanline seems to affect the stable thresh?!
+            # can be 30 without stopline (this is from old repo)
+            var['STABLE_TIME'] = 50/var['CRYSTAL_HZ']
+            var['START%'] = 2/ticksinfacet
+            scanbits = 2
+            var['END%'] = (laserticks*scanbits)/ticksinfacet + var['START%']
+
         # parameter creation
         ticksinfacet = round(var['CRYSTAL_HZ']/(var['RPM']/60*var['FACETS']))
         laserticks = int(var['CRYSTAL_HZ']/var['LASER_HZ'])

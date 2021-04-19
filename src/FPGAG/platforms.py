@@ -22,9 +22,8 @@ class TestPlatform:
     name = 'Test'
     stepspermm = {'x': 400, 'y': 400}
     laser_var = {'RPM': 2000, 'SPINUP_TIME': 1.5, 'STABLE_TIME': 1.125,
-                 'FACETS': 4, 'CRYSTAL_HZ': 50E6, 'LASER_HZ': 100E3,
-                 'END%': 0.7, 'START%': 0.35, 'SINGLE_LINE': False,
-                 'SINGLE_FACET': False, 'DIRECTION': 0}
+                 'FACETS': 4, 'SINGLE_LINE': False, 'TICKSINFACET': 18,
+                 'LASERTICKS': 4, 'SINGLE_FACET': False, 'DIRECTION': 0}
     motors = len(stepspermm.keys())
     wordsinmove = wordsinmove(motors)
     memdepth = wordsinmove*2+1

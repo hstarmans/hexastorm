@@ -98,7 +98,8 @@ class Host:
         bits = "{:08b}".format(data[-2])
         dct = {'x': int(bits[0]),
                'y': int(bits[1]),
-               'z': int(bits[2])}
+               'z': int(bits[2]),
+               'photodiode_trigger': int(bits[3])}
         return dct
 
     @property

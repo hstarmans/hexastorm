@@ -34,7 +34,7 @@ class SPIParser(Elaboratable):
     I/O signals:
         I/O: Spibus       -- spi bus connected to peripheral
         I: positions      -- positions of stepper motors
-        I: pin state      -- state of certain pins
+        I: pin state      -- used to get the value of select pins at client
         I: read_commit    -- finalize read transactionalizedfifo
         I: read_en        -- enable read transactionalizedfifo
         I: dispatcherror  -- error while processing stored command from spi
@@ -214,18 +214,19 @@ class Dispatcher(Elaboratable):
             self.parser = parser
             self.pol = polynomal
             spi = synchronize(m, self.spi)
-            self.laserhead = platform.laserhead
+            self.laserheadpins = platform.laserhead
+            self.laserhead = laserhead
             self.steppers = steppers = platform.steppers
             self.busy = busy
         coeffcnt = Signal(range(len(polynomal.coeff)))
         # connect laserhead
-        hexa = self.platform.laserhead
+        laserheadpins = self.platform.laserhead
         m.d.comb += [
-            hexa.pwm.eq(laserhead.pwm),
-            hexa.en.eq(laserhead.enable_prism | enable_prism),
-            laserhead.photodiode.eq(hexa.photodiode),
-            hexa.laser0.eq(laserhead.lasers[0] | lasers[0]),
-            hexa.laser1.eq(laserhead.lasers[1] | lasers[1])
+            laserheadpins.pwm.eq(laserhead.pwm),
+            laserheadpins.en.eq(laserhead.enable_prism | enable_prism),
+            laserhead.photodiode.eq(laserheadpins.photodiode),
+            laserheadpins.laser0.eq(laserhead.lasers[0] | lasers[0]),
+            laserheadpins.laser1.eq(laserhead.lasers[1] | lasers[1]),
         ]
         # connect motors
         for idx, stepper in enumerate(steppers):
@@ -233,6 +234,8 @@ class Dispatcher(Elaboratable):
                                          ((stepper.limit == 0) | stepper.dir)),
                          stepper.dir.eq(polynomal.dir[idx]),
                          parser.pinstate[idx].eq(stepper.limit)]
+        m.d.comb += (parser.pinstate[len(steppers)+1].
+                     eq(laserhead.photodiode_t))
         # connect spi
         m.d.comb += parser.spi.connect(spi)
         with m.If((busy_d == 1) & (busy == 0)):
@@ -345,6 +348,8 @@ class TestParser(SPIGatewareTestCase):
             yield self.dut.pinstate.eq(b)
             yield
             newdct = (yield from self.host.pinstate)
+            subset = ['x', 'y', 'z']
+            newdct = {k: v for k, v in newdct.items() if k in subset}
             self.assertDictEqual(dct, newdct)
         yield from test_pins({'x': 0, 'y': 1, 'z': 0})
         yield from test_pins({'x': 1, 'y': 0, 'z': 1})
@@ -433,6 +438,23 @@ class TestDispatcher(SPIGatewareTestCase):
         self.assertEqual((yield from self.host.error), False)
 
     @sync_test_case
+    def test_readdiode(self):
+        '''verify you can receive photodiode trigger
+
+        Photodiode trigger simply checks wether the photodiode
+        has been triggered for each cycle.
+        '''
+        yield self.dut.laserheadpins.photodiode.eq(1)
+        self.assertEqual((yield self.dut.laserhead.photodiode_t),
+                         False)
+        val = (yield from self.host.pinstate)['photodiode_trigger']
+        for _ in range(self.dut.laserhead.ticksinfacet):
+            yield
+        self.assertEqual((yield self.dut.laserhead.photodiode_t),
+                         True)
+        self.assertEqual(val, True)
+
+    @sync_test_case
     def test_writepin(self):
         '''verify homing procedure works correctly'''
         yield from self.host.enable_comp(laser0=True,
@@ -449,9 +471,9 @@ class TestDispatcher(SPIGatewareTestCase):
             yield
         # ensure there is no error
         self.assertEqual((yield from self.host.error), False)
-        self.assertEqual((yield self.dut.laserhead.laser0), 1)
-        self.assertEqual((yield self.dut.laserhead.laser1), 0)
-        self.assertEqual((yield self.dut.laserhead.en), 0)
+        self.assertEqual((yield self.dut.laserheadpins.laser0), 1)
+        self.assertEqual((yield self.dut.laserheadpins.laser1), 0)
+        self.assertEqual((yield self.dut.laserheadpins.en), 0)
 
     @sync_test_case
     def test_home(self):
@@ -556,6 +578,7 @@ if __name__ == "__main__":
 #  -- Polynomal integrator --> determines position via integrating counters
 
 # TODO:
+#   -- check properties like ticksinfacet propagate
 #   -- in practice, position is not reached with small differences like 0.02 mm
 #   -- test execution speed to ensure the right PLL is propagated
 #   -- use CRC packet for tranmission failure (it is in litex but not luna)
