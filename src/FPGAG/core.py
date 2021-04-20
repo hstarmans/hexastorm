@@ -573,7 +573,7 @@ if __name__ == "__main__":
 #  the hardware consists out of the following elements
 #  -- SPI command interface
 #  -- transactionalized FIFO
-#  -- SPI parser (basically an extension of SPI command interf)
+#  -- SPI parser (basically an extension of SPI command interface)
 #  -- Dispatcher --> dispatches signals to actual hardware
 #  -- Polynomal integrator --> determines position via integrating counters
 

@@ -1,7 +1,11 @@
+import unittest
+
 from nmigen import Signal, Elaboratable
 from nmigen import Module
+from luna.gateware.test import LunaGatewareTestCase, sync_test_case
 
 from FPGAG.constants import (MEMWIDTH, INSTRUCTIONS)
+from FPGAG.platforms import TestPlatform
 
 
 class Laserhead(Elaboratable):
@@ -49,12 +53,13 @@ class Laserhead(Elaboratable):
         if self.platform is not None:
             platform = self.platform
         var = platform.laser_var
+        var['POLY_HZ'] = var['RPM']/60
         if self.platform.name == 'Test':
             ticksinfacet = var['TICKSINFACET']
             laserticks = var['LASERTICKS']
             self.ticksinfacet = ticksinfacet
             var['CRYSTAL_HZ'] = round(ticksinfacet*var['FACETS']
-                                      * var['RPM']/60)
+                                      * var['POLY_HZ'])
             var['LASER_HZ'] = var['CRYSTAL_HZ']/laserticks
             var['SPINUP_TIME'] = 10/var['CRYSTAL_HZ']
             # TODO: stop scanline seems to affect the stable thresh?!
@@ -63,9 +68,9 @@ class Laserhead(Elaboratable):
             var['START%'] = 2/ticksinfacet
             scanbits = 2
             var['END%'] = (laserticks*scanbits)/ticksinfacet + var['START%']
-
+            self.var = var
         # parameter creation
-        ticksinfacet = round(var['CRYSTAL_HZ']/(var['RPM']/60*var['FACETS']))
+        ticksinfacet = round(var['CRYSTAL_HZ']/(var['POLY_HZ']*var['FACETS']))
         laserticks = int(var['CRYSTAL_HZ']/var['LASER_HZ'])
         jitterticks = round(0.5*laserticks)
         if var['END%'] > round(1-(jitterticks+1)
@@ -76,7 +81,7 @@ class Laserhead(Elaboratable):
         if bitsinscanline <= 0:
             raise Exception("Bits in scanline invalid")
         # Pulse generator for prism motor
-        polyperiod = int(var['CRYSTAL_HZ']/(var['RPM']/60)/(6*2))
+        polyperiod = int(var['CRYSTAL_HZ']/(var['POLY_HZ']*6*2))
         pwmcnt = Signal(range(polyperiod))
         poly_en = Signal()
         # photodiode_triggered
@@ -95,7 +100,7 @@ class Laserhead(Elaboratable):
             m.d.sync += [self.pwm.eq(~self.pwm),
                          pwmcnt.eq(polyperiod-1)]
         with m.Else():
-            m.d.sync += pwmcnt.eq(pwmcnt+1)
+            m.d.sync += pwmcnt.eq(pwmcnt-1)
         # Laser FSM
         facetcnt = Signal(range(var['FACETS']))
         spinupticks = round(var['SPINUP_TIME']*var['CRYSTAL_HZ'])
@@ -111,7 +116,7 @@ class Laserhead(Elaboratable):
         readbit = Signal(range(MEMWIDTH))
         photodiode_d = Signal()
         lasers = self.lasers
-        with m.FSM(reset='RESET', name='laserfsm'):
+        with m.FSM(reset='RESET') as laserfsm:
             with m.State('RESET'):
                 m.d.sync += self.error.eq(0)
                 m.next = 'STOP'
@@ -231,4 +236,63 @@ class Laserhead(Elaboratable):
                 with m.If(tickcounter >= round(ticksinfacet-jitterticks-1)):
                     m.d.sync += lasers.eq(int('11', 2))
                     m.next = 'WAIT_STABLE'
+        if self.platform.name == 'Test':
+            self.laserfsm = laserfsm
         return m
+
+
+class LaserheadTest(LunaGatewareTestCase):
+    platform = TestPlatform()
+    FRAGMENT_UNDER_TEST = Laserhead
+    FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1}
+
+    def getState(self, fsm=None):
+        if fsm is None:
+            fsm = self.dut.laserfsm
+        return fsm.decoding[(yield fsm.state)]
+
+    def waituntilState(self, state, fsm=None):
+        while (yield from self.getState(fsm)) != state:
+            yield
+
+    def assertState(self, state, fsm=None):
+        self.assertEqual(self.getState(state), state)
+
+    @sync_test_case
+    def test_pwmpulse(self):
+        '''pwm pulse generation test'''
+        dut = self.dut
+        var = dut.var
+        while (yield dut.pwm) == 0:
+            yield
+        cnt = 0
+        while (yield dut.pwm) == 1:
+            cnt += 1
+            yield
+        self.assertEqual(cnt,
+                         int(var['CRYSTAL_HZ']/(var['POLY_HZ']*6*2))
+                         )
+
+    @sync_test_case
+    def test_nosync(self):
+        '''error is raised if laser not synchronized'''
+        dut = self.dut
+        yield dut.photodiode.eq(1)
+        yield dut.synchronize.eq(1)
+        yield from self.waituntilState('SPINUP')
+        self.assertEqual((yield dut.error), 0)
+        yield from self.waituntilState('WAIT_STABLE')
+        yield from self.waituntilState('STOP')
+        self.assertEqual((yield dut.error), 1)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+# which test do I need
+#  ' remains in stable wihtout write'
+#  ' invalid line resuls in error'
+#  ' stop scanline end exposure'
+#  ' scanline repeated'
+#  ' scanline repeated single facet'
+#  ' scanline ringbuffer'
