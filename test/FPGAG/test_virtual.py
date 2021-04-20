@@ -1,6 +1,6 @@
 import unittest
 
-from FPGA.platforms import Firestarter
+from FPGAG.platforms import Firestarter
 from FPGAG.core import Dispatcher, SPIParser
 from FPGAG.movement import Polynomal
 

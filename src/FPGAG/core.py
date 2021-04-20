@@ -206,6 +206,7 @@ class Dispatcher(Elaboratable):
             board_spi = platform.request("debug_spi")
             spi = synchronize(m, board_spi)
             m.submodules.car = platform.clock_domain_generator()
+            laserheadpins = platform.request("laserscanner")
             steppers = [res for res in get_all_resources(platform, "stepper")]
             assert len(steppers) != 0
         else:
@@ -218,9 +219,9 @@ class Dispatcher(Elaboratable):
             self.laserhead = laserhead
             self.steppers = steppers = platform.steppers
             self.busy = busy
+            laserheadpins = self.platform.laserhead
         coeffcnt = Signal(range(len(polynomal.coeff)))
         # connect laserhead
-        laserheadpins = self.platform.laserhead
         m.d.comb += [
             laserheadpins.pwm.eq(laserhead.pwm),
             laserheadpins.en.eq(laserhead.enable_prism | enable_prism),

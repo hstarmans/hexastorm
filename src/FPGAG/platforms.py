@@ -150,7 +150,7 @@ class Firestarter(LatticeICE40Platform):
     enable_pin = 17    # enable pin for stepper motors
     reset_pin = 26     # can be used to reset FPGA
     stepspermm = {'x': 76.2, 'y': 76.2, 'z': 1600}
-    laserhead = {'RPM': 2000, 'SPINUP_TIME': 1.5, 'STABLE_TIME': 1.125,
+    laser_var = {'RPM': 2000, 'SPINUP_TIME': 1.5, 'STABLE_TIME': 1.125,
                  'FACETS': 4, 'CRYSTAL_HZ': 50E6, 'LASER_HZ': 100E3,
                  'END%': 0.7, 'START%': 0.35, 'SINGLE_LINE': False,
                  'SINGLE_FACET': False, 'DIRECTION': 0}
@@ -176,7 +176,8 @@ class Firestarter(LatticeICE40Platform):
                         Attrs(IO_STANDARD="SB_LVCMOS")),
                # Laserscanner resource
                LaserscannerResource(number=0, laser0='134', laser1='135',
-                                    photodiode='137', pwm='139', enable='141'),
+                                    photodiode='137', pwm='139', enable='141',
+                                    attrs=Attrs(IO_STANDARD="SB_LVCMOS")),
                # x-stepper
                StepperResource(number=0, step="38", direction="37",
                                limit="110",
