@@ -16,7 +16,7 @@ class Laserhead(Elaboratable):
         O: error          -- error signal
         O: lasers         -- laser pin
         O: pwm            -- pulse for scanner motor
-        O: enablepin      -- enable pin scanner motor
+        O: enable_prism   -- enable pin scanner motor
         I: synchronize    -- activate synchorinzation
         I: photodiode     -- trigger for photodiode
         O: photodiode_t   -- high if photodiode triggered in this cycle
@@ -83,7 +83,6 @@ class Laserhead(Elaboratable):
         # Pulse generator for prism motor
         polyperiod = int(var['CRYSTAL_HZ']/(var['POLY_HZ']*6*2))
         pwmcnt = Signal(range(polyperiod))
-        poly_en = Signal()
         # photodiode_triggered
         photodiodecnt = Signal(range(ticksinfacet*2))
         triggered = Signal()
@@ -116,6 +115,11 @@ class Laserhead(Elaboratable):
         readbit = Signal(range(MEMWIDTH))
         photodiode_d = Signal()
         lasers = self.lasers
+        if self.platform.name == 'Test':
+            self.tickcounter = tickcounter
+            self.ticksinfacet = ticksinfacet
+            self.jitterticks = jitterticks
+
         with m.FSM(reset='RESET') as laserfsm:
             with m.State('RESET'):
                 m.d.sync += self.error.eq(0)
@@ -123,7 +127,7 @@ class Laserhead(Elaboratable):
             with m.State('STOP'):
                 m.d.sync += [stablethresh.eq(stableticks-1),
                              stablecntr.eq(0),
-                             poly_en.eq(0),
+                             self.enable_prism.eq(1),
                              readbit.eq(0),
                              facetcnt.eq(0),
                              scanbit.eq(0),
@@ -137,7 +141,7 @@ class Laserhead(Elaboratable):
                         m.next = 'STOP'
                     with m.Else():
                         m.d.sync += [self.error.eq(0),
-                                     poly_en.eq(1)]
+                                     self.enable_prism.eq(0)]
                         m.next = 'SPINUP'
             with m.State('SPINUP'):
                 with m.If(stablecntr > spinupticks-1):
@@ -150,7 +154,7 @@ class Laserhead(Elaboratable):
             with m.State('WAIT_STABLE'):
                 m.d.sync += [stablecntr.eq(stablecntr+1),
                              photodiode_d.eq(photodiode)]
-                with m.If(stablecntr > stablethresh):
+                with m.If(stablecntr >= stablethresh):
                     m.d.sync += self.error.eq(1)
                     m.next = 'STOP'
                 with m.Elif(~photodiode & ~photodiode_d):
@@ -241,10 +245,43 @@ class Laserhead(Elaboratable):
         return m
 
 
+class DiodeSimulator(Laserhead):
+    """ Wraps laser head with object which simulates photodiode
+
+        This is purely used for testing. Photodiode is only created
+        if prism motor is enabled and the laser is on so the diode
+        can be triggered.
+    """
+    def elaborate(self, platform):
+        if self.platform is not None:
+            platform = self.platform
+        m = super().elaborate(platform)
+        var = platform.laser_var
+        ticksinfacet = var['TICKSINFACET']
+        diodecounter = Signal(range(ticksinfacet))
+        self.diodecounter = diodecounter
+
+        with m.If(diodecounter == (ticksinfacet-1)):
+            m.d.sync += diodecounter.eq(0)
+        with m.Elif(diodecounter > (ticksinfacet-4)):
+            m.d.sync += [self.photodiode.eq(~((self.enable_prism == 0)
+                                            & (self.lasers != 0))),
+                         diodecounter.eq(diodecounter+1)]
+        with m.Else():
+            m.d.sync += [diodecounter.eq(diodecounter+1),
+                         self.photodiode.eq(1)]
+        return m
+
+
 class LaserheadTest(LunaGatewareTestCase):
+    'Test laserhead without triggering photodiode'
     platform = TestPlatform()
     FRAGMENT_UNDER_TEST = Laserhead
     FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1}
+
+    def initialize_signals(self):
+        '''If not triggered the photodiode is high'''
+        yield self.dut.photodiode.eq(1)
 
     def getState(self, fsm=None):
         if fsm is None:
@@ -274,10 +311,9 @@ class LaserheadTest(LunaGatewareTestCase):
                          )
 
     @sync_test_case
-    def test_nosync(self):
+    def test_sync(self):
         '''error is raised if laser not synchronized'''
         dut = self.dut
-        yield dut.photodiode.eq(1)
         yield dut.synchronize.eq(1)
         yield from self.waituntilState('SPINUP')
         self.assertEqual((yield dut.error), 0)
@@ -286,11 +322,30 @@ class LaserheadTest(LunaGatewareTestCase):
         self.assertEqual((yield dut.error), 1)
 
 
+class DiodeTest(LaserheadTest):
+    'Test laserhead while triggering photodiode'
+    platform = TestPlatform()
+    FRAGMENT_UNDER_TEST = DiodeSimulator
+    FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1}
+
+    @sync_test_case
+    def test_sync(self):
+        '''photodiode should be triggered state
+           read instruction is reached
+        '''
+        dut = self.dut
+        yield dut.synchronize.eq(1)
+        yield from self.waituntilState('SPINUP')
+        self.assertEqual((yield dut.error), 0)
+        yield from self.waituntilState('WAIT_STABLE')
+        yield from self.waituntilState('READ_INSTRUCTION')
+
+
 if __name__ == "__main__":
     unittest.main()
 
 # which test do I need
-#  ' remains in stable wihtout write'
+#  ' remains in stable without write'
 #  ' invalid line resuls in error'
 #  ' stop scanline end exposure'
 #  ' scanline repeated'
