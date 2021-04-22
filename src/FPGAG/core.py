@@ -224,7 +224,7 @@ class Dispatcher(Elaboratable):
         # connect laserhead
         m.d.comb += [
             laserheadpins.pwm.eq(laserhead.pwm),
-            laserheadpins.en.eq(laserhead.enable_prism | enable_prism),
+            laserheadpins.en.eq(laserhead.enable_prism & enable_prism),
             laserhead.photodiode.eq(laserheadpins.photodiode),
             laserheadpins.laser0.eq(laserhead.lasers[0] | lasers[0]),
             laserheadpins.laser1.eq(laserhead.lasers[1] | lasers[1]),

@@ -8,7 +8,7 @@ A proof of concept video is shown below;
 
 # Brief Description
 The controller sends over a command with a word to the peripheral which updates the motor state.
-The command is 8 bits long and the word 32 bits. Only for write commands, word is not empty.
+The command is 8 bits long and the word 64 bits. Only for write commands, word is not empty.
 Typically, the word received by the host is empty unless the memory is full or a read command is issued.
 
 # Commands
@@ -56,8 +56,17 @@ The default motor sampling frequency is 1 MHz.
 ### Pin instruction
 | data | number of bytes | description
 |---|---|---|
-| INSTRUCTION | 1 | type of instructions, here pin instruction
-| AUX | 7 | pins to set equal to 1 or 0
+| INSTRUCTION | 1 | type of instructions, here set pin instruction
+| PINS | 7 | Last byte set pins. The last bits set polygon, laser0, laser1
+
+A user can read but not write directly to pins. This ensures that the host
+can establish precedence between instructions.
+
+### Laserline instruction
+| data | number of bytes | description
+|---|---|---|
+| INSTRUCTION | 1 | type of instructions, here start or stop scanline
+| DATA | 7 | information for lasers
 
 A user can read but not write directly to pins. This ensures that the host
 can establish precedence between instructions.

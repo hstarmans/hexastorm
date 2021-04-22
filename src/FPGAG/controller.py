@@ -7,9 +7,11 @@ from smbus2 import SMBus
 import numpy as np
 from gpiozero import LED
 
+import FPGAG.lasers as lasers
 from FPGAG.constants import (INSTRUCTIONS, COMMANDS, FREQ, STATE, BIT_SHIFT,
                              MOVE_TICKS, WORD_BYTES, COMMAND_BYTES)
 from FPGAG.platforms import Firestarter
+import FPGAG.core as core
 
 import steppers
 
@@ -38,6 +40,7 @@ class Host:
         else:
             self.platform = platform
             self.generator = True
+        self.laser_params = lasers.params(self.platform)
         self._position = np.array([0]*self.platform.motors)
 
     def init_steppers(self):
@@ -59,10 +62,8 @@ class Host:
 
     def build(self, do_program=True, verbose=True):
         # put here to prevent circular import when testing core.py
-        from FPGAG.core import Dispatcher
-
         self.platform = Firestarter()
-        self.platform.build(Dispatcher(Firestarter()),
+        self.platform.build(core.Dispatcher(Firestarter()),
                             do_program=do_program, verbose=verbose)
 
     def reset(self):
@@ -278,12 +279,12 @@ class Host:
             data = (self.spi_exchange_data(data))
         return data
 
-    def enable_comp(self, laser0=False, laser1=False, polygon=False):
+    def enable_comp(self, laser0=False, laser1=False, polygon=True):
         '''enable components
 
         laser0   -- True enables laser channel 0
         laser1   -- True enables laser channel 1
-        polygon  -- True enable polygon motor
+        polygon  -- False enables polygon motor
         '''
         laser0, laser1, polygon = (int(bool(laser0)),
                                    int(bool(laser1)), int(bool(polygon)))
@@ -353,3 +354,25 @@ class Host:
         response = bytearray(self.spi.xfer2(datachanged))
         self.chip_select.on()
         return response
+
+    def bittobytelist(self, bitlst, bitorder='little'):
+        '''converts bitlst to bytelst
+
+        if bytelst is empty stop command is sent
+        '''
+        def remainder(bytelst):
+            return WORD_BYTES-(len(bytelst) % WORD_BYTES)
+
+        if len(bitlst) == 0:
+            bytelst = [INSTRUCTIONS.LASTSCANLINE]
+            bytelst += remainder(bytelst)*[0]
+        else:
+            assert len(bitlst) == self.laser_params['bitsinscanline']
+            assert max(bitlst) <= 1
+            assert min(bitlst) >= 0
+            bytelst = [INSTRUCTIONS.SCANLINE]
+            bytelst += remainder(bytelst)*[0]
+            bytelst += np.packbits(bitlst, bitorder=bitorder).tolist()
+            bytelst += remainder(bytelst)*[0]
+        bytelst.reverse()
+        return bytelst
