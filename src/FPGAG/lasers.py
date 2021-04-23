@@ -144,7 +144,7 @@ class Laserhead(Elaboratable):
         m.d.sync += expose_start_d.eq(self.expose_start)
         with m.If((expose_start_d == 0) & self.expose_start):
             m.d.sync += process_lines.eq(1)
-            
+
         with m.FSM(reset='RESET') as laserfsm:
             with m.State('RESET'):
                 m.d.sync += self.error.eq(0)
