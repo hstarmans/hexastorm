@@ -55,11 +55,13 @@ class Laserhead(Elaboratable):
 
         I/O signals:
         O: synchronized   -- if true, laser is in sync and prism is rotating
+        I: synchronize    -- activate synchronization
+        I: exopose_start  -- start reading lines and exposing
+        O: exopose_finish -- exposure is finished
         O: error          -- error signal
         O: lasers         -- laser pin
         O: pwm            -- pulse for scanner motor
         O: enable_prism   -- enable pin scanner motor
-        I: synchronize    -- activate synchorinzation
         I: photodiode     -- trigger for photodiode
         O: photodiode_t   -- high if photodiode triggered in this cycle
         O: read_commit    -- finalize read transactionalizedfifo
@@ -89,6 +91,8 @@ class Laserhead(Elaboratable):
         self.read_en = Signal()
         self.read_data = Signal()
         self.empty = Signal()
+        self.expose_finished = Signal()
+        self.expose_start = Signal()
 
     def elaborate(self, platform):
         m = Module()
@@ -135,6 +139,12 @@ class Laserhead(Elaboratable):
             self.ticksinfacet = dct['ticksinfacet']
             self.jitterticks = dct['jitterticks']
 
+        process_lines = Signal()
+        expose_start_d = Signal()
+        m.d.sync += expose_start_d.eq(self.expose_start)
+        with m.If((expose_start_d == 0) & self.expose_start):
+            m.d.sync += process_lines.eq(1)
+            
         with m.FSM(reset='RESET') as laserfsm:
             with m.State('RESET'):
                 m.d.sync += self.error.eq(0)
@@ -148,7 +158,7 @@ class Laserhead(Elaboratable):
                              scanbit.eq(0),
                              lasercnt.eq(0),
                              lasers.eq(0)]
-                with m.If(self.synchronize):
+                with m.If(self.synchronize | process_lines):
                     # laser is off, photodiode cannot be triggered
                     # TODO: add check that fifo is not empty
                     with m.If(self.photodiode == 0):
@@ -186,29 +196,28 @@ class Laserhead(Elaboratable):
                                          stablecntr.eq(0)]
                         with m.If(dct['SINGLE_FACET'] & (facetcnt > 0)):
                             m.next = 'WAIT_END'
+                        with m.Elif(self.empty | ~process_lines):
+                            m.next = 'WAIT_END'
                         with m.Else():
                             # TODO: 10 is too high, should be lower
                             thresh = min(round(10.1*dct['ticksinfacet']),
                                          dct['stableticks'])
-                            m.d.sync += stablethresh.eq(thresh)
+                            m.d.sync += [stablethresh.eq(thresh),
+                                         self.read_en.eq(1)]
                             m.next = 'READ_INSTRUCTION'
                     with m.Else():
                         m.next = 'WAIT_END'
                 with m.Else():
                     m.d.sync += tickcounter.eq(tickcounter+1)
             with m.State('READ_INSTRUCTION'):
-                m.d.sync += tickcounter.eq(tickcounter+1)
-                with m.If(self.empty):
-                    m.next = 'WAIT_END'
-                with m.Else():
-                    m.d.sync += self.read_en.eq(1)
-                    m.next = 'PARSE_HEAD'
-            with m.State('PARSE_HEAD'):
                 m.d.sync += [self.read_en.eq(0), tickcounter.eq(tickcounter+1)]
                 # with m.If(read_data == INSTRUCTIONS.STOP):
                 #     m.next = 'STOP'
                 with m.If(read_data == INSTRUCTIONS.SCANLINE):
                     m.next = 'WAIT_FOR_DATA_RUN'
+                with m.Elif(read_data == INSTRUCTIONS.LASTSCANLINE):
+                    m.d.sync += [self.expose_finished.eq(1),
+                                 process_lines.eq(0)]
                 with m.Else():
                     m.d.sync += self.error.eq(1)
                     m.next = 'STOP'
@@ -293,6 +302,7 @@ class DiodeSimulator(Laserhead):
                      fifo.write_en.eq(self.write_en),
                      fifo.read_commit.eq(self.read_commit),
                      fifo.read_en.eq(self.read_en),
+                     self.empty.eq(fifo.empty),
                      self.read_data.eq(fifo.read_data)]
 
         with m.If(diodecounter == (dct['ticksinfacet']-1)):
@@ -382,18 +392,38 @@ class DiodeTest(LaserheadTest):
             yield dut.write_data.eq(number)
             yield
             yield dut.write_en.eq(0)
+        yield from self.pulse(dut.write_commit)
 
     @sync_test_case
     def test_sync(self):
         '''photodiode should be triggered state
-           read instruction is reached
+           wait end is reached
         '''
         dut = self.dut
         yield dut.synchronize.eq(1)
         yield from self.waituntilState('SPINUP')
         self.assertEqual((yield dut.error), 0)
+        for _ in range(3):
+            yield from self.waituntilState('WAIT_STABLE')
+            yield from self.waituntilState('WAIT_END')
+
+    @sync_test_case
+    def test_stopline(self):
+        'several scanline'
+        lines = [[]]
+        dut = self.dut
+        for line in lines:
+            yield from self.write_line(line)
+        yield dut.synchronize.eq(1)
+        yield from self.pulse(dut.expose_start)
+        self.assertEqual((yield dut.empty), 0)
+        yield from self.waituntilState('SPINUP')
         yield from self.waituntilState('WAIT_STABLE')
         yield from self.waituntilState('READ_INSTRUCTION')
+        yield
+        self.assertEqual((yield dut.expose_finished), 0)
+        yield from self.waituntilState('WAIT_END')
+        yield from self.waituntilState('WAIT_STABLE')
 
     @sync_test_case
     def test_scanlineringbuffer(self):
