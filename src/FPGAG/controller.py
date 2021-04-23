@@ -358,6 +358,7 @@ class Host:
     def bittobytelist(self, bitlst, bitorder='little'):
         '''converts bitlst to bytelst
 
+        bit list set laser on and off
         if bytelst is empty stop command is sent
         '''
         def remainder(bytelst):

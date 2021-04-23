@@ -19,29 +19,28 @@ def params(platform):
     var = platform.laser_var
     var['POLY_HZ'] = var['RPM']/60
     if platform.name == 'Test':
-        ticksinfacet = var['TICKSINFACET']
-        laserticks = var['LASERTICKS']
-        var['CRYSTAL_HZ'] = round(ticksinfacet*var['FACETS']
+        var['CRYSTAL_HZ'] = round(var['TICKSINFACET']*var['FACETS']
                                   * var['POLY_HZ'])
-        var['LASER_HZ'] = var['CRYSTAL_HZ']/laserticks
+        var['LASER_HZ'] = var['CRYSTAL_HZ']/var['LASERTICKS']
         var['SPINUP_TIME'] = 10/var['CRYSTAL_HZ']
         # TODO: stop scanline seems to affect the stable thresh?!
         # can be 30 without stopline (this is from old repo)
         var['STABLE_TIME'] = 50/var['CRYSTAL_HZ']
-        var['START%'] = 2/ticksinfacet
+        var['START%'] = 2/var['TICKSINFACET']
         scanbits = 2
-        var['END%'] = (laserticks*scanbits)/ticksinfacet + var['START%']
+        var['END%'] = ((var['LASERTICKS']*scanbits)/var['TICKSINFACET']
+                       + var['START%'])
     # parameter creation
     var['ticksinfacet'] = round(var['CRYSTAL_HZ']/(var['POLY_HZ']
                                 * var['FACETS']))
-    var['laserticks'] = int(var['CRYSTAL_HZ']/var['LASER_HZ'])
-    var['jitterticks'] = round(0.5*laserticks)
+    var['LASERTICKS'] = int(var['CRYSTAL_HZ']/var['LASER_HZ'])
+    var['jitterticks'] = round(0.5*var['LASERTICKS'])
     if var['END%'] > round(1-(var['jitterticks']+1)
                            / var['ticksinfacet']):
         raise Exception("Invalid settings, END% too high")
     var['bitsinscanline'] = round((var['ticksinfacet'] *
                                   (var['END%']-var['START%']))
-                                  / var['laserticks'])
+                                  / var['LASERTICKS'])
     if var['bitsinscanline'] <= 0:
         raise Exception("Bits in scanline invalid")
     var['spinupticks'] = round(var['SPINUP_TIME']*var['CRYSTAL_HZ'])
@@ -89,7 +88,7 @@ class Laserhead(Elaboratable):
         self.photodiode_t = Signal()
         self.read_commit = Signal()
         self.read_en = Signal()
-        self.read_data = Signal()
+        self.read_data = Signal(MEMWIDTH)
         self.empty = Signal()
         self.expose_finished = Signal()
         self.expose_start = Signal()
@@ -125,7 +124,7 @@ class Laserhead(Elaboratable):
 
         stablecntr = Signal(range(max(dct['spinupticks'], dct['stableticks'])))
         stablethresh = Signal(range(dct['stableticks']))
-        lasercnt = Signal(range(dct['laserticks']))
+        lasercnt = Signal(range(dct['LASERTICKS']))
         scanbit = Signal(range(dct['bitsinscanline']+1))
         tickcounter = Signal(range(dct['ticksinfacet']*2))
         photodiode = self.photodiode
@@ -136,8 +135,10 @@ class Laserhead(Elaboratable):
         lasers = self.lasers
         if self.platform.name == 'Test':
             self.tickcounter = tickcounter
-            self.ticksinfacet = dct['ticksinfacet']
-            self.jitterticks = dct['jitterticks']
+            self.dct = dct
+            # needed for line verify
+            self.scanbit = scanbit
+            self.lasercnt = lasercnt
 
         process_lines = Signal()
         expose_start_d = Signal()
@@ -211,8 +212,6 @@ class Laserhead(Elaboratable):
                     m.d.sync += tickcounter.eq(tickcounter+1)
             with m.State('READ_INSTRUCTION'):
                 m.d.sync += [self.read_en.eq(0), tickcounter.eq(tickcounter+1)]
-                # with m.If(read_data == INSTRUCTIONS.STOP):
-                #     m.next = 'STOP'
                 with m.If(read_data == INSTRUCTIONS.SCANLINE):
                     m.next = 'WAIT_FOR_DATA_RUN'
                 with m.Elif(read_data == INSTRUCTIONS.LASTSCANLINE):
@@ -223,13 +222,21 @@ class Laserhead(Elaboratable):
                     m.next = 'STOP'
             with m.State('WAIT_FOR_DATA_RUN'):
                 m.d.sync += [tickcounter.eq(tickcounter+1),
+                             self.read_en.eq(1),
                              readbit.eq(0),
                              scanbit.eq(0),
                              lasercnt.eq(0)]
-                tickcnt_thresh = int(dct['START%']*dct['ticksinfacet']-2)
+                tickcnt_thresh = int(dct['START%']*dct['ticksinfacet'])
+                # Needs to be otherwise read_en is not 1
+                assert tickcnt_thresh > 0
+                with m.If(self.read_en):
+                    m.d.sync += [read_old.eq(self.read_data),
+                                 self.read_en.eq(0)]
                 with m.If(tickcounter >= tickcnt_thresh):
                     m.next = 'DATA_RUN'
             with m.State('DATA_RUN'):
+                with m.If(self.read_en):
+                    m.d.sync += self.read_en.eq(0)
                 m.d.sync += tickcounter.eq(tickcounter+1)
                 # NOTE:
                 #      readbit is your current position in memory
@@ -239,7 +246,7 @@ class Laserhead(Elaboratable):
                     with m.If(scanbit >= dct['bitsinscanline']):
                         m.next = 'WAIT_END'
                     with m.Else():
-                        m.d.sync += [lasercnt.eq(dct['laserticks']-1),
+                        m.d.sync += [lasercnt.eq(dct['LASERTICKS']-1),
                                      scanbit.eq(scanbit+1),
                                      self.lasers[0].eq(read_old[0])]
                 # read from memory before the spinup
@@ -249,13 +256,15 @@ class Laserhead(Elaboratable):
                 # is outside of line
                         with m.If(readbit == 0):
                             # TODO: what if fifo is empty!?
-                            m.d.sync += [self.read_en.eq(1),
+                            #       what if the line is at the end?!
+                            m.d.sync += [#self.read_en.eq(1),
                                          readbit.eq(readbit+1),
                                          read_old.eq(read_old >> 1)]
                         # final read bit copy memory
                         # move to next address, i.e. byte, if end is reached
                         with m.Elif(readbit == MEMWIDTH-1):
-                            m.d.sync += read_old.eq(read_data)
+                            m.d.sync += [read_old.eq(read_data),
+                                         self.read_en.eq(0)]
                         with m.Else():
                             m.d.sync += [readbit.eq(readbit+1),
                                          read_old.eq(read_old >> 1)]
@@ -297,6 +306,7 @@ class DiodeSimulator(Laserhead):
         fifo = TransactionalizedFIFO(width=MEMWIDTH,
                                      depth=platform.memdepth)
         m.submodules.fifo = fifo
+        self.fifo = fifo
         m.d.comb += [fifo.write_data.eq(self.write_data),
                      fifo.write_commit.eq(self.write_commit),
                      fifo.write_en.eq(self.write_en),
@@ -376,7 +386,27 @@ class DiodeTest(LaserheadTest):
         yield from super().initialize_signals()
         self.host = controller.Host(self.platform)
 
-    def write_line(self, bitlist=[1, 1]):
+    def checkline(self, bitlst):
+        'it is verified wether the laser produces the pattern in bitlist'
+        dut = self.dut
+        self.assertEqual((yield dut.empty), False)
+        yield from self.waituntilState('READ_INSTRUCTION')
+        yield
+        self.assertEqual((yield self.dut.error), False)
+        yield from self.waituntilState('WAIT_FOR_DATA_RUN')
+        yield from self.waituntilState('DATA_RUN')
+        yield
+        for idx, bit in enumerate(bitlst):
+            assert (yield dut.lasercnt) == dut.dct['LASERTICKS']-1
+            assert (yield dut.scanbit) == idx+1
+            for _ in range(dut.dct['LASERTICKS']):
+                assert (yield dut.lasers[0]) == bit
+                yield
+        print('ben ik in wait end')
+        yield from self.waituntilState('WAIT_END')
+        print("ja ik ben er")
+
+    def write_line(self, bitlist):
         '''write line to fifo
 
         This is a helper function to allow testing of the module
@@ -385,13 +415,11 @@ class DiodeTest(LaserheadTest):
         bytelst = self.host.bittobytelist(bitlist)
         dut = self.dut
         for i in range(0, len(bytelst), WORD_BYTES):
-            yield dut.write_en.eq(1)
             lst = bytelst[i:i+WORD_BYTES]
             lst.reverse()
             number = unpack('Q', bytearray(lst))[0]
             yield dut.write_data.eq(number)
-            yield
-            yield dut.write_en.eq(0)
+            yield from self.pulse(dut.write_en)
         yield from self.pulse(dut.write_commit)
 
     @sync_test_case
@@ -421,16 +449,24 @@ class DiodeTest(LaserheadTest):
         yield from self.waituntilState('WAIT_STABLE')
         yield from self.waituntilState('READ_INSTRUCTION')
         yield
-        self.assertEqual((yield dut.expose_finished), 0)
+        self.assertEqual((yield dut.error), False)
+        self.assertEqual((yield dut.expose_finished), True)
         yield from self.waituntilState('WAIT_END')
         yield from self.waituntilState('WAIT_STABLE')
 
-    @sync_test_case
-    def test_scanlineringbuffer(self):
-        'several scanline'
-        lines = [[1, 1], [1, 1], [0, 1]]
-        for line in lines:
-            yield from self.write_line(line)
+    # @sync_test_case
+    # def test_scanlineringbuffer(self):
+    #     'several scanline'
+    #     dut = self.dut
+    #     lines = [[1, 1], [1, 1], [0, 1]]
+    #     for line in lines:
+    #         yield from self.write_line(line)
+    #     yield dut.synchronize.eq(1)
+    #     yield from self.pulse(dut.expose_start)
+    #     for line in lines:
+    #         print('begin aan lijn')
+    #         yield from self.checkline(line)
+    #         print('line finished')
 
 
 if __name__ == "__main__":
