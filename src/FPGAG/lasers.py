@@ -1,5 +1,6 @@
 import unittest
 from struct import unpack
+from copy import deepcopy
 
 from nmigen import Signal, Elaboratable
 from nmigen import Module
@@ -89,6 +90,7 @@ class Laserhead(Elaboratable):
         self.read_commit = Signal()
         self.read_en = Signal()
         self.read_data = Signal(MEMWIDTH)
+        self.read_discard = Signal()
         self.empty = Signal()
         self.expose_finished = Signal()
         self.expose_start = Signal()
@@ -139,13 +141,14 @@ class Laserhead(Elaboratable):
             # needed for line verify
             self.scanbit = scanbit
             self.lasercnt = lasercnt
-
+        # Needed so object can be modified while testing
         process_lines = Signal()
         expose_start_d = Signal()
         m.d.sync += expose_start_d.eq(self.expose_start)
         with m.If((expose_start_d == 0) & self.expose_start):
             m.d.sync += process_lines.eq(1)
-
+        
+    
         with m.FSM(reset='RESET') as laserfsm:
             with m.State('RESET'):
                 m.d.sync += self.error.eq(0)
@@ -238,6 +241,10 @@ class Laserhead(Elaboratable):
                 #      lasercnt used to pulse laser at certain freq
                 with m.If(lasercnt == 0):
                     with m.If(scanbit >= dct['bitsinscanline']):
+                        with m.If(dct['SINGLE_LINE']):
+                            m.d.sync += self.read_discard.eq(1)
+                        with m.Else():
+                            m.d.sync += self.read_commit.eq(1)
                         m.next = 'WAIT_END'
                     with m.Else():
                         m.d.sync += [lasercnt.eq(dct['LASERTICKS']-1),
@@ -269,6 +276,12 @@ class Laserhead(Elaboratable):
             with m.State('WAIT_END'):
                 m.d.sync += [stablecntr.eq(stablecntr+1),
                              tickcounter.eq(tickcounter+1)]
+                
+                with m.If(dct['SINGLE_LINE']):
+                    m.d.sync += self.read_discard.eq(0)
+                with m.Else():
+                    m.d.sync += self.read_commit.eq(0)
+                
                 with m.If(tickcounter >= round(dct['ticksinfacet']
                           - dct['jitterticks']-1)):
                     m.d.sync += lasers.eq(int('11', 2))
@@ -279,26 +292,29 @@ class Laserhead(Elaboratable):
 
 
 class DiodeSimulator(Laserhead):
-    """ Wraps laser head with object which simulates photodiode
+    """ Wraps laser head with object to simulate photodiode
 
         This is purely used for testing. Photodiode is only created
         if prism motor is enabled and the laser is on so the diode
         can be triggered.
     """
-    def __init__(self, platform=None, divider=50, top=False):
-        super().__init__(platform, divider, top)
+    def __init__(self, platform=None, divider=50, top=False, single_line=False):
+        platform.laser_var['SINGLE_LINE'] = single_line
+        super().__init__(platform, divider, top=False)
         self.write_en = Signal()
         self.write_commit = Signal()
         self.write_data = Signal(MEMWIDTH)
-
+        
     def elaborate(self, platform):
         if self.platform is not None:
             platform = self.platform
         m = super().elaborate(platform)
-        dct = params(platform)
+        
+        dct = self.dct
         diodecounter = Signal(range(dct['ticksinfacet']))
         self.diodecounter = diodecounter
-
+        
+        
         fifo = TransactionalizedFIFO(width=MEMWIDTH,
                                      depth=platform.memdepth)
         m.submodules.fifo = fifo
@@ -309,6 +325,7 @@ class DiodeSimulator(Laserhead):
                      fifo.read_commit.eq(self.read_commit),
                      fifo.read_en.eq(self.read_en),
                      self.empty.eq(fifo.empty),
+                     fifo.read_discard.eq(self.read_discard),
                      self.read_data.eq(fifo.read_data)]
 
         with m.If(diodecounter == (dct['ticksinfacet']-1)):
@@ -322,70 +339,35 @@ class DiodeSimulator(Laserhead):
                          self.photodiode.eq(1)]
         return m
 
-
-class LaserheadTest(LunaGatewareTestCase):
-    'Test laserhead without triggering photodiode'
-    platform = TestPlatform()
-    FRAGMENT_UNDER_TEST = Laserhead
-    FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1}
+class BaseTest(LunaGatewareTestCase):
+    'Base class for laserhead test'
 
     def initialize_signals(self):
         '''If not triggered the photodiode is high'''
         yield self.dut.photodiode.eq(1)
+        self.host = controller.Host(self.platform)
 
     def getState(self, fsm=None):
         if fsm is None:
             fsm = self.dut.laserfsm
         return fsm.decoding[(yield fsm.state)]
 
-    def waituntilState(self, state, fsm=None):
+    def waituntilState(self, state, fsm=None, timeout=100):
+        count = 0
         while (yield from self.getState(fsm)) != state:
             yield
+            count += 1
+            if count>timeout:
+                print(f"Did not reach {state} in {timeout} ticks")
+                self.assertTrue(count<timeout)
 
     def assertState(self, state, fsm=None):
         self.assertEqual(self.getState(state), state)
-
-    @sync_test_case
-    def test_pwmpulse(self):
-        '''pwm pulse generation test'''
-        dut = self.dut
-        dct = params(self.platform)
-        while (yield dut.pwm) == 0:
-            yield
-        cnt = 0
-        while (yield dut.pwm) == 1:
-            cnt += 1
-            yield
-        self.assertEqual(cnt,
-                         int(dct['CRYSTAL_HZ']/(dct['POLY_HZ']*6*2))
-                         )
-
-    @sync_test_case
-    def test_sync(self):
-        '''error is raised if laser not synchronized'''
-        dut = self.dut
-        yield dut.synchronize.eq(1)
-        yield from self.waituntilState('SPINUP')
-        self.assertEqual((yield dut.error), 0)
-        yield from self.waituntilState('WAIT_STABLE')
-        yield from self.waituntilState('STOP')
-        self.assertEqual((yield dut.error), 1)
-
-
-class DiodeTest(LaserheadTest):
-    'Test laserhead while triggering photodiode'
-    platform = TestPlatform()
-    FRAGMENT_UNDER_TEST = DiodeSimulator
-    FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1}
-
-    def initialize_signals(self):
-        yield from super().initialize_signals()
-        self.host = controller.Host(self.platform)
-
+    
     def checkline(self, bitlst):
         'it is verified wether the laser produces the pattern in bitlist'
         dut = self.dut
-        self.assertEqual((yield dut.empty), False)
+        #self.assertEqual((yield dut.empty), False)
         yield from self.waituntilState('READ_INSTRUCTION')
         yield
         if len(bitlst) == 0:
@@ -417,6 +399,67 @@ class DiodeTest(LaserheadTest):
             yield dut.write_data.eq(number)
             yield from self.pulse(dut.write_en)
         yield from self.pulse(dut.write_commit)
+    
+    
+class LaserheadTest(BaseTest):
+    'Test laserhead without triggering photodiode'
+    
+    platform = TestPlatform()
+    FRAGMENT_UNDER_TEST = Laserhead
+    FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1}
+    
+    @sync_test_case
+    def test_pwmpulse(self):
+        '''pwm pulse generation test'''
+        dut = self.dut
+        dct = params(self.platform)
+        while (yield dut.pwm) == 0:
+            yield
+        cnt = 0
+        while (yield dut.pwm) == 1:
+            cnt += 1
+            yield
+        self.assertEqual(cnt,
+                         int(dct['CRYSTAL_HZ']/(dct['POLY_HZ']*6*2))
+                         )
+
+    @sync_test_case
+    def test_sync(self):
+        '''error is raised if laser not synchronized'''
+        dut = self.dut
+        yield dut.synchronize.eq(1)
+        yield from self.waituntilState('SPINUP')
+        self.assertEqual((yield dut.error), 0)
+        yield from self.waituntilState('WAIT_STABLE')
+        yield from self.waituntilState('STOP')
+        self.assertEqual((yield dut.error), 1)
+
+        
+class SinglelineTest(BaseTest):
+    'Test laserhead while triggering photodiode and single line'
+    platform = TestPlatform()
+    FRAGMENT_UNDER_TEST = DiodeSimulator
+    FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1,
+                          'single_line': True}
+    
+    @sync_test_case
+    def test_single_line(self):
+        dut = self.dut
+        lines = [[1, 1]]
+        for line in lines:
+            yield from self.write_line(line)
+        yield dut.synchronize.eq(1)
+        yield from self.pulse(dut.expose_start)
+        for _ in range(10):
+            yield from self.checkline(line)
+        
+
+class MultilineTest(BaseTest):
+    'Test laserhead while triggering photodiode and ring buffer'
+    platform = deepcopy(TestPlatform())
+    FRAGMENT_UNDER_TEST = deepcopy(DiodeSimulator)
+    FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1, 
+                          'single_line': False}
 
     @sync_test_case
     def test_sync(self):
@@ -448,7 +491,7 @@ class DiodeTest(LaserheadTest):
 
     @sync_test_case
     def test_scanlineringbuffer(self):
-        'several scanline'
+        'write several scanlines and verify receival'
         dut = self.dut
         lines = [[1, 1], [1, 1], [0, 1], []]
         for line in lines:
@@ -457,15 +500,13 @@ class DiodeTest(LaserheadTest):
         yield from self.pulse(dut.expose_start)
         for line in lines:
             yield from self.checkline(line)
+        self.assertEqual((yield dut.empty), True)
 
 
 if __name__ == "__main__":
     unittest.main()
 
 # which test do I need
-#  ' remains in stable without write'
-#  ' invalid line resuls in error'
-#  ' stop scanline end exposure'
-#  ' scanline repeated'
-#  ' scanline repeated single facet'
-#  ' scanline ringbuffer'
+#  single_line mode should say it is finished
+#  add a check for "synchronize"
+#  test for single facet''
