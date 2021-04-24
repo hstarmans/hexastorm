@@ -222,21 +222,15 @@ class Laserhead(Elaboratable):
                     m.next = 'STOP'
             with m.State('WAIT_FOR_DATA_RUN'):
                 m.d.sync += [tickcounter.eq(tickcounter+1),
-                             self.read_en.eq(1),
                              readbit.eq(0),
                              scanbit.eq(0),
                              lasercnt.eq(0)]
                 tickcnt_thresh = int(dct['START%']*dct['ticksinfacet'])
-                # Needs to be otherwise read_en is not 1
                 assert tickcnt_thresh > 0
-                with m.If(self.read_en):
-                    m.d.sync += [read_old.eq(self.read_data),
-                                 self.read_en.eq(0)]
                 with m.If(tickcounter >= tickcnt_thresh):
+                    m.d.sync += self.read_en.eq(1)
                     m.next = 'DATA_RUN'
             with m.State('DATA_RUN'):
-                with m.If(self.read_en):
-                    m.d.sync += self.read_en.eq(0)
                 m.d.sync += tickcounter.eq(tickcounter+1)
                 # NOTE:
                 #      readbit is your current position in memory
@@ -247,24 +241,26 @@ class Laserhead(Elaboratable):
                         m.next = 'WAIT_END'
                     with m.Else():
                         m.d.sync += [lasercnt.eq(dct['LASERTICKS']-1),
-                                     scanbit.eq(scanbit+1),
-                                     self.lasers[0].eq(read_old[0])]
-                # read from memory before the spinup
-                # it is triggered here again, so fresh data is available
-                # once the end is reached
-                # if read bit is 0, trigger a read out unless the next byte
-                # is outside of line
+                                     scanbit.eq(scanbit+1)]
                         with m.If(readbit == 0):
-                            # TODO: what if fifo is empty!?
-                            #       what if the line is at the end?!
-                            m.d.sync += [#self.read_en.eq(1),
-                                         readbit.eq(readbit+1),
-                                         read_old.eq(read_old >> 1)]
+                            m.d.sync += self.lasers[0].eq(self.read_data[0])
+                        with m.Else():
+                            m.d.sync += self.lasers[0].eq(read_old[0])
+
+                        with m.If(readbit == 0):
+                            m.d.sync += [self.read_en.eq(0),
+                                         read_old.eq(self.read_data >> 1),
+                                         readbit.eq(readbit+1)]
                         # final read bit copy memory
                         # move to next address, i.e. byte, if end is reached
                         with m.Elif(readbit == MEMWIDTH-1):
-                            m.d.sync += [read_old.eq(read_data),
-                                         self.read_en.eq(0)]
+                            # If fifo is empty it will give errors later
+                            # so it can be ignored here
+                            # Only grab a new line if more than current
+                            # is needed
+                            with m.If(scanbit >= (dct['bitsinscanline']-2)):
+                                m.d.sync += self.read_en.eq(1)
+                            m.d.sync += readbit.eq(0)
                         with m.Else():
                             m.d.sync += [readbit.eq(readbit+1),
                                          read_old.eq(read_old >> 1)]
@@ -392,19 +388,20 @@ class DiodeTest(LaserheadTest):
         self.assertEqual((yield dut.empty), False)
         yield from self.waituntilState('READ_INSTRUCTION')
         yield
-        self.assertEqual((yield self.dut.error), False)
-        yield from self.waituntilState('WAIT_FOR_DATA_RUN')
-        yield from self.waituntilState('DATA_RUN')
-        yield
-        for idx, bit in enumerate(bitlst):
-            assert (yield dut.lasercnt) == dut.dct['LASERTICKS']-1
-            assert (yield dut.scanbit) == idx+1
-            for _ in range(dut.dct['LASERTICKS']):
-                assert (yield dut.lasers[0]) == bit
-                yield
-        print('ben ik in wait end')
+        if len(bitlst) == 0:
+            self.assertEqual((yield dut.error), False)
+            self.assertEqual((yield dut.expose_finished), True)
+        else:
+            yield from self.waituntilState('DATA_RUN')
+            yield
+            for idx, bit in enumerate(bitlst):
+                assert (yield dut.lasercnt) == dut.dct['LASERTICKS']-1
+                assert (yield dut.scanbit) == idx+1
+                for _ in range(dut.dct['LASERTICKS']):
+                    assert (yield dut.lasers[0]) == bit
+                    yield
         yield from self.waituntilState('WAIT_END')
-        print("ja ik ben er")
+        self.assertEqual((yield self.dut.error), False)
 
     def write_line(self, bitlist):
         '''write line to fifo
@@ -416,7 +413,6 @@ class DiodeTest(LaserheadTest):
         dut = self.dut
         for i in range(0, len(bytelst), WORD_BYTES):
             lst = bytelst[i:i+WORD_BYTES]
-            lst.reverse()
             number = unpack('Q', bytearray(lst))[0]
             yield dut.write_data.eq(number)
             yield from self.pulse(dut.write_en)
@@ -437,36 +433,30 @@ class DiodeTest(LaserheadTest):
 
     @sync_test_case
     def test_stopline(self):
-        'several scanline'
-        lines = [[]]
+        'verify data run is not reached when stopline is sent'
+        line = []
         dut = self.dut
-        for line in lines:
-            yield from self.write_line(line)
+        yield from self.write_line(line)
         yield dut.synchronize.eq(1)
         yield from self.pulse(dut.expose_start)
         self.assertEqual((yield dut.empty), 0)
         yield from self.waituntilState('SPINUP')
         yield from self.waituntilState('WAIT_STABLE')
-        yield from self.waituntilState('READ_INSTRUCTION')
-        yield
-        self.assertEqual((yield dut.error), False)
-        self.assertEqual((yield dut.expose_finished), True)
+        yield from self.checkline(line)
         yield from self.waituntilState('WAIT_END')
         yield from self.waituntilState('WAIT_STABLE')
 
-    # @sync_test_case
-    # def test_scanlineringbuffer(self):
-    #     'several scanline'
-    #     dut = self.dut
-    #     lines = [[1, 1], [1, 1], [0, 1]]
-    #     for line in lines:
-    #         yield from self.write_line(line)
-    #     yield dut.synchronize.eq(1)
-    #     yield from self.pulse(dut.expose_start)
-    #     for line in lines:
-    #         print('begin aan lijn')
-    #         yield from self.checkline(line)
-    #         print('line finished')
+    @sync_test_case
+    def test_scanlineringbuffer(self):
+        'several scanline'
+        dut = self.dut
+        lines = [[1, 1], [1, 1], [0, 1], []]
+        for line in lines:
+            yield from self.write_line(line)
+        yield dut.synchronize.eq(1)
+        yield from self.pulse(dut.expose_start)
+        for line in lines:
+            yield from self.checkline(line)
 
 
 if __name__ == "__main__":

@@ -363,7 +363,6 @@ class Host:
         '''
         def remainder(bytelst):
             return WORD_BYTES-(len(bytelst) % WORD_BYTES)
-
         if len(bitlst) == 0:
             bytelst = [INSTRUCTIONS.LASTSCANLINE]
             bytelst += remainder(bytelst)*[0]
@@ -375,5 +374,7 @@ class Host:
             bytelst += remainder(bytelst)*[0]
             bytelst += np.packbits(bitlst, bitorder=bitorder).tolist()
             bytelst += remainder(bytelst)*[0]
-        bytelst.reverse()
+        # TODO: remove bytelst.reverse()
+        # if you need to reverse you need to reverse each element within
+        # this has been removed, requires final check with spi core
         return bytelst
