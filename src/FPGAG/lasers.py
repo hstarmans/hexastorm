@@ -141,17 +141,16 @@ class Laserhead(Elaboratable):
             self.scanbit = scanbit
             self.lasercnt = lasercnt
             self.facetcnt = facetcnt
-        
+
         # Exposure start detector
         process_lines = Signal()
         expose_start_d = Signal()
-    
+
         m.d.sync += expose_start_d.eq(self.expose_start)
         with m.If((expose_start_d == 0) & self.expose_start):
             m.d.sync += [process_lines.eq(1),
                          self.expose_finished.eq(0)]
-        
-    
+
         with m.FSM(reset='RESET') as laserfsm:
             with m.State('RESET'):
                 m.d.sync += self.error.eq(0)
@@ -284,7 +283,7 @@ class Laserhead(Elaboratable):
             with m.State('WAIT_END'):
                 m.d.sync += [stablecntr.eq(stablecntr+1),
                              tickcounter.eq(tickcounter+1)]
-                
+
                 with m.If(dct['SINGLE_LINE']):
                     m.d.sync += [self.read_discard.eq(0),
                                  self.expose_finished.eq(1)]
@@ -319,17 +318,16 @@ class DiodeSimulator(Laserhead):
         self.write_en = Signal()
         self.write_commit = Signal()
         self.write_data = Signal(MEMWIDTH)
-        
+
     def elaborate(self, platform):
         if self.platform is not None:
             platform = self.platform
         m = super().elaborate(platform)
-        
+
         dct = self.dct
         diodecounter = Signal(range(dct['ticksinfacet']))
         self.diodecounter = diodecounter
-        
-        
+
         fifo = TransactionalizedFIFO(width=MEMWIDTH,
                                      depth=platform.memdepth)
         m.submodules.fifo = fifo
@@ -347,13 +345,14 @@ class DiodeSimulator(Laserhead):
             m.d.sync += diodecounter.eq(0)
         with m.Elif(diodecounter > (dct['ticksinfacet']-4)):
             m.d.sync += [self.photodiode.eq(~((~self.enable_prism)
-                                            & (self.lasers>0))),
+                                            & (self.lasers > 0))),
                          diodecounter.eq(diodecounter+1)]
         with m.Else():
             m.d.sync += [diodecounter.eq(diodecounter+1),
                          self.photodiode.eq(1)]
         self.diodecounter = diodecounter
         return m
+
 
 class BaseTest(LunaGatewareTestCase):
     'Base class for laserhead test'
@@ -373,13 +372,13 @@ class BaseTest(LunaGatewareTestCase):
         while (yield from self.getState(fsm)) != state:
             yield
             count += 1
-            if count>timeout:
+            if count > timeout:
                 print(f"Did not reach {state} in {timeout} ticks")
-                self.assertTrue(count<timeout)
+                self.assertTrue(count < timeout)
 
     def assertState(self, state, fsm=None):
         self.assertEqual(self.getState(state), state)
-    
+
     def checkline(self, bitlst):
         'it is verified wether the laser produces the pattern in bitlist'
         dut = self.dut
@@ -399,7 +398,7 @@ class BaseTest(LunaGatewareTestCase):
                 for _ in range(dut.dct['LASERTICKS']):
                     assert (yield dut.lasers[0]) == bit
                     yield
-        if (len(bitlst) == 0) & ((yield dut.synchronize)==0):
+        if (len(bitlst) == 0) & ((yield dut.synchronize) == 0):
             yield from self.waituntilState('STOP')
         else:
             yield from self.waituntilState('WAIT_END')
@@ -419,15 +418,15 @@ class BaseTest(LunaGatewareTestCase):
             yield dut.write_data.eq(number)
             yield from self.pulse(dut.write_en)
         yield from self.pulse(dut.write_commit)
-    
-    
+
+
 class LaserheadTest(BaseTest):
     'Test laserhead without triggering photodiode'
-    
+
     platform = TestPlatform()
     FRAGMENT_UNDER_TEST = Laserhead
     FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1}
-    
+
     @sync_test_case
     def test_pwmpulse(self):
         '''pwm pulse generation test'''
@@ -454,14 +453,14 @@ class LaserheadTest(BaseTest):
         yield from self.waituntilState('STOP')
         self.assertEqual((yield dut.error), 1)
 
-        
+
 class SinglelineTest(BaseTest):
     'Test laserhead while triggering photodiode and single line'
     platform = TestPlatform()
     FRAGMENT_UNDER_TEST = DiodeSimulator
     FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1,
                           'single_line': True}
-    
+
     @sync_test_case
     def test_single_line(self):
         dut = self.dut
@@ -479,13 +478,13 @@ class SinglelineTest(BaseTest):
 
 class SinglelinesinglefacetTest(BaseTest):
     '''Test laserhead while triggering photodiode.
-        
-        Laserhead is in single line and single facet mode''' 
+
+        Laserhead is in single line and single facet mode'''
     platform = TestPlatform()
     FRAGMENT_UNDER_TEST = DiodeSimulator
-    FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1, 
+    FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1,
                           'single_facet': True, 'single_line': True}
-    
+
     @sync_test_case
     def test_single_line_single_facet(self):
         dut = self.dut
@@ -504,13 +503,13 @@ class SinglelinesinglefacetTest(BaseTest):
             yield from self.checkline(line)
             self.assertEqual(1, (yield dut.facetcnt))
         self.assertEqual((yield dut.error), False)
-        
+
 
 class MultilineTest(BaseTest):
     'Test laserhead while triggering photodiode and ring buffer'
     platform = TestPlatform()
     FRAGMENT_UNDER_TEST = DiodeSimulator
-    FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1, 
+    FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1,
                           'single_line': False}
 
     @sync_test_case
@@ -525,7 +524,7 @@ class MultilineTest(BaseTest):
             yield from self.waituntilState('WAIT_STABLE')
             yield from self.waituntilState('WAIT_END')
         self.assertEqual((yield dut.error), 0)
-    
+
     @sync_test_case
     def test_stopline(self):
         'verify data run is not reached when stopline is sent'
