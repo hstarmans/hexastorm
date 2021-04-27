@@ -248,7 +248,7 @@ class Laserhead(Elaboratable):
                 #      lasercnt used to pulse laser at certain freq
                 with m.If(lasercnt == 0):
                     with m.If(scanbit >= dct['bitsinscanline']):
-                        with m.If(dct['SINGLE_LINE']):
+                        with m.If(dct['SINGLE_LINE'] & self.empty):
                             m.d.sync += self.read_discard.eq(1)
                         with m.Else():
                             m.d.sync += self.read_commit.eq(1)
@@ -284,9 +284,8 @@ class Laserhead(Elaboratable):
                 m.d.sync += [stablecntr.eq(stablecntr+1),
                              tickcounter.eq(tickcounter+1)]
 
-                with m.If(dct['SINGLE_LINE']):
-                    m.d.sync += [self.read_discard.eq(0),
-                                 self.expose_finished.eq(1)]
+                with m.If(dct['SINGLE_LINE'] & self.empty):
+                    m.d.sync += self.read_discard.eq(0)
                 with m.Else():
                     m.d.sync += self.read_commit.eq(0)
                 # -1 as you count till range-1 in python
@@ -471,6 +470,14 @@ class SinglelineTest(BaseTest):
         yield from self.pulse(dut.expose_start)
         for _ in range(10):
             yield from self.checkline(line)
+        lines = [[1, 0], []]
+        self.assertEqual((yield dut.expose_finished), 0)
+        for line in lines:
+            yield from self.write_line(line)
+        # the last line, i.e. [], triggers exposure finished
+        while (yield dut.expose_finished) == 0:
+            yield
+        self.assertEqual((yield dut.expose_finished), 1)
         yield dut.synchronize.eq(0)
         yield from self.waituntilState('STOP')
         self.assertEqual((yield dut.error), False)
