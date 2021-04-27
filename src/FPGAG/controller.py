@@ -367,7 +367,7 @@ class Host:
             bytelst = [INSTRUCTIONS.LASTSCANLINE]
             bytelst += remainder(bytelst)*[0]
         else:
-            assert len(bitlst) == self.laser_params['bitsinscanline']
+            assert len(bitlst) == self.laser_params['BITSINSCANLINE']
             assert max(bitlst) <= 1
             assert min(bitlst) >= 0
             bytelst = [INSTRUCTIONS.SCANLINE]

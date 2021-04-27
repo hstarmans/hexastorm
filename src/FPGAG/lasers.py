@@ -1,5 +1,7 @@
 import unittest
 from struct import unpack
+from copy import deepcopy
+from random import randint
 
 from nmigen import Signal, Elaboratable
 from nmigen import Module
@@ -27,25 +29,25 @@ def params(platform):
         # can be 30 without stopline (this is from old repo)
         var['STABLE_TIME'] = 50/var['CRYSTAL_HZ']
         var['START%'] = 2/var['TICKSINFACET']
-        scanbits = 2
-        var['END%'] = ((var['LASERTICKS']*scanbits)/var['TICKSINFACET']
+        var['END%'] = ((var['LASERTICKS']*var['SCANBITS'])/var['TICKSINFACET']
                        + var['START%'])
     # parameter creation
-    var['ticksinfacet'] = round(var['CRYSTAL_HZ']/(var['POLY_HZ']
-                                * var['FACETS']))
+    assert var['TICKSINFACET'] == round(var['CRYSTAL_HZ']/(var['POLY_HZ']
+                                        * var['FACETS']))
     var['LASERTICKS'] = int(var['CRYSTAL_HZ']/var['LASER_HZ'])
-    var['jitterticks'] = round(0.5*var['LASERTICKS'])
-    if var['END%'] > round(1-(var['jitterticks']+1)
-                           / var['ticksinfacet']):
+    var['JITTERTICKS'] = round(0.5*var['LASERTICKS'])
+    if var['END%'] > round(1-(var['JITTERTICKS']+1)
+                           / var['TICKSINFACET']):
         raise Exception("Invalid settings, END% too high")
-    var['bitsinscanline'] = round((var['ticksinfacet'] *
+    var['BITSINSCANLINE'] = round((var['TICKSINFACET'] *
                                   (var['END%']-var['START%']))
                                   / var['LASERTICKS'])
-    if var['bitsinscanline'] <= 0:
+    assert var['BITSINSCANLINE'] == var['SCANBITS']
+    if var['BITSINSCANLINE'] <= 0:
         raise Exception("Bits in scanline invalid")
-    var['spinupticks'] = round(var['SPINUP_TIME']*var['CRYSTAL_HZ'])
-    var['stableticks'] = round(var['STABLE_TIME']*var['CRYSTAL_HZ'])
-    var['polyperiod'] = int(var['CRYSTAL_HZ']/(var['POLY_HZ']*6*2))
+    var['SPINUPTICKS'] = round(var['SPINUP_TIME']*var['CRYSTAL_HZ'])
+    var['STABLETICKS'] = round(var['STABLE_TIME']*var['CRYSTAL_HZ'])
+    var['POLYPERIOD'] = int(var['CRYSTAL_HZ']/(var['POLY_HZ']*6*2))
     return var
 
 
@@ -94,20 +96,23 @@ class Laserhead(Elaboratable):
         self.empty = Signal()
         self.expose_finished = Signal()
         self.expose_start = Signal()
+        self.dct = params(platform)
+        # print(self.dct['BITSINSCANLINE'])
+        # input()
 
     def elaborate(self, platform):
         m = Module()
         if self.platform is not None:
             platform = self.platform
 
-        dct = params(platform)
+        dct = self.dct
 
         # Pulse generator for prism motor
-        pwmcnt = Signal(range(dct['polyperiod']))
+        pwmcnt = Signal(range(dct['POLYPERIOD']))
         # photodiode_triggered
-        photodiodecnt = Signal(range(dct['ticksinfacet']*2))
+        photodiodecnt = Signal(range(dct['TICKSINFACET']*2))
         triggered = Signal()
-        with m.If(photodiodecnt < (dct['ticksinfacet']*2-1)):
+        with m.If(photodiodecnt < (dct['TICKSINFACET']*2-1)):
             with m.If(self.photodiode):
                 m.d.sync += triggered.eq(1)
             m.d.sync += photodiodecnt.eq(photodiodecnt+1)
@@ -118,17 +123,17 @@ class Laserhead(Elaboratable):
         # pwm is always created but can be deactivated
         with m.If(pwmcnt == 0):
             m.d.sync += [self.pwm.eq(~self.pwm),
-                         pwmcnt.eq(dct['polyperiod']-1)]
+                         pwmcnt.eq(dct['POLYPERIOD']-1)]
         with m.Else():
             m.d.sync += pwmcnt.eq(pwmcnt-1)
         # Laser FSM
         facetcnt = Signal(range(dct['FACETS']))
 
-        stablecntr = Signal(range(max(dct['spinupticks'], dct['stableticks'])))
-        stablethresh = Signal(range(dct['stableticks']))
+        stablecntr = Signal(range(max(dct['SPINUPTICKS'], dct['STABLETICKS'])))
+        stablethresh = Signal(range(dct['STABLETICKS']))
         lasercnt = Signal(range(dct['LASERTICKS']))
-        scanbit = Signal(range(dct['bitsinscanline']+1))
-        tickcounter = Signal(range(dct['ticksinfacet']*2))
+        scanbit = Signal(range(dct['BITSINSCANLINE']+1))
+        tickcounter = Signal(range(dct['TICKSINFACET']*2))
         photodiode = self.photodiode
         read_data = self.read_data
         read_old = Signal.like(read_data)
@@ -137,7 +142,6 @@ class Laserhead(Elaboratable):
         lasers = self.lasers
         if self.platform.name == 'Test':
             self.tickcounter = tickcounter
-            self.dct = dct
             self.scanbit = scanbit
             self.lasercnt = lasercnt
             self.facetcnt = facetcnt
@@ -156,7 +160,7 @@ class Laserhead(Elaboratable):
                 m.d.sync += self.error.eq(0)
                 m.next = 'STOP'
             with m.State('STOP'):
-                m.d.sync += [stablethresh.eq(dct['stableticks']-1),
+                m.d.sync += [stablethresh.eq(dct['STABLETICKS']-1),
                              stablecntr.eq(0),
                              self.synchronized.eq(0),
                              self.enable_prism.eq(1),
@@ -175,7 +179,7 @@ class Laserhead(Elaboratable):
                                      self.enable_prism.eq(0)]
                         m.next = 'SPINUP'
             with m.State('SPINUP'):
-                with m.If(stablecntr > dct['spinupticks']-1):
+                with m.If(stablecntr > dct['SPINUPTICKS']-1):
                     # turn on laser
                     m.d.sync += [self.lasers.eq(int('1'*2, 2)),
                                  stablecntr.eq(0)]
@@ -190,10 +194,10 @@ class Laserhead(Elaboratable):
                 with m.Elif(~photodiode & ~photodiode_d):
                     m.d.sync += [tickcounter.eq(0),
                                  lasers.eq(0)]
-                    with m.If((tickcounter > (dct['ticksinfacet']-1)
-                              - dct['jitterticks']) &
-                              (tickcounter < (dct['ticksinfacet']-1)
-                              + dct['jitterticks'])):
+                    with m.If((tickcounter > (dct['TICKSINFACET']-1)
+                              - dct['JITTERTICKS']) &
+                              (tickcounter < (dct['TICKSINFACET']-1)
+                              + dct['JITTERTICKS'])):
                         m.d.sync += [stablecntr.eq(0),
                                      self.synchronized.eq(1),
                                      tickcounter.eq(0)]
@@ -207,8 +211,8 @@ class Laserhead(Elaboratable):
                             m.next = 'WAIT_END'
                         with m.Else():
                             # TODO: 10 is too high, should be lower
-                            thresh = min(round(10.1*dct['ticksinfacet']),
-                                         dct['stableticks'])
+                            thresh = min(round(10.1*dct['TICKSINFACET']),
+                                         dct['STABLETICKS'])
                             m.d.sync += [stablethresh.eq(thresh),
                                          self.read_en.eq(1)]
                             m.next = 'READ_INSTRUCTION'
@@ -235,7 +239,7 @@ class Laserhead(Elaboratable):
                              readbit.eq(0),
                              scanbit.eq(0),
                              lasercnt.eq(0)]
-                tickcnt_thresh = int(dct['START%']*dct['ticksinfacet'])
+                tickcnt_thresh = int(dct['START%']*dct['TICKSINFACET'])
                 assert tickcnt_thresh > 0
                 with m.If(tickcounter >= tickcnt_thresh):
                     m.d.sync += self.read_en.eq(1)
@@ -247,7 +251,7 @@ class Laserhead(Elaboratable):
                 #      scanbit current byte position in scanline
                 #      lasercnt used to pulse laser at certain freq
                 with m.If(lasercnt == 0):
-                    with m.If(scanbit >= dct['bitsinscanline']):
+                    with m.If(scanbit >= dct['BITSINSCANLINE']):
                         with m.If(dct['SINGLE_LINE'] & self.empty):
                             m.d.sync += self.read_discard.eq(1)
                         with m.Else():
@@ -272,7 +276,7 @@ class Laserhead(Elaboratable):
                             # so it can be ignored here
                             # Only grab a new line if more than current
                             # is needed
-                            with m.If(scanbit >= (dct['bitsinscanline']-2)):
+                            with m.If(scanbit >= (dct['BITSINSCANLINE']-2)):
                                 m.d.sync += self.read_en.eq(1)
                             m.d.sync += readbit.eq(0)
                         with m.Else():
@@ -290,8 +294,8 @@ class Laserhead(Elaboratable):
                     m.d.sync += self.read_commit.eq(0)
                 # -1 as you count till range-1 in python
                 # -2 as yuu need 1 tick to process
-                with m.If(tickcounter >= round(dct['ticksinfacet']
-                          - dct['jitterticks']-2)):
+                with m.If(tickcounter >= round(dct['TICKSINFACET']
+                          - dct['JITTERTICKS']-2)):
                     m.d.sync += lasers.eq(int('11', 2))
                     m.next = 'WAIT_STABLE'
                 with m.Elif(~self.synchronize):
@@ -308,11 +312,9 @@ class DiodeSimulator(Laserhead):
         if prism motor is enabled and the laser is on so the diode
         can be triggered.
     """
-    def __init__(self, platform=None, divider=50, top=False, single_line=False,
-                 single_facet=True):
-        self.single_line = single_line
-        platform.laser_var['SINGLE_LINE'] = single_line
-        platform.laser_var['SINGLE_FACET'] = single_facet
+    def __init__(self, platform=None, divider=50, top=False, laser_var=None):
+        if laser_var is not None:
+            platform.laser_var = laser_var
         super().__init__(platform, divider, top=False)
         self.write_en = Signal()
         self.write_commit = Signal()
@@ -324,7 +326,7 @@ class DiodeSimulator(Laserhead):
         m = super().elaborate(platform)
 
         dct = self.dct
-        diodecounter = Signal(range(dct['ticksinfacet']))
+        diodecounter = Signal(range(dct['TICKSINFACET']))
         self.diodecounter = diodecounter
 
         fifo = TransactionalizedFIFO(width=MEMWIDTH,
@@ -340,9 +342,9 @@ class DiodeSimulator(Laserhead):
                      fifo.read_discard.eq(self.read_discard),
                      self.read_data.eq(fifo.read_data)]
 
-        with m.If(diodecounter == (dct['ticksinfacet']-1)):
+        with m.If(diodecounter == (dct['TICKSINFACET']-1)):
             m.d.sync += diodecounter.eq(0)
-        with m.Elif(diodecounter > (dct['ticksinfacet']-4)):
+        with m.Elif(diodecounter > (dct['TICKSINFACET']-4)):
             m.d.sync += [self.photodiode.eq(~((~self.enable_prism)
                                             & (self.lasers > 0))),
                          diodecounter.eq(diodecounter+1)]
@@ -355,6 +357,7 @@ class DiodeSimulator(Laserhead):
 
 class BaseTest(LunaGatewareTestCase):
     'Base class for laserhead test'
+    timeout = 100
 
     def initialize_signals(self):
         '''If not triggered the photodiode is high'''
@@ -366,14 +369,14 @@ class BaseTest(LunaGatewareTestCase):
             fsm = self.dut.laserfsm
         return fsm.decoding[(yield fsm.state)]
 
-    def waituntilState(self, state, fsm=None, timeout=100):
+    def waituntilState(self, state, fsm=None):
         count = 0
         while (yield from self.getState(fsm)) != state:
             yield
             count += 1
-            if count > timeout:
-                print(f"Did not reach {state} in {timeout} ticks")
-                self.assertTrue(count < timeout)
+            if count > self.timeout:
+                print(f"Did not reach {state} in {self.timeout} ticks")
+                self.assertTrue(count < self.timeout)
 
     def assertState(self, state, fsm=None):
         self.assertEqual(self.getState(state), state)
@@ -381,7 +384,7 @@ class BaseTest(LunaGatewareTestCase):
     def checkline(self, bitlst):
         'it is verified wether the laser produces the pattern in bitlist'
         dut = self.dut
-        if not dut.single_line:
+        if not dut.dct['SINGLE_LINE']:
             self.assertEqual((yield dut.empty), False)
         yield from self.waituntilState('READ_INSTRUCTION')
         yield
@@ -417,6 +420,25 @@ class BaseTest(LunaGatewareTestCase):
             yield dut.write_data.eq(number)
             yield from self.pulse(dut.write_en)
         yield from self.pulse(dut.write_commit)
+
+    def scanlineringbuffer(self, numblines=3):
+        'write several scanlines and verify receival'
+        dut = self.dut
+        lines = []
+        for _ in range(numblines):
+            line = []
+            for _ in range(dut.dct['SCANBITS']):
+                line.append(randint(0, 1))
+            lines.append(line)
+        lines.append([])
+        for line in lines:
+            yield from self.write_line(line)
+        yield from self.pulse(dut.expose_start)
+        yield dut.synchronize.eq(1)
+        for line in lines:
+            yield from self.checkline(line)
+        self.assertEqual((yield dut.empty), True)
+        self.assertEqual((yield dut.expose_finished), True)
 
 
 class LaserheadTest(BaseTest):
@@ -456,9 +478,12 @@ class LaserheadTest(BaseTest):
 class SinglelineTest(BaseTest):
     'Test laserhead while triggering photodiode and single line'
     platform = TestPlatform()
+    laser_var = deepcopy(platform.laser_var)
+    laser_var['SINGLE_FACET'] = True
+    laser_var['SINGLE_LINE'] = True
     FRAGMENT_UNDER_TEST = DiodeSimulator
     FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1,
-                          'single_line': True}
+                          'laser_var': laser_var}
 
     @sync_test_case
     def test_single_line(self):
@@ -488,9 +513,12 @@ class SinglelinesinglefacetTest(BaseTest):
 
         Laserhead is in single line and single facet mode'''
     platform = TestPlatform()
+    laser_var = deepcopy(platform.laser_var)
+    laser_var['SINGLE_FACET'] = True
+    laser_var['SINGLE_LINE'] = True
     FRAGMENT_UNDER_TEST = DiodeSimulator
     FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1,
-                          'single_facet': True, 'single_line': True}
+                          'laser_var': laser_var}
 
     @sync_test_case
     def test_single_line_single_facet(self):
@@ -516,8 +544,7 @@ class MultilineTest(BaseTest):
     'Test laserhead while triggering photodiode and ring buffer'
     platform = TestPlatform()
     FRAGMENT_UNDER_TEST = DiodeSimulator
-    FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1,
-                          'single_line': False}
+    FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1}
 
     @sync_test_case
     def test_sync(self):
@@ -548,18 +575,33 @@ class MultilineTest(BaseTest):
         self.assertEqual((yield dut.empty), True)
 
     @sync_test_case
-    def test_scanlineringbuffer(self):
+    def test_scanlineringbuffer(self, numblines=3):
         'write several scanlines and verify receival'
-        dut = self.dut
-        lines = [[1, 1], [1, 1], [0, 1], []]
-        for line in lines:
-            yield from self.write_line(line)
-        yield from self.pulse(dut.expose_start)
-        yield dut.synchronize.eq(1)
-        for line in lines:
-            yield from self.checkline(line)
-        self.assertEqual((yield dut.empty), True)
-        self.assertEqual((yield dut.expose_finished), True)
+        yield from self.scanlineringbuffer(numblines=numblines)
+
+
+class Loweredge(BaseTest):
+    'Test Scanline of length MEMWDITH'
+    platform = TestPlatform()
+    FRAGMENT_UNDER_TEST = DiodeSimulator
+    timeout = 10000
+    dct = deepcopy(platform.laser_var)
+    dct['TICKSINFACET'] = 500
+    dct['SPINUP_TIME'] = 0.1
+    dct['STABLE_TIME'] = 0.1
+    dct['LASERTICKS'] = 3
+    dct['SINGLE_LINE'] = False
+    dct['SCANBITS'] = 55  # MEMWIDTH
+    FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1,
+                          'laser_var': dct}
+
+    # def test_limit(self):
+    #     self.assertEqual(self.dut.dct['BITSINSCANLINE'], MEMWIDTH)
+
+    @sync_test_case
+    def test_scanlineringbuffer(self, numblines=3):
+        'write several scanlines and verify receival'
+        yield from self.scanlineringbuffer(numblines=numblines)
 
 
 if __name__ == "__main__":
