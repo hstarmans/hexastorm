@@ -362,7 +362,12 @@ class Host:
         if bytelst is empty stop command is sent
         '''
         def remainder(bytelst):
-            return WORD_BYTES-(len(bytelst) % WORD_BYTES)
+            rem = (len(bytelst) % WORD_BYTES)
+            if rem > 0:
+                res = WORD_BYTES - rem
+            else:
+                res = 0
+            return res
         if len(bitlst) == 0:
             bytelst = [INSTRUCTIONS.LASTSCANLINE]
             bytelst += remainder(bytelst)*[0]

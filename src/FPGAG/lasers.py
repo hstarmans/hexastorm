@@ -27,7 +27,7 @@ def params(platform):
         var['SPINUP_TIME'] = 10/var['CRYSTAL_HZ']
         # TODO: stop scanline seems to affect the stable thresh?!
         # can be 30 without stopline (this is from old repo)
-        var['STABLE_TIME'] = 50/var['CRYSTAL_HZ']
+        var['STABLE_TIME'] = 5*var['TICKSINFACET']/var['CRYSTAL_HZ']
         var['START%'] = 2/var['TICKSINFACET']
         var['END%'] = ((var['LASERTICKS']*var['SCANBITS'])/var['TICKSINFACET']
                        + var['START%'])
@@ -35,6 +35,9 @@ def params(platform):
     assert var['TICKSINFACET'] == round(var['CRYSTAL_HZ']/(var['POLY_HZ']
                                         * var['FACETS']))
     var['LASERTICKS'] = int(var['CRYSTAL_HZ']/var['LASER_HZ'])
+    # jitter requires 2
+    # you also need to enable read pin at count one when you read bits
+    assert var['LASERTICKS']>2
     var['JITTERTICKS'] = round(0.5*var['LASERTICKS'])
     if var['END%'] > round(1-(var['JITTERTICKS']+1)
                            / var['TICKSINFACET']):
@@ -169,7 +172,7 @@ class Laserhead(Elaboratable):
                              scanbit.eq(0),
                              lasercnt.eq(0),
                              lasers.eq(0)]
-                with m.If(self.synchronize):
+                with m.If(self.synchronize&(~self.error)):
                     # laser is off, photodiode cannot be triggered
                     with m.If(self.photodiode == 0):
                         m.d.sync += self.error.eq(1)
@@ -261,14 +264,18 @@ class Laserhead(Elaboratable):
                         m.d.sync += [lasercnt.eq(dct['LASERTICKS']-1),
                                      scanbit.eq(scanbit+1)]
                         with m.If(readbit == 0):
-                            m.d.sync += self.lasers[0].eq(self.read_data[0])
+                            m.d.sync += [self.lasers[0].eq(self.read_data[0]),
+                                         read_old.eq(self.read_data >> 1),
+                                         self.read_en.eq(0)]
                         with m.Else():
                             m.d.sync += self.lasers[0].eq(read_old[0])
-
-                        with m.If(readbit == 0):
-                            m.d.sync += [self.read_en.eq(0),
-                                         read_old.eq(self.read_data >> 1),
-                                         readbit.eq(readbit+1)]
+                with m.Else():
+                    m.d.sync += lasercnt.eq(lasercnt-1)
+                    # NOTE: read enable can only be high for 1 cycle
+                    #       as a result this is done right be fore the "read"
+                    with m.If(lasercnt == 1):
+                        with m.If(readbit == 0 ):
+                                m.d.sync += [readbit.eq(readbit+1)]
                         # final read bit copy memory
                         # move to next address, i.e. byte, if end is reached
                         with m.Elif(readbit == MEMWIDTH-1):
@@ -276,14 +283,13 @@ class Laserhead(Elaboratable):
                             # so it can be ignored here
                             # Only grab a new line if more than current
                             # is needed
-                            with m.If(scanbit >= (dct['BITSINSCANLINE']-2)):
+                            # -1 as counting in python is different
+                            with m.If(scanbit < (dct['BITSINSCANLINE']-1)):
                                 m.d.sync += self.read_en.eq(1)
                             m.d.sync += readbit.eq(0)
                         with m.Else():
                             m.d.sync += [readbit.eq(readbit+1),
                                          read_old.eq(read_old >> 1)]
-                with m.Else():
-                    m.d.sync += lasercnt.eq(lasercnt-1)
             with m.State('WAIT_END'):
                 m.d.sync += [stablecntr.eq(stablecntr+1),
                              tickcounter.eq(tickcounter+1)]
@@ -357,7 +363,6 @@ class DiodeSimulator(Laserhead):
 
 class BaseTest(LunaGatewareTestCase):
     'Base class for laserhead test'
-    timeout = 100
 
     def initialize_signals(self):
         '''If not triggered the photodiode is high'''
@@ -370,13 +375,16 @@ class BaseTest(LunaGatewareTestCase):
         return fsm.decoding[(yield fsm.state)]
 
     def waituntilState(self, state, fsm=None):
+        dut = self.dut
+        timeout = max(dut.dct['TICKSINFACET']*2, dut.dct['STABLETICKS'],
+                      dut.dct['SPINUPTICKS'])
         count = 0
         while (yield from self.getState(fsm)) != state:
             yield
             count += 1
-            if count > self.timeout:
-                print(f"Did not reach {state} in {self.timeout} ticks")
-                self.assertTrue(count < self.timeout)
+            if count > timeout:
+                print(f"Did not reach {state} in {timeout} ticks")
+                self.assertTrue(count < timeout)
 
     def assertState(self, state, fsm=None):
         self.assertEqual(self.getState(state), state)
@@ -388,6 +396,7 @@ class BaseTest(LunaGatewareTestCase):
             self.assertEqual((yield dut.empty), False)
         yield from self.waituntilState('READ_INSTRUCTION')
         yield
+        self.assertEqual((yield dut.error), False)
         if len(bitlst) == 0:
             self.assertEqual((yield dut.error), False)
             self.assertEqual((yield dut.expose_finished), True)
@@ -397,7 +406,7 @@ class BaseTest(LunaGatewareTestCase):
             for idx, bit in enumerate(bitlst):
                 assert (yield dut.lasercnt) == dut.dct['LASERTICKS']-1
                 assert (yield dut.scanbit) == idx+1
-                for _ in range(dut.dct['LASERTICKS']):
+                for _ in range(dut.dct['LASERTICKS']):    
                     assert (yield dut.lasers[0]) == bit
                     yield
         if (len(bitlst) == 0) & ((yield dut.synchronize) == 0):
@@ -584,14 +593,12 @@ class Loweredge(BaseTest):
     'Test Scanline of length MEMWDITH'
     platform = TestPlatform()
     FRAGMENT_UNDER_TEST = DiodeSimulator
-    timeout = 10000
+    
     dct = deepcopy(platform.laser_var)
     dct['TICKSINFACET'] = 500
-    dct['SPINUP_TIME'] = 0.1
-    dct['STABLE_TIME'] = 0.1
     dct['LASERTICKS'] = 3
     dct['SINGLE_LINE'] = False
-    dct['SCANBITS'] = 55  # MEMWIDTH
+    dct['SCANBITS'] = 64  # MEMWIDTH
     FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1,
                           'laser_var': dct}
 
@@ -607,5 +614,5 @@ class Loweredge(BaseTest):
 if __name__ == "__main__":
     unittest.main()
 
-# which test do I need
-#  test edges better, and extend lines with multiple pixers around bound
+# clean up the test code, especially how you pass the "settings"
+# you now create a new class for each instance
