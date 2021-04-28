@@ -284,7 +284,7 @@ class Laserhead(Elaboratable):
                             # Only grab a new line if more than current
                             # is needed
                             # -1 as counting in python is different
-                            with m.If(scanbit < (dct['BITSINSCANLINE']-1)):
+                            with m.If(scanbit < (dct['BITSINSCANLINE'])):
                                 m.d.sync += self.read_en.eq(1)
                             m.d.sync += readbit.eq(0)
                         with m.Else():
@@ -598,21 +598,30 @@ class Loweredge(BaseTest):
     dct['TICKSINFACET'] = 500
     dct['LASERTICKS'] = 3
     dct['SINGLE_LINE'] = False
-    dct['SCANBITS'] = 64  # MEMWIDTH
+    dct['SCANBITS'] = MEMWIDTH
     FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1,
                           'laser_var': dct}
-
-    # def test_limit(self):
-    #     self.assertEqual(self.dut.dct['BITSINSCANLINE'], MEMWIDTH)
-
+    
     @sync_test_case
     def test_scanlineringbuffer(self, numblines=3):
         'write several scanlines and verify receival'
         yield from self.scanlineringbuffer(numblines=numblines)
 
 
+class Upperedge(Loweredge):
+    platform = TestPlatform()
+    FRAGMENT_UNDER_TEST = DiodeSimulator
+    dct = deepcopy(platform.laser_var)
+    dct['TICKSINFACET'] = 500
+    dct['LASERTICKS'] = 3
+    dct['SINGLE_LINE'] = False
+    dct['SCANBITS'] = MEMWIDTH+1
+    FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1,
+                          'laser_var': dct}
+
+
 if __name__ == "__main__":
     unittest.main()
 
-# clean up the test code, especially how you pass the "settings"
-# you now create a new class for each instance
+# NOTE: new class is created to reset settings
+#       couldn't avoid this easily so kept for now
