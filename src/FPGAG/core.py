@@ -449,7 +449,7 @@ class TestDispatcher(SPIGatewareTestCase):
         self.assertEqual((yield self.dut.laserhead.photodiode_t),
                          False)
         val = (yield from self.host.pinstate)['photodiode_trigger']
-        for _ in range(self.dut.laserhead.ticksinfacet):
+        for _ in range(self.dut.laserhead.dct['TICKSINFACET']):
             yield
         self.assertEqual((yield self.dut.laserhead.photodiode_t),
                          True)
