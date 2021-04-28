@@ -31,9 +31,12 @@ def params(platform):
         var['START%'] = 2/var['TICKSINFACET']
         var['END%'] = ((var['LASERTICKS']*var['SCANBITS'])/var['TICKSINFACET']
                        + var['START%'])
-    # parameter creation
-    assert var['TICKSINFACET'] == round(var['CRYSTAL_HZ']/(var['POLY_HZ']
+        assert var['TICKSINFACET'] == round(var['CRYSTAL_HZ']/(var['POLY_HZ']
                                         * var['FACETS']))
+    else:
+        var['TICKSINFACET'] = round(var['CRYSTAL_HZ']/(var['POLY_HZ']
+                                        * var['FACETS']))
+    # parameter creation
     var['LASERTICKS'] = int(var['CRYSTAL_HZ']/var['LASER_HZ'])
     # jitter requires 2
     # you also need to enable read pin at count one when you read bits
@@ -45,7 +48,8 @@ def params(platform):
     var['BITSINSCANLINE'] = round((var['TICKSINFACET'] *
                                   (var['END%']-var['START%']))
                                   / var['LASERTICKS'])
-    assert var['BITSINSCANLINE'] == var['SCANBITS']
+    if platform.name == 'Test':
+        assert var['BITSINSCANLINE'] == var['SCANBITS']
     if var['BITSINSCANLINE'] <= 0:
         raise Exception("Bits in scanline invalid")
     var['SPINUPTICKS'] = round(var['SPINUP_TIME']*var['CRYSTAL_HZ'])
