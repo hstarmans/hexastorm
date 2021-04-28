@@ -73,16 +73,12 @@ class Laserhead(Elaboratable):
         I: read_data      -- read data from transactionalizedfifo
         I: empty          -- signal wether fifo is empty
     """
-    def __init__(self, platform=None, divider=50, top=False):
+    def __init__(self, platform=None, top=False):
         '''
         top        -- trigger synthesis of module
         platform   -- pass test platform
-        divider    -- original clock of 100 MHz via PLL reduced to 50 MHz
-                      if this is divided by 50 laser state updated
-                      with 1 MHz
         '''
         self.platform = platform
-        self.divider = divider
         self.status = Signal()
         self.lasers = Signal(2)
         self.pwm = Signal()
@@ -318,10 +314,10 @@ class DiodeSimulator(Laserhead):
         if prism motor is enabled and the laser is on so the diode
         can be triggered.
     """
-    def __init__(self, platform=None, divider=50, top=False, laser_var=None):
+    def __init__(self, platform=None, top=False, laser_var=None):
         if laser_var is not None:
             platform.laser_var = laser_var
-        super().__init__(platform, divider, top=False)
+        super().__init__(platform, top=False)
         self.write_en = Signal()
         self.write_commit = Signal()
         self.write_data = Signal(MEMWIDTH)
@@ -455,7 +451,7 @@ class LaserheadTest(BaseTest):
 
     platform = TestPlatform()
     FRAGMENT_UNDER_TEST = Laserhead
-    FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1}
+    FRAGMENT_ARGUMENTS = {'platform': platform}
 
     @sync_test_case
     def test_pwmpulse(self):
@@ -491,7 +487,7 @@ class SinglelineTest(BaseTest):
     laser_var['SINGLE_FACET'] = True
     laser_var['SINGLE_LINE'] = True
     FRAGMENT_UNDER_TEST = DiodeSimulator
-    FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1,
+    FRAGMENT_ARGUMENTS = {'platform': platform,
                           'laser_var': laser_var}
 
     @sync_test_case
@@ -526,7 +522,7 @@ class SinglelinesinglefacetTest(BaseTest):
     laser_var['SINGLE_FACET'] = True
     laser_var['SINGLE_LINE'] = True
     FRAGMENT_UNDER_TEST = DiodeSimulator
-    FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1,
+    FRAGMENT_ARGUMENTS = {'platform': platform,
                           'laser_var': laser_var}
 
     @sync_test_case
@@ -553,7 +549,7 @@ class MultilineTest(BaseTest):
     'Test laserhead while triggering photodiode and ring buffer'
     platform = TestPlatform()
     FRAGMENT_UNDER_TEST = DiodeSimulator
-    FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1}
+    FRAGMENT_ARGUMENTS = {'platform': platform}
 
     @sync_test_case
     def test_sync(self):
@@ -599,7 +595,7 @@ class Loweredge(BaseTest):
     dct['LASERTICKS'] = 3
     dct['SINGLE_LINE'] = False
     dct['SCANBITS'] = MEMWIDTH
-    FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1,
+    FRAGMENT_ARGUMENTS = {'platform': platform,
                           'laser_var': dct}
     
     @sync_test_case
@@ -616,7 +612,7 @@ class Upperedge(Loweredge):
     dct['LASERTICKS'] = 3
     dct['SINGLE_LINE'] = False
     dct['SCANBITS'] = MEMWIDTH+1
-    FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1,
+    FRAGMENT_ARGUMENTS = {'platform': platform,
                           'laser_var': dct}
 
 
