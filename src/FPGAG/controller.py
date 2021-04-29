@@ -355,12 +355,17 @@ class Host:
         self.chip_select.on()
         return response
 
-    def bittobytelist(self, bitlst, bitorder='little'):
+    def bittobytelist(self, bitlst, stepsperline=1, direction=0, bitorder='little'):
         '''converts bitlst to bytelst
 
-        bit list set laser on and off
-        if bytelst is empty stop command is sent
+           bit list      set laser on and off
+                         if bitlst is empty stop command is sent
+           stepsperline  stepsperline, should be greater than 0
+                         if you don't want to move simply disable motor
+           direction     scanning direction
         '''
+        halfperiod = round(self.laser_params['TICKSINFACET']/(stepsperline*2))
+        direction = [int(bool(direction))]
         def remainder(bytelst):
             rem = (len(bytelst) % WORD_BYTES)
             if rem > 0:
@@ -376,6 +381,10 @@ class Host:
             assert max(bitlst) <= 1
             assert min(bitlst) >= 0
             bytelst = [INSTRUCTIONS.SCANLINE]
+            halfperiodbits = [int(i) for i in bin(halfperiod)[2:]]
+            halfperiodbits.reverse()
+            assert len(halfperiodbits) < 56
+            bytelst += np.packbits(direction+halfperiodbits, bitorder=bitorder).tolist()
             bytelst += remainder(bytelst)*[0]
             bytelst += np.packbits(bitlst, bitorder=bitorder).tolist()
             bytelst += remainder(bytelst)*[0]

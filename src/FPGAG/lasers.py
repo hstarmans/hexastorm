@@ -76,6 +76,8 @@ class Laserhead(Elaboratable):
         O: read_en        -- enable read transactionalizedfifo
         I: read_data      -- read data from transactionalizedfifo
         I: empty          -- signal wether fifo is empty
+        O: step           -- step signal
+        O: direction      -- direction signal
     """
     def __init__(self, platform=None, top=False):
         '''
@@ -99,10 +101,11 @@ class Laserhead(Elaboratable):
         self.empty = Signal()
         self.expose_finished = Signal()
         self.expose_start = Signal()
+        self.step = Signal()
+        self.dir = Signal()
         self.dct = params(platform)
-        # print(self.dct['BITSINSCANLINE'])
-        # input()
 
+        
     def elaborate(self, platform):
         m = Module()
         if self.platform is not None:
@@ -123,12 +126,27 @@ class Laserhead(Elaboratable):
             m.d.sync += [self.photodiode_t.eq(triggered),
                          photodiodecnt.eq(0),
                          triggered.eq(0)]
+        
+        # step generator
+        move = Signal()
+        stepcnt = Signal(56)
+        stephalfperiod = Signal(55)
+        with m.If(move):
+            with m.If(stepcnt < stephalfperiod):
+                m.d.sync += stepcnt.eq(stepcnt+1)
+            with m.Else():
+                m.d.sync += [stepcnt.eq(0),
+                             self.step.eq(~self.step)]
+        
+        
+        
         # pwm is always created but can be deactivated
         with m.If(pwmcnt == 0):
             m.d.sync += [self.pwm.eq(~self.pwm),
                          pwmcnt.eq(dct['POLYPERIOD']-1)]
         with m.Else():
             m.d.sync += pwmcnt.eq(pwmcnt-1)
+        
         # Laser FSM
         facetcnt = Signal(range(dct['FACETS']))
 
@@ -144,6 +162,7 @@ class Laserhead(Elaboratable):
         photodiode_d = Signal()
         lasers = self.lasers
         if self.platform.name == 'Test':
+            self.stephalfperiod = stephalfperiod
             self.tickcounter = tickcounter
             self.scanbit = scanbit
             self.lasercnt = lasercnt
@@ -209,8 +228,10 @@ class Laserhead(Elaboratable):
                         with m.Else():
                             m.d.sync += facetcnt.eq(facetcnt+1)
                         with m.If(dct['SINGLE_FACET'] & (facetcnt > 0)):
+                            m.d.sync += move.eq(0)
                             m.next = 'WAIT_END'
                         with m.Elif(self.empty | ~process_lines):
+                            m.d.sync += move.eq(0)
                             m.next = 'WAIT_END'
                         with m.Else():
                             # TODO: 10 is too high, should be lower
@@ -220,17 +241,22 @@ class Laserhead(Elaboratable):
                                          self.read_en.eq(1)]
                             m.next = 'READ_INSTRUCTION'
                     with m.Else():
-                        m.d.sync += self.synchronized.eq(0)
+                        m.d.sync += [move.eq(0),
+                                     self.synchronized.eq(0)]
                         m.next = 'WAIT_END'
                 with m.Else():
                     m.d.sync += [stablecntr.eq(stablecntr+1),
                                  tickcounter.eq(tickcounter+1)]
             with m.State('READ_INSTRUCTION'):
                 m.d.sync += [self.read_en.eq(0), tickcounter.eq(tickcounter+1)]
-                with m.If(read_data == INSTRUCTIONS.SCANLINE):
+                with m.If(read_data[0:8] == INSTRUCTIONS.SCANLINE):
+                    m.d.sync += [move.eq(1),
+                                 self.dir.eq(read_data[8]),
+                                 stephalfperiod.eq(read_data[9:])]
                     m.next = 'WAIT_FOR_DATA_RUN'
                 with m.Elif(read_data == INSTRUCTIONS.LASTSCANLINE):
                     m.d.sync += [self.expose_finished.eq(1),
+                                 move.eq(0),
                                  self.read_commit.eq(1),
                                  process_lines.eq(0)]
                     m.next = 'WAIT_END'
@@ -389,13 +415,17 @@ class BaseTest(LunaGatewareTestCase):
     def assertState(self, state, fsm=None):
         self.assertEqual(self.getState(state), state)
 
-    def checkline(self, bitlst):
+    def checkline(self, bitlst, stepsperline=1, direction=0):
         'it is verified wether the laser produces the pattern in bitlist'
         dut = self.dut
         if not dut.dct['SINGLE_LINE']:
             self.assertEqual((yield dut.empty), False)
         yield from self.waituntilState('READ_INSTRUCTION')
         yield
+        self.assertEqual((yield dut.dir), direction)
+        if len(bitlst) != 0:
+            self.assertEqual((yield dut.stephalfperiod),
+                             round(stepsperline*dut.dct['TICKSINFACET']/2))
         self.assertEqual((yield dut.error), False)
         if len(bitlst) == 0:
             self.assertEqual((yield dut.error), False)
@@ -415,13 +445,13 @@ class BaseTest(LunaGatewareTestCase):
             yield from self.waituntilState('WAIT_END')
         self.assertEqual((yield self.dut.error), False)
 
-    def write_line(self, bitlist):
+    def write_line(self, bitlist, stepsperline=1, direction=0):
         '''write line to fifo
 
         This is a helper function to allow testing of the module
         without dispatcher and parser
         '''
-        bytelst = self.host.bittobytelist(bitlist)
+        bytelst = self.host.bittobytelist(bitlist, stepsperline, direction)
         dut = self.dut
         for i in range(0, len(bytelst), WORD_BYTES):
             lst = bytelst[i:i+WORD_BYTES]
@@ -567,7 +597,7 @@ class MultilineTest(BaseTest):
             yield from self.waituntilState('WAIT_STABLE')
             yield from self.waituntilState('WAIT_END')
         self.assertEqual((yield dut.error), 0)
-
+        
     @sync_test_case
     def test_stopline(self):
         'verify data run is not reached when stopline is sent'
@@ -625,3 +655,9 @@ if __name__ == "__main__":
 
 # NOTE: new class is created to reset settings
 #       couldn't avoid this easily so kept for now
+
+# add movement tests
+#  receival of direction and halfperiod
+#  move x steps per line and verify you reach x*y after y lines
+#  verify that if you don't sent out a line, e.g. communication error that you don't  move
+#  verify the above for the single facet mode

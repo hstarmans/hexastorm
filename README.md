@@ -63,10 +63,13 @@ A user can read but not write directly to pins. This ensures that the host
 can establish precedence between instructions.
 
 ### Laserline instruction
-| data | number of bytes | description
+| data | number of bits | description
 |---|---|---|
-| INSTRUCTION | 1 | type of instructions, here start or stop scanline
-| DATA | 7 | information for lasers
+| INSTRUCTION | 8 | type of instructions, here start or stop scanline
+| DIRECTION | 1 | scanning direction
+| TICKSPERSTEP | 55 | ticks per half period step
+| DATA | 64 | information for lasers in chunks of 8 bytes
+
 
 A user can read but not write directly to pins. This ensures that the host
 can establish precedence between instructions.
