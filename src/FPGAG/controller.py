@@ -364,7 +364,7 @@ class Host:
                          if you don't want to move simply disable motor
            direction     scanning direction
         '''
-        halfperiod = round(self.laser_params['TICKSINFACET']/(stepsperline*2))
+        halfperiod = round((self.laser_params['TICKSINFACET']-1)/(stepsperline*2))
         direction = [int(bool(direction))]
         def remainder(bytelst):
             rem = (len(bytelst) % WORD_BYTES)

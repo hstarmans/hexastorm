@@ -399,6 +399,23 @@ class BaseTest(LunaGatewareTestCase):
         if fsm is None:
             fsm = self.dut.laserfsm
         return fsm.decoding[(yield fsm.state)]
+    
+    def count_steps(self):
+        '''counts steps in accounting for direction
+        
+        Very similar to the function in movement.py
+        '''
+        count = 0
+        dut = self.dut
+        while ((yield dut.expose_finished)==0):
+            old = (yield self.dut.step)
+            yield
+            if old and ((yield self.dut.step) == 0):
+                if (yield self.dut.dir):
+                    count += 1
+                else:
+                    count -= 1
+        return count
 
     def waituntilState(self, state, fsm=None):
         dut = self.dut
@@ -611,8 +628,35 @@ class MultilineTest(BaseTest):
         yield dut.synchronize.eq(0)
         yield from self.checkline(line)
         self.assertEqual((yield dut.expose_finished), True)
+        # to ensure it stays finished
+        yield
+        yield
+        self.assertEqual((yield dut.expose_finished), True)
         self.assertEqual((yield dut.empty), True)
-
+    
+    @sync_test_case
+    def test_movement(self, numblines=3, stepsperline=1):
+        '''verify scanhead moves as expected forward / backward
+        
+        stepsperline  -- number of steps per line
+        direction     -- 0 is negative and 1 is positive
+        '''
+        dut = self.dut
+        def domove(direction):
+            lines = [[1]*dut.dct['BITSINSCANLINE']]*numblines
+            lines.append([])
+            for line in lines:
+                yield from self.write_line(line, stepsperline, direction)
+            yield dut.synchronize.eq(1)
+            yield from self.pulse(dut.expose_start)
+            steps = (yield from self.count_steps())
+            if not direction:
+                direction = -1
+            self.assertEqual(steps, stepsperline*numblines*direction)
+        yield from domove(0)
+        yield from domove(1)
+        
+        
     @sync_test_case
     def test_scanlineringbuffer(self, numblines=3):
         'write several scanlines and verify receival'
@@ -656,8 +700,8 @@ if __name__ == "__main__":
 # NOTE: new class is created to reset settings
 #       couldn't avoid this easily so kept for now
 
-# add movement tests
-#  receival of direction and halfperiod
-#  move x steps per line and verify you reach x*y after y lines
+#  verify that you don't move after stop
+
 #  verify that if you don't sent out a line, e.g. communication error that you don't  move
 #  verify the above for the single facet mode
+#  if you dont'get a laser trigger OUT OF count ... should stop move and reset count to 0
