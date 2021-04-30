@@ -762,5 +762,8 @@ if __name__ == "__main__":
 
 # NOTE: new class is created to reset settings
 #       couldn't avoid this easily so kept for now
-
-#  if you dont'get a laser trigger OUT OF count ... should stop move and reset count to 0
+#  
+#       syncing behaviour is not really tested, in reality
+#       prism spins up and systems goes into sync
+#
+#       spin up of prism is done without profile
