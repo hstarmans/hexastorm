@@ -365,6 +365,9 @@ class Host:
            direction     scanning direction
         '''
         halfperiod = round((self.laser_params['TICKSINFACET']-1)/(stepsperline*2))
+        # avoid python "banker's rounding"
+        steps = round(self.laser_params['TICKSINFACET']/(halfperiod*2)+0.01)
+        assert stepsperline == steps
         direction = [int(bool(direction))]
         def remainder(bytelst):
             rem = (len(bytelst) % WORD_BYTES)

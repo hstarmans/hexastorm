@@ -132,7 +132,7 @@ class Laserhead(Elaboratable):
         stepcnt = Signal(56)
         stephalfperiod = Signal(55)
         with m.If(move):
-            with m.If(stepcnt < stephalfperiod):
+            with m.If(stepcnt < stephalfperiod-1):
                 m.d.sync += stepcnt.eq(stepcnt+1)
             with m.Else():
                 m.d.sync += [stepcnt.eq(0),
@@ -298,7 +298,7 @@ class Laserhead(Elaboratable):
                 with m.Else():
                     m.d.sync += lasercnt.eq(lasercnt-1)
                     # NOTE: read enable can only be high for 1 cycle
-                    #       as a result this is done right be fore the "read"
+                    #       as a result this is done right before the "read"
                     with m.If(lasercnt == 1):
                         with m.If(readbit == 0 ):
                                 m.d.sync += [readbit.eq(readbit+1)]
@@ -325,7 +325,7 @@ class Laserhead(Elaboratable):
                 with m.Else():
                     m.d.sync += self.read_commit.eq(0)
                 # -1 as you count till range-1 in python
-                # -2 as yuu need 1 tick to process
+                # -2 as you need 1 tick to process
                 with m.If(tickcounter >= round(dct['TICKSINFACET']
                           - dct['JITTERTICKS']-2)):
                     m.d.sync += lasers.eq(int('11', 2))
@@ -400,8 +400,11 @@ class BaseTest(LunaGatewareTestCase):
             fsm = self.dut.laserfsm
         return fsm.decoding[(yield fsm.state)]
     
-    def count_steps(self):
-        '''counts steps in accounting for direction
+    def count_steps(self, single=False):
+        '''counts steps while accounting for direction
+        
+        single -- in single line mode dut.empty is not
+                  a good measure
         
         Very similar to the function in movement.py
         '''
@@ -409,10 +412,14 @@ class BaseTest(LunaGatewareTestCase):
         dut = self.dut
         ticks = 0
         # when the last line is exposed the memory is empty
-        # as a result you need to wait one round longer
-        thresh = dut.dct['TICKSINFACET']*dut.dct['FACETS']
+        # as a result you need to wait one line/facet longer
+        thresh = dut.dct['TICKSINFACET']
+        if single:
+            thresh = 4*thresh
         while ((yield dut.empty)==0) | (ticks < thresh):
-            if (yield dut.empty)==1:
+            if single:
+                ticks += 1
+            elif (yield dut.empty)==1:
                 ticks += 1 
             old = (yield self.dut.step)
             yield
@@ -543,7 +550,6 @@ class SinglelineTest(BaseTest):
     'Test laserhead while triggering photodiode and single line'
     platform = TestPlatform()
     laser_var = deepcopy(platform.laser_var)
-    laser_var['SINGLE_FACET'] = True
     laser_var['SINGLE_LINE'] = True
     FRAGMENT_UNDER_TEST = DiodeSimulator
     FRAGMENT_ARGUMENTS = {'platform': platform,
@@ -552,7 +558,7 @@ class SinglelineTest(BaseTest):
     @sync_test_case
     def test_single_line(self):
         dut = self.dut
-        lines = [[1, 1]]
+        lines = [[]*dut.dct['SCANBITS']]
         for line in lines:
             yield from self.write_line(line)
         yield dut.synchronize.eq(1)
@@ -587,7 +593,7 @@ class SinglelinesinglefacetTest(BaseTest):
     @sync_test_case
     def test_single_line_single_facet(self):
         dut = self.dut
-        lines = [[1, 1]]
+        lines = [[1]*dut.dct['SCANBITS']]
         for line in lines:
             yield from self.write_line(line)
         yield dut.synchronize.eq(1)
@@ -602,7 +608,19 @@ class SinglelinesinglefacetTest(BaseTest):
             yield from self.checkline(line)
             self.assertEqual(1, (yield dut.facetcnt))
         self.assertEqual((yield dut.error), False)
-
+     
+    @sync_test_case
+    def test_move(self):
+        dut = self.dut
+        lines = [[1]*dut.dct['SCANBITS']]
+        stepsperline = 3
+        for line in lines:
+            yield from self.write_line(line, stepsperline=stepsperline, direction=1)
+        yield dut.synchronize.eq(1)
+        yield from self.pulse(dut.expose_start)
+        steps = (yield from self.count_steps(single=True))
+        self.assertEqual(steps, stepsperline)
+        
 
 class MultilineTest(BaseTest):
     'Test laserhead while triggering photodiode and ring buffer'
@@ -748,5 +766,4 @@ if __name__ == "__main__":
 # NOTE: new class is created to reset settings
 #       couldn't avoid this easily so kept for now
 
-#  verify the above for the single facet mode
 #  if you dont'get a laser trigger OUT OF count ... should stop move and reset count to 0
