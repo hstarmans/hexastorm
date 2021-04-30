@@ -447,9 +447,9 @@ class BaseTest(LunaGatewareTestCase):
         yield
         self.assertEqual((yield dut.dir), direction)
         # TODO: doesn'twork
-        #if len(bitlst) != 0:
-        #    self.assertEqual((yield dut.stephalfperiod),
-        #                     round(stepsperline*dut.dct['TICKSINFACET']/2))
+        if len(bitlst) != 0:
+            self.assertEqual((yield dut.stephalfperiod),
+                            stepsperline*round((dut.dct['TICKSINFACET']-1)/2))
         self.assertEqual((yield dut.error), False)
         if len(bitlst) == 0:
             self.assertEqual((yield dut.error), False)
