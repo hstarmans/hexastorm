@@ -89,6 +89,7 @@ Next step would be to create a copy of [beagleg](https://github.com/hzeller/beag
 In a later stage, they might be merged.
 
 ## Alignment procedure
+Note, I should have used principal component analysis to determine properties of a line.
 An instruction video is shown below;  
 [![Alignment procedure image not showing](http://img.youtube.com/vi/Ri6DAneEzw4/0.jpg)](http://www.youtube.com/watch?v=Ri6DAneEzw4 "Alignment procedure")
 
