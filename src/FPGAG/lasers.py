@@ -148,13 +148,12 @@ class Laserhead(Elaboratable):
             m.d.sync += pwmcnt.eq(pwmcnt-1)
         
         # Laser FSM
-        facetcnt = Signal(range(dct['FACETS']))
-
-        stablecntr = Signal(range(max(dct['SPINUPTICKS'], dct['STABLETICKS'])))
+        # stable thresh is changed, larger at start and then lowered
         stablethresh = Signal(range(dct['STABLETICKS']))
+        facetcnt = Signal(range(dct['FACETS']))
         lasercnt = Signal(range(dct['LASERTICKS']))
         scanbit = Signal(range(dct['BITSINSCANLINE']+1))
-        tickcounter = Signal(range(dct['TICKSINFACET']*2))
+        tickcounter = Signal(range(max(dct['SPINUPTICKS'], dct['STABLETICKS'])))
         photodiode = self.photodiode
         read_data = self.read_data
         read_old = Signal.like(read_data)
@@ -183,7 +182,7 @@ class Laserhead(Elaboratable):
                 m.next = 'STOP'
             with m.State('STOP'):
                 m.d.sync += [stablethresh.eq(dct['STABLETICKS']-1),
-                             stablecntr.eq(0),
+                             tickcounter.eq(0),
                              self.synchronized.eq(0),
                              self.enable_prism.eq(1),
                              readbit.eq(0),
@@ -201,16 +200,16 @@ class Laserhead(Elaboratable):
                                      self.enable_prism.eq(0)]
                         m.next = 'SPINUP'
             with m.State('SPINUP'):
-                with m.If(stablecntr > dct['SPINUPTICKS']-1):
+                with m.If(tickcounter > dct['SPINUPTICKS']-1):
                     # turn on laser
                     m.d.sync += [self.lasers.eq(int('1'*2, 2)),
-                                 stablecntr.eq(0)]
+                                 tickcounter.eq(0)]
                     m.next = 'WAIT_STABLE'
                 with m.Else():
-                    m.d.sync += stablecntr.eq(stablecntr+1)
+                    m.d.sync += tickcounter.eq(tickcounter+1)
             with m.State('WAIT_STABLE'):
                 m.d.sync += photodiode_d.eq(photodiode)
-                with m.If(stablecntr >= stablethresh):
+                with m.If(tickcounter >= stablethresh):
                     m.d.sync += self.error.eq(1)
                     m.next = 'STOP'
                 with m.Elif(~photodiode & ~photodiode_d):
@@ -220,8 +219,7 @@ class Laserhead(Elaboratable):
                               - dct['JITTERTICKS']) &
                               (tickcounter < (dct['TICKSINFACET']-1)
                               + dct['JITTERTICKS'])):
-                        m.d.sync += [stablecntr.eq(0),
-                                     self.synchronized.eq(1),
+                        m.d.sync += [self.synchronized.eq(1),
                                      tickcounter.eq(0)]
                         with m.If(facetcnt == dct['FACETS']-1):
                             m.d.sync += facetcnt.eq(0)
@@ -242,8 +240,7 @@ class Laserhead(Elaboratable):
                         m.d.sync += self.synchronized.eq(0)
                         m.next = 'NO_INSTRUCTION'
                 with m.Else():
-                    m.d.sync += [stablecntr.eq(stablecntr+1),
-                                 tickcounter.eq(tickcounter+1)]
+                    m.d.sync += tickcounter.eq(tickcounter+1)
             with m.State('NO_INSTRUCTION'):
                 m.d.sync += [move.eq(0), tickcounter.eq(tickcounter+1)]
                 m.next = 'WAIT_END'
@@ -317,13 +314,12 @@ class Laserhead(Elaboratable):
                             m.d.sync += [readbit.eq(readbit+1),
                                          read_old.eq(read_old >> 1)]
             with m.State('WAIT_END'):
-                m.d.sync += [stablecntr.eq(stablecntr+1),
-                             tickcounter.eq(tickcounter+1)]
+                m.d.sync += tickcounter.eq(tickcounter+1)
 
-                with m.If(dct['SINGLE_LINE'] & self.empty):
-                    m.d.sync += self.read_discard.eq(0)
-                with m.Else():
-                    m.d.sync += self.read_commit.eq(0)
+                #with m.If(dct['SINGLE_LINE'] & self.empty):
+                m.d.sync += self.read_discard.eq(0)
+                #with m.Else():
+                #    m.d.sync += self.read_commit.eq(0)
                 # -1 as you count till range-1 in python
                 # -2 as you need 1 tick to process
                 with m.If(tickcounter >= round(dct['TICKSINFACET']
@@ -558,13 +554,14 @@ class SinglelineTest(BaseTest):
     @sync_test_case
     def test_single_line(self):
         dut = self.dut
-        lines = [[]*dut.dct['SCANBITS']]
+        lines = [[1]*dut.dct['SCANBITS']]
         for line in lines:
             yield from self.write_line(line)
         yield dut.synchronize.eq(1)
         yield from self.pulse(dut.expose_start)
-        for _ in range(10):
+        for _ in range(2):
             yield from self.checkline(line)
+        self.assertEqual((yield dut.synchronized), True)
         lines = [[1, 0], []]
         self.assertEqual((yield dut.expose_finished), 0)
         for line in lines:
