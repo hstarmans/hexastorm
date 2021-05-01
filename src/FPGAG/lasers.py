@@ -64,8 +64,8 @@ class Laserhead(Elaboratable):
         I/O signals:
         O: synchronized   -- if true, laser is in sync and prism is rotating
         I: synchronize    -- activate synchronization
-        I: exopose_start  -- start reading lines and exposing
-        O: exopose_finish -- exposure is finished
+        I: expose_start  -- start reading lines and exposing
+        O: expose_finish -- exposure is finished
         O: error          -- error signal
         O: lasers         -- laser pin
         O: pwm            -- pulse for scanner motor
@@ -480,6 +480,7 @@ class BaseTest(LunaGatewareTestCase):
         without dispatcher and parser
         '''
         bytelst = self.host.bittobytelist(bitlist, stepsperline, direction)
+        bytelst.reverse()
         dut = self.dut
         for i in range(0, len(bytelst), WORD_BYTES):
             lst = bytelst[i:i+WORD_BYTES]

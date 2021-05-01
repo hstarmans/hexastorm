@@ -134,8 +134,7 @@ class SPIParser(Elaboratable):
                 with m.If(interf.word_complete):
                     byte0 = interf.word_received[:8]
                     with m.If(wordsreceived == 0):
-                        with m.If((byte0 == INSTRUCTIONS.MOVE) |
-                                  (byte0 == INSTRUCTIONS.WRITEPIN)):
+                        with m.If((byte0>0)&(byte0<6)):
                             m.d.sync += [instruction.eq(byte0),
                                          fifo.write_en.eq(1),
                                          wordsreceived.eq(wordsreceived+1),
@@ -154,7 +153,10 @@ class SPIParser(Elaboratable):
                 m.d.sync += fifo.write_en.eq(0)
                 with m.If(((instruction == INSTRUCTIONS.MOVE) &
                           (wordsreceived >= platform.wordsinmove))
-                          | (instruction == INSTRUCTIONS.WRITEPIN)):
+                          | (instruction == INSTRUCTIONS.WRITEPIN)
+                          | (instruction == INSTRUCTIONS.LASTSCANLINE)
+                          | ((instruction == INSTRUCTIONS.SCANLINE) &
+                          (wordsreceived >= platform.wordsinscanline))):
                     m.d.sync += [wordsreceived.eq(0),
                                  fifo.write_commit.eq(1)]
                     m.next = 'COMMIT'
@@ -299,6 +301,14 @@ class TestParser(SPIGatewareTestCase):
         self.host.spi_exchange_data = self.spi_exchange_data
         yield self.dut.spi.cs.eq(0)
 
+    def instruction_ready(self, check):
+        while (yield self.dut.empty) == 1:
+            yield
+        # Instruction ready
+        self.assertEqual((yield self.dut.empty), 0)
+        self.assertEqual((yield self.dut.fifo.space_available),
+                         (self.platform.memdepth - check))
+        
     @sync_test_case
     def test_getposition(self):
         decimals = 3
@@ -310,18 +320,25 @@ class TestParser(SPIGatewareTestCase):
         assert_array_equal(lst, (position/stepspermm).round(decimals))
 
     @sync_test_case
+    def test_writescanline(self):
+        yield from self.host.writeline([])
+        while (yield self.dut.empty) == 1:
+            yield
+        yield from self.instruction_ready(self.platform.wordsinscanline)
+    
+    @sync_test_case
+    def test_lastscanline(self):
+        yield from self.host.writeline([])
+        yield from self.instruction_ready(1)
+        
+    @sync_test_case
     def test_writepin(self):
         'write move instruction and verify FIFO is no longer empty'
         self.assertEqual((yield self.dut.empty), 1)
         yield from self.host.enable_comp(laser0=True,
                                          laser1=False,
                                          polygon=False)
-        while (yield self.dut.empty) == 1:
-            yield
-        # Instruction ready
-        self.assertEqual((yield self.dut.empty), 0)
-        self.assertEqual((yield self.dut.fifo.space_available),
-                         (self.platform.memdepth - 1))
+        yield from self.instruction_ready(1)
 
     @sync_test_case
     def test_writemoveinstruction(self):
@@ -331,14 +348,7 @@ class TestParser(SPIGatewareTestCase):
                                        [1]*self.platform.motors,
                                        [2]*self.platform.motors,
                                        [3]*self.platform.motors)
-        while (yield self.dut.empty) == 1:
-            yield
-        # Instruction ready
-        self.assertEqual((yield self.dut.empty), 0)
-        self.assertEqual((yield self.dut.fifo.space_available),
-                         (self.platform.memdepth -
-                          self.platform.wordsinmove
-                          ))
+        yield from self.instruction_ready(self.platform.wordsinmove)
 
     @sync_test_case
     def test_readpinstate(self):

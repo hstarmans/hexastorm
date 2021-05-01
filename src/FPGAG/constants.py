@@ -25,13 +25,18 @@ FREQ = 1E6  # motor move interpolation freq in Hz
 MOVE_INSTRUCTION = {'INSTRUCTION': 1, 'TICKS': 7}
 DEGREE = 3  # only third degree polynomal
 
+
+
 # these numbers must be tested with minimum
 # jerk and maximum velocity move
 BIT_SHIFT = 40
 MOVE_TICKS = 10_000
 
-# TODO: move this to board
-VARIABLES = {'CRYSTAL_HZ': 50E6}
+
+def wordsinscanline(bits):
+    bytesinline = WORD_BYTES # Instruction, direction, ticksperstep  
+    bytesinline += ceil(bits/8)
+    return ceil(bytesinline/WORD_BYTES)
 
 
 def wordsinmove(motors):

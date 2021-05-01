@@ -36,6 +36,7 @@ class Host:
             self.chip_select = LED(8)
             self.init_steppers()
             self.enable = LED(self.platform.enable_pin)
+            # TODO: generator syntax is no longer needed!
             self.generator = False
         else:
             self.platform = platform
@@ -354,7 +355,14 @@ class Host:
         response = bytearray(self.spi.xfer2(datachanged))
         self.chip_select.on()
         return response
-
+    
+    def writeline(self, bitlst, stepsperline=1, direction=0):
+        bytelst = self.bittobytelist(bitlst, stepsperline, direction)
+        write_byte = COMMANDS.WRITE.to_bytes(1, 'big')
+        # TODO: add memfull check
+        for i in range(0, len(bytelst), 8):
+            yield from self.send_command(write_byte + bytes(bytelst[i:i+8]))
+    
     def bittobytelist(self, bitlst, stepsperline=1, direction=0, bitorder='little'):
         '''converts bitlst to bytelst
 
@@ -391,7 +399,8 @@ class Host:
             bytelst += remainder(bytelst)*[0]
             bytelst += np.packbits(bitlst, bitorder=bitorder).tolist()
             bytelst += remainder(bytelst)*[0]
-        # TODO: remove bytelst.reverse()
+        bytelst.reverse()
+        # TODO: remove 
         # if you need to reverse you need to reverse each element within
         # this has been removed, requires final check with spi core
         return bytelst
