@@ -17,7 +17,7 @@ from FPGAG.controller import Host, Memfull
 from FPGAG.movement import Polynomal
 from FPGAG.platforms import TestPlatform
 from FPGAG.resources import get_all_resources
-from FPGAG.lasers import Laserhead
+from FPGAG.lasers import Laserhead, DiodeSimulator
 from FPGAG.constants import (COMMAND_BYTES, WORD_BYTES, STATE, INSTRUCTIONS,
                              MEMWIDTH, COMMANDS, DEGREE, FREQ)
 
@@ -178,12 +178,13 @@ class Dispatcher(Elaboratable):
         and dispatches the instructions to the corresponding module.
         This is the top module
     """
-    def __init__(self, platform=None, divider=50):
+    def __init__(self, platform=None, divider=50, simdiode=False):
         """
             platform  -- used to pass test platform
             divider   -- if sys clk is 50 MHz and divider is 50
                         motor state is update with 1 Mhz
         """
+        self.simdiode = simdiode
         self.platform = platform
         self.divider = divider
         self.read_commit = Signal()
@@ -204,7 +205,11 @@ class Dispatcher(Elaboratable):
         polynomal = Polynomal(self.platform, self.divider)
         m.submodules.polynomal = polynomal
         # Laserscan Head
-        laserhead = Laserhead(self.platform, self.divider)
+        if self.simdiode:
+            laserhead = DiodeSimulator(self.platform, self.divider, addfifo=False)
+        else:
+            laserhead = Laserhead(self.platform, self.divider)
+            laserhead.photodiode.eq(laserheadpins.photodiode)
         m.submodules.laserhead = laserhead
         # Local laser signal clones
         enable_prism = Signal()
@@ -235,7 +240,6 @@ class Dispatcher(Elaboratable):
         m.d.comb += [
             laserheadpins.pwm.eq(laserhead.pwm),
             laserheadpins.en.eq(laserhead.enable_prism & enable_prism),
-            laserhead.photodiode.eq(laserheadpins.photodiode),
             laserheadpins.laser0.eq(laserhead.lasers[0] | lasers[0]),
             laserheadpins.laser1.eq(laserhead.lasers[1] | lasers[1]),
         ]
@@ -350,7 +354,7 @@ class TestParser(SPIGatewareTestCase):
 
     @sync_test_case
     def test_writescanline(self):
-        yield from self.host.writeline([])
+        yield from self.host.writeline([1]*self.host.laser_params['BITSINSCANLINE'])
         while (yield self.dut.empty) == 1:
             yield
         yield from self.instruction_ready(self.platform.wordsinscanline)
@@ -432,7 +436,8 @@ class TestParser(SPIGatewareTestCase):
 class TestDispatcher(SPIGatewareTestCase):
     platform = TestPlatform()
     FRAGMENT_UNDER_TEST = Dispatcher
-    FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1}
+    FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1,
+                          'simdiode': True}
 
     def initialize_signals(self):
         self.host = Host(self.platform)
@@ -483,8 +488,9 @@ class TestDispatcher(SPIGatewareTestCase):
 
         Photodiode trigger simply checks wether the photodiode
         has been triggered for each cycle.
+        The photodiode is triggered by the simdiode.
         '''
-        yield self.dut.laserheadpins.photodiode.eq(1)
+        # not triggered at start of cycle
         self.assertEqual((yield self.dut.laserhead.photodiode_t),
                          False)
         val = (yield from self.host.pinstate)['photodiode_trigger']

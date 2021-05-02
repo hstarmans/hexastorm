@@ -340,13 +340,15 @@ class DiodeSimulator(Laserhead):
         if prism motor is enabled and the laser is on so the diode
         can be triggered.
     """
-    def __init__(self, platform=None, top=False, laser_var=None):
+    def __init__(self, platform=None, top=False, laser_var=None, addfifo=True):
         if laser_var is not None:
             platform.laser_var = laser_var
         super().__init__(platform, top=False)
-        self.write_en = Signal()
-        self.write_commit = Signal()
-        self.write_data = Signal(MEMWIDTH)
+        self.addfifo = addfifo
+        if addfifo:
+            self.write_en = Signal()
+            self.write_commit = Signal()
+            self.write_data = Signal(MEMWIDTH)
 
     def elaborate(self, platform):
         if self.platform is not None:
@@ -356,19 +358,20 @@ class DiodeSimulator(Laserhead):
         dct = self.dct
         diodecounter = Signal(range(dct['TICKSINFACET']))
         self.diodecounter = diodecounter
-
-        fifo = TransactionalizedFIFO(width=MEMWIDTH,
-                                     depth=platform.memdepth)
-        m.submodules.fifo = fifo
-        self.fifo = fifo
-        m.d.comb += [fifo.write_data.eq(self.write_data),
-                     fifo.write_commit.eq(self.write_commit),
-                     fifo.write_en.eq(self.write_en),
-                     fifo.read_commit.eq(self.read_commit),
-                     fifo.read_en.eq(self.read_en),
-                     self.empty.eq(fifo.empty),
-                     fifo.read_discard.eq(self.read_discard),
-                     self.read_data.eq(fifo.read_data)]
+        
+        if self.addfifo:
+            fifo = TransactionalizedFIFO(width=MEMWIDTH,
+                                         depth=platform.memdepth)
+            m.submodules.fifo = fifo
+            self.fifo = fifo
+            m.d.comb += [fifo.write_data.eq(self.write_data),
+                         fifo.write_commit.eq(self.write_commit),
+                         fifo.write_en.eq(self.write_en),
+                         fifo.read_commit.eq(self.read_commit),
+                         fifo.read_en.eq(self.read_en),
+                         self.empty.eq(fifo.empty),
+                         fifo.read_discard.eq(self.read_discard),
+                         self.read_data.eq(fifo.read_data)]
 
         with m.If(diodecounter == (dct['TICKSINFACET']-1)):
             m.d.sync += diodecounter.eq(0)

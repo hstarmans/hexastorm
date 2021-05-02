@@ -34,7 +34,7 @@ MOVE_TICKS = 10_000
 
 
 def wordsinscanline(bits):
-    bytesinline = 1 # Instruction, direction, ticksperstep  
+    bytesinline = 8 # Instruction, direction, ticksperstep  
     bytesinline += ceil(bits/8)
     return ceil(bytesinline/WORD_BYTES)
 
