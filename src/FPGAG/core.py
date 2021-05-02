@@ -37,6 +37,7 @@ class SPIParser(Elaboratable):
         I: pin state      -- used to get the value of select pins at client
         I: read_commit    -- finalize read transactionalizedfifo
         I: read_en        -- enable read transactionalizedfifo
+        I: read_discard   -- read discard of transactionalizedfifo
         I: dispatcherror  -- error while processing stored command from spi
         O: execute        -- start processing gcode
         O: read_data      -- read data from transactionalizedfifo
@@ -56,6 +57,7 @@ class SPIParser(Elaboratable):
         self.pinstate = Signal(8)
         self.read_commit = Signal()
         self.read_en = Signal()
+        self.read_discard = Signal()
         self.dispatcherror = Signal()
         self.execute = Signal()
         self.read_data = Signal(MEMWIDTH)
@@ -82,6 +84,7 @@ class SPIParser(Elaboratable):
         m.submodules.fifo = fifo
         m.d.comb += [self.read_data.eq(fifo.read_data),
                      fifo.read_commit.eq(self.read_commit),
+                     fifo.read_discard.eq(self.read_discard),
                      fifo.read_en.eq(self.read_en),
                      self.empty.eq(fifo.empty)]
         # Parser
@@ -183,12 +186,20 @@ class Dispatcher(Elaboratable):
         """
         self.platform = platform
         self.divider = divider
+        self.read_commit = Signal()
+        self.read_en = Signal()
+        self.read_data = Signal(MEMWIDTH)
+        self.read_discard = Signal()
+        self.empty = Signal()
 
     def elaborate(self, platform):
         m = Module()
         # Parser
         parser = SPIParser(self.platform)
         m.submodules.parser = parser
+        # Busy used to detect move or scanline in action
+        # disabled "dispatching"
+        busy = Signal()
         # Polynomal Move
         polynomal = Polynomal(self.platform, self.divider)
         m.submodules.polynomal = polynomal
@@ -198,9 +209,6 @@ class Dispatcher(Elaboratable):
         # Local laser signal clones
         enable_prism = Signal()
         lasers = Signal(2)
-        # Busy signal
-        busy = Signal()
-        m.d.comb += busy.eq(polynomal.busy)
         # position adder
         busy_d = Signal()
         m.d.sync += busy_d.eq(polynomal.busy)
@@ -231,6 +239,16 @@ class Dispatcher(Elaboratable):
             laserheadpins.laser0.eq(laserhead.lasers[0] | lasers[0]),
             laserheadpins.laser1.eq(laserhead.lasers[1] | lasers[1]),
         ]
+        # connect Parser
+        m.d.comb += [
+            self.read_data.eq(parser.read_data),
+            laserhead.read_data.eq(parser.read_data),
+            laserhead.empty.eq(parser.empty),
+            self.empty.eq(parser.empty),
+            parser.read_commit.eq(self.read_commit | laserhead.read_commit),
+            parser.read_en.eq(self.read_en | laserhead.read_en),
+            parser.read_discard.eq(self.read_discard | laserhead.read_discard)
+        ]
         # connect motors
         for idx, stepper in enumerate(steppers):
             m.d.comb += [stepper.step.eq(polynomal.step[idx] &
@@ -239,6 +257,8 @@ class Dispatcher(Elaboratable):
                          parser.pinstate[idx].eq(stepper.limit)]
         m.d.comb += (parser.pinstate[len(steppers)+1].
                      eq(laserhead.photodiode_t))
+        # Busy signal
+        m.d.comb += busy.eq(polynomal.busy | laserhead.process_lines)
         # connect spi
         m.d.comb += parser.spi.connect(spi)
         with m.If((busy_d == 1) & (busy == 0)):
@@ -248,39 +268,48 @@ class Dispatcher(Elaboratable):
             with m.State('RESET'):
                 m.next = 'WAIT_INSTRUCTION'
             with m.State('WAIT_INSTRUCTION'):
-                m.d.sync += [parser.read_commit.eq(0), polynomal.start.eq(0)]
-                with m.If((parser.empty == 0) & parser.execute & (busy == 0)):
-                    m.d.sync += parser.read_en.eq(1)
+                m.d.sync += [self.read_commit.eq(0), polynomal.start.eq(0)]
+                with m.If((self.empty == 0) & parser.execute & (busy == 0)):
+                    m.d.sync += self.read_en.eq(1)
                     m.next = 'PARSEHEAD'
             # check which instruction we r handling
             with m.State('PARSEHEAD'):
-                byte0 = parser.read_data[:8]
+                byte0 = self.read_data[:8]
                 with m.If(byte0 == INSTRUCTIONS.MOVE):
-                    m.d.sync += [polynomal.ticklimit.eq(parser.read_data[8:]),
-                                 parser.read_en.eq(0),
+                    m.d.sync += [polynomal.ticklimit.eq(self.read_data[8:]),
+                                 self.read_en.eq(0),
                                  coeffcnt.eq(0)]
                     m.next = 'MOVE_POLYNOMAL'
                 with m.Elif(byte0 == INSTRUCTIONS.WRITEPIN):
                     pins = Cat(lasers, enable_prism)
-                    m.d.sync += [pins.eq(parser.read_data[8:]),
-                                 parser.read_commit.eq(0)]
+                    m.d.sync += [pins.eq(self.read_data[8:]),
+                                 self.read_commit.eq(0)]
                     m.next = 'WAIT_INSTRUCTION'
+                with m.Elif((byte0 == INSTRUCTIONS.SCANLINE) |
+                            (byte0 == INSTRUCTIONS.LASTSCANLINE)):
+                    m.d.sync += [self.read_discard.eq(1),
+                                 laserhead.expose_start.eq(1)]
+                    m.next = 'SCANLINE'
                 with m.Else():
                     m.next = 'ERROR'
                     m.d.sync += parser.dispatcherror.eq(1)
             with m.State('MOVE_POLYNOMAL'):
                 with m.If(coeffcnt < len(polynomal.coeff)):
-                    with m.If(parser.read_en == 0):
-                        m.d.sync += parser.read_en.eq(1)
+                    with m.If(self.read_en == 0):
+                        m.d.sync += self.read_en.eq(1)
                     with m.Else():
                         m.d.sync += [polynomal.coeff[coeffcnt].eq(
-                                     parser.read_data),
+                                     self.read_data),
                                      coeffcnt.eq(coeffcnt+1),
-                                     parser.read_en.eq(0)]
+                                     self.read_en.eq(0)]
                 with m.Else():
                     m.next = 'WAIT'
                     m.d.sync += [polynomal.start.eq(1),
-                                 parser.read_commit.eq(1)]
+                                 self.read_commit.eq(1)]
+            with m.State('SCANLINE'):
+                m.d.sync += [self.read_discard.eq(0),
+                             laserhead.expose_start.eq(0)]
+                m.next = 'WAIT'
             # NOTE: you need to wait for busy to be raised
             #       in time
             with m.State('WAIT'):
@@ -574,7 +603,11 @@ class TestDispatcher(SPIGatewareTestCase):
             self.assertEqual((yield self.dut.pol.cntrs[motor*DEGREE]),
                              a[motor]*ticks + b[motor]*pow(ticks, 2)
                              + c[motor]*pow(ticks, 3))
-
+    
+    @sync_test_case
+    def test_writeline(self):
+        'write line and verify laser is pulsed accordingly'
+        yield
 
 if __name__ == "__main__":
     unittest.main()

@@ -74,7 +74,7 @@ class Laserhead(Elaboratable):
         O: photodiode_t   -- high if photodiode triggered in this cycle
         O: read_commit    -- finalize read transactionalizedfifo
         O: read_en        -- enable read transactionalizedfifo
-        I: read_data      -- read data from transactionalizedfifo
+        I: read_data      -- read data from transactionalizedfifo, AKA busy
         I: empty          -- signal wether fifo is empty
         O: step           -- step signal
         O: direction      -- direction signal
@@ -104,6 +104,7 @@ class Laserhead(Elaboratable):
         self.step = Signal()
         self.dir = Signal()
         self.dct = params(platform)
+        self.process_lines = Signal()
 
         
     def elaborate(self, platform):
@@ -168,12 +169,11 @@ class Laserhead(Elaboratable):
             self.facetcnt = facetcnt
 
         # Exposure start detector
-        process_lines = Signal()
         expose_start_d = Signal()
 
         m.d.sync += expose_start_d.eq(self.expose_start)
         with m.If((expose_start_d == 0) & self.expose_start):
-            m.d.sync += [process_lines.eq(1),
+            m.d.sync += [self.process_lines.eq(1),
                          self.expose_finished.eq(0)]
 
         with m.FSM(reset='RESET') as laserfsm:
@@ -227,7 +227,7 @@ class Laserhead(Elaboratable):
                             m.d.sync += facetcnt.eq(facetcnt+1)
                         with m.If(dct['SINGLE_FACET'] & (facetcnt > 0)):
                             m.next = 'NO_INSTRUCTION'
-                        with m.Elif(self.empty | ~process_lines):
+                        with m.Elif(self.empty | ~self.process_lines):
                             m.next = 'NO_INSTRUCTION'
                         with m.Else():
                             # TODO: 10 is too high, should be lower
@@ -255,7 +255,7 @@ class Laserhead(Elaboratable):
                     m.d.sync += [self.expose_finished.eq(1),
                                  move.eq(0),
                                  self.read_commit.eq(1),
-                                 process_lines.eq(0)]
+                                 self.process_lines.eq(0)]
                     m.next = 'WAIT_END'
                 with m.Else():
                     m.d.sync += self.error.eq(1)

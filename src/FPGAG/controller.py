@@ -294,7 +294,7 @@ class Host:
                 + [INSTRUCTIONS.WRITEPIN])
         yield from self.send_command(data)
 
-    def send_move(self, ticks, a, b, c, maxtrials=1E5, delay=0.1):
+    def send_move(self, ticks, a, b, c, maxtrials=1E5):
         '''send move instruction with data
 
         data            -- coefficients for polynomal move
@@ -306,22 +306,21 @@ class Host:
         if self.generator:
             maxtrials = 10
         commands = self.move_commands(ticks, a, b, c)
-        trials = 0
-        command = commands.pop(0)
-        while True:
-            data_out = (yield from self.send_command(command))
-            trials += 1
-            bits = [int(i) for i in "{:08b}".format(data_out[-1])]
-            if int(bits[STATE.ERROR]):
-                raise Exception("Error detected on FPGA")
-            bits = [int(i) for i in "{:08b}".format(data_out[-2])]
-            home_bits = np.array(bits[:self.platform.motors])
-            if not (yield from self.memfull(data_out)):
-                break
-            if trials > maxtrials:
-                raise Memfull("Too many trials needed")
+        # TODO: this has been changed, remove if passes checks on machine
         for command in commands:
-            yield from self.send_command(command)
+            trials = 0
+            while True:
+                data_out = (yield from self.send_command(command))
+                trials += 1
+                bits = [int(i) for i in "{:08b}".format(data_out[-1])]
+                if int(bits[STATE.ERROR]):
+                    raise Exception("Error detected on FPGA")
+                bits = [int(i) for i in "{:08b}".format(data_out[-2])]
+                home_bits = np.array(bits[:self.platform.motors])
+                if not (yield from self.memfull(data_out)):
+                    break
+                if trials > maxtrials:
+                    raise Memfull("Too many trials needed")
         return home_bits
 
     def move_commands(self, ticks, a, b, c):
@@ -356,13 +355,23 @@ class Host:
         self.chip_select.on()
         return response
     
-    def writeline(self, bitlst, stepsperline=1, direction=0):
+    def writeline(self, bitlst, stepsperline=1, direction=0, maxtrials=1E5):
         bytelst = self.bittobytelist(bitlst, stepsperline, direction)
         write_byte = COMMANDS.WRITE.to_bytes(1, 'big')
-        # TODO: add memfull check
+        # TODO: merge write line with send commands
+        if self.generator:
+            maxtrials = 10
         for i in range(0, len(bytelst), 8):
-            yield from self.send_command(write_byte + bytes(bytelst[i:i+8]))
-    
+            trials = 0
+            while True:
+                trials += 1
+                data = write_byte + bytes(bytelst[i:i+8])
+                data_out = (yield from self.send_command(data))
+                if not (yield from self.memfull(data_out)):
+                    break
+                if trials > maxtrials:
+                    raise Memfull("Too many trials needed")
+            
     def bittobytelist(self, bitlst, stepsperline=1, direction=0, bitorder='little'):
         '''converts bitlst to bytelst
 
