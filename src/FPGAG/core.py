@@ -612,9 +612,17 @@ class TestDispatcher(SPIGatewareTestCase):
     
     @sync_test_case
     def test_writeline(self):
-        'write line and verify laser is pulsed accordingly'
-        yield
-
+        'write line and see it is processed accordingly'
+        for _ in range(3):
+            yield from self.host.writeline([1]*self.host.laser_params['BITSINSCANLINE'])
+        yield from self.host.writeline([])
+        # enable dispatching of code
+        yield from self.host._executionsetter(True)
+        # data should now be parsed and empty become 1
+        while (yield self.dut.parser.empty) == 0:
+            yield
+        
+        
 if __name__ == "__main__":
     unittest.main()
 
