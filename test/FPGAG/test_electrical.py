@@ -88,6 +88,11 @@ class StaticTest(Base):
 
 
 class LaserheadTest(Base):
+    def test_setlaserpower(self, power=100):
+        'test if laser power can be set'
+        self.host.laser_power = power
+        assert self.host.laser_power == power
+
     @executor
     def spinprism(self, timeout=10):
         yield from self.host.enable_comp(polygon=False)

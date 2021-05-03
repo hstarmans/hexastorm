@@ -155,7 +155,6 @@ class Firestarter(LatticeICE40Platform):
                  'END%': 0.7, 'START%': 0.35, 'SINGLE_LINE': False,
                  'SINGLE_FACET': False, 'DIRECTION': 0}
     motors = len(stepspermm.keys())
-    #wordsinmove = wordsinmove(motors=motors)
     memdepth = 256
     device = 'iCE40HX4K'
     package = 'TQ144'
