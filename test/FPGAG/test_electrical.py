@@ -6,12 +6,23 @@ import numpy as np
 from numpy.testing import assert_array_equal
 from FPGAG.controller import Host, Memfull
 from FPGAG.platforms import Firestarter
-from FPGAG.constants import (WORD_BYTES, COMMANDS, MOVE_TICKS)
+from FPGAG.constants import (WORD_BYTES, COMMANDS, MOVE_TICKS,
+                             wordsinmove)
 
 
-class Tests(unittest.TestCase):
-    '''Test on a real scanhead with a FPGA'''
+def executor(func):
+    '''executes generator until stop iteration
 
+    Nmigen uses generator syntax and this leaks into our
+    python code. As a result, it is required to iterate.
+    '''
+    def inner(self):
+        for _ in func(self):
+            pass
+    return inner
+
+
+class Base(unittest.TestCase):
     @classmethod
     def setUpClass(cls, flash=False):
         cls.host = Host()
@@ -21,58 +32,9 @@ class Tests(unittest.TestCase):
             print("Resetting the machine")
             cls.host.reset()
 
-    def _executor(func):
-        '''executes generator until stop iteration
 
-        Nmigen uses generator syntax and this leaks into our
-        python code. As a result, it is required to iterate.
-        '''
-        def inner(self):
-            for _ in func(self):
-                pass
-        return inner
-
-    @_executor
-    def readpin(self):
-        '''test if you can detect triggers of the limit switches
-
-        This is typically executed manually by placing a sheet of paper
-        in the cavity of the optical switch.
-        '''
-        self.host.enable_steppers = False
-        while True:
-            print((yield from self.host.pinstate))
-            sleep(1)
-
-    @_executor
-    def motorenable(self):
-        '''test if motors are enabled and execution is enabled/disabled
-           via communication with FPGA'''
-        self.host.enable_steppers = True
-        self.assertEqual((yield from self.host.execution), True)
-        print('check manually if axes are blocked and hard to move')
-        input()
-        self.host.enable_steppers = False
-        self.assertEqual((yield from self.host.execution), False)
-
-    @_executor
-    def multiplemove(self):
-        '''test if motors move'''
-        motors = Firestarter.motors
-        position = np.array([10, 10, 0])
-        self.assertEqual((yield from self.host.error), False)
-        self.host.enable_steppers = True
-        yield from self.host.gotopoint(position=position,
-                                       speed=[1]*motors,
-                                       absolute=False)
-        # NOTE: is the sleep really needed?
-        print('sleep to complete')
-        sleep(1)
-        assert_array_equal((yield from self.host.position),
-                           position)
-        self.host.enable_steppers = False
-
-    @_executor
+class StaticTest(Base):
+    @executor
     def test_memfull(self):
         '''test if memory can be filled and emptied
 
@@ -89,7 +51,7 @@ class Tests(unittest.TestCase):
         mm = np.array([1]*motors)
         steps = mm * np.array(list(host.platform.stepspermm.values()))
         limit = floor(host.platform.memdepth /
-                      host.platform.wordsinmove)
+                      wordsinmove(host.platform.motors))
         for _ in range(host.platform.memdepth):
             a = ((host.steps_to_count(steps.astype('int64'))/MOVE_TICKS)
                  .round().astype('int64'))
@@ -108,18 +70,81 @@ class Tests(unittest.TestCase):
                            mm*limit)
         self.host._executionsetter(False)
         self.assertEqual((yield from self.host.error), False)
+        self.host.reset()
 
-    @_executor
+    @executor
     def test_invalidinstruction(self):
         '''write invalid instruction and verify it passes dispatcher'''
         yield from self.host._executionsetter(True)
         command = [COMMANDS.WRITE] + [0]*WORD_BYTES
-        for _ in range(self.host.platform.wordsinmove):
+        for _ in range(wordsinmove(self.host.platform.motors)):
             yield from self.host.send_command(command)
         sleep(3)
         yield from self.host._executionsetter(False)
         self.assertEqual((yield from self.host.memfull()), False)
         self.assertEqual((yield from self.host.error), True)
+        self.host.reset()
+        self.assertEqual((yield from self.host.error), False)
+
+
+class LaserheadTest(Base):
+    @executor
+    def spinprism(self, timeout=10):
+        yield from self.host.enable_comp(polygon=False)
+        print(f'Spinning prism for {timeout} seconds')
+        sleep(timeout)
+        yield from self.host.enable_comp(polygon=True)
+
+    @executor
+    def lasertest(self, timeout=10):
+        yield from self.host.enable_comp(laser0=True)
+        print(f'Laser on for {timeout} seconds')
+        sleep(timeout)
+        yield from self.host.enable_comp(laser0=False)
+
+
+class MoveTest(Base):
+    '''Test movement core'''
+
+    @executor
+    def readpin(self):
+        '''test if you can detect triggers of the limit switches
+
+        This is typically executed manually by placing a sheet of paper
+        in the cavity of the optical switch.
+        '''
+        self.host.enable_steppers = False
+        while True:
+            print((yield from self.host.pinstate))
+            sleep(1)
+
+    @executor
+    def motorenable(self):
+        '''test if motors are enabled and execution is enabled/disabled
+           via communication with FPGA'''
+        self.host.enable_steppers = True
+        self.assertEqual((yield from self.host.execution), True)
+        print('check manually if axes are blocked and hard to move')
+        input()
+        self.host.enable_steppers = False
+        self.assertEqual((yield from self.host.execution), False)
+
+    @executor
+    def multiplemove(self):
+        '''test if motors move'''
+        motors = Firestarter.motors
+        position = np.array([10, 10, 0])
+        self.assertEqual((yield from self.host.error), False)
+        self.host.enable_steppers = True
+        yield from self.host.gotopoint(position=position,
+                                       speed=[1]*motors,
+                                       absolute=False)
+        # NOTE: is the sleep really needed?
+        print('sleep to complete')
+        sleep(1)
+        assert_array_equal((yield from self.host.position),
+                           position)
+        self.host.enable_steppers = False
 
 
 if __name__ == "__main__":
