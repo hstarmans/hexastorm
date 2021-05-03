@@ -17,9 +17,10 @@ from FPGAG.controller import Host, Memfull
 from FPGAG.movement import Polynomal
 from FPGAG.platforms import TestPlatform
 from FPGAG.resources import get_all_resources
-from FPGAG.lasers import Laserhead, DiodeSimulator
+from FPGAG.lasers import Laserhead, DiodeSimulator, params
 from FPGAG.constants import (COMMAND_BYTES, WORD_BYTES, STATE, INSTRUCTIONS,
-                             MEMWIDTH, COMMANDS, DEGREE, FREQ)
+                             MEMWIDTH, COMMANDS, DEGREE, FREQ, wordsinscanline,
+                             wordsinmove)
 
 
 class SPIParser(Elaboratable):
@@ -89,7 +90,7 @@ class SPIParser(Elaboratable):
                      self.empty.eq(fifo.empty)]
         # Parser
         mtrcntr = Signal(range(platform.motors))
-        wordsreceived = Signal(range(platform.wordsinmove+1))
+        wordsreceived = Signal(range(wordsinmove(platform.motors)+1))
         error = Signal()
         # Peripheral state
         state = Signal(8)
@@ -137,7 +138,7 @@ class SPIParser(Elaboratable):
                 with m.If(interf.word_complete):
                     byte0 = interf.word_received[:8]
                     with m.If(wordsreceived == 0):
-                        with m.If((byte0>0)&(byte0<6)):
+                        with m.If((byte0 > 0) & (byte0 < 6)):
                             m.d.sync += [instruction.eq(byte0),
                                          fifo.write_en.eq(1),
                                          wordsreceived.eq(wordsreceived+1),
@@ -154,12 +155,16 @@ class SPIParser(Elaboratable):
                         m.next = 'WRITE'
             with m.State('WRITE'):
                 m.d.sync += fifo.write_en.eq(0)
+                wordslaser = wordsinscanline(
+                    params(platform)['BITSINSCANLINE'])
+                wordsmotor = wordsinmove(platform.motors)
                 with m.If(((instruction == INSTRUCTIONS.MOVE) &
-                          (wordsreceived >= platform.wordsinmove))
+                          (wordsreceived >= wordsmotor))
                           | (instruction == INSTRUCTIONS.WRITEPIN)
                           | (instruction == INSTRUCTIONS.LASTSCANLINE)
                           | ((instruction == INSTRUCTIONS.SCANLINE) &
-                          (wordsreceived >= platform.wordsinscanline))):
+                          (wordsreceived >= wordslaser)
+                          )):
                     m.d.sync += [wordsreceived.eq(0),
                                  fifo.write_commit.eq(1)]
                     m.next = 'COMMIT'
@@ -204,19 +209,6 @@ class Dispatcher(Elaboratable):
         # Polynomal Move
         polynomal = Polynomal(self.platform, self.divider)
         m.submodules.polynomal = polynomal
-        # Laserscan Head
-        if self.simdiode:
-            laserhead = DiodeSimulator(self.platform, self.divider, addfifo=False)
-        else:
-            laserhead = Laserhead(self.platform, self.divider)
-            laserhead.photodiode.eq(laserheadpins.photodiode)
-        m.submodules.laserhead = laserhead
-        # Local laser signal clones
-        enable_prism = Signal()
-        lasers = Signal(2)
-        # position adder
-        busy_d = Signal()
-        m.d.sync += busy_d.eq(polynomal.busy)
         if platform:
             board_spi = platform.request("debug_spi")
             spi = synchronize(m, board_spi)
@@ -231,10 +223,25 @@ class Dispatcher(Elaboratable):
             self.pol = polynomal
             spi = synchronize(m, self.spi)
             self.laserheadpins = platform.laserhead
-            self.laserhead = laserhead
             self.steppers = steppers = platform.steppers
             self.busy = busy
             laserheadpins = self.platform.laserhead
+        # Laserscan Head
+        if self.simdiode:
+            laserhead = DiodeSimulator(platform=platform,
+                                       addfifo=False)
+        else:
+            laserhead = Laserhead(platform=platform)
+            laserhead.photodiode.eq(laserheadpins.photodiode)
+        m.submodules.laserhead = laserhead
+        if platform.name == 'Test':
+            self.laserhead = laserhead
+        # Local laser signal clones
+        enable_prism = Signal()
+        lasers = Signal(2)
+        # position adder
+        busy_d = Signal()
+        m.d.sync += busy_d.eq(polynomal.busy)
         coeffcnt = Signal(range(len(polynomal.coeff)))
         # connect laserhead
         m.d.comb += [
@@ -255,9 +262,16 @@ class Dispatcher(Elaboratable):
         ]
         # connect motors
         for idx, stepper in enumerate(steppers):
-            m.d.comb += [stepper.step.eq(polynomal.step[idx] &
-                                         ((stepper.limit == 0) | stepper.dir)),
-                         stepper.dir.eq(polynomal.dir[idx]),
+            if idx != 0:
+                step = (polynomal.step[idx] &
+                        ((stepper.limit == 0) | stepper.dir))
+                direction = polynomal.dir[idx]
+            else:
+                step = ((polynomal.step[idx] | laserhead.step)
+                        & ((stepper.limit == 0) | stepper.dir))
+                direction = (polynomal.dir[idx] | laserhead.dir)
+            m.d.comb += [stepper.step.eq(step),
+                         stepper.dir.eq(direction),
                          parser.pinstate[idx].eq(stepper.limit)]
         m.d.comb += (parser.pinstate[len(steppers)+1].
                      eq(laserhead.photodiode_t))
@@ -341,7 +355,7 @@ class TestParser(SPIGatewareTestCase):
         self.assertEqual((yield self.dut.empty), 0)
         self.assertEqual((yield self.dut.fifo.space_available),
                          (self.platform.memdepth - check))
-        
+
     @sync_test_case
     def test_getposition(self):
         decimals = 3
@@ -354,16 +368,19 @@ class TestParser(SPIGatewareTestCase):
 
     @sync_test_case
     def test_writescanline(self):
-        yield from self.host.writeline([1]*self.host.laser_params['BITSINSCANLINE'])
+        host = self.host
+        yield from host.writeline([1] *
+                                  host.laser_params['BITSINSCANLINE'])
         while (yield self.dut.empty) == 1:
             yield
-        yield from self.instruction_ready(self.platform.wordsinscanline)
-    
+        wordslaser = wordsinscanline(params(self.platform)['BITSINSCANLINE'])
+        yield from self.instruction_ready(wordslaser)
+
     @sync_test_case
     def test_lastscanline(self):
         yield from self.host.writeline([])
         yield from self.instruction_ready(1)
-        
+
     @sync_test_case
     def test_writepin(self):
         'write move instruction and verify FIFO is no longer empty'
@@ -381,7 +398,8 @@ class TestParser(SPIGatewareTestCase):
                                        [1]*self.platform.motors,
                                        [2]*self.platform.motors,
                                        [3]*self.platform.motors)
-        yield from self.instruction_ready(self.platform.wordsinmove)
+        words = wordsinmove(self.platform.motors)
+        yield from self.instruction_ready(words)
 
     @sync_test_case
     def test_readpinstate(self):
@@ -609,20 +627,22 @@ class TestDispatcher(SPIGatewareTestCase):
             self.assertEqual((yield self.dut.pol.cntrs[motor*DEGREE]),
                              a[motor]*ticks + b[motor]*pow(ticks, 2)
                              + c[motor]*pow(ticks, 3))
-    
+
     @sync_test_case
     def test_writeline(self):
         'write line and see it is processed accordingly'
+        host = self.host
         for _ in range(3):
-            yield from self.host.writeline([1]*self.host.laser_params['BITSINSCANLINE'])
-        yield from self.host.writeline([])
+            yield from self.host.writeline([1] *
+                                           host.laser_params['BITSINSCANLINE'])
+        yield from host.writeline([])
         # enable dispatching of code
-        yield from self.host._executionsetter(True)
+        yield from host._executionsetter(True)
         # data should now be parsed and empty become 1
         while (yield self.dut.parser.empty) == 0:
             yield
-        
-        
+
+
 if __name__ == "__main__":
     unittest.main()
 

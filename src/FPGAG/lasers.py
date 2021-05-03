@@ -29,18 +29,19 @@ def params(platform):
         # can be 30 without stopline (this is from old repo)
         var['STABLE_TIME'] = 5*var['TICKSINFACET']/var['CRYSTAL_HZ']
         var['START%'] = 2/var['TICKSINFACET']
-        var['END%'] = ((var['LASERTICKS']*var['SCANBITS'])/var['TICKSINFACET']
-                       + var['START%'])
+        var['END%'] = ((var['LASERTICKS']*var['BITSINSCANLINE'])
+                       / var['TICKSINFACET'] + var['START%'])
         assert var['TICKSINFACET'] == round(var['CRYSTAL_HZ']/(var['POLY_HZ']
-                                        * var['FACETS']))
+                                            * var['FACETS']))
+        bitsinscanline = var['BITSINSCANLINE']
     else:
         var['TICKSINFACET'] = round(var['CRYSTAL_HZ']/(var['POLY_HZ']
-                                        * var['FACETS']))
+                                    * var['FACETS']))
     # parameter creation
     var['LASERTICKS'] = int(var['CRYSTAL_HZ']/var['LASER_HZ'])
     # jitter requires 2
     # you also need to enable read pin at count one when you read bits
-    assert var['LASERTICKS']>2
+    assert var['LASERTICKS'] > 2
     var['JITTERTICKS'] = round(0.5*var['LASERTICKS'])
     if var['END%'] > round(1-(var['JITTERTICKS']+1)
                            / var['TICKSINFACET']):
@@ -49,7 +50,7 @@ def params(platform):
                                   (var['END%']-var['START%']))
                                   / var['LASERTICKS'])
     if platform.name == 'Test':
-        assert var['BITSINSCANLINE'] == var['SCANBITS']
+        assert var['BITSINSCANLINE'] == bitsinscanline
     if var['BITSINSCANLINE'] <= 0:
         raise Exception("Bits in scanline invalid")
     var['SPINUPTICKS'] = round(var['SPINUP_TIME']*var['CRYSTAL_HZ'])
@@ -79,7 +80,7 @@ class Laserhead(Elaboratable):
         O: step           -- step signal
         O: direction      -- direction signal
     """
-    def __init__(self, platform=None, top=False):
+    def __init__(self, platform):
         '''
         top        -- trigger synthesis of module
         platform   -- pass test platform
@@ -106,12 +107,8 @@ class Laserhead(Elaboratable):
         self.dct = params(platform)
         self.process_lines = Signal()
 
-        
     def elaborate(self, platform):
         m = Module()
-        if self.platform is not None:
-            platform = self.platform
-
         dct = self.dct
 
         # Pulse generator for prism motor
@@ -127,7 +124,7 @@ class Laserhead(Elaboratable):
             m.d.sync += [self.photodiode_t.eq(triggered),
                          photodiodecnt.eq(0),
                          triggered.eq(0)]
-        
+
         # step generator
         move = Signal()
         stepcnt = Signal(56)
@@ -138,23 +135,22 @@ class Laserhead(Elaboratable):
             with m.Else():
                 m.d.sync += [stepcnt.eq(0),
                              self.step.eq(~self.step)]
-        
-        
-        
+
         # pwm is always created but can be deactivated
         with m.If(pwmcnt == 0):
             m.d.sync += [self.pwm.eq(~self.pwm),
                          pwmcnt.eq(dct['POLYPERIOD']-1)]
         with m.Else():
             m.d.sync += pwmcnt.eq(pwmcnt-1)
-        
+
         # Laser FSM
         # stable thresh is changed, larger at start and then lowered
         stablethresh = Signal(range(dct['STABLETICKS']))
         facetcnt = Signal(range(dct['FACETS']))
         lasercnt = Signal(range(dct['LASERTICKS']))
         scanbit = Signal(range(dct['BITSINSCANLINE']+1))
-        tickcounter = Signal(range(max(dct['SPINUPTICKS'], dct['STABLETICKS'])))
+        tickcounter = Signal(range(max(dct['SPINUPTICKS'],
+                             dct['STABLETICKS'])))
         photodiode = self.photodiode
         read_data = self.read_data
         read_old = Signal.like(read_data)
@@ -190,7 +186,7 @@ class Laserhead(Elaboratable):
                              scanbit.eq(0),
                              lasercnt.eq(0),
                              lasers.eq(0)]
-                with m.If(self.synchronize&(~self.error)):
+                with m.If(self.synchronize & (~self.error)):
                     # laser is off, photodiode cannot be triggered
                     with m.If(self.photodiode == 0):
                         m.d.sync += self.error.eq(1)
@@ -297,8 +293,8 @@ class Laserhead(Elaboratable):
                     # NOTE: read enable can only be high for 1 cycle
                     #       as a result this is done right before the "read"
                     with m.If(lasercnt == 1):
-                        with m.If(readbit == 0 ):
-                                m.d.sync += [readbit.eq(readbit+1)]
+                        with m.If(readbit == 0):
+                            m.d.sync += [readbit.eq(readbit+1)]
                         # final read bit copy memory
                         # move to next address, i.e. byte, if end is reached
                         with m.Elif(readbit == MEMWIDTH-1):
@@ -315,11 +311,10 @@ class Laserhead(Elaboratable):
                                          read_old.eq(read_old >> 1)]
             with m.State('WAIT_END'):
                 m.d.sync += tickcounter.eq(tickcounter+1)
-
-                #with m.If(dct['SINGLE_LINE'] & self.empty):
-                m.d.sync += self.read_discard.eq(0)
-                #with m.Else():
-                #    m.d.sync += self.read_commit.eq(0)
+                with m.If(dct['SINGLE_LINE'] & self.empty):
+                    m.d.sync += self.read_discard.eq(0)
+                with m.Else():
+                    m.d.sync += self.read_commit.eq(0)
                 # -1 as you count till range-1 in python
                 # -2 as you need 1 tick to process
                 with m.If(tickcounter >= round(dct['TICKSINFACET']
@@ -340,10 +335,10 @@ class DiodeSimulator(Laserhead):
         if prism motor is enabled and the laser is on so the diode
         can be triggered.
     """
-    def __init__(self, platform=None, top=False, laser_var=None, addfifo=True):
+    def __init__(self, platform, laser_var=None, addfifo=True):
         if laser_var is not None:
             platform.laser_var = laser_var
-        super().__init__(platform, top=False)
+        super().__init__(platform)
         self.addfifo = addfifo
         if addfifo:
             self.write_en = Signal()
@@ -358,7 +353,7 @@ class DiodeSimulator(Laserhead):
         dct = self.dct
         diodecounter = Signal(range(dct['TICKSINFACET']))
         self.diodecounter = diodecounter
-        
+
         if self.addfifo:
             fifo = TransactionalizedFIFO(width=MEMWIDTH,
                                          depth=platform.memdepth)
@@ -398,13 +393,13 @@ class BaseTest(LunaGatewareTestCase):
         if fsm is None:
             fsm = self.dut.laserfsm
         return fsm.decoding[(yield fsm.state)]
-    
+
     def count_steps(self, single=False):
         '''counts steps while accounting for direction
-        
+
         single -- in single line mode dut.empty is not
                   a good measure
-        
+
         Very similar to the function in movement.py
         '''
         count = 0
@@ -415,11 +410,11 @@ class BaseTest(LunaGatewareTestCase):
         thresh = dut.dct['TICKSINFACET']
         if single:
             thresh = 4*thresh
-        while ((yield dut.empty)==0) | (ticks < thresh):
+        while ((yield dut.empty) == 0) | (ticks < thresh):
             if single:
                 ticks += 1
-            elif (yield dut.empty)==1:
-                ticks += 1 
+            elif (yield dut.empty) == 1:
+                ticks += 1
             old = (yield self.dut.step)
             yield
             if old and ((yield self.dut.step) == 0):
@@ -455,7 +450,7 @@ class BaseTest(LunaGatewareTestCase):
         # TODO: doesn'twork
         if len(bitlst) != 0:
             self.assertEqual((yield dut.stephalfperiod),
-                            stepsperline*round((dut.dct['TICKSINFACET']-1)/2))
+                             stepsperline*round((dut.dct['TICKSINFACET']-1)/2))
         self.assertEqual((yield dut.error), False)
         if len(bitlst) == 0:
             self.assertEqual((yield dut.error), False)
@@ -466,7 +461,7 @@ class BaseTest(LunaGatewareTestCase):
             for idx, bit in enumerate(bitlst):
                 assert (yield dut.lasercnt) == dut.dct['LASERTICKS']-1
                 assert (yield dut.scanbit) == idx+1
-                for _ in range(dut.dct['LASERTICKS']):    
+                for _ in range(dut.dct['LASERTICKS']):
                     assert (yield dut.lasers[0]) == bit
                     yield
         if (len(bitlst) == 0) & ((yield dut.synchronize) == 0):
@@ -498,7 +493,7 @@ class BaseTest(LunaGatewareTestCase):
         lines = []
         for _ in range(numblines):
             line = []
-            for _ in range(dut.dct['SCANBITS']):
+            for _ in range(dut.dct['BITSINSCANLINE']):
                 line.append(randint(0, 1))
             lines.append(line)
         lines.append([])
@@ -558,7 +553,7 @@ class SinglelineTest(BaseTest):
     @sync_test_case
     def test_single_line(self):
         dut = self.dut
-        lines = [[1]*dut.dct['SCANBITS']]
+        lines = [[1]*dut.dct['BITSINSCANLINE']]
         for line in lines:
             yield from self.write_line(line)
         yield dut.synchronize.eq(1)
@@ -594,7 +589,7 @@ class SinglelinesinglefacetTest(BaseTest):
     @sync_test_case
     def test_single_line_single_facet(self):
         dut = self.dut
-        lines = [[1]*dut.dct['SCANBITS']]
+        lines = [[1]*dut.dct['BITSINSCANLINE']]
         for line in lines:
             yield from self.write_line(line)
         yield dut.synchronize.eq(1)
@@ -609,19 +604,20 @@ class SinglelinesinglefacetTest(BaseTest):
             yield from self.checkline(line)
             self.assertEqual(1, (yield dut.facetcnt))
         self.assertEqual((yield dut.error), False)
-     
+
     @sync_test_case
     def test_move(self):
         dut = self.dut
-        lines = [[1]*dut.dct['SCANBITS']]
+        lines = [[1]*dut.dct['BITSINSCANLINE']]
         stepsperline = 3
         for line in lines:
-            yield from self.write_line(line, stepsperline=stepsperline, direction=1)
+            yield from self.write_line(line, stepsperline=stepsperline,
+                                       direction=1)
         yield dut.synchronize.eq(1)
         yield from self.pulse(dut.expose_start)
         steps = (yield from self.count_steps(single=True))
         self.assertEqual(steps, stepsperline)
-        
+
 
 class MultilineTest(BaseTest):
     'Test laserhead while triggering photodiode and ring buffer'
@@ -629,8 +625,7 @@ class MultilineTest(BaseTest):
     FRAGMENT_UNDER_TEST = DiodeSimulator
     FRAGMENT_ARGUMENTS = {'platform': platform}
 
-    
-    def checkmove(self, direction, stepsperline=1, numblines=3, 
+    def checkmove(self, direction, stepsperline=1, numblines=3,
                   appendstop=True):
         dut = self.dut
         lines = [[1]*dut.dct['BITSINSCANLINE']]*numblines
@@ -646,12 +641,12 @@ class MultilineTest(BaseTest):
         self.assertEqual(steps, stepsperline*numblines*direction)
         self.assertEqual((yield dut.synchronized), True)
         self.assertEqual((yield dut.error), False)
-    
+
     def checknomove(self, thresh=None):
         dut = self.dut
         if thresh is None:
             thresh = (yield dut.stephalfperiod)*2
-       
+
         current = (yield dut.step)
         count = 0
         res = False
@@ -676,7 +671,7 @@ class MultilineTest(BaseTest):
             yield from self.waituntilState('WAIT_STABLE')
             yield from self.waituntilState('WAIT_END')
         self.assertEqual((yield dut.error), 0)
-        
+
     @sync_test_case
     def test_stopline(self):
         'verify data run is not reached when stopline is sent'
@@ -695,11 +690,11 @@ class MultilineTest(BaseTest):
         yield
         self.assertEqual((yield dut.expose_finished), True)
         self.assertEqual((yield dut.empty), True)
-    
+
     @sync_test_case
     def test_interruption(self, numblines=3, stepsperline=1):
         '''verify scanhead moves as expected forward / backward
-        
+
         stepsperline  -- number of steps per line
         direction     -- 0 is negative and 1 is positive
         '''
@@ -711,19 +706,19 @@ class MultilineTest(BaseTest):
         # due to lack of data
         yield from self.checknomove()
         yield from self.checkmove(0)
-       
+
     @sync_test_case
     def test_movement(self):
         '''verify scanhead moves as expected forward / backward
-        
+
         stepsperline  -- number of steps per line
         direction     -- 0 is negative and 1 is positive
         '''
-        yield from self.checkmove(direction = 0)
-        yield from self.checkmove(direction = 1)
+        yield from self.checkmove(direction=0)
+        yield from self.checkmove(direction=1)
         # scanner should not move after stop
         yield from self.checknomove()
-                
+
     @sync_test_case
     def test_scanlineringbuffer(self, numblines=3):
         'write several scanlines and verify receival'
@@ -734,15 +729,15 @@ class Loweredge(BaseTest):
     'Test Scanline of length MEMWDITH'
     platform = TestPlatform()
     FRAGMENT_UNDER_TEST = DiodeSimulator
-    
+
     dct = deepcopy(platform.laser_var)
     dct['TICKSINFACET'] = 500
     dct['LASERTICKS'] = 3
     dct['SINGLE_LINE'] = False
-    dct['SCANBITS'] = MEMWIDTH
+    dct['BITSINSCANLINE'] = MEMWIDTH
     FRAGMENT_ARGUMENTS = {'platform': platform,
                           'laser_var': dct}
-    
+
     @sync_test_case
     def test_scanlineringbuffer(self, numblines=3):
         'write several scanlines and verify receival'
@@ -756,7 +751,7 @@ class Upperedge(Loweredge):
     dct['TICKSINFACET'] = 500
     dct['LASERTICKS'] = 3
     dct['SINGLE_LINE'] = False
-    dct['SCANBITS'] = MEMWIDTH+1
+    dct['BITSINSCANLINE'] = MEMWIDTH+1
     FRAGMENT_ARGUMENTS = {'platform': platform,
                           'laser_var': dct}
 
@@ -766,7 +761,7 @@ if __name__ == "__main__":
 
 # NOTE: new class is created to reset settings
 #       couldn't avoid this easily so kept for now
-#  
+#
 #       syncing behaviour is not really tested, in reality
 #       prism spins up and systems goes into sync
 #

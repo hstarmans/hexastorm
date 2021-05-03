@@ -354,7 +354,7 @@ class Host:
         response = bytearray(self.spi.xfer2(datachanged))
         self.chip_select.on()
         return response
-    
+
     def writeline(self, bitlst, stepsperline=1, direction=0, maxtrials=1E5):
         bytelst = self.bittobytelist(bitlst, stepsperline, direction)
         write_byte = COMMANDS.WRITE.to_bytes(1, 'big')
@@ -371,8 +371,9 @@ class Host:
                     break
                 if trials > maxtrials:
                     raise Memfull("Too many trials needed")
-            
-    def bittobytelist(self, bitlst, stepsperline=1, direction=0, bitorder='little'):
+
+    def bittobytelist(self, bitlst, stepsperline=1,
+                      direction=0, bitorder='little'):
         '''converts bitlst to bytelst
 
            bit list      set laser on and off
@@ -381,11 +382,13 @@ class Host:
                          if you don't want to move simply disable motor
            direction     scanning direction
         '''
-        halfperiod = round((self.laser_params['TICKSINFACET']-1)/(stepsperline*2))
+        halfperiod = round((self.laser_params['TICKSINFACET']-1)
+                           / (stepsperline*2))
         # avoid python "banker's rounding"
         steps = round(self.laser_params['TICKSINFACET']/(halfperiod*2)+0.01)
         assert stepsperline == steps
         direction = [int(bool(direction))]
+
         def remainder(bytelst):
             rem = (len(bytelst) % WORD_BYTES)
             if rem > 0:
@@ -404,12 +407,13 @@ class Host:
             halfperiodbits = [int(i) for i in bin(halfperiod)[2:]]
             halfperiodbits.reverse()
             assert len(halfperiodbits) < 56
-            bytelst += np.packbits(direction+halfperiodbits, bitorder=bitorder).tolist()
+            bytelst += np.packbits(direction+halfperiodbits,
+                                   bitorder=bitorder).tolist()
             bytelst += remainder(bytelst)*[0]
             bytelst += np.packbits(bitlst, bitorder=bitorder).tolist()
             bytelst += remainder(bytelst)*[0]
         bytelst.reverse()
-        # TODO: remove 
+        # TODO: remove
         # if you need to reverse you need to reverse each element within
         # this has been removed, requires final check with spi core
         return bytelst

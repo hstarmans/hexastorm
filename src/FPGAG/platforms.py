@@ -13,7 +13,7 @@ from nmigen.vendor.lattice_ice40 import LatticeICE40Platform
 from nmigen_boards.resources import LEDResources
 from nmigen_boards.test.blinky import Blinky
 
-from FPGAG.constants import wordsinmove, wordsinscanline
+from FPGAG.constants import wordsinmove
 from FPGAG.resources import (StepperResource, StepperRecord,
                              LaserscannerResource, LaserscannerRecord)
 
@@ -23,12 +23,10 @@ class TestPlatform:
     stepspermm = {'x': 400, 'y': 400}
     laser_var = {'RPM': 2000,
                  'FACETS': 4, 'SINGLE_LINE': False, 'TICKSINFACET': 18,
-                 'SCANBITS': 2, 'LASERTICKS': 4,
+                 'BITSINSCANLINE': 2, 'LASERTICKS': 4,
                  'SINGLE_FACET': False, 'DIRECTION': 0}
     motors = len(stepspermm.keys())
-    wordsinscanline = wordsinscanline(laser_var['SCANBITS'])
-    wordsinmove = wordsinmove(motors)
-    memdepth = wordsinmove*2+1
+    memdepth = wordsinmove(motors)*2+1
     steppers = [StepperRecord()]*motors
     laserhead = LaserscannerRecord()
 
@@ -157,7 +155,7 @@ class Firestarter(LatticeICE40Platform):
                  'END%': 0.7, 'START%': 0.35, 'SINGLE_LINE': False,
                  'SINGLE_FACET': False, 'DIRECTION': 0}
     motors = len(stepspermm.keys())
-    wordsinmove = wordsinmove(motors=motors)
+    #wordsinmove = wordsinmove(motors=motors)
     memdepth = 256
     device = 'iCE40HX4K'
     package = 'TQ144'

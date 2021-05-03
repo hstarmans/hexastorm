@@ -4,7 +4,7 @@ from math import floor
 
 import numpy as np
 from numpy.testing import assert_array_equal
-from FPGAG.controller import Host
+from FPGAG.controller import Host, Memfull
 from FPGAG.platforms import Firestarter
 from FPGAG.constants import (WORD_BYTES, COMMANDS, MOVE_TICKS)
 
@@ -60,7 +60,7 @@ class Tests(unittest.TestCase):
         '''test if motors move'''
         motors = Firestarter.motors
         position = np.array([10, 10, 0])
-        self.assertEqual((yield from self.host.dispatcherror), False)
+        self.assertEqual((yield from self.host.error), False)
         self.host.enable_steppers = True
         yield from self.host.gotopoint(position=position,
                                        speed=[1]*motors,
@@ -80,7 +80,7 @@ class Tests(unittest.TestCase):
         You fill the entire memory and see if it is properly emptied
         by ensuring that the position changes as excepted.
         '''
-        self.assertEqual((yield from self.host.dispatcherror), False)
+        self.assertEqual((yield from self.host.error), False)
         self.host.enable_steppers = False
         # with false check if this results in block
         # you can do a blink test to verify move
@@ -90,13 +90,16 @@ class Tests(unittest.TestCase):
         steps = mm * np.array(list(host.platform.stepspermm.values()))
         limit = floor(host.platform.memdepth /
                       host.platform.wordsinmove)
-        for _ in range(limit):
+        for _ in range(host.platform.memdepth):
             a = ((host.steps_to_count(steps.astype('int64'))/MOVE_TICKS)
                  .round().astype('int64'))
-            yield from host.send_move([MOVE_TICKS],
-                                      a.tolist(),
-                                      [0]*motors,
-                                      [0]*motors)
+            try:
+                yield from host.send_move([MOVE_TICKS],
+                                          a.tolist(),
+                                          [0]*motors,
+                                          [0]*motors, maxtrials=10)
+            except Memfull:
+                pass
         self.assertEqual((yield from self.host.memfull()), True)
         yield from self.host._executionsetter(True)
         sleep(1)
@@ -104,7 +107,7 @@ class Tests(unittest.TestCase):
         assert_array_equal((yield from self.host.position),
                            mm*limit)
         self.host._executionsetter(False)
-        self.assertEqual((yield from self.host.dispatcherror), False)
+        self.assertEqual((yield from self.host.error), False)
 
     @_executor
     def test_invalidinstruction(self):
@@ -116,7 +119,7 @@ class Tests(unittest.TestCase):
         sleep(3)
         yield from self.host._executionsetter(False)
         self.assertEqual((yield from self.host.memfull()), False)
-        self.assertEqual((yield from self.host.dispatcherror), True)
+        self.assertEqual((yield from self.host.error), True)
 
 
 if __name__ == "__main__":

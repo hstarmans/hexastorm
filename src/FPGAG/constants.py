@@ -26,7 +26,6 @@ MOVE_INSTRUCTION = {'INSTRUCTION': 1, 'TICKS': 7}
 DEGREE = 3  # only third degree polynomal
 
 
-
 # these numbers must be tested with minimum
 # jerk and maximum velocity move
 BIT_SHIFT = 40
@@ -34,7 +33,7 @@ MOVE_TICKS = 10_000
 
 
 def wordsinscanline(bits):
-    bytesinline = 8 # Instruction, direction, ticksperstep  
+    bytesinline = 8  # Instruction, direction, ticksperstep
     bytesinline += ceil(bits/8)
     return ceil(bytesinline/WORD_BYTES)
 
@@ -52,6 +51,7 @@ def getmovedct(motors):
     for i in range(motors):
         for j in range(DEGREE):
             dct.update({f'C{i}{j}': 8})
+
 
 # NOTE: following doesnt work due to bug
 # in pylint https://github.com/PyCQA/pylint/issues/3876
