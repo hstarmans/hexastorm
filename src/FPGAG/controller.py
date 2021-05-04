@@ -299,8 +299,10 @@ class Host:
             data = (self.spi_exchange_data(data))
         return data
 
-    def enable_comp(self, laser0=False, laser1=False, polygon=True):
+    def enable_comp(self, laser0=False, laser1=False, polygon=False):
         '''enable components
+
+        You need to enable dispatching
 
         laser0   -- True enables laser channel 0
         laser1   -- True enables laser channel 1

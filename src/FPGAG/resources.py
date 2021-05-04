@@ -3,7 +3,7 @@ import itertools
 from nmigen import Record
 
 from nmigen.hdl.ast import unsigned
-from nmigen.build import Subsignal, Resource, Pins, ResourceError
+from nmigen.build import Subsignal, Resource, Pins, PinsN, ResourceError
 from nmigen.hdl.rec import Layout
 
 
@@ -107,7 +107,7 @@ def LaserscannerResource(*args, laser0, laser1,
     io.append(Subsignal("photodiode",
               Pins(photodiode, dir="o", conn=conn, assert_width=1)))
     io.append(Subsignal("pwm", Pins(pwm, dir="o", conn=conn, assert_width=1)))
-    io.append(Subsignal("en", Pins(enable, dir="o",
+    io.append(Subsignal("en", PinsN(enable, dir="o",
                         conn=conn, assert_width=1)))
     if attrs is not None:
         io.append(attrs)

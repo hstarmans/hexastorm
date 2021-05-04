@@ -180,7 +180,7 @@ class Laserhead(Elaboratable):
                 m.d.sync += [stablethresh.eq(dct['STABLETICKS']-1),
                              tickcounter.eq(0),
                              self.synchronized.eq(0),
-                             self.enable_prism.eq(1),
+                             self.enable_prism.eq(0),
                              readbit.eq(0),
                              facetcnt.eq(0),
                              scanbit.eq(0),
@@ -193,7 +193,7 @@ class Laserhead(Elaboratable):
                         m.next = 'STOP'
                     with m.Else():
                         m.d.sync += [self.error.eq(0),
-                                     self.enable_prism.eq(0)]
+                                     self.enable_prism.eq(1)]
                         m.next = 'SPINUP'
             with m.State('SPINUP'):
                 with m.If(tickcounter > dct['SPINUPTICKS']-1):
@@ -371,7 +371,7 @@ class DiodeSimulator(Laserhead):
         with m.If(diodecounter == (dct['TICKSINFACET']-1)):
             m.d.sync += diodecounter.eq(0)
         with m.Elif(diodecounter > (dct['TICKSINFACET']-4)):
-            m.d.sync += [self.photodiode.eq(~((~self.enable_prism)
+            m.d.sync += [self.photodiode.eq(~(self.enable_prism
                                             & (self.lasers > 0))),
                          diodecounter.eq(diodecounter+1)]
         with m.Else():

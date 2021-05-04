@@ -94,18 +94,27 @@ class LaserheadTest(Base):
         assert self.host.laser_power == power
 
     @executor
-    def spinprism(self, timeout=10):
-        yield from self.host.enable_comp(polygon=False)
+    def spinprism(self, timeout=3):
+        yield from self.host._executionsetter(True)
+        yield from self.host.enable_comp(polygon=True)
         print(f'Spinning prism for {timeout} seconds')
         sleep(timeout)
-        yield from self.host.enable_comp(polygon=True)
+        self.assertEqual((yield from self.host.error), False)
+        yield from self.host.enable_comp(polygon=False)
+        self.assertEqual((yield from self.host.error), False)
+        yield from self.host._executionsetter(False)
 
     @executor
-    def lasertest(self, timeout=10):
-        yield from self.host.enable_comp(laser0=True)
+    def lasertest(self, timeout=3):
+        self.assertEqual((yield from self.host.error), False)
+        yield from self.host._executionsetter(True)
+        yield from self.host.enable_comp(laser1=True)
+        self.assertEqual((yield from self.host.error), False)
         print(f'Laser on for {timeout} seconds')
         sleep(timeout)
         yield from self.host.enable_comp(laser0=False)
+        self.assertEqual((yield from self.host.error), False)
+        yield from self.host._executionsetter(False)
 
 
 class MoveTest(Base):

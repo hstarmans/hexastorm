@@ -246,7 +246,7 @@ class Dispatcher(Elaboratable):
         # connect laserhead
         m.d.comb += [
             laserheadpins.pwm.eq(laserhead.pwm),
-            laserheadpins.en.eq(laserhead.enable_prism & enable_prism),
+            laserheadpins.en.eq(laserhead.enable_prism | enable_prism),
             laserheadpins.laser0.eq(laserhead.lasers[0] | lasers[0]),
             laserheadpins.laser1.eq(laserhead.lasers[1] | lasers[1]),
         ]
@@ -293,16 +293,16 @@ class Dispatcher(Elaboratable):
             # check which instruction we r handling
             with m.State('PARSEHEAD'):
                 byte0 = self.read_data[:8]
+                m.d.sync += self.read_en.eq(0)
                 with m.If(byte0 == INSTRUCTIONS.MOVE):
                     m.d.sync += [polynomal.ticklimit.eq(self.read_data[8:]),
-                                 self.read_en.eq(0),
                                  coeffcnt.eq(0)]
                     m.next = 'MOVE_POLYNOMAL'
                 with m.Elif(byte0 == INSTRUCTIONS.WRITEPIN):
                     pins = Cat(lasers, enable_prism)
                     m.d.sync += [pins.eq(self.read_data[8:]),
-                                 self.read_commit.eq(0)]
-                    m.next = 'WAIT_INSTRUCTION'
+                                 self.read_commit.eq(1)]
+                    m.next = 'WAIT'
                 with m.Elif((byte0 == INSTRUCTIONS.SCANLINE) |
                             (byte0 == INSTRUCTIONS.LASTSCANLINE)):
                     m.d.sync += [self.read_discard.eq(1),
@@ -530,10 +530,6 @@ class TestDispatcher(SPIGatewareTestCase):
         yield
         # enable dispatching of code
         yield from self.host._executionsetter(True)
-        # data should now be parsed and empty become 1
-        while (yield self.dut.parser.empty) == 0:
-            yield
-        # ensure there is no error
         self.assertEqual((yield from self.host.error), False)
         self.assertEqual((yield self.dut.laserheadpins.laser0), 1)
         self.assertEqual((yield self.dut.laserheadpins.laser1), 0)
