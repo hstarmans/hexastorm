@@ -116,6 +116,24 @@ class LaserheadTest(Base):
         self.assertEqual((yield from self.host.error), False)
         yield from self.host._executionsetter(False)
 
+    @executor
+    def test_diode(self, timeout=3):
+        self.assertEqual((yield from self.host.error), False)
+        res = (yield from self.host.pinstate)['photodiode_trigger']
+        self.assertEqual(res, 0)
+        yield from self.host._executionsetter(True)
+        yield from self.host.enable_comp(laser1=True, polygon=True)
+        print(f'Wait for diode trigger, {timeout} seconds')
+        sleep(timeout)
+        res = (yield from self.host.pinstate)['photodiode_trigger']
+        self.assertEqual((yield from self.host.error), False)
+        yield from self.host.enable_comp(laser1=False, polygon=False)
+        self.assertEqual(res, 1)
+
+    @executor
+    def test_stable(self, timeout=3):
+        pass
+
 
 class MoveTest(Base):
     '''Test movement core'''

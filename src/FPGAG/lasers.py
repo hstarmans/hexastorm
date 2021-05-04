@@ -117,7 +117,7 @@ class Laserhead(Elaboratable):
         photodiodecnt = Signal(range(dct['TICKSINFACET']*2))
         triggered = Signal()
         with m.If(photodiodecnt < (dct['TICKSINFACET']*2-1)):
-            with m.If(self.photodiode):
+            with m.If(~self.photodiode):
                 m.d.sync += triggered.eq(1)
             m.d.sync += photodiodecnt.eq(photodiodecnt+1)
         with m.Else():
@@ -340,6 +340,9 @@ class DiodeSimulator(Laserhead):
             platform.laser_var = laser_var
         super().__init__(platform)
         self.addfifo = addfifo
+        self.laser0in = Signal()
+        self.laser1in = Signal()
+        self.enable_prism_in = Signal()
         if addfifo:
             self.write_en = Signal()
             self.write_commit = Signal()
@@ -355,6 +358,9 @@ class DiodeSimulator(Laserhead):
         self.diodecounter = diodecounter
 
         if self.addfifo:
+            m.d.comb += [self.enable_prism_in.eq(self.enable_prism),
+                         self.laser0in.eq(self.lasers[0]),
+                         self.laser1in.eq(self.lasers[1])]
             fifo = TransactionalizedFIFO(width=MEMWIDTH,
                                          depth=platform.memdepth)
             m.submodules.fifo = fifo
@@ -371,8 +377,9 @@ class DiodeSimulator(Laserhead):
         with m.If(diodecounter == (dct['TICKSINFACET']-1)):
             m.d.sync += diodecounter.eq(0)
         with m.Elif(diodecounter > (dct['TICKSINFACET']-4)):
-            m.d.sync += [self.photodiode.eq(~(self.enable_prism
-                                            & (self.lasers > 0))),
+            m.d.sync += [self.photodiode.eq(
+                ~(self.enable_prism_in
+                  & (self.laser0in | self.laser1in))),
                          diodecounter.eq(diodecounter+1)]
         with m.Else():
             m.d.sync += [diodecounter.eq(diodecounter+1),

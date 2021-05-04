@@ -105,7 +105,7 @@ def LaserscannerResource(*args, laser0, laser1,
     io.append(Subsignal("laser1", Pins(laser1, dir="o",
               conn=conn, assert_width=1)))
     io.append(Subsignal("photodiode",
-              Pins(photodiode, dir="o", conn=conn, assert_width=1)))
+              Pins(photodiode, dir="i", conn=conn, assert_width=1)))
     io.append(Subsignal("pwm", Pins(pwm, dir="o", conn=conn, assert_width=1)))
     io.append(Subsignal("en", PinsN(enable, dir="o",
                         conn=conn, assert_width=1)))

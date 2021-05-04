@@ -98,10 +98,11 @@ class Host:
         '''retrieves pin state as dictionary'''
         data = (yield from self._read_state())
         bits = "{:08b}".format(data[-2])
-        dct = {'x': int(bits[0]),
-               'y': int(bits[1]),
-               'z': int(bits[2]),
-               'photodiode_trigger': int(bits[3])}
+        mapping = ['x', 'y', 'z', 'extruder']
+        dct = {}
+        for i in range(self.platform.motors):
+            dct[mapping[i]] = int(bits[i])
+        dct['photodiode_trigger'] = int(bits[self.platform.motors])
         return dct
 
     @property
