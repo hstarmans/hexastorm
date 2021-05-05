@@ -85,12 +85,17 @@ class StaticTest(Base):
 
 class LaserheadTest(Base):
     def test_setlaserpower(self, power=100):
-        'test if laser power can be set'
+        '''test if laser power can be set
+
+        sets value on digipot via I2C
+        and verifies this is equal to readed value of digipot
+        '''
         self.host.laser_power = power
         assert self.host.laser_power == power
 
     @executor
     def spinprism(self, timeout=3):
+        'spin for timeout seconds'
         yield from self.host.enable_comp(polygon=True)
         print(f'Spinning prism for {timeout} seconds')
         sleep(timeout)
@@ -99,6 +104,7 @@ class LaserheadTest(Base):
 
     @executor
     def lasertest(self, timeout=3):
+        'enable laser for timeout seconds'
         yield from self.host.enable_comp(laser1=True)
         print(f'Laser on for {timeout} seconds')
         sleep(timeout)
@@ -107,6 +113,7 @@ class LaserheadTest(Base):
 
     @executor
     def test_diode(self, timeout=3):
+        'enable motor, laser and verify photodiode is triggered'
         res = (yield from self.host.pinstate)['photodiode_trigger']
         self.assertEqual(res, 0)
         yield from self.host.enable_comp(laser1=True, polygon=True)
