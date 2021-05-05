@@ -101,7 +101,7 @@ class SPIParser(Elaboratable):
         instruction = Signal(8)
         with m.FSM(reset='RESET', name='parser'):
             with m.State('RESET'):
-                m.d.sync += [self.execute.eq(0), wordsreceived.eq(0),
+                m.d.sync += [self.execute.eq(1), wordsreceived.eq(0),
                              error.eq(0)]
                 m.next = 'WAIT_COMMAND'
             with m.State('WAIT_COMMAND'):
@@ -280,8 +280,8 @@ class Dispatcher(Elaboratable):
             m.d.comb += [stepper.step.eq(step),
                          stepper.dir.eq(direction),
                          parser.pinstate[idx].eq(stepper.limit)]
-        m.d.comb += (parser.pinstate[len(steppers)].
-                     eq(laserhead.photodiode_t))
+        m.d.comb += (parser.pinstate[len(steppers):].
+                     eq(Cat(laserhead.photodiode_t, laserhead.synchronized)))
         # Busy signal
         m.d.comb += busy.eq(polynomal.busy | laserhead.process_lines)
         # connect spi
@@ -289,9 +289,12 @@ class Dispatcher(Elaboratable):
         with m.If((busy_d == 1) & (busy == 0)):
             for idx, position in enumerate(parser.position):
                 m.d.sync += position.eq(position+polynomal.totalsteps[idx])
+        # pins you can write to
+        pins = Cat(lasers, enable_prism, laserhead.synchronize)
         with m.FSM(reset='RESET', name='dispatcher'):
             with m.State('RESET'):
                 m.next = 'WAIT_INSTRUCTION'
+                m.d.sync += pins.eq(0)
             with m.State('WAIT_INSTRUCTION'):
                 m.d.sync += [self.read_commit.eq(0), polynomal.start.eq(0)]
                 with m.If((self.empty == 0) & parser.execute & (busy == 0)):
@@ -306,13 +309,13 @@ class Dispatcher(Elaboratable):
                                  coeffcnt.eq(0)]
                     m.next = 'MOVE_POLYNOMAL'
                 with m.Elif(byte0 == INSTRUCTIONS.WRITEPIN):
-                    pins = Cat(lasers, enable_prism)
                     m.d.sync += [pins.eq(self.read_data[8:]),
                                  self.read_commit.eq(1)]
                     m.next = 'WAIT'
                 with m.Elif((byte0 == INSTRUCTIONS.SCANLINE) |
                             (byte0 == INSTRUCTIONS.LASTSCANLINE)):
                     m.d.sync += [self.read_discard.eq(1),
+                                 laserhead.synchronize.eq(1),
                                  laserhead.expose_start.eq(1)]
                     m.next = 'SCANLINE'
                 with m.Else():
@@ -338,6 +341,7 @@ class Dispatcher(Elaboratable):
             # NOTE: you need to wait for busy to be raised
             #       in time
             with m.State('WAIT'):
+                m.d.sync += polynomal.start.eq(0)
                 m.next = 'WAIT_INSTRUCTION'
             # NOTE: system never recovers user must reset
             with m.State('ERROR'):
@@ -410,27 +414,28 @@ class TestParser(SPIGatewareTestCase):
 
     @sync_test_case
     def test_readpinstate(self):
-        '''retrieve pin state'''
-        # TODO: stopped working in last commit
-        def test_pins(dct):
-            bitlist = dct.values()
+        '''set pins to random state'''
+        def test_pins():
+            olddct = (yield from self.host.pinstate)
+            for k in olddct.keys():
+                olddct[k] = randint(0, 1)
+            bitlist = list(olddct.values())
+            bitlist.reverse()
             b = int("".join(str(i) for i in bitlist), 2)
             yield self.dut.pinstate.eq(b)
             yield
             newdct = (yield from self.host.pinstate)
-            subset = ['x', 'y']
-            newdct = {k: v for k, v in newdct.items() if k in subset}
-            self.assertDictEqual(dct, newdct)
-        yield from test_pins({'x': 0, 'y': 1})
-        yield from test_pins({'x': 1, 'y': 0})
+            self.assertDictEqual(olddct, newdct)
+        yield from test_pins()
+        yield from test_pins()
 
     @sync_test_case
     def test_enableparser(self):
         '''enables SRAM parser via command and verifies status with
         different command'''
-        yield from self.host._executionsetter(True)
-        self.assertEqual((yield self.dut.execute), 1)
-        self.assertEqual((yield from self.host.execution), True)
+        yield from self.host._executionsetter(False)
+        self.assertEqual((yield self.dut.execute), 0)
+        self.assertEqual((yield from self.host.execution), 0)
 
     @sync_test_case
     def test_invalidwrite(self):
@@ -489,6 +494,7 @@ class TestDispatcher(SPIGatewareTestCase):
         # should fill the memory as move instruction is
         # larger than the memdepth
         self.assertEqual((yield from self.host.memfull()), False)
+        yield from self.host._executionsetter(False)
         try:
             for _ in range(platform.memdepth):
                 yield from self.host.send_move([1000],
@@ -516,6 +522,7 @@ class TestDispatcher(SPIGatewareTestCase):
         has been triggered for each cycle.
         The photodiode is triggered by the simdiode.
         '''
+        yield from self.host._executionsetter(False)
         yield from self.host.enable_comp(laser0=True,
                                          polygon=True)
         for _ in range(self.dut.laserhead.dct['TICKSINFACET']*2):
@@ -541,8 +548,6 @@ class TestDispatcher(SPIGatewareTestCase):
         while (yield self.dut.parser.empty):
             yield
         yield
-        # enable dispatching of code
-        yield from self.host._executionsetter(True)
         self.assertEqual((yield from self.host.error), False)
         self.assertEqual((yield self.dut.laserheadpins.laser0), 1)
         self.assertEqual((yield self.dut.laserheadpins.laser1), 0)
@@ -573,8 +578,6 @@ class TestDispatcher(SPIGatewareTestCase):
         yield from self.pulse(fifo.write_en)
         yield from self.pulse(fifo.write_commit)
         self.assertEqual((yield self.dut.parser.empty), 0)
-        # enable dispatching of code
-        yield from self.host._executionsetter(True)
         # data should now be processed from sram and empty become 1
         while (yield self.dut.parser.empty) == 0:
             yield
@@ -614,13 +617,10 @@ class TestDispatcher(SPIGatewareTestCase):
                                        b,
                                        c)
         # wait till instruction is received
-        while (yield self.dut.parser.empty):
+        while (yield self.dut.pol.start) == 0:
             yield
         yield
-        # enable dispatching of code
-        yield from self.host._executionsetter(True)
-        # data should now be parsed and empty become 1
-        while (yield self.dut.parser.empty) == 0:
+        while (yield self.dut.pol.busy):
             yield
         # confirm receipt tick limit and coefficients
         self.assertEqual((yield self.dut.pol.ticklimit), 10_000)
@@ -645,12 +645,8 @@ class TestDispatcher(SPIGatewareTestCase):
             yield from self.host.writeline([1] *
                                            host.laser_params['BITSINSCANLINE'])
         yield from host.writeline([])
-        # TODO: doesnt work as you don't read out code / aka enabled the head
-        # # enable dispatching of code
-        # yield from host._executionsetter(True)
-        # # data should now be parsed and empty become 1
-        # while (yield self.dut.parser.empty) == 0:
-        #     yield
+        while (yield self.dut.parser.empty) == 0:
+            yield
 
 
 if __name__ == "__main__":
@@ -677,4 +673,4 @@ if __name__ == "__main__":
 #   -- number of ticks per motor is uniform
 #   -- yosys does not give an error if you try to synthesize invalid memory
 #   -- read / write commit is not perfect
-#   -- simulations do not always agree with reality, around edges
+#   -- add example of simulating in yosys / chisel
