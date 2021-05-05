@@ -103,6 +103,7 @@ class Host:
         for i in range(self.platform.motors):
             dct[mapping[i]] = int(bits[i])
         dct['photodiode_trigger'] = int(bits[self.platform.motors])
+        dct['synchronized'] = int(bits[self.platform.motors+1])
         return dct
 
     @property
@@ -300,7 +301,8 @@ class Host:
             data = (self.spi_exchange_data(data))
         return data
 
-    def enable_comp(self, laser0=False, laser1=False, polygon=False):
+    def enable_comp(self, laser0=False, laser1=False,
+                    polygon=False, synchronize=False):
         '''enable components
 
         You need to enable dispatching
@@ -311,8 +313,9 @@ class Host:
         '''
         laser0, laser1, polygon = (int(bool(laser0)),
                                    int(bool(laser1)), int(bool(polygon)))
+        synchronize = int(bool(synchronize))
         data = ([COMMANDS.WRITE] + [0]*(WORD_BYTES-2) +
-                [int(f'{polygon}{laser1}{laser0}', 2)]
+                [int(f'{synchronize}{polygon}{laser1}{laser0}', 2)]
                 + [INSTRUCTIONS.WRITEPIN])
         yield from self.send_command(data)
 

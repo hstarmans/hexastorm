@@ -42,7 +42,7 @@ class StaticTest(Base):
         You fill the entire memory and see if it is properly emptied
         by ensuring that the position changes as excepted.
         '''
-        self.assertEqual((yield from self.host.error), False)
+        yield from self.host._executionsetter(False)
         self.host.enable_steppers = False
         # with false check if this results in block
         # you can do a blink test to verify move
@@ -68,23 +68,19 @@ class StaticTest(Base):
         self.assertEqual((yield from self.host.memfull()), False)
         assert_array_equal((yield from self.host.position),
                            mm*limit)
-        self.host._executionsetter(False)
         self.assertEqual((yield from self.host.error), False)
         self.host.reset()
 
     @executor
     def test_invalidinstruction(self):
         '''write invalid instruction and verify it passes dispatcher'''
-        yield from self.host._executionsetter(True)
         command = [COMMANDS.WRITE] + [0]*WORD_BYTES
         for _ in range(wordsinmove(self.host.platform.motors)):
             yield from self.host.send_command(command)
         sleep(3)
-        yield from self.host._executionsetter(False)
         self.assertEqual((yield from self.host.memfull()), False)
         self.assertEqual((yield from self.host.error), True)
         self.host.reset()
-        self.assertEqual((yield from self.host.error), False)
 
 
 class LaserheadTest(Base):
@@ -95,44 +91,41 @@ class LaserheadTest(Base):
 
     @executor
     def spinprism(self, timeout=3):
-        yield from self.host._executionsetter(True)
         yield from self.host.enable_comp(polygon=True)
         print(f'Spinning prism for {timeout} seconds')
         sleep(timeout)
-        self.assertEqual((yield from self.host.error), False)
         yield from self.host.enable_comp(polygon=False)
         self.assertEqual((yield from self.host.error), False)
-        yield from self.host._executionsetter(False)
 
     @executor
     def lasertest(self, timeout=3):
-        self.assertEqual((yield from self.host.error), False)
-        yield from self.host._executionsetter(True)
         yield from self.host.enable_comp(laser1=True)
-        self.assertEqual((yield from self.host.error), False)
         print(f'Laser on for {timeout} seconds')
         sleep(timeout)
         yield from self.host.enable_comp(laser0=False)
         self.assertEqual((yield from self.host.error), False)
-        yield from self.host._executionsetter(False)
 
     @executor
     def test_diode(self, timeout=3):
-        self.assertEqual((yield from self.host.error), False)
         res = (yield from self.host.pinstate)['photodiode_trigger']
         self.assertEqual(res, 0)
-        yield from self.host._executionsetter(True)
         yield from self.host.enable_comp(laser1=True, polygon=True)
         print(f'Wait for diode trigger, {timeout} seconds')
         sleep(timeout)
         res = (yield from self.host.pinstate)['photodiode_trigger']
-        self.assertEqual((yield from self.host.error), False)
         yield from self.host.enable_comp(laser1=False, polygon=False)
         self.assertEqual(res, 1)
+        self.assertEqual((yield from self.host.error), False)
 
     @executor
     def test_stable(self, timeout=3):
-        pass
+        yield from self.host.enable_comp(synchronize=True)
+        print(f'Wait for synchronization, {timeout} seconds')
+        sleep(timeout)
+        res = (yield from self.host.pinstate)['photodiode_trigger']
+        self.assertEqual(res, 1)
+        yield from self.host.enable_comp(synchronize=False)
+        self.assertEqual((yield from self.host.error), False)
 
 
 class MoveTest(Base):
