@@ -134,6 +134,16 @@ class LaserheadTest(Base):
         yield from self.host.enable_comp(synchronize=False)
         self.assertEqual((yield from self.host.error), False)
 
+    @executor
+    def test_scanline(self, timeout=3, numblines=1):
+        line = [1] * self.host.laser_params['BITSINSCANLINE']
+        for _ in range(numblines):
+            yield from self.host.writeline(line)
+        yield from self.host.writeline([])
+        print(f'Wait for stopline to execute, {timeout} seconds')
+        sleep(timeout)
+        self.assertEqual((yield from self.host.error), False)
+
 
 class MoveTest(Base):
     '''Test movement core'''

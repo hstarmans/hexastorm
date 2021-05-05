@@ -65,8 +65,8 @@ class Laserhead(Elaboratable):
         I/O signals:
         O: synchronized   -- if true, laser is in sync and prism is rotating
         I: synchronize    -- activate synchronization
-        I: expose_start  -- start reading lines and exposing
-        O: expose_finish -- exposure is finished
+        I: expose_start   -- start reading lines and exposing
+        O: expose_finish  -- exposure is finished
         O: error          -- error signal
         O: lasers         -- laser pin
         O: pwm            -- pulse for scanner motor
