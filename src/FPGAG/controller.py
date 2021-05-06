@@ -388,9 +388,11 @@ class Host:
             maxtrials = 10
         for i in range(0, len(bytelst), 8):
             trials = 0
+            lst = bytelst[i:i+8]
+            lst.reverse()
+            data = write_byte + bytes(lst)
             while True:
                 trials += 1
-                data = write_byte + bytes(bytelst[i:i+8])
                 data_out = (yield from self.send_command(data))
                 if not (yield from self.memfull(data_out)):
                     break
@@ -437,8 +439,4 @@ class Host:
             bytelst += remainder(bytelst)*[0]
             bytelst += np.packbits(bitlst, bitorder=bitorder).tolist()
             bytelst += remainder(bytelst)*[0]
-        bytelst.reverse()
-        # TODO: remove
-        # if you need to reverse you need to reverse each element within
-        # this has been removed, requires final check with spi core
         return bytelst

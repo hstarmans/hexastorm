@@ -638,15 +638,16 @@ class TestDispatcher(SPIGatewareTestCase):
                              + c[motor]*pow(ticks, 3))
 
     @sync_test_case
-    def test_writeline(self):
+    def test_writeline(self, numblines=3):
         'write line and see it is processed accordingly'
         host = self.host
-        for _ in range(3):
+        for _ in range(numblines):
             yield from self.host.writeline([1] *
                                            host.laser_params['BITSINSCANLINE'])
         yield from host.writeline([])
         while (yield self.dut.parser.empty) == 0:
             yield
+        self.assertEqual((yield from self.host.error), False)
 
 
 if __name__ == "__main__":

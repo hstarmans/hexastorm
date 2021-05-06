@@ -485,7 +485,6 @@ class BaseTest(LunaGatewareTestCase):
         without dispatcher and parser
         '''
         bytelst = self.host.bittobytelist(bitlist, stepsperline, direction)
-        bytelst.reverse()
         dut = self.dut
         for i in range(0, len(bytelst), WORD_BYTES):
             lst = bytelst[i:i+WORD_BYTES]
