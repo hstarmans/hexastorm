@@ -24,8 +24,8 @@ def find_largestcontour(img, denoise=False):
         thresh = cv.erode(thresh, kernel, iterations=1)
         thresh = cv.dilate(thresh, kernel, iterations=1)
     # find the external contour
-    cntrs, _ = cv.findContours
-    (thresh, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+    cntrs, _ = cv.findContours(
+        thresh, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
     if len(cntrs) == 0:
         raise Exception("Did not find a contour")
     c = max(cntrs, key=cv.contourArea)

@@ -10,7 +10,7 @@ build*
 *.vcd
 
 # Optical camera images
-tests/images*
+test/FPGAG/images*
 
 # other
 # Byte-compiled / optimized / DLL files

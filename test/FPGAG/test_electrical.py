@@ -4,22 +4,10 @@ from math import floor
 
 import numpy as np
 from numpy.testing import assert_array_equal
-from FPGAG.controller import Host, Memfull
+from FPGAG.controller import Host, Memfull, executor
 from FPGAG.platforms import Firestarter
 from FPGAG.constants import (WORD_BYTES, COMMANDS, MOVE_TICKS,
                              wordsinmove)
-
-
-def executor(func):
-    '''executes generator until stop iteration
-
-    Nmigen uses generator syntax and this leaks into our
-    python code. As a result, it is required to iterate.
-    '''
-    def inner(self):
-        for _ in func(self):
-            pass
-    return inner
 
 
 class Base(unittest.TestCase):

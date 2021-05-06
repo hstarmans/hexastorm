@@ -16,6 +16,18 @@ import FPGAG.core as core
 import steppers
 
 
+def executor(func):
+    '''executes generator until stop iteration
+
+    Nmigen uses generator syntax and this leaks into our
+    python code. As a result, it is required to iterate.
+    '''
+    def inner(self):
+        for _ in func(self):
+            pass
+    return inner
+
+
 class Memfull(Exception):
     'Custom exception for memfull'
     pass
@@ -62,9 +74,9 @@ class Host:
         steppers.bcm2835_close()
 
     def build(self, do_program=True, verbose=True):
-        # put here to prevent circular import when testing core.py
         self.platform = Firestarter()
-        self.platform.build(core.Dispatcher(Firestarter()),
+        self.platform.laser_var = self.laser_params
+        self.platform.build(core.Dispatcher(self.platform),
                             do_program=do_program, verbose=verbose)
 
     def reset(self):
