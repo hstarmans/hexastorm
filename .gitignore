@@ -11,6 +11,8 @@ build*
 
 # Optical camera images
 test/FPGAG/images*
+src/FPGAG/interpolator/debug*
+
 
 # other
 # Byte-compiled / optimized / DLL files
