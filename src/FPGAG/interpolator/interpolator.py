@@ -1,9 +1,76 @@
 import math
 import os
+from numba import jit, typed, types
 
 import numpy as np
 from scipy import ndimage
 from PIL import Image
+
+
+# the following function cannot be defined with self due to numba
+
+@jit
+def displacement(pixel, params):
+    '''returns the displacement for a given pixel
+
+    The x-axis is parallel to the scanline if the stage does not move.
+    It is assumed, the laser bundle traverses
+    in the negative direction if the polygon rotates.
+
+    pixel  --  the pixelnumber, in range [0, self.pixelsfacet]
+    '''
+    # interiorangle = 180-360/self.n
+    # max_angle = 180-90-0.5*interiorangle
+    max_angle = 180/params['facets']
+    pixelsfacet = round(params['laserfrequency'] /
+                        (params['rotationfrequency']*params['facets']))
+    angle = np.radians(- 2 * max_angle * (pixel/pixelsfacet) + max_angle)
+    disp = (params['inradius']*2*np.sin(angle) *
+            (1-np.power((1-np.power(np.sin(angle), 2)) /
+             (np.power(params['n'], 2)-np.power(np.sin(angle), 2)), 0.5)))
+    return disp
+
+
+@jit
+def fxpos(pixel, params, xstart=0):
+    '''returns the laserdiode x-position in pixels
+
+    The x-axis is parallel to the scanline if the stage does not move.
+    pixel   -- the pixelnumber in the line
+    xstart  -- the x-start position [mm], typically
+                your xstart is larger than 0 as the displacement
+                can be negative
+    '''
+    line_pixel = params['startpixel'] + pixel % params['pixelsinline']
+    xpos = (np.sin(params['tiltangle']) *
+            displacement(line_pixel, params)
+            + xstart)
+    return xpos/params['samplegridsize']
+
+
+@jit
+def fypos(pixel, params, direction, ystart=0):
+    '''
+    returns the laserdiode y-position in pixels
+
+    The y-axis is orthogonal to the scanline if the stage does not move,
+    and parallel to the stage movement.
+    pixel      -- the pixelnumber in the line
+    direction  -- True is +, False is -
+    ystart     -- the y-start position [mm]
+    '''
+    line_pixel = params['startpixel'] + pixel % params['pixelsinline']
+    if direction:
+        ypos = -np.cos(params['tiltangle'])*displacement(line_pixel,
+                                                         params)
+        ypos += (line_pixel/params['laserfrequency']*params['stagespeed']
+                 + ystart)
+    else:
+        ypos = -np.cos(params['tiltangle'])*displacement(line_pixel,
+                                                         params)
+        ypos -= (line_pixel/params['laserfrequency']*params['stagespeed'] +
+                 ystart)
+    return ypos/params['samplegridsize']
 
 
 class Interpolator:
@@ -21,124 +88,86 @@ class Interpolator:
     the original light engine described in US10114289B2.
     '''
     def __init__(self):
-        # PARAMETERS
-        # angle [radians], for a definition see figure 7
-        # https://reprap.org/wiki/Transparent_Polygon_Scanning
-        self.tiltangle = np.radians(90)
-        # the laser frequency [Hz]
-        self.laserfrequency = 2e6
-        # rotation frequency polygon [Hz]
-        self.rotationfrequency = 2400/60
-        # number of facets
-        self.facets = 4
-        # inradius polygon [mm]
-        self.inradius = 15
-        # refractive index
-        self.n = 1.49
-        # platform size scanning direction [mm]
-        self.pltfxsize = 200
-        # platform size stacking direction [mm]
-        self.pltfysize = 200
-        # sample size scanning direction [mm]
-        self.samplexsize = 0
-        # sample size stacking direction [mm]
-        self.sampleysize = 0
-        # NOTE: sample below Nyquist criterion
-        #       you first sample the image,
-        #       you then again sample the sampled image
-        # height/width of the sample gridth [mm]
-        self.samplegridsize = 0.015
-        # mm/s
-        self.stagespeed = 2.0997375328
-        # pixel determine via camera
-        self.startpixel = 3467
-        # number of pixels in a line [new 785]
-        self.pixelsinline = 790*8
-        # each pixel is repeated five times, to speed up interpolation
-        self.downsample_factor = 5
-        self.downsample(factor=self.downsample_factor)
+        self.params = self.parameters()
+        self.params = self.downsample(self.params)
         currentdir = os.path.dirname(os.path.realpath(__file__))
         self.debug_folder = os.path.join(currentdir, 'debug')
 
-    def downsample(self, factor=5):
+    def parameters(self):
+        dct = typed.Dict.empty(key_type=types.string,
+                               value_type=types.float64)
+        dct2 = {
+            # angle [radians], for a definition see figure 7
+            # https://reprap.org/wiki/Transparent_Polygon_Scanning
+            'tiltangle': np.radians(90),
+            'laserfrequency': 2e6,   # Hz
+            # rotation frequency polygon [Hz]
+            'rotationfrequency': 2400/60,
+            # number of facets
+            'facets': 4,
+            # inradius polygon [mm]
+            'inradius': 15,
+            # refractive index
+            'n': 1.49,
+            # platform size scanning direction [mm]
+            'pltfxsize': 200,
+            # platform size stacking direction [mm]
+            'pltfysize': 200,
+            # sample size scanning direction [mm]
+            'samplexsize': 0,
+            # sample size stacking direction [mm]
+            'sampleysize': 0,
+            # NOTE: sample below Nyquist criterion
+            #       you first sample the image,
+            #       you then again sample the sampled image
+            # height/width of the sample gridth [mm]
+            'samplegridsize': 0.015,
+            # mm/s
+            'stagespeed': 2.0997375328,
+            # pixel determined via camera
+            'startpixel': 3467,
+            # number of pixels in a line [new 785]
+            'pixelsinline': 790*8,
+            # each pixel is repeated five times, to speed up interpolation
+            'downsamplefactor': 5
+        }
+        for k, v in dct2.items():
+            dct[k] = v
+        return dct
+
+    def downsample(self, params):
         'downsamples constants'
-        self.laserfrequency = round(self.laserfrequency/factor)
-        self.startpixel = round(self.startpixel/factor)
-        self.pixelsinline = round(self.pixelsinline/factor)
-        if self.pixelsinline % 8:
+        lst = ['laserfrequency', 'startpixel', 'pixelsinline']
+        for item in lst:
+            params[item] /= params['downsamplefactor']
+            params[item] = round(params[item])
+        if params['pixelsinline'] % 8:
             raise Exception('Remainder not zero {}'
-                            .format(self.pixelsinline % 8))
+                            .format(params['pixelsinline'] % 8))
+        return params
 
     def pstoarray(self, url):
         '''converts postscript file to an array
 
-        :param url: path to postcript file
+        url  --  path to postcript file
         '''
+        params = self.params
         # post script pixel in mm
         psppoint = 0.3527777778
         tmp = Image.open(url)
         x_size, y_size = [i*psppoint for i in tmp.size]
-        if x_size > self.pltfxsize or y_size > self.pltfysize:
+        if x_size > params['pltfxsize'] or y_size > params['pltfysize']:
             raise Exception('Object does not fit on platform')
         # NOTE: this is only a crude approximation
-        self.samplexsize, self.sampleysize = x_size, y_size
-        scale = psppoint/self.samplegridsize
+        params['samplexsize'] = x_size
+        params['sampleysize'] = y_size
+        self.params = params
+        scale = psppoint/params['samplegridsize']
         tmp.load(scale=scale)
         tmp_array = np.array(tmp.convert('1'))
         if tmp_array.max() == 0:
             raise Exception("Postscript file is empty")
         return tmp_array
-
-    def displacement(self, pixel):
-        '''returns the displacement for a given pixel
-
-        The x-axis is parallel to the scanline if the stage does not move.
-        It is assumed, the laser bundle traverses
-        in the negative direction if the polygon rotates.
-        pixel  --  the pixelnumber, in range [0, self.pixelsfacet]
-        '''
-        # interiorangle = 180-360/self.n
-        # max_angle = 180-90-0.5*interiorangle
-        max_angle = 180/self.facets
-        pixelsfacet = round(self.laserfrequency /
-                            (self.rotationfrequency*self.facets))
-        angle = np.radians(- 2 * max_angle * (pixel/pixelsfacet) + max_angle)
-        disp = (self.inradius*2*np.sin(angle) *
-                (1-np.power((1-np.power(np.sin(angle), 2)) /
-                 (np.power(self.n, 2)-np.power(np.sin(angle), 2)), 0.5)))
-        return disp
-
-    def fxpos(self, pixel, xstart=0):
-        '''returns the laserdiode x-position in pixels
-
-        The x-axis is parallel to the scanline if the stage does not move.
-        pixel   -- the pixelnumber in the line
-        xstart  -- the x-start position [mm], typically
-                   your xstart is larger than 0 as the displacement
-                   can be negative
-        '''
-        line_pixel = self.startpixel + pixel % self.pixelsinline
-        xpos = np.sin(self.tiltangle)*self.displacement(line_pixel) + xstart
-        return xpos/self.samplegridsize
-
-    def fypos(self, pixel, direction, ystart=0):
-        '''
-        returns the laserdiode y-position in pixels
-
-        The y-axis is orthogonal to the scanline if the stage does not move,
-        and parallel to the stage movement.
-        :param pixel: the pixelnumber in the line
-        :param direction: True is +, False is -
-        :param ystart: the y-start position [mm]
-        '''
-        line_pixel = self.startpixel + pixel % self.pixelsinline
-        if direction:
-            ypos = -np.cos(self.tiltangle)*self.displacement(line_pixel)
-            ypos += line_pixel/self.laserfrequency*self.stagespeed + ystart
-        else:
-            ypos = -np.cos(self.tiltangle)*self.displacement(line_pixel)
-            ypos -= line_pixel/self.laserfrequency*self.stagespeed + ystart
-        return ypos/self.samplegridsize
 
     def createcoordinates(self):
         '''returns the x, y position of the laserdiode
@@ -146,63 +175,87 @@ class Interpolator:
 
         assumes the line starts at the positive plane
         '''
-        if not self.sampleysize or not self.samplexsize:
+        params = self.params
+        if not params['sampleysize'] or not params['samplexsize']:
             raise Exception('Sampleysize or samplexsize are set to zero.')
-        if self.fxpos(0) < 0 or self.fxpos(self.pixelsinline-1) > 0:
+        if (fxpos(0, params) < 0 or
+                fxpos(params['pixelsinline']-1, params) > 0):
             raise Exception('Line seems ill positioned')
         # mm
-        lanewidth = ((self.fxpos(0)-self.fxpos(self.pixelsinline-1))
-                     * self.samplegridsize)
-        lanes = math.ceil(self.samplexsize/lanewidth)
-        facets_inlane = math.ceil(self.rotationfrequency
-                                  * self.facets *
-                                  (self.sampleysize/self.stagespeed))
+        lanewidth = ((fxpos(0, params) -
+                     fxpos(params['pixelsinline']-1, params))
+                     * params['samplegridsize'])
+        lanes = math.ceil(params['samplexsize']/lanewidth)
+        facets_inlane = math.ceil(params['rotationfrequency']
+                                  * params['facets'] *
+                                  (params['sampleysize']/params['stagespeed']))
         print("The lanewidth is {}".format(lanewidth))
         print("The facets in lane are {}".format(facets_inlane))
         # single facet
-        vfxpos = np.vectorize(self.fxpos, otypes=[np.int16])
-        vfypos = np.vectorize(self.fypos, otypes=[np.int16])
-        xstart = abs(self.fxpos(self.pixelsinline-1)*self.samplegridsize)
-        xpos_facet = vfxpos(range(0, self.pixelsinline), xstart)
+
+        def fxpos2(x, y=0):
+            return fxpos(x, params, y)
+
+        def fypos2(x, y=0):
+            return fypos(x, params, y)
+        vfxpos = np.vectorize(fxpos2, otypes=[np.int16])
+        vfypos = np.vectorize(fypos2, otypes=[np.int16])
+        xstart = abs(fxpos2(int(params['pixelsinline'])-1)
+                     * params['samplegridsize'])
+        xpos_facet = vfxpos(range(0, int(params['pixelsinline'])), xstart)
         # TODO: you still don't account for ystart
         # (you are moving in the y, so if you start
         #  at the edge you miss something)
-        ypos_forwardfacet = vfypos(range(0, self.pixelsinline), True)
-        ypos_backwardfacet = vfypos(range(0, self.pixelsinline), False)
+        ypos_forwardfacet = vfypos(range(0, int(params['pixelsinline'])),
+                                   True)
+        ypos_backwardfacet = vfypos(range(0, int(params['pixelsinline'])),
+                                    False)
         # single lane
         xpos_lane = np.tile(xpos_facet, facets_inlane)
-        ypos_forwardlane = np.array([], dtype=np.int16)
-        ypos_backwardlane = np.array([], dtype=np.int16)
-        # TODO: this part is slow and looks suboptimal
-        for facet in range(0, facets_inlane):
-            ypos_forwardtemp = ypos_forwardfacet + round(
-                (facet*self.stagespeed) /
-                (self.facets*self.rotationfrequency*self.samplegridsize))
-            ypos_backwardtemp = ypos_backwardfacet + round(
-                ((facets_inlane-facet)*self.stagespeed) /
-                (self.facets*self.rotationfrequency*self.samplegridsize))
-            ypos_forwardlane = np.concatenate((ypos_forwardlane,
-                                              ypos_forwardtemp))
-            ypos_backwardlane = np.concatenate((ypos_backwardlane,
-                                               ypos_backwardtemp))
+
+        # TODO: parallel not supported on 32 bit hardware
+        @jit(nopython=True, parallel=False)
+        def loop0(params):
+            forward = np.zeros((facets_inlane, int(params['pixelsinline'])))
+            backward = np.zeros((facets_inlane, int(params['pixelsinline'])))
+            for facet in range(0, facets_inlane):
+                ypos_forwardtemp = ypos_forwardfacet + round(
+                    (facet*params['stagespeed']) /
+                    (params['facets']*params['rotationfrequency'] *
+                     params['samplegridsize']))
+                ypos_backwardtemp = ypos_backwardfacet + round(
+                    ((facets_inlane-facet)*params['stagespeed']) /
+                    (params['facets']*params['rotationfrequency']
+                     * params['samplegridsize']))
+                forward[facet] = ypos_forwardtemp
+                backward[facet] = ypos_backwardtemp
+            return forward.flatten(), backward.flatten()
+
+        ypos_forwardlane, ypos_backwardlane = loop0(params)
         # per lane; 5000 (pixels per facet) / 5 (samplefactor)
         #    * (200 mm/0.015 mm (resolution)*2 (16 bit = 2byte)) )/1E6 = 40 MB
         # TODO: slice per lane so it fits on beaglebone,
         #       you have on the fly slicing
         # all lanes
-        xpos = np.array([], dtype=np.int16)
-        ypos = np.array([], dtype=np.int16)
-        for lane in range(0, lanes):
-            # TODO: why is this force needed?
-            xoffset = int(round(lane * (self.fxpos(0) -
-                          self.fxpos(self.pixelsinline-1))))
-            xpos_temp = xpos_lane + xoffset
-            if lane % 2 == 1:
-                ypos_temp = ypos_backwardlane
-            else:
-                ypos_temp = ypos_forwardlane
-            xpos = np.concatenate((xpos, xpos_temp))
-            ypos = np.concatenate((ypos, ypos_temp))
+
+        @jit(nopython=True, parallel=False)
+        def loop1(params):
+            xpos = np.zeros((lanes, len(xpos_lane)), dtype=np.int16)
+            ypos = np.zeros((lanes, len(ypos_forwardlane)), dtype=np.int16)
+            for lane in range(0, lanes):
+                # TODO: why is this force needed?
+                xoffset = int(round(lane * (fxpos(0, params) -
+                              fxpos(params['pixelsinline']-1, params))))
+                xpos_temp = xpos_lane + xoffset
+                if lane % 2 == 1:
+                    ypos_temp = ypos_backwardlane
+                else:
+                    ypos_temp = ypos_forwardlane
+                xpos[lane] = xpos_temp
+                ypos[lane] = ypos_temp
+                return xpos, ypos
+
+        xpos, ypos = loop1(params)
         # interpolation can be linear, however int are used to save space
         ids = np.concatenate(([xpos], [ypos]))
         return ids
@@ -224,10 +277,10 @@ class Interpolator:
         if test:
             layerarr = np.ones_like(layerarr)
         print("Retrieved layerarr")
-        print("elapsed {}".format(time()-ctime))
+        print(f"elapsed {time()-ctime:.2f}")
         ids = self.createcoordinates()
         print("Retrieved coordinates")
-        print("elapsed {}".format(time()-ctime))
+        print(f"elapsed {time()-ctime:.2f}")
         if test:
             ptrn = ndimage.map_coordinates(input=layerarr, output=np.uint8,
                                            coordinates=ids, order=1,
@@ -237,11 +290,11 @@ class Interpolator:
                                            coordinates=ids, order=1,
                                            mode="constant", cval=0)
         print("Completed interpolation")
-        print("elapsed {}".format(time()-ctime))
+        print(f"elapsed {time()-ctime:.2f}")
         if ptrn.min() < 0 or ptrn.max() > 1:
             raise Exception('This is not a bit list.')
         ptrn = np.logical_not(ptrn)
-        ptrn = np.repeat(ptrn, self.downsample_factor)
+        ptrn = np.repeat(ptrn, self.params['downsamplefactor'])
         ptrn = np.packbits(ptrn)
         return ptrn
 
@@ -260,7 +313,7 @@ class Interpolator:
         #        this will not be there in
         #        reality as you spot is larger
         ids = self.createcoordinates()
-        ids = np.repeat(ids, self.downsample_factor, axis=1)
+        ids = np.repeat(ids, self.params['downsamplefactor'], axis=1)
         # repeat adden
         xcor = ids[0, ::step]
         ycor = ids[1, ::step]
@@ -300,11 +353,17 @@ class Interpolator:
 
 
 if __name__ == "__main__":
+    # numba greatly improves performance
+    # install procedure followed is
+    # https://github.com/numba/llvmlite/issues/604
+    # parallelization could not be used, as I am
+    # still on 32 bit (this is easier with
+    # camera)
     interpolator = Interpolator()
     dir_path = os.path.dirname(os.path.realpath(__file__))
     url = os.path.join(dir_path, 'test-patterns', 'line-resolution-test.ps')
     ptrn = interpolator.patternfile(url)
-    interpolator.writebin(ptrn, "test.bin")
-    pat = interpolator.readbin("test.bin")
-    print("The shape of the pattern is {}".format(pat.shape))
-    interpolator.plotptrn(ptrn=pat, step=1)
+    # interpolator.writebin(ptrn, "test.bin")
+    # pat = interpolator.readbin("test.bin")
+    # print("The shape of the pattern is {}".format(pat.shape))
+    # interpolator.plotptrn(ptrn=pat, step=1)
