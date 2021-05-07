@@ -212,8 +212,8 @@ class Interpolator:
                                     False)
         # single lane
         xpos_lane = np.tile(xpos_facet, facets_inlane)
-
         # TODO: parallel not supported on 32 bit hardware
+
         @jit(nopython=True, parallel=False)
         def loop0(params):
             forward = np.zeros((facets_inlane, int(params['pixelsinline'])))
@@ -234,18 +234,17 @@ class Interpolator:
         ypos_forwardlane, ypos_backwardlane = loop0(params)
         # per lane; 5000 (pixels per facet) / 5 (samplefactor)
         #    * (200 mm/0.015 mm (resolution)*2 (16 bit = 2byte)) )/1E6 = 40 MB
-        # TODO: slice per lane so it fits on beaglebone,
-        #       you have on the fly slicing
-        # all lanes
 
+        # all lanes, another option would be to slice per lane
         @jit(nopython=True, parallel=False)
         def loop1(params):
             xpos = np.zeros((lanes, len(xpos_lane)), dtype=np.int16)
             ypos = np.zeros((lanes, len(ypos_forwardlane)), dtype=np.int16)
+            xwidthlane = (fxpos(0, params) -
+                          fxpos(params['pixelsinline']-1, params))
             for lane in range(0, lanes):
                 # TODO: why is this force needed?
-                xoffset = int(round(lane * (fxpos(0, params) -
-                              fxpos(params['pixelsinline']-1, params))))
+                xoffset = int(round(lane * xwidthlane))
                 xpos_temp = xpos_lane + xoffset
                 if lane % 2 == 1:
                     ypos_temp = ypos_backwardlane
@@ -253,7 +252,7 @@ class Interpolator:
                     ypos_temp = ypos_forwardlane
                 xpos[lane] = xpos_temp
                 ypos[lane] = ypos_temp
-                return xpos, ypos
+            return xpos.flatten(), ypos.flatten()
 
         xpos, ypos = loop1(params)
         # interpolation can be linear, however int are used to save space
@@ -353,6 +352,7 @@ class Interpolator:
 
 
 if __name__ == "__main__":
+    # https://github.com/hstarmans/ldgraphy
     # numba greatly improves performance
     # install procedure followed is
     # https://github.com/numba/llvmlite/issues/604
@@ -363,7 +363,8 @@ if __name__ == "__main__":
     dir_path = os.path.dirname(os.path.realpath(__file__))
     url = os.path.join(dir_path, 'test-patterns', 'line-resolution-test.ps')
     ptrn = interpolator.patternfile(url)
-    # interpolator.writebin(ptrn, "test.bin")
-    # pat = interpolator.readbin("test.bin")
-    # print("The shape of the pattern is {}".format(pat.shape))
-    # interpolator.plotptrn(ptrn=pat, step=1)
+    interpolator.writebin(ptrn, "test.bin")
+    interpolator.pstoarray(url)
+    pat = interpolator.readbin("test.bin")
+    print(f"The shape of the pattern is {pat.shape}")
+    interpolator.plotptrn(ptrn=pat, step=1)
