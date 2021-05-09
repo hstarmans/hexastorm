@@ -122,8 +122,8 @@ class Tests(unittest.TestCase):
     def searchcamera(self, timeout=3, build=False):
         '''laser is synced with photodiode and a line is projected
 
-        This is done for various line patterns and
-         used to detect the edges of the camera
+        This is done for various line patterns and is
+        used to detect the edges of the camera
         '''
         self.host.laser_params['SINGLE_LINE'] = True
         self.host.laser_params['SINGLE_FACET'] = False

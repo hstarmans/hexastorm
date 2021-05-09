@@ -645,10 +645,15 @@ class TestDispatcher(SPIGatewareTestCase):
             yield from self.host.writeline([1] *
                                            host.laser_params['BITSINSCANLINE'])
         yield from host.writeline([])
+        self.assertEqual((yield from self.host.pinstate)['synchronized'],
+                         True)
+        yield from self.host.enable_comp(synchronize=False)
         while (yield self.dut.parser.empty) == 0:
             yield
+        self.assertEqual((yield from self.host.pinstate)['synchronized'],
+                         False)
         self.assertEqual((yield from self.host.error), False)
-
+        
 
 if __name__ == "__main__":
     unittest.main()
@@ -663,7 +668,6 @@ if __name__ == "__main__":
 #  -- Polynomal integrator --> determines position via integrating counters
 
 # TODO:
-#   -- check properties like ticksinfacet propagate
 #   -- in practice, position is not reached with small differences like 0.02 mm
 #   -- test execution speed to ensure the right PLL is propagated
 #   -- use CRC packet for tranmission failure (it is in litex but not luna)
