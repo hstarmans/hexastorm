@@ -5,9 +5,10 @@ from numba import jit, typed, types
 import numpy as np
 from scipy import ndimage
 from PIL import Image
+from FPGAG.platforms import Firestarter
+from FPGAG.lasers import params as paramsfunc
 
-
-# the following function cannot be defined with self due to numba
+# numba.jit decorated functions cannot be defined with self
 
 @jit
 def displacement(pixel, params):
@@ -21,9 +22,9 @@ def displacement(pixel, params):
     '''
     # interiorangle = 180-360/self.n
     # max_angle = 180-90-0.5*interiorangle
-    max_angle = 180/params['facets']
-    pixelsfacet = round(params['laserfrequency'] /
-                        (params['rotationfrequency']*params['facets']))
+    max_angle = 180/params['FACETS']
+    pixelsfacet = round(params['LASER_HZ'] /
+                        (params['rotationfrequency']*params['FACETS']))
     angle = np.radians(- 2 * max_angle * (pixel/pixelsfacet) + max_angle)
     disp = (params['inradius']*2*np.sin(angle) *
             (1-np.power((1-np.power(np.sin(angle), 2)) /
@@ -41,7 +42,7 @@ def fxpos(pixel, params, xstart=0):
                 your xstart is larger than 0 as the displacement
                 can be negative
     '''
-    line_pixel = params['startpixel'] + pixel % params['pixelsinline']
+    line_pixel = params['startpixel'] + pixel % params['BITSINSCANLINE']
     xpos = (np.sin(params['tiltangle']) *
             displacement(line_pixel, params)
             + xstart)
@@ -59,16 +60,16 @@ def fypos(pixel, params, direction, ystart=0):
     direction  -- True is +, False is -
     ystart     -- the y-start position [mm]
     '''
-    line_pixel = params['startpixel'] + pixel % params['pixelsinline']
+    line_pixel = params['startpixel'] + pixel % params['BITSINSCANLINE']
     if direction:
         ypos = -np.cos(params['tiltangle'])*displacement(line_pixel,
                                                          params)
-        ypos += (line_pixel/params['laserfrequency']*params['stagespeed']
+        ypos += (line_pixel/params['LASER_HZ']*params['stagespeed']
                  + ystart)
     else:
         ypos = -np.cos(params['tiltangle'])*displacement(line_pixel,
                                                          params)
-        ypos -= (line_pixel/params['laserfrequency']*params['stagespeed'] +
+        ypos -= (line_pixel/params['LASER_HZ']*params['stagespeed'] +
                  ystart)
     return ypos/params['samplegridsize']
 
@@ -94,17 +95,19 @@ class Interpolator:
         self.debug_folder = os.path.join(currentdir, 'debug')
 
     def parameters(self):
+        # in new version of numba dictionaries are converted automatically
         dct = typed.Dict.empty(key_type=types.string,
                                value_type=types.float64)
+        var = paramsfunc(Firestarter())
         dct2 = {
             # angle [radians], for a definition see figure 7
             # https://reprap.org/wiki/Transparent_Polygon_Scanning
             'tiltangle': np.radians(90),
-            'laserfrequency': 2e6,   # Hz
+            'LASER_HZ': var['LASER_HZ'],   # Hz
             # rotation frequency polygon [Hz]
-            'rotationfrequency': 2400/60,
+            'rotationfrequency': var['RPM']/60,
             # number of facets
-            'facets': 4,
+            'FACETS': var['FACETS'],
             # inradius polygon [mm]
             'inradius': 15,
             # refractive index
@@ -125,25 +128,27 @@ class Interpolator:
             # mm/s
             'stagespeed': 2.0997375328,
             # pixel determined via camera
-            'startpixel': 3467,
+            'startpixel': (var['BITSINSCANLINE']/(var['END%']-var['START%']))*var['START%'],
             # number of pixels in a line [new 785]
-            'pixelsinline': 790*8,
-            # each pixel is repeated five times, to speed up interpolation
-            'downsamplefactor': 5
+            'BITSINSCANLINE': var['BITSINSCANLINE'],
+            # each can be repeated, to speed up interpolation
+            # this was used on the beaglebone
+            'downsamplefactor': 1
         }
         for k, v in dct2.items():
             dct[k] = v
         return dct
 
     def downsample(self, params):
-        'downsamples constants'
-        lst = ['laserfrequency', 'startpixel', 'pixelsinline']
-        for item in lst:
-            params[item] /= params['downsamplefactor']
-            params[item] = round(params[item])
-        if params['pixelsinline'] % 8:
-            raise Exception('Remainder not zero {}'
-                            .format(params['pixelsinline'] % 8))
+        '''to speed up interpolation pixels can be repeated
+        
+        This was used on the beaglebone as it was harder to change the frequency
+        '''
+        if params['downsamplefactor'] > 1:
+            lst = ['LASER_HZ', 'startpixel', 'BITSINSCANLINE']
+            for item in lst:
+                params[item] /= params['downsamplefactor']
+                params[item] = round(params[item])
         return params
 
     def pstoarray(self, url):
@@ -179,15 +184,15 @@ class Interpolator:
         if not params['sampleysize'] or not params['samplexsize']:
             raise Exception('Sampleysize or samplexsize are set to zero.')
         if (fxpos(0, params) < 0 or
-                fxpos(params['pixelsinline']-1, params) > 0):
+                fxpos(params['BITSINSCANLINE']-1, params) > 0):
             raise Exception('Line seems ill positioned')
         # mm
         lanewidth = ((fxpos(0, params) -
-                     fxpos(params['pixelsinline']-1, params))
+                     fxpos(params['BITSINSCANLINE']-1, params))
                      * params['samplegridsize'])
         lanes = math.ceil(params['samplexsize']/lanewidth)
         facets_inlane = math.ceil(params['rotationfrequency']
-                                  * params['facets'] *
+                                  * params['FACETS'] *
                                   (params['sampleysize']/params['stagespeed']))
         print("The lanewidth is {}".format(lanewidth))
         print("The facets in lane are {}".format(facets_inlane))
@@ -200,15 +205,15 @@ class Interpolator:
             return fypos(x, params, y)
         vfxpos = np.vectorize(fxpos2, otypes=[np.int16])
         vfypos = np.vectorize(fypos2, otypes=[np.int16])
-        xstart = abs(fxpos2(int(params['pixelsinline'])-1)
+        xstart = abs(fxpos2(int(params['BITSINSCANLINE'])-1)
                      * params['samplegridsize'])
-        xpos_facet = vfxpos(range(0, int(params['pixelsinline'])), xstart)
+        xpos_facet = vfxpos(range(0, int(params['BITSINSCANLINE'])), xstart)
         # TODO: you still don't account for ystart
         # (you are moving in the y, so if you start
         #  at the edge you miss something)
-        ypos_forwardfacet = vfypos(range(0, int(params['pixelsinline'])),
+        ypos_forwardfacet = vfypos(range(0, int(params['BITSINSCANLINE'])),
                                    True)
-        ypos_backwardfacet = vfypos(range(0, int(params['pixelsinline'])),
+        ypos_backwardfacet = vfypos(range(0, int(params['BITSINSCANLINE'])),
                                     False)
         # single lane
         xpos_lane = np.tile(xpos_facet, facets_inlane)
@@ -216,16 +221,16 @@ class Interpolator:
 
         @jit(nopython=True, parallel=False)
         def loop0(params):
-            forward = np.zeros((facets_inlane, int(params['pixelsinline'])))
-            backward = np.zeros((facets_inlane, int(params['pixelsinline'])))
+            forward = np.zeros((facets_inlane, int(params['BITSINSCANLINE'])))
+            backward = np.zeros((facets_inlane, int(params['BITSINSCANLINE'])))
             for facet in range(0, facets_inlane):
                 ypos_forwardtemp = ypos_forwardfacet + round(
                     (facet*params['stagespeed']) /
-                    (params['facets']*params['rotationfrequency'] *
+                    (params['FACETS']*params['rotationfrequency'] *
                      params['samplegridsize']))
                 ypos_backwardtemp = ypos_backwardfacet + round(
                     ((facets_inlane-facet)*params['stagespeed']) /
-                    (params['facets']*params['rotationfrequency']
+                    (params['FACETS']*params['rotationfrequency']
                      * params['samplegridsize']))
                 forward[facet] = ypos_forwardtemp
                 backward[facet] = ypos_backwardtemp
@@ -241,7 +246,7 @@ class Interpolator:
             xpos = np.zeros((lanes, len(xpos_lane)), dtype=np.int16)
             ypos = np.zeros((lanes, len(ypos_forwardlane)), dtype=np.int16)
             xwidthlane = (fxpos(0, params) -
-                          fxpos(params['pixelsinline']-1, params))
+                          fxpos(params['BITSINSCANLINE']-1, params))
             for lane in range(0, lanes):
                 # TODO: why is this force needed?
                 xoffset = int(round(lane * xwidthlane))
@@ -276,10 +281,10 @@ class Interpolator:
         if test:
             layerarr = np.ones_like(layerarr)
         print("Retrieved layerarr")
-        print(f"elapsed {time()-ctime:.2f}")
+        print(f"Elapsed {time()-ctime:.2f}")
         ids = self.createcoordinates()
         print("Retrieved coordinates")
-        print(f"elapsed {time()-ctime:.2f}")
+        print(f"Elapsed {time()-ctime:.2f}")
         if test:
             ptrn = ndimage.map_coordinates(input=layerarr, output=np.uint8,
                                            coordinates=ids, order=1,
@@ -289,7 +294,7 @@ class Interpolator:
                                            coordinates=ids, order=1,
                                            mode="constant", cval=0)
         print("Completed interpolation")
-        print(f"elapsed {time()-ctime:.2f}")
+        print(f"Elapsed {time()-ctime:.2f}")
         if ptrn.min() < 0 or ptrn.max() > 1:
             raise Exception('This is not a bit list.')
         ptrn = np.logical_not(ptrn)
@@ -310,7 +315,7 @@ class Interpolator:
         # TODO: - plot with real laser spots --> convolution?
         #       - your y-step is greater than sample size so you see lines
         #        this will not be there in
-        #        reality as you spot is larger
+        #        reality as the laser spot is larger
         ids = self.createcoordinates()
         ids = np.repeat(ids, self.params['downsamplefactor'], axis=1)
         # repeat adden
@@ -324,6 +329,8 @@ class Interpolator:
             ycor += abs(ycor.min())
         arr = np.zeros((xcor.max() + 1, ycor.max() + 1), dtype=np.uint8)
         ptrn = np.unpackbits(ptrn)
+        # TODO: this is strange, added as quick fix on may 9 2021
+        ptrn = ptrn[:len(xcor)]
         arr[xcor[:], ycor[:]] = ptrn[0: len(ptrn): step]
         arr = arr * 255
         img = Image.fromarray(arr)

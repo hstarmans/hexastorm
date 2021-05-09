@@ -2,18 +2,13 @@ from struct import unpack
 from time import sleep
 from copy import deepcopy
 
-import spidev
-from smbus2 import SMBus
 import numpy as np
-from gpiozero import LED
 
 import FPGAG.lasers as lasers
 from FPGAG.constants import (INSTRUCTIONS, COMMANDS, FREQ, STATE, BIT_SHIFT,
                              MOVE_TICKS, WORD_BYTES, COMMAND_BYTES)
 from FPGAG.platforms import Firestarter
 import FPGAG.core as core
-
-import steppers
 
 
 def executor(func):
@@ -37,6 +32,10 @@ class Host:
     'Class for sending instructions to core'
     def __init__(self, platform=None):
         if platform is None:
+            from gpiozero import LED
+            import spidev
+            from smbus2 import SMBus
+            import steppers
             self.platform = Firestarter()
             # IC bus used to set power laser
             self.bus = SMBus(self.platform.ic_dev_nr)
