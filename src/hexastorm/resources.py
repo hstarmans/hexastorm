@@ -1,7 +1,6 @@
 import itertools
 
 from nmigen import Record
-
 from nmigen.hdl.ast import unsigned
 from nmigen.build import Subsignal, Resource, Pins, PinsN, ResourceError
 from nmigen.hdl.rec import Layout

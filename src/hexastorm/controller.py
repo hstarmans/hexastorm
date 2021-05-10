@@ -4,11 +4,12 @@ from copy import deepcopy
 
 import numpy as np
 
-import FPGAG.lasers as lasers
-from FPGAG.constants import (INSTRUCTIONS, COMMANDS, FREQ, STATE, BIT_SHIFT,
-                             MOVE_TICKS, WORD_BYTES, COMMAND_BYTES)
-from FPGAG.platforms import Firestarter
-import FPGAG.core as core
+import hexastorm.lasers as lasers
+from hexastorm.constants import (INSTRUCTIONS, COMMANDS, FREQ, STATE,
+                                 BIT_SHIFT, MOVE_TICKS, WORD_BYTES,
+                                 COMMAND_BYTES)
+from hexastorm.platforms import Firestarter
+import hexastorm.core as core
 
 
 def executor(func):
@@ -35,7 +36,6 @@ class Host:
             from gpiozero import LED
             import spidev
             from smbus2 import SMBus
-            import steppers
             self.platform = Firestarter()
             # IC bus used to set power laser
             self.bus = SMBus(self.platform.ic_dev_nr)
@@ -57,6 +57,7 @@ class Host:
 
     def init_steppers(self):
         '''configure steppers via SPI using teemuatflut CPP library'''
+        import steppers
         self.motors = [steppers.TMC2130(link_index=i)
                        for i in range(1, 1+self.platform.motors)]
         steppers.bcm2835_init()
@@ -80,6 +81,7 @@ class Host:
 
     def reset(self):
         'reset the chip by raising and lowering the reset pin'
+        from gpiozero import LED
         reset_pin = LED(self.platform.reset_pin)
         reset_pin.off()
         sleep(1)
@@ -130,6 +132,7 @@ class Host:
 
         Execution might still be disabled on the FPGA
         '''
+        from gpiozero import LED
         enable = LED(self.platform.enable_pin)
         return enable.value
 

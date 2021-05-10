@@ -4,15 +4,16 @@ from math import floor
 
 import numpy as np
 from numpy.testing import assert_array_equal
-from FPGAG.controller import Host, Memfull, executor
-from FPGAG.platforms import Firestarter
-from FPGAG.constants import (WORD_BYTES, COMMANDS, MOVE_TICKS,
-                             wordsinmove)
+
+from hexastorm.controller import Host, Memfull, executor
+from hexastorm.platforms import Firestarter
+from hexastorm.constants import (WORD_BYTES, COMMANDS, MOVE_TICKS,
+                                 wordsinmove)
 
 
 class Base(unittest.TestCase):
     @classmethod
-    def setUpClass(cls, flash=False):
+    def setUpClass(cls, flash=True):
         cls.host = Host()
         if flash:
             cls.host.build()

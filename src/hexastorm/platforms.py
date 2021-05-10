@@ -13,9 +13,9 @@ from nmigen.vendor.lattice_ice40 import LatticeICE40Platform
 from nmigen_boards.resources import LEDResources
 from nmigen_boards.test.blinky import Blinky
 
-from FPGAG.constants import wordsinmove
-from FPGAG.resources import (StepperResource, StepperRecord,
-                             LaserscannerResource, LaserscannerRecord)
+from hexastorm.constants import wordsinmove
+from hexastorm.resources import (StepperResource, StepperRecord,
+                                 LaserscannerResource, LaserscannerRecord)
 
 
 class TestPlatform:

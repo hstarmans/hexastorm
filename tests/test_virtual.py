@@ -1,8 +1,8 @@
 import unittest
 
-from FPGAG.platforms import Firestarter
-from FPGAG.core import Dispatcher, SPIParser
-from FPGAG.movement import Polynomal
+from hexastorm.platforms import Firestarter
+from hexastorm.core import Dispatcher, SPIParser
+from hexastorm.movement import Polynomal
 
 
 class TestBuild(unittest.TestCase):

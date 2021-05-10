@@ -13,14 +13,15 @@ from luna.gateware.memory import TransactionalizedFIFO
 from luna.gateware.test.utils import sync_test_case
 from luna.gateware.interface.spi import SPIGatewareTestCase
 
-from FPGAG.controller import Host, Memfull
-from FPGAG.movement import Polynomal
-from FPGAG.platforms import TestPlatform
-from FPGAG.resources import get_all_resources
-from FPGAG.lasers import Laserhead, DiodeSimulator, params
-from FPGAG.constants import (COMMAND_BYTES, WORD_BYTES, STATE, INSTRUCTIONS,
-                             MEMWIDTH, COMMANDS, DEGREE, FREQ, wordsinscanline,
-                             wordsinmove)
+from hexastorm.controller import Host, Memfull
+from hexastorm.movement import Polynomal
+from hexastorm.platforms import TestPlatform
+from hexastorm.resources import get_all_resources
+from hexastorm.lasers import Laserhead, DiodeSimulator, params
+from hexastorm.constants import (COMMAND_BYTES, WORD_BYTES, STATE,
+                                 INSTRUCTIONS, MEMWIDTH, COMMANDS,
+                                 DEGREE, FREQ, wordsinscanline,
+                                 wordsinmove)
 
 
 class SPIParser(Elaboratable):
@@ -653,7 +654,7 @@ class TestDispatcher(SPIGatewareTestCase):
         self.assertEqual((yield from self.host.pinstate)['synchronized'],
                          False)
         self.assertEqual((yield from self.host.error), False)
-        
+
 
 if __name__ == "__main__":
     unittest.main()

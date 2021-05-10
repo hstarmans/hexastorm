@@ -8,9 +8,9 @@ from nmigen import Module
 from luna.gateware.test import LunaGatewareTestCase, sync_test_case
 from luna.gateware.memory import TransactionalizedFIFO
 
-import FPGAG.controller as controller
-from FPGAG.constants import (MEMWIDTH, WORD_BYTES, INSTRUCTIONS)
-from FPGAG.platforms import TestPlatform
+import hexastorm.controller as controller
+from hexastorm.constants import (MEMWIDTH, WORD_BYTES, INSTRUCTIONS)
+from hexastorm.platforms import TestPlatform
 
 
 def params(platform):

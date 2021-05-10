@@ -3,12 +3,12 @@ import unittest
 from nmigen import (Signal, Elaboratable, signed, Module)
 from nmigen.hdl.mem import Array
 from luna.gateware.test import LunaGatewareTestCase, sync_test_case
-from FPGAG.resources import get_all_resources
-from FPGAG.constants import (DEGREE, BIT_SHIFT,
-                             MOVE_TICKS)
 
-from FPGAG.controller import Host
-from FPGAG.platforms import TestPlatform
+from hexastorm.resources import get_all_resources
+from hexastorm.constants import (DEGREE, BIT_SHIFT,
+                                 MOVE_TICKS)
+from hexastorm.controller import Host
+from hexastorm.platforms import TestPlatform
 
 
 class Polynomal(Elaboratable):

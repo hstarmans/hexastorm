@@ -5,10 +5,11 @@ from numba import jit, typed, types
 import numpy as np
 from scipy import ndimage
 from PIL import Image
-from FPGAG.platforms import Firestarter
-from FPGAG.lasers import params as paramsfunc
+from hexastorm.platforms import Firestarter
+from hexastorm.lasers import params as paramsfunc
 
 # numba.jit decorated functions cannot be defined with self
+
 
 @jit
 def displacement(pixel, params):
@@ -128,7 +129,8 @@ class Interpolator:
             # mm/s
             'stagespeed': 2.0997375328,
             # pixel determined via camera
-            'startpixel': (var['BITSINSCANLINE']/(var['END%']-var['START%']))*var['START%'],
+            'startpixel': ((var['BITSINSCANLINE']/(var['END%']-var['START%']))
+                           * var['START%']),
             # number of pixels in a line [new 785]
             'BITSINSCANLINE': var['BITSINSCANLINE'],
             # each can be repeated, to speed up interpolation
@@ -141,8 +143,9 @@ class Interpolator:
 
     def downsample(self, params):
         '''to speed up interpolation pixels can be repeated
-        
-        This was used on the beaglebone as it was harder to change the frequency
+
+        This was used on the beaglebone as it was harder to change
+        the frequency
         '''
         if params['downsamplefactor'] > 1:
             lst = ['LASER_HZ', 'startpixel', 'BITSINSCANLINE']

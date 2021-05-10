@@ -7,8 +7,9 @@ import cv2 as cv
 import numpy as np
 
 import camera
-from FPGAG.controller import Host, executor
-import FPGAG.optical as feature
+
+from hexastorm.controller import Host, executor
+import hexastorm.optical as feature
 
 TEST_DIR = Path(__file__).parents[0].resolve()
 IMG_DIR = Path(TEST_DIR, 'images')
@@ -119,7 +120,7 @@ class Tests(unittest.TestCase):
         yield from self.host.writeline(line)
 
     @executor
-    def searchcamera(self, timeout=3, build=False):
+    def searchcamera(self, timeout=30, build=False):
         '''laser is synced with photodiode and a line is projected
 
         This is done for various line patterns and is
@@ -131,13 +132,13 @@ class Tests(unittest.TestCase):
             self.host.build()
         self.host.laser_power = 120
         self.cam.set_exposure(36000)
-        yield from self.writepattern([0]*8+[0]*8)
+        yield from self.writepattern([0]*8+[1]*8)
         self.cam.live_view(scale=0.6)
         # TODO: it doesn't catch the stopline
         yield from self.host.writeline([])
         print(f'Wait for stopline to execute, {timeout} seconds')
         time.sleep(timeout)
-        self.host.enable_comp(synchronize=False)
+        yield from self.host.enable_comp(synchronize=False)
 
     def takepicture(self):
         'takes picture and store it with timestamp to this folder'
