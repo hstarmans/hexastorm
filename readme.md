@@ -1,4 +1,4 @@
-# Laserscanner
+# Laserscanner [![Documentation Status](https://readthedocs.org/projects/luna/badge/?version=latest)](https://hexastorm.readthedocs.io/en/latest/?badge=latest)
 Implementation of a laserscanner on a FPGA. In a high-speed polygon scanner system, the laser is deflected by a rotating prism or reflective mirror. 
 The position of the laser is determined via a sensor such as a photodiode.  
 <img src="https://cdn.hackaday.io/images/7106161566426847098.jpg" align="center" height="300"/>  
