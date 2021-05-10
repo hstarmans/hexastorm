@@ -5,8 +5,14 @@
 *.vcd
 build*
 
+# GTKWave
+*.gtkw
+*.vcd
+
 # Optical camera images
-tests/images*
+test/FPGAG/images*
+src/FPGAG/interpolator/debug*
+
 
 # other
 # Byte-compiled / optimized / DLL files

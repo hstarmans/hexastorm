@@ -1,67 +1,159 @@
-import os
+from struct import unpack
 from time import sleep
-import math
+from copy import deepcopy
 
-import spidev
 import numpy as np
-from gpiozero import LED
-from smbus2 import SMBus
 
-from hexastorm.core import Scanhead
-import hexastorm.board as board
+import FPGAG.lasers as lasers
+from FPGAG.constants import (INSTRUCTIONS, COMMANDS, FREQ, STATE, BIT_SHIFT,
+                             MOVE_TICKS, WORD_BYTES, COMMAND_BYTES)
+from FPGAG.platforms import Firestarter
+import FPGAG.core as core
 
 
-class Machine:
+def executor(func):
+    '''executes generator until stop iteration
+
+    Nmigen uses generator syntax and this leaks into our
+    python code. As a result, it is required to iterate.
     '''
-    class used to control a laser scanner
-    '''
-    ic_dev_nr = 1
-    ic_address = 0x28
+    def inner(self):
+        for _ in func(self):
+            pass
+    return inner
 
-    def __init__(self):
-        self.sh = Scanhead(board.Platform())
-        # IC bus used to set power laser
-        self.bus = SMBus(self.ic_dev_nr)
-        # SPI to sent data to scanner
-        self.spi = spidev.SpiDev()
-        self.spi.open(0, 0)
-        self.spi.max_speed_hz = round(1E6)
-        self.spi.cshigh = False
-        self.STABLE_TIME = round(Scanhead.VARIABLES['SPINUP_TIME']
-                                 + Scanhead.VARIABLES['STABLE_TIME']+2)
+
+class Memfull(Exception):
+    'Custom exception for memfull'
+    pass
+
+
+class Host:
+    'Class for sending instructions to core'
+    def __init__(self, platform=None):
+        if platform is None:
+            from gpiozero import LED
+            import spidev
+            from smbus2 import SMBus
+            import steppers
+            self.platform = Firestarter()
+            # IC bus used to set power laser
+            self.bus = SMBus(self.platform.ic_dev_nr)
+            # SPI to sent data to scanner
+            self.spi = spidev.SpiDev()
+            self.spi.open(0, 0)
+            self.spi.mode = 1
+            self.spi.max_speed_hz = round(1E6)
+            self.chip_select = LED(8)
+            self.init_steppers()
+            self.enable = LED(self.platform.enable_pin)
+            # TODO: generator syntax is no longer needed!
+            self.generator = False
+        else:
+            self.platform = platform
+            self.generator = True
+        self.laser_params = lasers.params(self.platform)
+        self._position = np.array([0]*self.platform.motors)
+
+    def init_steppers(self):
+        '''configure steppers via SPI using teemuatflut CPP library'''
+        self.motors = [steppers.TMC2130(link_index=i)
+                       for i in range(1, 1+self.platform.motors)]
+        steppers.bcm2835_init()
+        for motor in self.motors:
+            motor.begin()
+            motor.toff(5)
+            # ideally should be 0
+            # on working equipment it is always 2
+            assert motor.test_connection() == 2
+            motor.rms_current(600)
+            motor.microsteps(16)
+            motor.en_pwm_mode(True)
+        # close bcm2835
+        steppers.bcm2835_close()
+
+    def build(self, do_program=True, verbose=True):
+        self.platform = Firestarter()
+        self.platform.laser_var = self.laser_params
+        self.platform.build(core.Dispatcher(self.platform),
+                            do_program=do_program, verbose=verbose)
+
+    def reset(self):
+        'reset the chip by raising and lowering the reset pin'
+        reset_pin = LED(self.platform.reset_pin)
+        reset_pin.off()
+        sleep(1)
+        reset_pin.on()
+        sleep(1)
+
+    def _read_state(self):
+        '''reads the state and returns bytearray'''
+        command = [COMMANDS.READ] + WORD_BYTES*[0]
+        read_data = (yield from self.send_command(command))
+        return read_data
 
     @property
-    def single_facet(self):
-        'true if system is in single facet mode'
-        return Scanhead.VARIABLES['SINGLE_FACET']
-
-    @single_facet.setter
-    def single_facet(self, val):
-        '''set system in single facet mode
-
-        You need to run flash to push settings to head
-        '''
-        assert isinstance(val, bool)
-        Scanhead.VARIABLES['SINGLE_FACET'] = val
+    def position(self):
+        '''retrieves and updates position'''
+        command = [COMMANDS.POSITION] + WORD_BYTES*[0]
+        for i in range(self.platform.motors):
+            read_data = (yield from self.send_command(command))
+            self._position[i] = unpack('!q', read_data[1:])[0]
+        # step --> mm
+        self._position = (self._position /
+                          np.array(list(self.platform.stepspermm.values())))
+        return self._position
 
     @property
-    def single_line(self):
-        'true if system is in single line mode'
-        return Scanhead.VARIABLES['SINGLE_LINE']
+    def pinstate(self):
+        '''retrieves pin state as dictionary'''
+        data = (yield from self._read_state())
+        bits = "{:08b}".format(data[-2])
+        mapping = ['x', 'y', 'z', 'extruder']
+        dct = {}
+        for i in range(self.platform.motors):
+            dct[mapping[i]] = int(bits[i])
+        dct['photodiode_trigger'] = int(bits[self.platform.motors])
+        dct['synchronized'] = int(bits[self.platform.motors+1])
+        return dct
 
-    @single_line.setter
-    def single_line(self, val):
-        '''set system in single line mode
+    @property
+    def error(self):
+        '''retrieves dispatch error status of FPGA via SPI'''
+        data = (yield from self._read_state())
+        bits = "{:08b}".format(data[-1])
+        return int(bits[STATE.ERROR])
 
-        You need to run flash to push settings to head
+    @property
+    def enable_steppers(self):
+        '''get status enables pin motors
+
+        Execution might still be disabled on the FPGA
         '''
-        assert isinstance(val, bool)
-        Scanhead.VARIABLES['SINGLE_LINE'] = val
+        enable = LED(self.platform.enable_pin)
+        return enable.value
+
+    @enable_steppers.setter
+    def enable_steppers(self, val):
+        '''disable stepper motors
+
+        sets enable pin on raspberry pi platform
+        send enable or disable command to FPGA core
+
+        val -- boolean, True enables steppers
+        '''
+        assert type(val) == bool
+        if val:
+            self.enable.off()
+            self.spi_exchange_data([COMMANDS.START]+WORD_BYTES*[0])
+        else:
+            self.enable.on()
+            self.spi_exchange_data([COMMANDS.STOP]+WORD_BYTES*[0])
 
     @property
     def laser_power(self):
         'return laser power in range [0-255]'
-        return self.bus.read_byte_data(self.ic_address, 0)
+        return self.bus.read_byte_data(self.platform.ic_address, 0)
 
     @laser_power.setter
     def laser_power(self, val):
@@ -75,193 +167,287 @@ class Machine:
         '''
         if val < 0 or val > 255:
             raise Exception('Invalid laser power')
-        self.bus.write_byte_data(self.ic_address, 0, val)
+        self.bus.write_byte_data(self.platform.ic_address, 0, val)
 
-    def bytetostate(self, byte=None):
-        'seperate the state and error bits from a byte'
-        if byte is None:
-            byte = self.spi.xfer([self.sh.COMMANDS.STATUS])[0]
-        errors = [int(i) for i in list('{0:0b}'.format(byte & 0b11111))]
-        errors.reverse()
-        # pad the list to 5
-        for _ in range(len(errors), 5):
-            errors.append(0)
-        return {'state': byte >> 5, 'errorbits': errors}
+    @property
+    def execution(self):
+        '''determine wether code in SRAM is dispatched
 
-    def statetobyte(self, errors=[], state=Scanhead.STATES.STOP):
-        'create byte correspdonding to a list of errors and a certain state'
-        errorstate = 0
-        for error in errors:
-            errorstate += pow(2, error)
-        val = errorstate + (state << 5)
-        return val
-
-    def status(self, byte=None, verbose=True):
-        '''prints state machine and list of errors for given byte
-        if verbose is True
-
-        returns the machine state and errors as string
+        The dispatcher on the FPGA can be on or off
         '''
-        # TODO: this will not work if the machine is receiving
-        bytedict = self.bytetostate(byte)
-        state, errors = bytedict['state'], bytedict['errorbits']
-        if state == 255:
-            raise Exception("Check reset pin is high and binary is correct")
-        error_string = 'None'
-        if max(errors) > 0:
-            error_string = ''
-            for idx, val in enumerate(errors):
-                if val > 0:
-                    error = list(self.sh.ERRORS._asdict())[idx]
-                    error_string += error + ' '
-        machinestate = list(self.sh.STATES._asdict())[state]
-        if verbose:
-            print(f"The machine state is {machinestate}")
-            print(f"The errors are {error_string}")
-        return machinestate, error_string
+        data = (yield from self._read_state())
+        bits = "{:08b}".format(data[-1])
+        return int(bits[STATE.PARSING])
 
-    def start(self):
-        'start scanhead'
-        self.busywrite(self.sh.COMMANDS.START)
+    def _executionsetter(self, val):
+        'not able to call execution with yield from'
+        assert type(val) == bool
+        if val:
+            command = [COMMANDS.START]
+        else:
+            command = [COMMANDS.STOP]
+        command += WORD_BYTES*[0]
+        return (yield from self.send_command(command))
 
-    def stop(self):
-        'disables scanhead'
-        self.busywrite(self.sh.COMMANDS.STOP)
+    @execution.setter
+    def execution(self, val):
+        '''set dispatcher on or of
 
-    def test_laser(self):
-        'enable laser'
-        self.busywrite(self.sh.COMMANDS.LASERTEST)
+        val -- True, dispatcher is enabled
+        '''
+        self._executionsetter(val)
 
-    def test_line(self):
-        'enable laser and motor which creates line'
-        self.busywrite(self.sh.COMMANDS.LINETEST)
+    def home_axes(self, axes, speed, pos=-200):
+        '''home given axes
 
-    def test_motor(self):
-        'enable motor'
-        self.busywrite(self.sh.COMMANDS.MOTORTEST)
+        e.g. axes = [1,0,1] will home x and z
+        axes  -- list with axes numbers to home
+        speed -- speed in mm/s used to home
+        pos   -- position to home to
+        '''
+        assert len(axes) == self.platform.motors
+        dist = np.array(axes)*np.array([pos]*self.platform.motors)
+        if self.generator:
+            yield from self.gotopoint(position=dist.tolist(),
+                                      speed=speed, absolute=False)
+        else:
+            self.gotopoint(position=dist.tolist(),
+                           speed=speed, absolute=False)
 
-    def reset(self, pin=26):
-        'reset the chip by raising and lowering the reset pin'
-        reset_pin = LED(pin)
-        reset_pin.off()
-        sleep(1)
-        reset_pin.on()
-        sleep(1)
+    def steps_to_count(self, steps):
+        '''compute count for a given number of steps
 
-    def busywrite(self, data, maxtrials=1E5, ignore=True):
-        byte = (self.spi.xfer([data]))[0]
-        state = self.bytetostate(byte)
-        trials = 0
-        # TODO: NOTSTABLE can also mean busy --> still needs fix
-        while (state['errorbits'][self.sh.ERRORS.NOTSTABLE] == 1) and ignore:
-            byte = (self.spi.xfer([data]))[0]
-            state = self.bytetostate(byte)
-            trials += 1
-            if trials > maxtrials:
-                self.status()
-                self.reset()
-                raise Exception(f"More than {maxtrials}\
-                                trials required to write to memory")
-        return byte
+        steps  -- motor moves in small steps
 
-    def forcewrite(self, data, maxtrials=1E6):
-        byte = (self.spi.xfer([data]))[0]
-        state = self.bytetostate(byte)
-        trials = 0
-        # NOTE: invalids should be detected
-        #      this was an issue with an older version of the code
-        if (state['errorbits'][self.sh.ERRORS.INVALID] == 1):
-            raise Exception("INVALID DETECTED")
-        while ((state['errorbits'][self.sh.ERRORS.MEMFULL] == 1)
-               | (state['errorbits'][self.sh.ERRORS.NOTSTABLE] == 1)):
-            byte = (self.spi.xfer([data]))[0]
-            state = self.bytetostate(byte)
-            trials += 1
-            if (state['errorbits'][self.sh.ERRORS.INVALID] == 1):
-                self.status()
-                self.reset()
-                raise Exception("INVALID DETECTED")
-            if trials > maxtrials:
-                self.status()
-                self.reset()
-                raise Exception(f"More than {maxtrials} trials\
-                                required to write to memory")
+        Shift is needed as two ticks per step are required
+        You need to count slightly over the threshold. That is why
+        +1 is added.
+        '''
+        count = (steps << (1+BIT_SHIFT))+(1 << (BIT_SHIFT-1))
+        return count
 
-    def bittobytelist(self, bitlst, bitorder='little'):
+    def gotopoint(self, position, speed, absolute=True):
+        '''move steppers to point with constant speed
+
+        Multiple axes can move in same instruction but ticks has to be uniform.
+        To simplify calculation each axes is moved independently
+
+        postion      -- list with coordinate or distance in mm
+        absolute     -- absolute position otherwise coordinate is distance
+        speed        -- speed in mm/s
+        '''
+        assert len(position) == self.platform.motors
+        if speed is not None:
+            assert len(speed) == self.platform.motors
+        else:
+            speed = [10]*self.platform.motors
+        if absolute:
+            dist = np.array(position) - self._position
+        else:
+            dist = np.array(position)
+        speed = np.array(speed)
+        for idx, _ in enumerate(position):
+            if dist[idx] == 0:
+                continue
+            # NOTE: ticks is equal for all axes
+            t = np.array([np.absolute((dist/speed))[idx]])
+            ticks = (t*FREQ).round().astype(int)
+            steps_per_mm = np.array(list(self.platform.stepspermm.values()))
+            # select axis
+            select = np.zeros_like(position, dtype='int64')
+            select[idx] = 1
+            # mm -> steps
+            dist_steps = dist * steps_per_mm * select
+
+            def get_ticks(x):
+                if x >= MOVE_TICKS:
+                    return MOVE_TICKS
+                else:
+                    return x
+            get_ticks_v = np.vectorize(get_ticks)
+
+            ticks_total = np.copy(ticks)
+            steps_total = np.zeros_like(dist_steps, dtype='int64')
+            if self.generator:
+                (yield from self._executionsetter(True))
+            else:
+                self._executionsetter(True)
+            hit_home = np.zeros_like(dist_steps, dtype='int64')
+            while ticks.sum() > 0:
+                ticks_move = get_ticks_v(ticks)
+                # steps -> count
+                steps_move = dist_steps*(ticks_move/ticks_total)
+                steps_move = steps_move.round().astype('int64')
+                steps_total += steps_move
+                cnts = self.steps_to_count(steps_move)
+                a = (cnts/ticks_move).round().astype('int64')
+                ticks -= MOVE_TICKS
+                ticks[ticks < 0] = 0
+                hit_home = (yield from self.send_move(ticks_move.tolist(),
+                                                      a.tolist(),
+                                                      [0]*self.platform.motors,
+                                                      [0]*self.platform.motors
+                                                      ))
+                if dist_steps[(hit_home == 0) | (a > 0)].sum() == 0:
+                    break
+            dist_mm = steps_total / steps_per_mm
+            self._position = self._position + dist_mm
+            self._position[hit_home == 1] = 0
+
+    def memfull(self, data=None):
+        '''check if memory is full
+
+        data -- data received from peripheral
+        '''
+        if data is None:
+            data = (yield from self._read_state())
+        bits = "{:08b}".format(data[-1])
+        return int(bits[STATE.FULL])
+
+    def send_command(self, data, format='!Q'):
+        assert len(data) == WORD_BYTES+COMMAND_BYTES
+        if self.generator:
+            data = (yield from self.spi_exchange_data(data))
+        else:
+            data = (self.spi_exchange_data(data))
+        return data
+
+    def enable_comp(self, laser0=False, laser1=False,
+                    polygon=False, synchronize=False):
+        '''enable components
+
+        You need to enable dispatching
+
+        laser0   -- True enables laser channel 0
+        laser1   -- True enables laser channel 1
+        polygon  -- False enables polygon motor
+        '''
+        laser0, laser1, polygon = (int(bool(laser0)),
+                                   int(bool(laser1)), int(bool(polygon)))
+        synchronize = int(bool(synchronize))
+        data = ([COMMANDS.WRITE] + [0]*(WORD_BYTES-2) +
+                [int(f'{synchronize}{polygon}{laser1}{laser0}', 2)]
+                + [INSTRUCTIONS.WRITEPIN])
+        yield from self.send_command(data)
+
+    def send_move(self, ticks, a, b, c, maxtrials=1E5):
+        '''send move instruction with data
+
+        data            -- coefficients for polynomal move
+        maxtrials       -- max number of communcation trials
+
+        returns array with status home switches
+        Zero implies home switch is hit
+        '''
+        if self.generator:
+            maxtrials = 10
+        commands = self.move_commands(ticks, a, b, c)
+        # TODO: this has been changed, remove if passes checks on machine
+        for command in commands:
+            trials = 0
+            while True:
+                data_out = (yield from self.send_command(command))
+                trials += 1
+                bits = [int(i) for i in "{:08b}".format(data_out[-1])]
+                if int(bits[STATE.ERROR]):
+                    raise Exception("Error detected on FPGA")
+                bits = [int(i) for i in "{:08b}".format(data_out[-2])]
+                home_bits = np.array(bits[:self.platform.motors])
+                if not (yield from self.memfull(data_out)):
+                    break
+                if trials > maxtrials:
+                    raise Memfull("Too many trials needed")
+        return home_bits
+
+    def move_commands(self, ticks, a, b, c):
+        '''get list of commands for move instruction with
+           [a,b,c] for ax+bx^2+cx^3
+
+           ticks        -- ticks in move
+           speed        -- speed in mm/s
+           acceleration -- acceleration in mm/s2
+           postion      -- list with position in mm
+        '''
+        assert len(ticks) == 1
+        assert len(a) == len(b) == len(c) == self.platform.motors
+        write_byte = COMMANDS.WRITE.to_bytes(1, 'big')
+        move_byte = INSTRUCTIONS.MOVE.to_bytes(1, 'big')
+        commands = []
+        commands += [write_byte +
+                     ticks[0].to_bytes(7, 'big') + move_byte]
+        for motor in range(self.platform.motors):
+            commands += [write_byte + a[motor].to_bytes(8, 'big', signed=True)]
+            commands += [write_byte + b[motor].to_bytes(8, 'big', signed=True)]
+            commands += [write_byte + c[motor].to_bytes(8, 'big', signed=True)]
+        return commands
+
+    def spi_exchange_data(self, data):
+        '''writes data to peripheral, returns reply'''
+        assert len(data) == (COMMAND_BYTES + WORD_BYTES)
+        self.chip_select.off()
+        # spidev changes values passed to it
+        datachanged = deepcopy(data)
+        response = bytearray(self.spi.xfer2(datachanged))
+        self.chip_select.on()
+        return response
+
+    def writeline(self, bitlst, stepsperline=1, direction=0, maxtrials=1E5):
+        bytelst = self.bittobytelist(bitlst, stepsperline, direction)
+        write_byte = COMMANDS.WRITE.to_bytes(1, 'big')
+        # TODO: merge write line with send commands
+        if self.generator:
+            maxtrials = 10
+        for i in range(0, len(bytelst), 8):
+            trials = 0
+            lst = bytelst[i:i+8]
+            lst.reverse()
+            data = write_byte + bytes(lst)
+            while True:
+                trials += 1
+                data_out = (yield from self.send_command(data))
+                if not (yield from self.memfull(data_out)):
+                    break
+                if trials > maxtrials:
+                    raise Memfull("Too many trials needed")
+
+    def bittobytelist(self, bitlst, stepsperline=1,
+                      direction=0, bitorder='little'):
         '''converts bitlst to bytelst
 
-        if bytelst is empty stop command is sent
+           bit list      set laser on and off
+                         if bitlst is empty stop command is sent
+           stepsperline  stepsperline, should be greater than 0
+                         if you don't want to move simply disable motor
+           direction     scanning direction
         '''
+        halfperiod = round((self.laser_params['TICKSINFACET']-1)
+                           / (stepsperline*2))
+        # avoid python "banker's rounding"
+        steps = round(self.laser_params['TICKSINFACET']/(halfperiod*2)+0.01)
+        assert stepsperline == steps
+        direction = [int(bool(direction))]
+
+        def remainder(bytelst):
+            rem = (len(bytelst) % WORD_BYTES)
+            if rem > 0:
+                res = WORD_BYTES - rem
+            else:
+                res = 0
+            return res
         if len(bitlst) == 0:
-            bytelst = [self.sh.INSTRUCTIONS.STOP]
+            bytelst = [INSTRUCTIONS.LASTSCANLINE]
+            bytelst += remainder(bytelst)*[0]
         else:
-            assert len(bitlst) == self.sh.BITSINSCANLINE
+            assert len(bitlst) == self.laser_params['BITSINSCANLINE']
             assert max(bitlst) <= 1
             assert min(bitlst) >= 0
-            bytelst = np.packbits(bitlst, bitorder=bitorder).tolist()
-            bytelst = [self.sh.INSTRUCTIONS.SCAN] + bytelst
-        bytelst.reverse()
+            bytelst = [INSTRUCTIONS.SCANLINE]
+            halfperiodbits = [int(i) for i in bin(halfperiod)[2:]]
+            halfperiodbits.reverse()
+            assert len(halfperiodbits) < 56
+            bytelst += np.packbits(direction+halfperiodbits,
+                                   bitorder=bitorder).tolist()
+            bytelst += remainder(bytelst)*[0]
+            bytelst += np.packbits(bitlst, bitorder=bitorder).tolist()
+            bytelst += remainder(bytelst)*[0]
         return bytelst
-
-    def genwritebytes(self, bytelst):
-        '''writes bytelst to memory
-
-        generator notation to facilitate sharing function with virtual object
-        '''
-        for _ in range(math.ceil(len(bytelst)/self.sh.CHUNKSIZE)):
-            yield self.sh.COMMANDS.WRITE_L
-            for _ in range(self.sh.CHUNKSIZE):
-                try:
-                    yield bytelst.pop()
-                except IndexError:
-                    yield 0
-
-    def writeline(self, bitlst, bitorder='little'):
-        '''writes bitlst to memory
-
-        if bitlst is empty --> stop command is sent
-        '''
-        if len(bitlst) > self.sh.BITSINSCANLINE:
-            raise Exception("Too many bits for a scanline")
-        bytelst = self.bittobytelist(bitlst)
-        for byte in self.genwritebytes(bytelst):
-            self.forcewrite(byte)
-
-    def writepattern(self, pattern):
-        '''repeats a pattern so a line is formed and writes to head
-
-        pattern: list of bits [0] or [1,0,0]
-        '''
-        line = (pattern*(self.sh.BITSINSCANLINE//len(pattern))
-                + pattern[:self.sh.BITSINSCANLINE % len(pattern)])
-        self.writeline(line)
-
-    def test_photodiode(self):
-        '''enable motor, laser and disable if photodiode is triggered
-
-        returns False if succesfull
-        '''
-        self.busywrite(self.sh.COMMANDS.PHOTODIODETEST)
-        sleep(4)
-        res = True
-        if self.bytetostate()['state'] != self.sh.STATES.STOP:
-            print("Test failed, stopping")
-            self.stop()
-        else:
-            res = False
-            print("Test succeeded")
-        return res
-
-    def flash(self, recompile=False, removebuild=False):
-        build_name = 'scanhead'
-        plat = board.Platform()   # object is removed from list
-        self.sh = Scanhead(plat)  # needs reinit to update settings
-        if recompile:
-            if os.path.isdir('build'):
-                plat.removebuild()
-            plat.build(freq=50, core=self.sh,
-                       build_name=build_name)
-        plat.upload(build_name)
-        if removebuild:
-            plat.removebuild()
-        self.reset()  # TODO: you need to reset, why?!!

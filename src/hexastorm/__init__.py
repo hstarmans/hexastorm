@@ -1,1 +1,2 @@
-from . import board, controller, core, optical
+from . import (platforms, core, constants, controller, movement,
+               resources, arithmetic, optical)

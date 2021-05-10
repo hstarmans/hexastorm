@@ -1,522 +1,681 @@
-import math
-import sys
-from collections import namedtuple
+import unittest
+from random import randint
+from copy import deepcopy
 
-from migen.fhdl.tools import list_special_ios
-from migen import *
-from litex.soc.cores.clock import iCE40PLL
-from litex.soc.cores.spi import SPISlave
+import numpy as np
+from numpy.testing import assert_array_equal
+from nmigen import Signal, Elaboratable, signed, Cat
+from nmigen import Module
+from nmigen.hdl.mem import Array
+from luna.gateware.utils.cdc import synchronize
+from luna.gateware.interface.spi import SPICommandInterface, SPIBus
+from luna.gateware.memory import TransactionalizedFIFO
+from luna.gateware.test.utils import sync_test_case
+from luna.gateware.interface.spi import SPIGatewareTestCase
+
+from FPGAG.controller import Host, Memfull
+from FPGAG.movement import Polynomal
+from FPGAG.platforms import TestPlatform
+from FPGAG.resources import get_all_resources
+from FPGAG.lasers import Laserhead, DiodeSimulator, params
+from FPGAG.constants import (COMMAND_BYTES, WORD_BYTES, STATE, INSTRUCTIONS,
+                             MEMWIDTH, COMMANDS, DEGREE, FREQ, wordsinscanline,
+                             wordsinmove)
 
 
-class Scanhead(Module):
-    '''
-    This description can be converted to VHDL or Verilog and then converted to binary
-    and uploaded to the FPGA.
-    '''
-    @staticmethod
-    def commands():
-        commands = ('STATUS', 'START', 'STOP', 'LASERTEST',
-                    'MOTORTEST', 'LINETEST', 'PHOTODIODETEST',
-                     'READ_D', 'WRITE_L')
-        Commands = namedtuple('Commands', commands, defaults=tuple(range(len(commands))))
-        return Commands()
-    COMMANDS = commands.__func__()
+class SPIParser(Elaboratable):
+    """ Parses and replies to commands over SPI
 
-    @staticmethod
-    def states():
-        states = ('STOP', 'START', 'MOTORTEST', 'LASERTEST', 'LINETEST', 'PHOTODIODETEST')
-        States = namedtuple('States', states, defaults=tuple(range(len(states))))
-        return States()
-    STATES = states.__func__()
+    The following commmands are possible
+      status -- send back state of the peripheriral
+      start  -- enable execution of gcode
+      stop   -- halt execution of gcode
+      write  -- write instruction to FIFO or report memory is full
 
-    @staticmethod
-    def instructions():
-        instructions = ('SCAN', 'STOP')
-        Instructions = namedtuple('Instructions', instructions, defaults=tuple(range(1,len(instructions)+1)))
-        return Instructions()
-    INSTRUCTIONS = instructions.__func__()
+    I/O signals:
+        I/O: Spibus       -- spi bus connected to peripheral
+        I: positions      -- positions of stepper motors
+        I: pin state      -- used to get the value of select pins at client
+        I: read_commit    -- finalize read transactionalizedfifo
+        I: read_en        -- enable read transactionalizedfifo
+        I: read_discard   -- read discard of transactionalizedfifo
+        I: dispatcherror  -- error while processing stored command from spi
+        O: execute        -- start processing gcode
+        O: read_data      -- read data from transactionalizedfifo
+        O: empty          -- transactionalizedfifo is empty
+    """
+    def __init__(self, platform, top=False):
+        """
+        platform  -- pass test platform
+        top       -- trigger synthesis of module
+        """
+        self.platform = platform
+        self.top = top
 
-    @staticmethod
-    def errors():
-        '''errors
-        Multiple errors can be present at the same time. This is different from state or command
-        as these can only be equal to one value.
-        If all bits are zero, there is no error.
-        Returned is the bit which equals the error
+        self.spi = SPIBus()
+        self.position = Array(Signal(signed(64))
+                              for _ in range(platform.motors))
+        self.pinstate = Signal(8)
+        self.read_commit = Signal()
+        self.read_en = Signal()
+        self.read_discard = Signal()
+        self.dispatcherror = Signal()
+        self.execute = Signal()
+        self.read_data = Signal(MEMWIDTH)
+        self.empty = Signal()
+
+    def elaborate(self, platform):
+        m = Module()
+        if platform and self.top:
+            board_spi = platform.request("debug_spi")
+            spi2 = synchronize(m, board_spi)
+            m.d.comb += self.spi.connect(spi2)
+        if self.platform:
+            platform = self.platform
+        spi = self.spi
+        interf = SPICommandInterface(command_size=COMMAND_BYTES*8,
+                                     word_size=WORD_BYTES*8)
+        m.d.comb += interf.spi.connect(spi)
+        m.submodules.interf = interf
+        # FIFO connection
+        fifo = TransactionalizedFIFO(width=MEMWIDTH,
+                                     depth=platform.memdepth)
+        if platform.name == 'Test':
+            self.fifo = fifo
+        m.submodules.fifo = fifo
+        m.d.comb += [self.read_data.eq(fifo.read_data),
+                     fifo.read_commit.eq(self.read_commit),
+                     fifo.read_discard.eq(self.read_discard),
+                     fifo.read_en.eq(self.read_en),
+                     self.empty.eq(fifo.empty)]
+        # Parser
+        mtrcntr = Signal(range(platform.motors))
+        wordsreceived = Signal(range(wordsinmove(platform.motors)+1))
+        error = Signal()
+        # Peripheral state
+        state = Signal(8)
+        m.d.sync += [state[STATE.PARSING].eq(self.execute),
+                     state[STATE.FULL].eq(fifo.space_available <= 1),
+                     state[STATE.ERROR].eq(self.dispatcherror | error)]
+        # remember which word we are processing
+        instruction = Signal(8)
+        with m.FSM(reset='RESET', name='parser'):
+            with m.State('RESET'):
+                m.d.sync += [self.execute.eq(1), wordsreceived.eq(0),
+                             error.eq(0)]
+                m.next = 'WAIT_COMMAND'
+            with m.State('WAIT_COMMAND'):
+                with m.If(interf.command_ready):
+                    word = Cat(state[::-1], self.pinstate[::-1])
+                    with m.If(interf.command == COMMANDS.EMPTY):
+                        m.next = 'WAIT_COMMAND'
+                    with m.Elif(interf.command == COMMANDS.START):
+                        m.next = 'WAIT_COMMAND'
+                        m.d.sync += self.execute.eq(1)
+                    with m.Elif(interf.command == COMMANDS.STOP):
+                        m.next = 'WAIT_COMMAND'
+                        m.d.sync += self.execute.eq(0)
+                    with m.Elif(interf.command == COMMANDS.WRITE):
+                        m.d.sync += interf.word_to_send.eq(word)
+                        with m.If(state[STATE.FULL] == 0):
+                            m.next = 'WAIT_WORD'
+                        with m.Else():
+                            m.next = 'WAIT_COMMAND'
+                    with m.Elif(interf.command == COMMANDS.READ):
+                        m.d.sync += interf.word_to_send.eq(word)
+                        m.next = 'WAIT_COMMAND'
+                    with m.Elif(interf.command == COMMANDS.POSITION):
+                        # position is requested multiple times for multiple
+                        # motors
+                        with m.If(mtrcntr < platform.motors):
+                            m.d.sync += mtrcntr.eq(mtrcntr+1)
+                        with m.Else():
+                            m.d.sync += mtrcntr.eq(0)
+                        m.d.sync += interf.word_to_send.eq(
+                                                self.position[mtrcntr])
+                        m.next = 'WAIT_COMMAND'
+            with m.State('WAIT_WORD'):
+                with m.If(interf.word_complete):
+                    byte0 = interf.word_received[:8]
+                    with m.If(wordsreceived == 0):
+                        with m.If((byte0 > 0) & (byte0 < 6)):
+                            m.d.sync += [instruction.eq(byte0),
+                                         fifo.write_en.eq(1),
+                                         wordsreceived.eq(wordsreceived+1),
+                                         fifo.write_data.eq(
+                                             interf.word_received)]
+                            m.next = 'WRITE'
+                        with m.Else():
+                            m.d.sync += error.eq(1)
+                            m.next = 'WAIT_COMMAND'
+                    with m.Else():
+                        m.d.sync += [fifo.write_en.eq(1),
+                                     wordsreceived.eq(wordsreceived+1),
+                                     fifo.write_data.eq(interf.word_received)]
+                        m.next = 'WRITE'
+            with m.State('WRITE'):
+                m.d.sync += fifo.write_en.eq(0)
+                wordslaser = wordsinscanline(
+                    params(platform)['BITSINSCANLINE'])
+                wordsmotor = wordsinmove(platform.motors)
+                with m.If(((instruction == INSTRUCTIONS.MOVE) &
+                          (wordsreceived >= wordsmotor))
+                          | (instruction == INSTRUCTIONS.WRITEPIN)
+                          | (instruction == INSTRUCTIONS.LASTSCANLINE)
+                          | ((instruction == INSTRUCTIONS.SCANLINE) &
+                          (wordsreceived >= wordslaser)
+                          )):
+                    m.d.sync += [wordsreceived.eq(0),
+                                 fifo.write_commit.eq(1)]
+                    m.next = 'COMMIT'
+                with m.Else():
+                    m.next = 'WAIT_COMMAND'
+            with m.State('COMMIT'):
+                m.d.sync += fifo.write_commit.eq(0)
+                m.next = 'WAIT_COMMAND'
+        return m
+
+
+class Dispatcher(Elaboratable):
+    """ Dispatches instructions to right submodule
+
+        Instructions are buffered in SRAM. This module checks the buffer
+        and dispatches the instructions to the corresponding module.
+        This is the top module
+    """
+    def __init__(self, platform=None, divider=50, simdiode=False):
+        """
+            platform  -- used to pass test platform
+            divider   -- if sys clk is 50 MHz and divider is 50
+                        motor state is update with 1 Mhz
+        """
+        self.simdiode = simdiode
+        self.platform = platform
+        self.divider = divider
+        self.read_commit = Signal()
+        self.read_en = Signal()
+        self.read_data = Signal(MEMWIDTH)
+        self.read_discard = Signal()
+        self.empty = Signal()
+
+    def elaborate(self, platform):
+        m = Module()
+        # Parser
+        parser = SPIParser(self.platform)
+        m.submodules.parser = parser
+        # Busy used to detect move or scanline in action
+        # disabled "dispatching"
+        busy = Signal()
+        # Polynomal Move
+        polynomal = Polynomal(self.platform, self.divider)
+        m.submodules.polynomal = polynomal
+        if platform:
+            board_spi = platform.request("debug_spi")
+            spi = synchronize(m, board_spi)
+            m.submodules.car = platform.clock_domain_generator()
+            laserheadpins = platform.request("laserscanner")
+            steppers = [res for res in get_all_resources(platform, "stepper")]
+            assert len(steppers) != 0
+        else:
+            platform = self.platform
+            self.spi = SPIBus()
+            self.parser = parser
+            self.pol = polynomal
+            spi = synchronize(m, self.spi)
+            self.laserheadpins = platform.laserhead
+            self.steppers = steppers = platform.steppers
+            self.busy = busy
+            laserheadpins = self.platform.laserhead
+        # Local laser signal clones
+        enable_prism = Signal()
+        lasers = Signal(2)
+        # Laserscan Head
+        if self.simdiode:
+            laserhead = DiodeSimulator(platform=platform,
+                                       addfifo=False)
+            lh = laserhead
+            m.d.comb += [lh.enable_prism_in.eq(enable_prism |
+                         lh.enable_prism),
+                         lh.laser0in.eq(lasers[0]
+                         | lh.lasers[0]),
+                         laserhead.laser1in.eq(lasers[1]
+                         | lh.lasers[1])]
+        else:
+            laserhead = Laserhead(platform=platform)
+            m.d.comb += laserhead.photodiode.eq(laserheadpins.photodiode)
+        m.submodules.laserhead = laserhead
+        if platform.name == 'Test':
+            self.laserhead = laserhead
+        # position adder
+        busy_d = Signal()
+        m.d.sync += busy_d.eq(polynomal.busy)
+        coeffcnt = Signal(range(len(polynomal.coeff)))
+        # connect laserhead
+        m.d.comb += [
+            laserheadpins.pwm.eq(laserhead.pwm),
+            laserheadpins.en.eq(laserhead.enable_prism | enable_prism),
+            laserheadpins.laser0.eq(laserhead.lasers[0] | lasers[0]),
+            laserheadpins.laser1.eq(laserhead.lasers[1] | lasers[1]),
+        ]
+        # connect Parser
+        m.d.comb += [
+            self.read_data.eq(parser.read_data),
+            laserhead.read_data.eq(parser.read_data),
+            laserhead.empty.eq(parser.empty),
+            self.empty.eq(parser.empty),
+            parser.read_commit.eq(self.read_commit | laserhead.read_commit),
+            parser.read_en.eq(self.read_en | laserhead.read_en),
+            parser.read_discard.eq(self.read_discard | laserhead.read_discard)
+        ]
+        # connect motors
+        for idx, stepper in enumerate(steppers):
+            if idx != 0:
+                step = (polynomal.step[idx] &
+                        ((stepper.limit == 0) | stepper.dir))
+                direction = polynomal.dir[idx]
+            else:
+                step = ((polynomal.step[idx] | laserhead.step)
+                        & ((stepper.limit == 0) | stepper.dir))
+                direction = (polynomal.dir[idx] | laserhead.dir)
+            m.d.comb += [stepper.step.eq(step),
+                         stepper.dir.eq(direction),
+                         parser.pinstate[idx].eq(stepper.limit)]
+        m.d.comb += (parser.pinstate[len(steppers):].
+                     eq(Cat(laserhead.photodiode_t, laserhead.synchronized)))
+        # Busy signal
+        m.d.comb += busy.eq(polynomal.busy | laserhead.process_lines)
+        # connect spi
+        m.d.comb += parser.spi.connect(spi)
+        with m.If((busy_d == 1) & (busy == 0)):
+            for idx, position in enumerate(parser.position):
+                m.d.sync += position.eq(position+polynomal.totalsteps[idx])
+        # pins you can write to
+        pins = Cat(lasers, enable_prism, laserhead.synchronize)
+        with m.FSM(reset='RESET', name='dispatcher'):
+            with m.State('RESET'):
+                m.next = 'WAIT_INSTRUCTION'
+                m.d.sync += pins.eq(0)
+            with m.State('WAIT_INSTRUCTION'):
+                m.d.sync += [self.read_commit.eq(0), polynomal.start.eq(0)]
+                with m.If((self.empty == 0) & parser.execute & (busy == 0)):
+                    m.d.sync += self.read_en.eq(1)
+                    m.next = 'PARSEHEAD'
+            # check which instruction we r handling
+            with m.State('PARSEHEAD'):
+                byte0 = self.read_data[:8]
+                m.d.sync += self.read_en.eq(0)
+                with m.If(byte0 == INSTRUCTIONS.MOVE):
+                    m.d.sync += [polynomal.ticklimit.eq(self.read_data[8:]),
+                                 coeffcnt.eq(0)]
+                    m.next = 'MOVE_POLYNOMAL'
+                with m.Elif(byte0 == INSTRUCTIONS.WRITEPIN):
+                    m.d.sync += [pins.eq(self.read_data[8:]),
+                                 self.read_commit.eq(1)]
+                    m.next = 'WAIT'
+                with m.Elif((byte0 == INSTRUCTIONS.SCANLINE) |
+                            (byte0 == INSTRUCTIONS.LASTSCANLINE)):
+                    m.d.sync += [self.read_discard.eq(1),
+                                 laserhead.synchronize.eq(1),
+                                 laserhead.expose_start.eq(1)]
+                    m.next = 'SCANLINE'
+                with m.Else():
+                    m.next = 'ERROR'
+                    m.d.sync += parser.dispatcherror.eq(1)
+            with m.State('MOVE_POLYNOMAL'):
+                with m.If(coeffcnt < len(polynomal.coeff)):
+                    with m.If(self.read_en == 0):
+                        m.d.sync += self.read_en.eq(1)
+                    with m.Else():
+                        m.d.sync += [polynomal.coeff[coeffcnt].eq(
+                                     self.read_data),
+                                     coeffcnt.eq(coeffcnt+1),
+                                     self.read_en.eq(0)]
+                with m.Else():
+                    m.next = 'WAIT'
+                    m.d.sync += [polynomal.start.eq(1),
+                                 self.read_commit.eq(1)]
+            with m.State('SCANLINE'):
+                m.d.sync += [self.read_discard.eq(0),
+                             laserhead.expose_start.eq(0)]
+                m.next = 'WAIT'
+            # NOTE: you need to wait for busy to be raised
+            #       in time
+            with m.State('WAIT'):
+                m.d.sync += polynomal.start.eq(0)
+                m.next = 'WAIT_INSTRUCTION'
+            # NOTE: system never recovers user must reset
+            with m.State('ERROR'):
+                m.next = 'ERROR'
+        return m
+
+
+class TestParser(SPIGatewareTestCase):
+    platform = TestPlatform()
+    FRAGMENT_UNDER_TEST = SPIParser
+    FRAGMENT_ARGUMENTS = {'platform': platform}
+
+    def initialize_signals(self):
+        self.host = Host(self.platform)
+        self.host.spi_exchange_data = self.spi_exchange_data
+        yield self.dut.spi.cs.eq(0)
+
+    def instruction_ready(self, check):
+        while (yield self.dut.empty) == 1:
+            yield
+        # Instruction ready
+        self.assertEqual((yield self.dut.empty), 0)
+        self.assertEqual((yield self.dut.fifo.space_available),
+                         (self.platform.memdepth - check))
+
+    @sync_test_case
+    def test_getposition(self):
+        decimals = 3
+        position = [randint(-2000, 2000) for _ in range(self.platform.motors)]
+        for idx, pos in enumerate(self.dut.position):
+            yield pos.eq(position[idx])
+        lst = (yield from self.host.position).round(decimals)
+        stepspermm = np.array(list(self.platform.stepspermm.values()))
+        assert_array_equal(lst, (position/stepspermm).round(decimals))
+
+    @sync_test_case
+    def test_writescanline(self):
+        host = self.host
+        yield from host.writeline([1] *
+                                  host.laser_params['BITSINSCANLINE'])
+        while (yield self.dut.empty) == 1:
+            yield
+        wordslaser = wordsinscanline(params(self.platform)['BITSINSCANLINE'])
+        yield from self.instruction_ready(wordslaser)
+
+    @sync_test_case
+    def test_lastscanline(self):
+        yield from self.host.writeline([])
+        yield from self.instruction_ready(1)
+
+    @sync_test_case
+    def test_writepin(self):
+        'write move instruction and verify FIFO is no longer empty'
+        self.assertEqual((yield self.dut.empty), 1)
+        yield from self.host.enable_comp(laser0=True,
+                                         laser1=False,
+                                         polygon=False)
+        yield from self.instruction_ready(1)
+
+    @sync_test_case
+    def test_writemoveinstruction(self):
+        'write move instruction and verify FIFO is no longer empty'
+        self.assertEqual((yield self.dut.empty), 1)
+        yield from self.host.send_move([1000],
+                                       [1]*self.platform.motors,
+                                       [2]*self.platform.motors,
+                                       [3]*self.platform.motors)
+        words = wordsinmove(self.platform.motors)
+        yield from self.instruction_ready(words)
+
+    @sync_test_case
+    def test_readpinstate(self):
+        '''set pins to random state'''
+        def test_pins():
+            olddct = (yield from self.host.pinstate)
+            for k in olddct.keys():
+                olddct[k] = randint(0, 1)
+            bitlist = list(olddct.values())
+            bitlist.reverse()
+            b = int("".join(str(i) for i in bitlist), 2)
+            yield self.dut.pinstate.eq(b)
+            yield
+            newdct = (yield from self.host.pinstate)
+            self.assertDictEqual(olddct, newdct)
+        yield from test_pins()
+        yield from test_pins()
+
+    @sync_test_case
+    def test_enableparser(self):
+        '''enables SRAM parser via command and verifies status with
+        different command'''
+        yield from self.host._executionsetter(False)
+        self.assertEqual((yield self.dut.execute), 0)
+        self.assertEqual((yield from self.host.execution), 0)
+
+    @sync_test_case
+    def test_invalidwrite(self):
+        '''write invalid instruction and verify error is raised'''
+        command = [COMMANDS.WRITE] + [0]*WORD_BYTES
+        yield from self.host.send_command(command)
+        self.assertEqual((yield from self.host.error), True)
+
+    @sync_test_case
+    def test_memfull(self):
+        'write move instruction until memory is full'
+        platform = self.platform
+        self.assertEqual((yield self.dut.empty), 1)
+        # should fill the memory as move instruction is
+        # larger than the memdepth
+        self.assertEqual((yield from self.host.memfull()), False)
+        try:
+            for _ in range(platform.memdepth):
+                yield from self.host.send_move([1000],
+                                               [1]*platform.motors,
+                                               [2]*platform.motors,
+                                               [3]*platform.motors,
+                                               maxtrials=1)
+        except Memfull:
+            pass
+        self.assertEqual((yield from self.host.memfull()), True)
+
+
+class TestDispatcher(SPIGatewareTestCase):
+    platform = TestPlatform()
+    FRAGMENT_UNDER_TEST = Dispatcher
+    FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1,
+                          'simdiode': True}
+
+    def initialize_signals(self):
+        self.host = Host(self.platform)
+        self.host.spi_exchange_data = self.spi_exchange_data
+        yield self.dut.spi.cs.eq(0)
+
+    def wait_complete(self):
+        '''helper method to wait for completion'''
+        cntr = 0
+        while (yield self.dut.busy) or (cntr < 100):
+            if (yield self.dut.pol.busy):
+                cntr = 0
+            else:
+                cntr += 1
+            yield
+
+    @sync_test_case
+    def test_memfull(self):
+        '''write move instruction until memory is full, execute
+           and ensure there is no parser error i.e. error
         '''
-        errors = ('MEMFULL', 'MEMREAD', 'NOTSTABLE', 'INVALID', 'INVALIDLINE')
-        Errors = namedtuple('Errors', errors, defaults=tuple(range(len(errors))))
-        return Errors()
-    ERRORS = errors.__func__()
-    VARIABLES = {'RPM':2000,'SPINUP_TIME':1.5, 'STABLE_TIME':1.125, 'FACETS':4,
-                 'CRYSTAL_HZ':50E6, 'LASER_HZ':100E3,
-                 'END%':0.7, 'START%':0.35, 'SINGLE_LINE':False,
-                 'SINGLE_FACET':False, 'DIRECTION':0}
-    CHUNKSIZE = 1 # ONLY 1 is supported!!
-    # one block is 4K bits, there are 32 blocks (officially 20 in HX4K)
-    MEMWIDTH = 8
-    MEMDEPTH = 512
+        platform = self.platform
+        # should fill the memory as move instruction is
+        # larger than the memdepth
+        self.assertEqual((yield from self.host.memfull()), False)
+        yield from self.host._executionsetter(False)
+        try:
+            for _ in range(platform.memdepth):
+                yield from self.host.send_move([1000],
+                                               [1]*platform.motors,
+                                               [2]*platform.motors,
+                                               [3]*platform.motors,
+                                               maxtrials=1)
+        except Memfull:
+            pass
+        self.assertEqual((yield from self.host.memfull()), True)
+        yield from self.host._executionsetter(True)
+        # data should now be processed from sram and empty become 1
+        while (yield self.dut.parser.empty) == 0:
+            yield
+        # 2 clocks needed for error to propagate
+        yield
+        yield
+        self.assertEqual((yield from self.host.error), False)
 
-    def __init__(self, platform, test=False):
-        # variables
-        self.ticksinfacet = round(self.VARIABLES['CRYSTAL_HZ']/(self.VARIABLES['RPM']/60*self.VARIABLES['FACETS']))
-        LASERTICKS = int(self.VARIABLES['CRYSTAL_HZ']/self.VARIABLES['LASER_HZ'])
-        self.JITTERTICKS = round(0.5*LASERTICKS)
-        if self.VARIABLES['END%']>round(1-(self.JITTERTICKS+1)/self.ticksinfacet): raise Exception("Invalid settings, END% too high")
-        self.BITSINSCANLINE = round((self.ticksinfacet*(self.VARIABLES['END%']-self.VARIABLES['START%']))/LASERTICKS)
-        if self.BITSINSCANLINE <= 0: raise Exception("Bits in scanline invalid")
-        self.bytesinline = math.ceil(self.BITSINSCANLINE/8)+1 # command byte is equal to 1
-        if self.VARIABLES['SINGLE_LINE']==1:
-            self.MEMDEPTH = self.bytesinline 
-        elif (self.MEMWIDTH*self.MEMDEPTH)//self.BITSINSCANLINE<5:
-            raise Exception("Memory too small for 5 lines")
-        # clock; routing was not able to reach speed higher than 70 MHz
-        #        for entire circuit on iCE40, so clock is contraint to 50 MHz
-        clk100 = platform.request('clk100')
-        self.clock_domains.cd_sys = ClockDomain(reset_less=True)
-        platform.add_period_constraint(self.cd_sys.clk, 20)
-        if not test:
-            self.submodules.pll = pll = iCE40PLL()
-            #self.comb += pll.reset.eq(~rst_n)
-            pll.register_clkin(clk100, 100e6)
-            pll.create_clkout(self.cd_sys, self.VARIABLES['CRYSTAL_HZ'])
-        # three submodules; SPI receiver, memory and laser state machine
-        # full byte state
-        self.laserfsmstate = Signal(3)    # state laser module 5-8 bit
-        self.error = Signal(5)            # error              0-5 bit
-        debug = Signal(8)                 # optional 
-        # Memory element
-        # Rules:
-        #        read cannot be set equal to write address  --> handled by laser ledfsm
-        #        write cannot be set equal to read address  --> handled by receiver statemachne
-        # readbit, current bit read
-        # written to detect if already information is written to memory
-        #         written can go zero after a write... if the memory is complety read --> it is no longer "written"
-        # dat_r_temp , data is shifted after read. It is believed that this is not possible on the memory element
-        # As a result data is copied to another element first.
-        # sram memory is 32 blocks... each block has its own ports
-        # one block 8*512 = 4096 bits currently used
-        self.specials.mem = Memory(width=self.MEMWIDTH, depth=self.MEMDEPTH)
-        writeport = self.mem.get_port(write_capable=True, mode = READ_FIRST)
-        self.readport = self.mem.get_port(has_re=True)
-        self.specials += writeport, self.readport
-        self.ios = {writeport.adr, writeport.dat_w, writeport.we, self.readport.dat_r, self.readport.adr, self.readport.re}
-        readbit = Signal(max = self.MEMWIDTH)
-        written = Signal()
-        self.dat_r_new = Signal(self.MEMWIDTH)
-        dat_r_old = Signal(self.MEMWIDTH)
-        # Receiver State Machine
-        # TODO: tried to paralize receiver and parser but this gives errors
-        #       I am not able achieve agreement between Linux host and FPGA on memfull
-        #       Memfull is not correctly propagated every 10K operations which results in failure.
-        # Consists out of component from litex and own custom component
-        # Detects whether new command is available
-        self.spi = platform.request("spi")
-        spislave = SPISlave(self.spi, data_width=8)
-        self.submodules.slave = spislave
-        # Done detector
-        done_d = Signal()
-        done_rise = Signal()
-        self.sync += done_d.eq(spislave.done)
-        self.comb += done_rise.eq(spislave.done & ~done_d)
-        # Start detector 
-        start_d = Signal()
-        start_rise = Signal()
-        self.sync += start_d.eq(spislave.start)
-        self.comb += start_rise.eq(spislave.start & ~start_d)
-        # Memfull trigger
-        dummyf = Signal(max=2*self.MEMDEPTH)
-        dummyb = Signal(min=-self.MEMDEPTH, max=self.MEMDEPTH)
-        self.sync += dummyf.eq(writeport.adr+self.CHUNKSIZE+1)
-        self.sync += dummyb.eq(writeport.adr+self.CHUNKSIZE+1-(self.MEMDEPTH-1))
-        self.submodules.parser = FSM(reset_state = "RESET")
-        spi_mosi = Signal(self.MEMWIDTH)
-        parsertrigger = Signal()
-        memfulld = Signal()
-        command = Signal()
-        chunkcnt = Signal(max=self.CHUNKSIZE+1)
-        self.parser.act("RESET",
-            NextValue(command, 1),
-            NextValue(chunkcnt, 0),
-            NextState('WAITFORSTART')
-        )
-        self.parser.act("WAITFORSTART",
-                If(start_rise,
-                    NextState("WAITFORDONE")
-                ).
-                Else(
-                    If((written==1)&(self.VARIABLES['SINGLE_LINE']==False),
-                            If((dummyf>self.readport.adr)&(self.readport.adr>writeport.adr),
-                                NextValue(self.error[self.ERRORS.MEMFULL],1)
-                            ).
-                            Elif((dummyb>self.readport.adr)&(self.readport.adr<writeport.adr),
-                                NextValue(self.error[self.ERRORS.MEMFULL],1)
-                            ).
-                            Else(NextValue(self.error[self.ERRORS.MEMFULL],0))
-                    ).
-                    Else(NextValue(self.error[self.ERRORS.MEMFULL],0)),
-                         NextValue(spislave.miso, Cat([self.error, self.laserfsmstate])),
-                         NextValue(memfulld, self.error[self.ERRORS.MEMFULL])
-                    )
-        )       
-        self.parser.act("WAITFORDONE",
-            NextValue(spi_mosi, spislave.mosi),
-            If(done_rise,
-                #TODO: don't overfloat bug with not stable
-                NextValue(spislave.miso, 4),  
-                If(command,
-                    NextState("PROCESSCOMMAND")
-                ).
-                Else(
-                    If(chunkcnt>=self.CHUNKSIZE-1,
-                        NextValue(chunkcnt, 0),
-                        NextValue(command, 1)
-                    ).
-                    Else(NextValue(chunkcnt, chunkcnt+1)
-                    ),
-                    NextValue(command, 1),
-                    NextValue(writeport.dat_w, spislave.mosi),
-                    NextValue(writeport.we, 1),
-                    NextState("WRITE")
-                )
-            )
-        )
-        # command is now used as extra parameter for state and makes it more confusing
-        self.parser.act("PROCESSCOMMAND",
-            NextState("WAITFORSTART"),
-            If(spi_mosi == self.COMMANDS.STOP,
-                NextValue(self.laserfsmstate, self.STATES.STOP)
-            ).
-            Elif(spi_mosi == self.COMMANDS.START,
-                NextValue(self.laserfsmstate, self.STATES.START)
-            ).
-            Elif(spi_mosi == self.COMMANDS.LASERTEST,
-                NextValue(self.laserfsmstate, self.STATES.LASERTEST)
-            ).
-            Elif(spi_mosi == self.COMMANDS.MOTORTEST,
-                NextValue(self.laserfsmstate, self.STATES.MOTORTEST)
-            ).
-            Elif(spi_mosi == self.COMMANDS.LINETEST,
-                NextValue(self.laserfsmstate, self.STATES.LINETEST)
-            ).
-            Elif(spi_mosi == self.COMMANDS.PHOTODIODETEST,
-                NextValue(self.laserfsmstate, self.STATES.PHOTODIODETEST)
-            ).
-            Elif(spi_mosi == self.COMMANDS.WRITE_L,
-                If(memfulld == 0 ,
-                    NextValue(command, 0)
-                )
-            ).
-            Elif(spi_mosi == self.COMMANDS.STATUS
-            ).
-            Elif(spi_mosi != 0,
-                NextValue(self.error[self.ERRORS.INVALID], 1)
-            )
-        )
-        self.parser.act("WRITE",
-            NextState("WAITFORSTART"),
-            NextValue(written, 1),
-            # Write address position
-            If(writeport.adr+1==self.MEMDEPTH,
-               NextValue(writeport.adr, 0)
-            ).
-            # wrap around is different in single line mode
-            Elif((writeport.adr==math.ceil(self.BITSINSCANLINE/self.MEMWIDTH))&(self.VARIABLES['SINGLE_LINE']==True), 
-                NextValue(writeport.adr, 0)
-            ).
-            Else(
-                NextValue(writeport.adr, writeport.adr+1)
-            ),
-            NextValue(writeport.we, 0)
-        )
-        # the original motor driver was designed for 6 facets and pulsed for eached facet
-        polyperiod = int(self.VARIABLES['CRYSTAL_HZ']/(self.VARIABLES['RPM']/60)/(6*2))
-        pwmcounter = Signal(max=polyperiod)
-        self.poly_pwm = platform.request("poly_pwm")
-        self.sync += If(pwmcounter == 0,
-                self.poly_pwm.eq(~self.poly_pwm),
-                pwmcounter.eq(polyperiod-1)).Else(
-                pwmcounter.eq(pwmcounter - 1)
-                )
-        # Laser FSM
-        # Laser FSM controls the laser, polygon anld output to motor
-        self.facetcnt = Signal(max=self.VARIABLES['FACETS'])
-        # stable counter used for both spinup and photo diode stable
-        spinupticks = round(self.VARIABLES['SPINUP_TIME']*self.VARIABLES['CRYSTAL_HZ'])
-        stableticks = round(self.VARIABLES['STABLE_TIME']*self.VARIABLES['CRYSTAL_HZ'])
-        stablecounter = Signal(max=max(spinupticks, stableticks))   # counter is used twice, hence the max
-        stablethresh = Signal(max=stableticks)
-        self.lasercnt = Signal(max=LASERTICKS)
-        self.scanbit = Signal(max=self.BITSINSCANLINE+1)
-        self.tickcounter = Signal(max=int(self.ticksinfacet*2))
-        self.submodules.laserfsm = FSM(reset_state = "RESET")
-        # leesfoutdetectie:
-        #   in het begin zijn lees en schrijfadres gelijk
-        #   als er geschreven is dan is het schrijf adres een groter dan lees adres
-        #   als er geschreven is en het volgende adres waarvan je gaat lezen nog niet beschreven is --> lees fout
-        # op het moment kost lezen een tick, dit zou voorkomen kunnen worden
-        # tick counter; number of ticks in a facet for the oscillator
-        # laser counter; laser operates at reduced speed this controlled by this counter
-        # readbit counter; current bit position in memory
-        # scanbit counter; current bit position along scanline
-        readtrig = Signal()
-        self.submodules.readmem= FSM(reset_state = "RESET")
-        self.readmem.act("RESET",
-            NextValue(self.readport.adr, 0),
-            NextValue(self.readport.re, 1),
-            NextValue(written, 0),
-            NextState("WAIT")
-        )
-        self.readmem.act("WAIT",
-            If(readtrig,
-               NextValue(self.readport.re, 0),
-               NextState("READ")
-            )
-        )
-        self.readmem.act("READ",
-            NextValue(readtrig, 0),
-            NextValue(self.readport.re, 1),
-            If((self.readport.adr == writeport.adr)&(written == 0),
-               NextValue(self.error[self.ERRORS.MEMREAD], 1),
-            ).
-            Else(
-                #TODO: you could split into two signals --> one if ever memread occured, other memread signal
-                NextValue(self.error[self.ERRORS.MEMREAD], 0),
-                NextValue(self.dat_r_new, self.readport.dat_r)
-            ),
-            # always increase address, if you move over the write set written to zero
-            If(self.readport.adr+1==self.MEMDEPTH,
-                NextValue(self.readport.adr, 0),
-                If((writeport.adr == 0)&(self.VARIABLES['SINGLE_LINE']==False), NextValue(written,0))
-            ).
-            Else(
-                NextValue(self.readport.adr, self.readport.adr+1),
-                If((self.readport.adr+1 == writeport.adr)&(self.VARIABLES['SINGLE_LINE']==False), NextValue(written,0))
-            ),
-            NextState("WAIT")
-        )
-        self.laserfsm.act("RESET",
-            NextValue(self.readport.adr, 0),
-            NextValue(writeport.adr, 0),
-            NextState("STOP")
-        )
-        self.laser0 = platform.request("laser0")
-        self.poly_en = platform.request("poly_en")
-        self.photodiode = platform.request("photodiode")
-        self.laserfsm.act("STOP",
-            NextValue(stablethresh, stableticks-1),
-            NextValue(stablecounter, 0),
-            NextValue(self.facetcnt, 0),
-            NextValue(self.tickcounter, 0),
-            NextValue(self.scanbit, 0),
-            NextValue(self.lasercnt, 0),
-            NextValue(self.laser0, 0),
-            NextValue(self.poly_en, 1),
-            NextValue(readbit,0),
-            If(self.laserfsmstate==self.STATES.START,
-                If(self.photodiode == 0,
-                    NextValue(self.laserfsmstate, self.STATES.STOP),
-                    NextState("STOP")
-                ).
-                Else(
-                    NextValue(readtrig, 1),
-                    NextValue(self.error[self.ERRORS.NOTSTABLE], 0),
-                    NextValue(self.error[self.ERRORS.MEMREAD], 0),
-                    NextValue(self.poly_en, 0),
-                    NextState("SPINUP")
-                )
-            ).
-            Elif(self.laserfsmstate==self.STATES.MOTORTEST,
-                NextValue(self.poly_en, 0),
-                NextState("MOTORTEST")
-            ).
-            Elif(self.laserfsmstate==self.STATES.LASERTEST,
-                NextValue(self.laser0, 1),
-                NextState("LASERTEST")
-            ).
-            Elif(self.laserfsmstate==self.STATES.LINETEST,
-                NextValue(self.laser0, 1),
-                NextValue(self.poly_en, 0),
-                NextState("LINETEST")
-            ).
-            Elif(self.laserfsmstate==self.STATES.PHOTODIODETEST,
-                # photodiode should be high with laser off
-                # something is wrong, this makes sure error is produced
-                If(self.photodiode == 0,
-                    NextValue(self.laser0, 1),
-                    NextValue(self.poly_en, 1)
-                ).
-                Else(
-                    NextValue(self.laser0, 1),
-                    NextValue(self.poly_en, 0),
-                ),
-                NextState("PHOTODIODETEST")
-            )
-        )
-        self.laserfsm.act("MOTORTEST",
-            If(self.laserfsmstate!=self.STATES.MOTORTEST,
-                 NextState("STOP")
-            )
-        )
-        self.laserfsm.act("LASERTEST",
-            If(self.laserfsmstate!=self.STATES.LASERTEST,
-                 NextState("STOP")
-            )
-        )
-        self.laserfsm.act("LINETEST",
-            If(self.laserfsmstate!=self.STATES.LINETEST,
-                 NextState("STOP")
-            )
-        )
-        # Photodiode rising edge detector
-        photodiode_d = Signal()
-        self.laserfsm.act("PHOTODIODETEST",
-            If((self.photodiode == 0) & (self.poly_en == 0),
-                NextValue(self.laserfsmstate, self.STATES.STOP),
-                NextState("STOP")
-            ).
-            Elif(self.laserfsmstate!=self.STATES.PHOTODIODETEST,
-                 NextState("STOP")
-            )
-        )
-        self.laserfsm.act("SPINUP",
-            NextValue(stablecounter, stablecounter + 1),
-            If(stablecounter>spinupticks-1,
-                NextState("STATE_WAIT_STABLE"),
-                NextValue(self.laser0, 1),
-                NextValue(stablecounter, 0),
-            )
-        )
-        self.laserfsm.act("STATE_WAIT_STABLE",
-            NextValue(stablecounter, stablecounter+1),
-            NextValue(photodiode_d, self.photodiode),
-            If(stablecounter>=stablethresh,
-               NextValue(self.error[self.ERRORS.NOTSTABLE], 1),
-               NextValue(self.laserfsmstate, self.STATES.STOP),
-               NextState('RESET')
-            ).
-            Elif(~self.photodiode&~photodiode_d,
-               NextValue(self.tickcounter, 0),
-               NextValue(self.laser0, 0),
-               If((self.tickcounter>self.ticksinfacet-self.JITTERTICKS)&
-                  (self.tickcounter<self.ticksinfacet+self.JITTERTICKS),
-                  If(self.facetcnt==self.VARIABLES['FACETS']-1, NextValue(self.facetcnt, 0)).
-                  Else(NextValue(self.facetcnt, self.facetcnt+1)),
-                  NextValue(stablecounter, 0),
-                  If((self.VARIABLES['SINGLE_FACET']==True)&(self.facetcnt>0),
-                    NextState('WAIT_END')
-                  ).
-                  Else(
-                    NextValue(stablethresh, min(round(10.1*self.ticksinfacet), stableticks)),  #TODO: lower!
-                    NextState('READ_INSTRUCTION')
-                  )
-               ).
-               Else(
-                   NextState('WAIT_END')
-               )
-            ).
-            Elif(self.laserfsmstate!=self.STATES.START,
-                 NextState("RESET")
-            ).  
-            Else(
-                NextValue(self.tickcounter, self.tickcounter+1)
-            )
-        )
-        self.laserfsm.act('READ_INSTRUCTION',
-            NextValue(self.tickcounter, self.tickcounter+1),
-            If(readtrig == 0,
-               If(self.error[self.ERRORS.MEMREAD] == 1,
-                   # move back the address and read again
-                   If(self.readport.adr == 0,
-                        NextValue(self.readport.adr, self.MEMDEPTH-1)
-                   ).
-                   Else(
-                       NextValue(self.readport.adr, self.readport.adr-1)
-                   ),
-                   NextValue(readtrig, 1),
-                   NextState("WAIT_END")
-               ).
-               Elif(self.dat_r_new == self.INSTRUCTIONS.STOP,
-                   NextState("RESET"),
-                   NextValue(self.laserfsmstate, self.STATES.STOP)
-               ).
-               Elif(self.dat_r_new == self.INSTRUCTIONS.SCAN,
-                   NextState('WAIT_FOR_DATA_RUN'),
-                   NextValue(readtrig, 1),
-               ).
-               Else(NextState("RESET"),
-                    NextValue(self.laserfsmstate, self.STATES.STOP),
-                    NextValue(self.error[self.ERRORS.INVALIDLINE], 1),
-               )
-            )
-        )
-        self.laserfsm.act('WAIT_FOR_DATA_RUN',
-            NextValue(self.tickcounter, self.tickcounter + 1),
-            If(readtrig == 0,
-                If(self.error[self.ERRORS.MEMREAD] == 1,
-                    NextValue(dat_r_old, 0)
-                    ).
-                Else(
-                    NextValue(dat_r_old, self.dat_r_new)
-                ),
-                NextValue(readbit, 0),
-                NextValue(self.scanbit, 0),
-                NextValue(self.lasercnt, 0),
-                If(self.tickcounter==int(self.VARIABLES['START%']*self.ticksinfacet-2),
-                    NextState('DATA_RUN')
-                ).
-                Elif(self.tickcounter>int(self.VARIABLES['START%']*self.ticksinfacet-2),
-                    #NextValue(self.error[self.ERRORS.INVALID], 1),   #TODO: replace with timeout
-                    NextState('DATA_RUN')
-                )
-            )
-        )
-        self.laserfsm.act("DATA_RUN",
-            NextValue(self.tickcounter, self.tickcounter + 1),
-            If(self.lasercnt == 0,
-                #NOTE: readbit and scanbit counters can be different
-                #      readbit is your current position in memory and scanbit your current byte position in scanline
-                If(self.scanbit >= self.BITSINSCANLINE,
-                    NextState("WAIT_END")
-                ).
-                Else(
-                    NextValue(self.lasercnt, LASERTICKS-1),
-                    NextValue(self.scanbit, self.scanbit+1),
-                    # read from memory before the spinup
-                    # it is triggered here again, so fresh data is available once the end is reached
-                    # if read bit is 0, trigger a read out unless the next byte is outside of line
-                    If(readbit == 0,
-                        NextValue(readtrig, 1),
-                        NextValue(readbit, readbit+1),
-                        NextValue(dat_r_old, dat_r_old>>1)
-                    ).
-                    # final read bit copy memory
-                    # move to next address, i.e. byte, if end is reached
-                    Elif(readbit==self.MEMWIDTH-1,
-                        If(self.error[self.ERRORS.MEMREAD] == 1,
-                            NextValue(dat_r_old, 0)
-                        ).
-                        Else(
-                            NextValue(dat_r_old, self.dat_r_new)
-                        ),
-                        NextValue(readbit, 0)
-                    ).
-                    Else(
-                        NextValue(readbit, readbit+1),
-                        NextValue(dat_r_old, dat_r_old>>1)
-                    ),
-                    NextValue(self.laser0, dat_r_old[0])
-                )
-            ).
-            Else(
-                NextValue(self.lasercnt, self.lasercnt - 1)
-            )
-        )
-        self.laserfsm.act("WAIT_END",
-            NextValue(stablecounter, stablecounter+1),
-            NextValue(self.tickcounter, self.tickcounter+1),
-            If(self.tickcounter>=round(self.ticksinfacet-self.JITTERTICKS-1),
-               NextState("STATE_WAIT_STABLE"),
-               NextValue(self.laser0, 1),
-            )
-        )
+    @sync_test_case
+    def test_readdiode(self):
+        '''verify you can receive photodiode trigger
+
+        Photodiode trigger simply checks wether the photodiode
+        has been triggered for each cycle.
+        The photodiode is triggered by the simdiode.
+        '''
+        yield from self.host._executionsetter(False)
+        yield from self.host.enable_comp(laser0=True,
+                                         polygon=True)
+        for _ in range(self.dut.laserhead.dct['TICKSINFACET']*2):
+            yield
+        self.assertEqual((yield self.dut.laserhead.photodiode_t),
+                         False)
+        # not triggered as laser and polygon not on
+        yield from self.host._executionsetter(True)
+        val = (yield from self.host.pinstate)['photodiode_trigger']
+        for _ in range(self.dut.laserhead.dct['TICKSINFACET']*2):
+            yield
+        self.assertEqual((yield self.dut.laserhead.photodiode_t),
+                         True)
+        self.assertEqual(val, True)
+
+    @sync_test_case
+    def test_writepin(self):
+        '''verify homing procedure works correctly'''
+        yield from self.host.enable_comp(laser0=True,
+                                         laser1=False,
+                                         polygon=False)
+        # wait till instruction is received
+        while (yield self.dut.parser.empty):
+            yield
+        yield
+        self.assertEqual((yield from self.host.error), False)
+        self.assertEqual((yield self.dut.laserheadpins.laser0), 1)
+        self.assertEqual((yield self.dut.laserheadpins.laser1), 0)
+        self.assertEqual((yield self.dut.laserheadpins.en), 0)
+
+    @sync_test_case
+    def test_home(self):
+        '''verify homing procedure works correctly'''
+        self.host._position = np.array([0.1]*self.platform.motors)
+        for i in range(self.platform.motors):
+            yield self.dut.steppers[i].limit.eq(1)
+        yield
+        self.assertEqual((yield self.dut.parser.pinstate[0]), 1)
+
+        yield from self.host.home_axes(axes=np.array([1]*self.platform.motors),
+                                       speed=None,
+                                       pos=-0.1)
+        assert_array_equal(self.host._position,
+                           np.array([0]*self.platform.motors))
+
+    @sync_test_case
+    def test_invalidwrite(self):
+        '''write invalid instruction and verify error is raised'''
+        fifo = self.dut.parser.fifo
+        self.assertEqual((yield from self.host.error), False)
+        # write illegal byte to queue and commit
+        yield fifo.write_data.eq(0xAA)
+        yield from self.pulse(fifo.write_en)
+        yield from self.pulse(fifo.write_commit)
+        self.assertEqual((yield self.dut.parser.empty), 0)
+        # data should now be processed from sram and empty become 1
+        while (yield self.dut.parser.empty) == 0:
+            yield
+        # 2 clocks needed for error to propagate
+        yield
+        yield
+        self.assertEqual((yield from self.host.error), True)
+
+    @sync_test_case
+    def test_ptpmove(self, steps=[800], ticks=[30_000]):
+        '''verify point to point move
+
+        If ticks is longer than tick limit the moves is broken up.
+        If the number of instruction is larger than memdepth it
+        also test blocking behaviour.
+        '''
+        steps = steps*self.platform.motors
+        mm = np.array(steps)/np.array(list(self.platform.stepspermm.values()))
+        time = np.array(ticks)/FREQ
+        speed = mm/time
+        yield from self.host.gotopoint(mm.tolist(),
+                                       speed.tolist())
+        yield from self.wait_complete()
+        calculated = deepcopy(self.host._position)
+        assert calculated.sum() > 0
+        assert_array_equal((yield from self.host.position),
+                           calculated)
+
+    @sync_test_case
+    def test_movereceipt(self, ticks=10_000):
+        'verify move instruction send over with send_move'
+        a = list(range(1, self.platform.motors+1))
+        b = list(range(3, self.platform.motors+3))
+        c = list(range(5, self.platform.motors+5))
+        yield from self.host.send_move([ticks],
+                                       a,
+                                       b,
+                                       c)
+        # wait till instruction is received
+        while (yield self.dut.pol.start) == 0:
+            yield
+        yield
+        while (yield self.dut.pol.busy):
+            yield
+        # confirm receipt tick limit and coefficients
+        self.assertEqual((yield self.dut.pol.ticklimit), 10_000)
+        coefficients = [a, b, c]
+        for motor in range(self.platform.motors):
+            for coef in range(DEGREE):
+                indx = motor*(DEGREE)+coef
+                self.assertEqual((yield self.dut.pol.coeff[indx]),
+                                 coefficients[coef][motor])
+        while (yield self.dut.pol.busy):
+            yield
+        for motor in range(self.platform.motors):
+            self.assertEqual((yield self.dut.pol.cntrs[motor*DEGREE]),
+                             a[motor]*ticks + b[motor]*pow(ticks, 2)
+                             + c[motor]*pow(ticks, 3))
+
+    @sync_test_case
+    def test_writeline(self, numblines=3):
+        'write line and see it is processed accordingly'
+        host = self.host
+        for _ in range(numblines):
+            yield from self.host.writeline([1] *
+                                           host.laser_params['BITSINSCANLINE'])
+        yield from host.writeline([])
+        self.assertEqual((yield from self.host.pinstate)['synchronized'],
+                         True)
+        yield from self.host.enable_comp(synchronize=False)
+        while (yield self.dut.parser.empty) == 0:
+            yield
+        self.assertEqual((yield from self.host.pinstate)['synchronized'],
+                         False)
+        self.assertEqual((yield from self.host.error), False)
+        
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+# Overview:
+#  the hardware consists out of the following elements
+#  -- SPI command interface
+#  -- transactionalized FIFO
+#  -- SPI parser (basically an extension of SPI command interface)
+#  -- Dispatcher --> dispatches signals to actual hardware
+#  -- Polynomal integrator --> determines position via integrating counters
+
+# TODO:
+#   -- in practice, position is not reached with small differences like 0.02 mm
+#   -- test execution speed to ensure the right PLL is propagated
+#   -- use CRC packet for tranmission failure (it is in litex but not luna)
+#   -- try to replace value == 0 with ~value
+#   -- xfer3 is faster in transaction
+#   -- if you chip select is released parsers should return to initial state
+#      now you get an error if you abort the transaction
+#   -- number of ticks per motor is uniform
+#   -- yosys does not give an error if you try to synthesize invalid memory
+#   -- read / write commit is not perfect
+#   -- add example of simulating in yosys / chisel
