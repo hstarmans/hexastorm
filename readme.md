@@ -8,11 +8,12 @@ The code took most inspiration from [LDGraphy](https://github.com/hzeller/ldgrap
 A new tool chain, see [FPGAG](https://github.com/hstarmans/FPGAG) is in development which leverages better abstractions provided by [Luna](https://github.com/greatscottgadgets/luna) an [Nmigen](https://github.com/nmigen/nmigen).
 
 ## Install Notes
-On Raspberry, install libatlas so latest Numpy, etc. can be installed via pip.
+On Raspbian, install libatlas so latest Numpy, etc. can be installed via pip.
 ```console
 sudo apt update
 sudo apt install libatlas3-base
 ```
+Install luna and checkout at f54de01. Code after this date does not work yet.
 Install required libraries
 ```console
 pip3 install -r requirements.txt
