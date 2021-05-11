@@ -21,10 +21,15 @@ Install Hexastorm in develop mode so you can edit.
 ```console
 python3 setup.py develop --user
 ```
-Install ice40 and yosys
+On 32 bits raspbian, install ice40 and yosys. These are outdated but work. For the latest, you need to build from source.
 ```console
 apio install yosys
 apio install ice40
+```
+On 64-bit use
+```console
+pip3 install yowasp-yosys
+pip3 install yowasp-nextpnr-ice40-8k
 ```
 Install icezprog, on ubuntu you need to add ```-lcrypt -lm``` to makefile.
 ```console
@@ -32,6 +37,15 @@ git clone https://github.com/cliffordwolf/icotools
 cd ~/icotools/examples/icezero
 make icezprog
 mv icezprog ~/.local/bin
+```
+In the ```~/.bashrc``` add 
+```
+## add python files to path
+export PATH="/home/ubuntu/.local/bin:$PATH"
+## these lines only needed for ubuntu core
+export YOSYS="yowasp-yosys"
+export ICEPACK="yowasp-icepack"
+export NEXTPNR_ICE40="yowasp-nextpnr-ice40"
 ```
 ## Parameters
 The following parameters describe the system.  
