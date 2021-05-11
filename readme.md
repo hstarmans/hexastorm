@@ -17,14 +17,6 @@ Install required libraries
 ```console
 pip3 install -r requirements.txt
 ```
-Make folder and install litex, this downloads and installs a lot!
-```console
-mkdir ~/litex
-cd ~/litex
-wget https://raw.githubusercontent.com/enjoy-digital/litex/master/litex_setup.py
-chmod +x litex_setup.py
-./litex_setup.py init install --user
-```
 Install Hexastorm in develop mode so you can edit.
 ```console
 python3 setup.py develop --user
@@ -122,12 +114,24 @@ My version can be installed via [uEyeCamera](https://github.com/hstarmans/ueyeca
 Install my version of the Python libary [ArducamPython](https://github.com/hstarmans/Arducampython).
 
 
-### SPI
+### Config
+Raspberry pi uses ```/boot/config.txt``` and ubuntu uses ```/boot/firmware/usercnf.txt.```
+The following lines need to be available;
+
+
 In the current board, the SPI1-1 select pin is not routed to the correct pin on the Raspberry.
 In /boot/config.txt ensure you have the following
 ```console
-dtoverlay=spi0-1cs
+# I2C for laserdriver and camera
+i2c_arm=on
+dtparam=i2c_vc=on
+# SPI
+dtoverlay=spi0-1cs,cs0_pin=18
 dtoverlay=spi1-1cs,cs0_pin=7
+# camera
+dtoverlay=vc4-fkms-v3d
+start_x=1
+gpu_mem=300
 ```
 There should not be dtparam=spi=on, somewhere. This would enable two chip selects for SPI0 and 
 create a conflict with the pin select of SPI1. You can check the configuration via
