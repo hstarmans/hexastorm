@@ -26,7 +26,7 @@ Install ice40 and yosys
 apio install yosys
 apio install ice40
 ```
-Install icezprog
+Install icezprog, on ubuntu you need to add ```-lcrypt -lm``` to makefile.
 ```console
 git clone https://github.com/cliffordwolf/icotools
 cd ~/icotools/examples/icezero
