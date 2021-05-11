@@ -121,7 +121,7 @@ The following lines need to be available;
 
 In the current board, the SPI1-1 select pin is not routed to the correct pin on the Raspberry.
 In /boot/config.txt ensure you have the following
-```console
+```
 # I2C for laserdriver and camera
 i2c_arm=on
 dtparam=i2c_vc=on
