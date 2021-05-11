@@ -48,6 +48,8 @@ export YOSYS="yowasp-yosys"
 export ICEPACK="yowasp-icepack"
 export NEXTPNR_ICE40="yowasp-nextpnr-ice40"
 ```
+You can enable wifi using [link](https://github.com/sraodev/Raspberry-Pi-Headless-Setup-via-Network-Manager)
+
 ## Parameters
 The following parameters describe the system.  
 | parameter | description |
