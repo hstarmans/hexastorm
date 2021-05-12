@@ -270,10 +270,11 @@ class Dispatcher(Elaboratable):
         ]
         # connect motors
         for idx, stepper in enumerate(steppers):
-            if idx != 0:
+            if idx !=  list(platform.stepspermm.keys()).index(platform.laser_axis):
                 step = (polynomal.step[idx] &
                         ((stepper.limit == 0) | stepper.dir))
                 direction = polynomal.dir[idx]
+            # connect the motor in which the laserhead moves to laser core
             else:
                 step = ((polynomal.step[idx] | laserhead.step)
                         & ((stepper.limit == 0) | stepper.dir))

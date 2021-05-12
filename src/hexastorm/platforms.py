@@ -21,6 +21,7 @@ from hexastorm.resources import (StepperResource, StepperRecord,
 class TestPlatform:
     name = 'Test'
     stepspermm = {'x': 400, 'y': 400}
+    laser_axis = 'y'
     laser_var = {'RPM': 2000,
                  'FACETS': 4, 'SINGLE_LINE': False, 'TICKSINFACET': 18,
                  'BITSINSCANLINE': 2, 'LASERTICKS': 4,
@@ -149,7 +150,10 @@ class Firestarter(LatticeICE40Platform):
     ic_address = 0x28  # spi address
     enable_pin = 17    # enable pin for stepper motors
     reset_pin = 26     # can be used to reset FPGA
-    stepspermm = {'x': 76.2, 'y': 76.2, 'z': 1600}
+    stepspermm = {'x': 76.2,
+                  'y': 76.2,
+                  'z': 1600}
+    laser_axis = 'y'
     laser_var = {'RPM': 2000, 'SPINUP_TIME': 1.5, 'STABLE_TIME': 1.125,
                  'FACETS': 4, 'CRYSTAL_HZ': 50E6, 'LASER_HZ': 100E3,
                  'END%': 0.7, 'START%': 0.35, 'SINGLE_LINE': False,
