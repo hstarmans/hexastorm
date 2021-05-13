@@ -55,6 +55,7 @@ def params(platform):
         raise Exception("Bits in scanline invalid")
     var['SPINUPTICKS'] = round(var['SPINUP_TIME']*var['CRYSTAL_HZ'])
     var['STABLETICKS'] = round(var['STABLE_TIME']*var['CRYSTAL_HZ'])
+    # 6 as the original mirror polygon has six sides
     var['POLYPERIOD'] = int(var['CRYSTAL_HZ']/(var['POLY_HZ']*6*2))
     return var
 

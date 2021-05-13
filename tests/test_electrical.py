@@ -124,6 +124,35 @@ class LaserheadTest(Base):
         self.assertEqual((yield from self.host.error), False)
 
     @executor
+    def test_move(self, dist=10, stepsperline=1, timeout=3):
+        '''verifies movement during a forward and backward 
+           scanning move
+
+        dist    -- distance in mm
+        timeout -- wait
+        '''
+        host = self.host
+        laser_params  = host.laser_params
+        numblines = round(dist*host.platform.stepspermm[host.platform.laser_axis]
+                    *stepsperline)
+        estimated_time = numblines/(laser_params['FACETS']*laser_params['RPM']/60)
+        yield from self.host.enable_comp(synchronize=True)
+        self.host.enable_steppers = True
+        print(f'Wait for synchronization, {timeout} seconds')
+        sleep(timeout)
+        line = [0] * laser_params['BITSINSCANLINE']
+        for direction in [0, 1]:
+            for _ in range(numblines):
+                yield from self.host.writeline(line, stepsperline, direction)
+            print('switching direction')
+        yield from host.writeline([])
+        print(f'Wait for stopline to execute, {timeout} seconds')
+        sleep(timeout)
+        self.assertEqual((yield from host.error), False)
+        yield from host.enable_comp(synchronize=False)
+        self.host.enable_steppers = False
+
+    @executor
     def test_scanline(self, timeout=3, numblines=1000):
         line = [1] * self.host.laser_params['BITSINSCANLINE']
         for _ in range(numblines):
