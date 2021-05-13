@@ -50,6 +50,16 @@ export NEXTPNR_ICE40="yowasp-nextpnr-ice40"
 ```
 You can enable wifi using [link](https://github.com/sraodev/Raspberry-Pi-Headless-Setup-via-Network-Manager)
 
+The slicer relies on numba for acceleration
+```
+# latest is 12 but pip3 only supports 10 for now
+sudo apt-get install llvm-10
+# if you can't locate llvm-config use
+# find / -name llvm-config
+LLVM_CONFIG=/usr/lib/llvm-10/bin/llvm-config pip3 install llvmlite
+pip3 install numba
+```
+
 ## Parameters
 The following parameters describe the system.  
 | parameter | description |

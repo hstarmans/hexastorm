@@ -8,9 +8,8 @@ from PIL import Image
 from hexastorm.platforms import Firestarter
 from hexastorm.lasers import params as paramsfunc
 
+
 # numba.jit decorated functions cannot be defined with self
-
-
 @jit
 def displacement(pixel, params):
     '''returns the displacement for a given pixel
@@ -85,7 +84,7 @@ class Interpolator:
     createcoordinates.
     The function patternfiles interpolates the image using the positions.
     These values are either 0 (laser off) or 1 (laser on).
-    The files created can also be plotted and read.
+    The files created can also be read and plotted.
     The objects supports different tilt angles which are required by
     the original light engine described in US10114289B2.
     '''
@@ -95,11 +94,22 @@ class Interpolator:
         currentdir = os.path.dirname(os.path.realpath(__file__))
         self.debug_folder = os.path.join(currentdir, 'debug')
 
-    def parameters(self):
+    def parameters(self, stepsperline=1):
+        '''
+        sets parameters for slicer based on parameters from board
+
+        In principle, the board support both reflective and refractive 
+        polygon scanning. The cut is not very clean but in principle
+        the prism nature of the system is seperated and only present here.
+
+        stepsperline -- this parameter is not fixed and can be changed
+                        without flashing the board
+        '''
         # in new version of numba dictionaries are converted automatically
         dct = typed.Dict.empty(key_type=types.string,
                                value_type=types.float64)
-        var = paramsfunc(Firestarter())
+        platform = Firestarter()
+        var = paramsfunc(platform)
         dct2 = {
             # angle [radians], for a definition see figure 7
             # https://reprap.org/wiki/Transparent_Polygon_Scanning
@@ -127,7 +137,8 @@ class Interpolator:
             # height/width of the sample gridth [mm]
             'samplegridsize': 0.015,
             # mm/s
-            'stagespeed': 2.0997375328,
+            'stagespeed': ((stepsperline/platform.stepspermm[platform.laser_axis])
+                           *(var['RPM']/60)*var['FACETS']),
             # pixel determined via camera
             'startpixel': ((var['BITSINSCANLINE']/(var['END%']-var['START%']))
                            * var['START%']),
