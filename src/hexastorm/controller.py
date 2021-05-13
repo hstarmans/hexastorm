@@ -261,6 +261,7 @@ class Host:
             select[idx] = 1
             # mm -> steps
             dist_steps = dist * steps_per_mm * select
+            dist_steps = dist_steps.round().astype('int64')
 
             def get_ticks(x):
                 if x >= MOVE_TICKS:
@@ -279,9 +280,19 @@ class Host:
             while ticks.sum() > 0:
                 ticks_move = get_ticks_v(ticks)
                 # steps -> count
-                steps_move = dist_steps*(ticks_move/ticks_total)
+                # this introduces a rounding error
+                steps_move = np.zeros_like(dist_steps, dtype='int64')
+                steps_move = (dist_steps*(ticks_move/ticks_total))
                 steps_move = steps_move.round().astype('int64')
                 steps_total += steps_move
+                # TODO: this is an ugly fix of the rounding error
+                #       epression is also evaluated multiple times
+                cond = np.absolute(steps_total)>np.absolute(dist_steps)
+                if cond.any():
+                    steps_move[cond] -= (
+                     (steps_total-dist_steps)[cond])
+                    steps_total[cond] = (
+                     dist_steps[cond])
                 cnts = self.steps_to_count(steps_move)
                 a = (cnts/ticks_move).round().astype('int64')
                 ticks -= MOVE_TICKS
