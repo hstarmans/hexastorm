@@ -278,7 +278,8 @@ class Dispatcher(Elaboratable):
             else:
                 step = ((polynomal.step[idx] | laserhead.step)
                         & ((stepper.limit == 0) | stepper.dir))
-                direction = (polynomal.dir[idx] | laserhead.dir)
+                direction = ((polynomal.dir[idx]&polynomal.busy) 
+                             | (laserhead.dir&laserhead.process_lines))
             m.d.comb += [stepper.step.eq(step),
                          stepper.dir.eq(direction),
                          parser.pinstate[idx].eq(stepper.limit)]

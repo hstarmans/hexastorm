@@ -1,10 +1,13 @@
 import unittest
 from time import sleep
 from math import floor
+import os
+from pathlib import Path
 
 import numpy as np
 from numpy.testing import assert_array_almost_equal
 
+from hexastorm import interpolator
 from hexastorm.controller import Host, Memfull, executor
 from hexastorm.platforms import Firestarter
 from hexastorm.constants import (WORD_BYTES, COMMANDS, MOVE_TICKS,
@@ -185,7 +188,7 @@ class MoveTest(Base):
            via communication with FPGA'''
         self.host.enable_steppers = True
         self.assertEqual((yield from self.host.execution), True)
-        print('check manually if axes are blocked and hard to move')
+        print('Check manually if axes are blocked and require force to move.')
         input()
         self.host.enable_steppers = False
         self.assertEqual((yield from self.host.execution), False)
@@ -212,6 +215,65 @@ class MoveTest(Base):
             pos = (yield from self.host.position)
         self.host.enable_steppers = False
 
+
+class PrintTest(Base):
+    @executor
+    def test_print(self):
+        '''the LDgraphy test pattern is printed
+        '''
+        host = self.host
+        host.init_steppers()
+        dir_path = os.path.dirname(interpolator.__file__)
+        FILENAME = Path(dir_path, 'debug', 'test.bin')
+        # it assumed the binary is already created and 
+        # in the interpolator folder
+        if not os.path.isfile(FILENAME):
+            raise Exception('File not found')
+        FACETS_IN_LANE = 5377
+        LANEWIDTH = 5.562357895217289
+        bitsinline = host.laser_params['BITSINSCANLINE']
+        stepsperline = 1
+        # z is not homed as it should be already in
+        # position so laser is in focus
+        self.host.enable_steppers = True
+        print('Homing X and Y axis')
+        yield from host.home_axes([1, 1, 0])
+        print("Move to start")
+        yield from host.gotopoint([70, 0, 0],
+                                  absolute=False)
+        print("Reading binary")
+        data = np.fromfile(FILENAME, dtype=np.uint8)
+        bits = np.unpackbits(data)
+        # enable scanhead
+        yield from self.host.enable_comp(synchronize=True)
+        bits_inlane = FACETS_IN_LANE * bitsinline
+        for lane in range(0, round(len(bits)/bits_inlane)):
+            print(f"Exposing lane {lane}")
+            if lane > 0:
+                print("Moving in x-direction for next lane")
+                yield from host.gotopoint([LANEWIDTH, 0, 0],
+                                          absolute=False)
+            if lane % 2 == 1:
+                direction = 0
+                print("Start exposing forward lane")
+            else:
+                direction = 1
+                print("Start exposing back lane")
+            for line in range(FACETS_IN_LANE):
+                start = lane*bits_inlane + line*bitsinline
+                end = start + bitsinline
+                line_data = bits[start:end]
+                # reverse, as exposure is inversed
+                line_data = line_data[::-1]
+                yield from host.writeline(bitlst = line_data,
+                                          stepsperline = stepsperline,
+                                          direction = direction)
+            # send stopline
+            yield from host.writeline([])
+        # disable scanhead
+        yield from self.host.enable_comp(synchronize=False)
+        self.host.enable_steppers = False
+        print("Finished exposure")
 
 if __name__ == "__main__":
     unittest.main()

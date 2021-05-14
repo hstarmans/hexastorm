@@ -200,7 +200,7 @@ class Host:
         '''
         self._executionsetter(val)
 
-    def home_axes(self, axes, speed, pos=-200):
+    def home_axes(self, axes, speed=None, pos=-200):
         '''home given axes
 
         e.g. axes = [1,0,1] will home x and z
@@ -210,12 +210,8 @@ class Host:
         '''
         assert len(axes) == self.platform.motors
         dist = np.array(axes)*np.array([pos]*self.platform.motors)
-        if self.generator:
-            yield from self.gotopoint(position=dist.tolist(),
-                                      speed=speed, absolute=False)
-        else:
-            self.gotopoint(position=dist.tolist(),
-                           speed=speed, absolute=False)
+        yield from self.gotopoint(position=dist.tolist(),
+                                  speed=speed, absolute=False)
 
     def steps_to_count(self, steps):
         '''compute count for a given number of steps
@@ -229,7 +225,7 @@ class Host:
         count = (steps << (1+BIT_SHIFT))+(1 << (BIT_SHIFT-1))
         return count
 
-    def gotopoint(self, position, speed, absolute=True):
+    def gotopoint(self, position, speed=None, absolute=True):
         '''move steppers to point with constant speed
 
         Multiple axes can move in same instruction but ticks has to be uniform.
@@ -370,7 +366,7 @@ class Host:
                 if not (yield from self.memfull(data_out)):
                     break
                 if trials > maxtrials:
-                    raise Memfull("Too many trials needed")
+                    raise Memfull(f"Too many trials {trials} needed")
         return home_bits
 
     def move_commands(self, ticks, a, b, c):
