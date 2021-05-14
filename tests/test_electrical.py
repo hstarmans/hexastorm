@@ -3,7 +3,7 @@ from time import sleep
 from math import floor
 
 import numpy as np
-from numpy.testing import assert_array_equal
+from numpy.testing import assert_array_almost_equal
 
 from hexastorm.controller import Host, Memfull, executor
 from hexastorm.platforms import Firestarter
@@ -13,7 +13,7 @@ from hexastorm.constants import (WORD_BYTES, COMMANDS, MOVE_TICKS,
 
 class Base(unittest.TestCase):
     @classmethod
-    def setUpClass(cls, flash=True):
+    def setUpClass(cls, flash=False):
         cls.host = Host()
         if flash:
             cls.host.build()
@@ -191,20 +191,25 @@ class MoveTest(Base):
         self.assertEqual((yield from self.host.execution), False)
 
     @executor
-    def multiplemove(self):
-        '''test if motors move'''
+    def multiplemove(self, decimals=1):
+        '''test if motors move
+        
+        decimals -- number of decimals
+        '''
         motors = Firestarter.motors
-        position = np.array([10, 10, 0])
-        self.assertEqual((yield from self.host.error), False)
-        self.host.enable_steppers = True
-        yield from self.host.gotopoint(position=position,
-                                       speed=[1]*motors,
-                                       absolute=False)
-        # NOTE: is the sleep really needed?
-        print('sleep to complete')
-        sleep(1)
-        assert_array_equal((yield from self.host.position),
-                           position)
+        dist = np.array([2, 2, 0])
+        pos = (yield from self.host.position)
+        for direction in [-1, 1]:
+            self.assertEqual((yield from self.host.error), False)
+            self.host.enable_steppers = True
+            yield from self.host.gotopoint(position=dist*direction,
+                                           speed=[1]*motors,
+                                           absolute=False)
+            assert_array_almost_equal(
+                (yield from self.host.position),
+                (dist*direction)+pos,
+                decimal=decimals)
+            pos = (yield from self.host.position)
         self.host.enable_steppers = False
 
 

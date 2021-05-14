@@ -128,7 +128,7 @@ class SPIParser(Elaboratable):
                     with m.Elif(interf.command == COMMANDS.POSITION):
                         # position is requested multiple times for multiple
                         # motors
-                        with m.If(mtrcntr < platform.motors):
+                        with m.If(mtrcntr < platform.motors-1):
                             m.d.sync += mtrcntr.eq(mtrcntr+1)
                         with m.Else():
                             m.d.sync += mtrcntr.eq(0)
