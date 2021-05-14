@@ -5,9 +5,13 @@
 *.vcd
 build*
 
+
 # GTKWave
 *.gtkw
 *.vcd
+
+# interpolater preview images
+src/hexastorm/interpolator/debug/*
 
 # Optical camera images
 test/FPGAG/images*
