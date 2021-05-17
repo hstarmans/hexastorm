@@ -58,8 +58,9 @@ class StaticTest(Base):
         yield from self.host._executionsetter(True)
         sleep(1)
         self.assertEqual((yield from self.host.memfull()), False)
-        assert_array_equal((yield from self.host.position),
-                           mm*limit)
+        assert_array_almost_equal(
+            (yield from self.host.position),
+            mm*limit)
         self.assertEqual((yield from self.host.error), False)
         self.host.reset()
 
@@ -128,17 +129,17 @@ class LaserheadTest(Base):
 
     @executor
     def test_move(self, dist=10, stepsperline=1, timeout=3):
-        '''verifies movement during a forward and backward 
+        '''verifies movement during a forward and backward
            scanning move
 
         dist    -- distance in mm
         timeout -- wait
         '''
         host = self.host
-        laser_params  = host.laser_params
-        numblines = round(dist*host.platform.stepspermm[host.platform.laser_axis]
-                    *stepsperline)
-        estimated_time = numblines/(laser_params['FACETS']*laser_params['RPM']/60)
+        laser_params = host.laser_params
+        numblines = round(dist *
+                          host.platform.stepspermm[host.platform.laser_axis]
+                          * stepsperline)
         yield from self.host.enable_comp(synchronize=True)
         self.host.enable_steppers = True
         print(f'Wait for synchronization, {timeout} seconds')
@@ -196,7 +197,7 @@ class MoveTest(Base):
     @executor
     def multiplemove(self, decimals=1):
         '''test if motors move
-        
+
         decimals -- number of decimals
         '''
         motors = Firestarter.motors
@@ -225,7 +226,7 @@ class PrintTest(Base):
         host.init_steppers()
         dir_path = os.path.dirname(interpolator.__file__)
         FILENAME = Path(dir_path, 'debug', 'test.bin')
-        # it assumed the binary is already created and 
+        # it assumed the binary is already created and
         # in the interpolator folder
         if not os.path.isfile(FILENAME):
             raise Exception('File not found')
@@ -265,15 +266,16 @@ class PrintTest(Base):
                 line_data = bits[start:end]
                 # reverse, as exposure is inversed
                 line_data = line_data[::-1]
-                yield from host.writeline(bitlst = line_data,
-                                          stepsperline = stepsperline,
-                                          direction = direction)
+                yield from host.writeline(bitlst=line_data,
+                                          stepsperline=stepsperline,
+                                          direction=direction)
             # send stopline
             yield from host.writeline([])
         # disable scanhead
         yield from self.host.enable_comp(synchronize=False)
         self.host.enable_steppers = False
         print("Finished exposure")
+
 
 if __name__ == "__main__":
     unittest.main()

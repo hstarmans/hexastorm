@@ -282,8 +282,9 @@ class Host:
                 steps_move = steps_move.round().astype('int64')
                 steps_total += steps_move
                 # TODO: this is an ugly fix of the rounding error
-                #       epression is also evaluated multiple times
-                cond = np.absolute(steps_total)>np.absolute(dist_steps)
+                #       expression is also evaluated multiple times
+                cond = (np.absolute(steps_total)
+                        > np.absolute(dist_steps))
                 if cond.any():
                     steps_move[cond] -= (
                      (steps_total-dist_steps)[cond])

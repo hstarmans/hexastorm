@@ -270,7 +270,8 @@ class Dispatcher(Elaboratable):
         ]
         # connect motors
         for idx, stepper in enumerate(steppers):
-            if idx !=  list(platform.stepspermm.keys()).index(platform.laser_axis):
+            if idx != (list(platform.stepspermm.keys())
+                       .index(platform.laser_axis)):
                 step = (polynomal.step[idx] &
                         ((stepper.limit == 0) | stepper.dir))
                 direction = polynomal.dir[idx]
@@ -278,8 +279,8 @@ class Dispatcher(Elaboratable):
             else:
                 step = ((polynomal.step[idx] | laserhead.step)
                         & ((stepper.limit == 0) | stepper.dir))
-                direction = ((polynomal.dir[idx]&polynomal.busy) 
-                             | (laserhead.dir&laserhead.process_lines))
+                direction = ((polynomal.dir[idx] & polynomal.busy)
+                             | (laserhead.dir & laserhead.process_lines))
             m.d.comb += [stepper.step.eq(step),
                          stepper.dir.eq(direction),
                          parser.pinstate[idx].eq(stepper.limit)]
