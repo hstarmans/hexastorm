@@ -431,11 +431,16 @@ class Host:
                          if you don't want to move simply disable motor
            direction     scanning direction
         '''
+        # NOTE: the halfperiod is sent over
+        #       this is the amount of ticks in half a cycle of
+        #       the motor
         halfperiod = round((self.laser_params['TICKSINFACET']-1)
                            / (stepsperline*2))
-        # avoid python "banker's rounding"
-        steps = round(self.laser_params['TICKSINFACET']/(halfperiod*2)+0.01)
-        assert stepsperline == steps
+        # watch out for python "banker's rounding"
+        # sometimes target might not be equal to steps
+        # this is ignored for now
+        # steps = self.laser_params['TICKSINFACET']/(halfperiod*2)
+        #    print(f"{steps} is actual steps per line")
         direction = [int(bool(direction))]
 
         def remainder(bytelst):

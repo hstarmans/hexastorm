@@ -219,6 +219,69 @@ class MoveTest(Base):
 
 class PrintTest(Base):
     @executor
+    def test_dose(self, lines=10, thickness=75, stepsperline=[0.25, 0.5, 1]):
+        '''prints lines at different steps per line, aka speed or dosage
+
+        For each dosage, measure in steps per line, several lines are made.
+        The lines are multiple scanline wide as they otherwise would be
+        hard to see.
+        Scanline per dosage is;  lines*thickness
+
+        number of lines -- number of lines
+        thickness       -- lines
+        stepsperline    -- list with steps per line
+        '''
+        host = self.host
+        scanstepsmm = host.platform.stepspermm[host.platform.laser_axis]
+        # laser diameter estimated to be 60 microns
+        if max(stepsperline)*(1/scanstepsmm) > 0.03:
+            # checks Nyquist criterion
+            print('Recommended is to use a stepsize of \
+                   half the laser diameter')
+
+        # enable scanhead
+        yield from self.host.enable_comp(synchronize=True)
+        LANEWIDTH = 5.562357895217289
+        self.host.enable_steppers = True
+        print('Homing X and Y axis')
+        yield from host.home_axes([1, 1, 0])
+        print("Move to start")
+        yield from host.gotopoint([70, 0, 0],
+                                  absolute=False)
+        bitsinline = host.laser_params['BITSINSCANLINE']
+        laser_on = [1]*bitsinline
+        laser_off = [0]*bitsinline
+        for lane, steps in enumerate(stepsperline):
+            if lane > 0:
+                print("Moving in x-direction for next lane")
+                yield from host.gotopoint([LANEWIDTH, 0, 0],
+                                          absolute=False)
+            if lane % 2 == 1:
+                direction = 0
+                print("Start exposing forward lane")
+            else:
+                direction = 1
+                print("Start exposing back lane")
+            for _ in range(lines):
+                scanlines = round(thickness/steps)
+                for _ in range(scanlines):
+                    yield from host.writeline(bitlst=laser_on,
+                                              stepsperline=steps,
+                                              direction=direction)
+                for _ in range(scanlines):
+                    yield from host.writeline(bitlst=laser_off,
+                                              stepsperline=steps,
+                                              direction=direction)
+            # send stopline
+            yield from host.writeline([])
+        # TODO: this is needed as otherwise synchronize is ignored
+        sleep(3)
+        print('Waiting for stopline to execute')
+        yield from self.host.enable_comp(synchronize=False)
+        self.host.enable_steppers = False
+        print("Finished exposure")
+
+    @executor
     def test_print(self):
         '''the LDgraphy test pattern is printed
         '''
@@ -272,6 +335,8 @@ class PrintTest(Base):
             # send stopline
             yield from host.writeline([])
         # disable scanhead
+        sleep(3)
+        print('Waiting for stopline to execute')
         yield from self.host.enable_comp(synchronize=False)
         self.host.enable_steppers = False
         print("Finished exposure")
