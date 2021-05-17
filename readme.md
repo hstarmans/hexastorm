@@ -2,12 +2,22 @@
 Implementation of a laserscanner on a FPGA. In a high-speed polygon scanner system, the laser is deflected by a rotating prism or reflective mirror. 
 The position of the laser is determined via a sensor such as a photodiode.  
 <img src="https://cdn.hackaday.io/images/7106161566426847098.jpg" align="center" height="300"/>  
-Code is tested on the system shown in the image above, branded as [Hexastorm](https://www.hexastorm.com). 
-The bill of materials (BOM) and links to FreeCad and PCB designs can be found on [Hackaday](https://hackaday.io/project/21933-open-hardware-fast-high-resolution-laser).
-The code took most inspiration from [LDGraphy](https://github.com/hzeller/ldgraphy).
-A new tool chain, see [FPGAG](https://github.com/hstarmans/FPGAG) is in development which leverages better abstractions provided by [Luna](https://github.com/greatscottgadgets/luna) an [Nmigen](https://github.com/nmigen/nmigen).
+Code is tested on the system shown above, branded as [Hexastorm](https://www.hexastorm.com). 
+The bill of materials (BOM) and links to FreeCad and PCB designs can be found on
+[Hackaday](https://hackaday.io/project/21933-open-hardware-fast-high-resolution-laser).
+The code took most inspiration from [LDGraphy](https://github.com/hzeller/ldgraphy).  
+A video of the scanhead exposing with latest code can be seen below;  
+[![video in action not showing](https://img.youtube.com/vi/KQgnZkochu4/0.jpg)](http://www.youtube.com/watch?v=KQgnZkochu4 "Moving laserhead").
+
+The alignment procedure is shown in the following video.
+
+[![Alignment procedure image not showing](http://img.youtube.com/vi/Ri6DAneEzw4/0.jpg)](http://www.youtube.com/watch?v=Ri6DAneEzw4 "Alignment procedure")
 
 ## Install Notes
+The code works on Raspberry Pi 3B and beyond. The SD-card should be at least 8 GB, ideally 16 gb.
+Both Raspbian and Ubuntu can be used. Raspbian is not yet available at 64 bit.
+Besides 64 bit, Ubuntu has the advantage that latest toolchain for Yosys is easier to install.
+The arducam, used in the alignment, does not work at 64 bit.
 On Raspbian, install libatlas so latest Numpy, etc. can be installed via pip.
 ```console
 sudo apt update
@@ -39,7 +49,13 @@ cd ~/icotools/examples/icezero
 make icezprog
 mv icezprog ~/.local/bin
 ```
-In the ```~/.bashrc``` add 
+In the ```~/.bashrc``` for Raspbian add 
+```
+export PATH=/home/pi/.local/bin:$PATH
+export PATH=/home/pi/.apio/packages/toolchain-yosys/bin:$PATH
+export PATH=/home/pi/.apio/packages/toolchain-ice40/bin:$PATH
+``` 
+for Ubuntu add
 ```
 ## add python files to path
 export PATH="/home/ubuntu/.local/bin:$PATH"
@@ -60,61 +76,14 @@ LLVM_CONFIG=/usr/lib/llvm-10/bin/llvm-config pip3 install llvmlite
 pip3 install numba
 ```
 
-## Parameters
-The following parameters describe the system.  
-| parameter | description |
-|---|---|
-| RPM | revolutions per minute of the rotor |
-| Start% | fraction of period where scanline starts |
-| End% | fraction of period where scanline stops |
-| SPINUP_TIME | seconds system waits for the rotor to stabilize speed |
-| STABLE_TIME | seconds system tries to determine position laser with photodiode |
-| FACETS | number of polygon facets|
-| DIRECTION | exposure direction, i.e. forward or backward |
-| SINGLE_LINE | system exposes fixed pattern, i.e. line|
-| SINGLE_FACET | only one of the facets is used|
-  
-Using the above, the code determines the number of bits in a scanline. Via a serial port interface the user can push data to the scanner.
-A line is preceded with a command which can be SCAN or STOP. The data is stored on the chip in block ram. 
-Once turned on, the scanner reads out this memory via First In First Out (FIFO).
+## FPGA Debugging
+Signal traces for GTKWave can be generated via;
+```
+export GENERATE_VCDS=1
+```
 
-## Commands
-| command | reply |
-|---|---|
-| STATUS | retrieve the error state and state of the laser scanner. This is the default reply of each command.|
-| START | enable the scanhead |
-| STOP | stop the scanhead |
-| MOTORTEST | enable the motor |
-| LASERTEST | turn on the laser|
-| LINETEST | turn on the laser and the motor|
-| PHOTODIODETEST | turn on motor, laser and turn off if photodiode is triggered|
-| WRITE_L | next byte will be stored in memory |  
-
-## Detailed description
-Look at the test folders and individually tests on how to use the code. The whole scanhead can be simulated virtually. 
-As such, a scanner is not needed.
-
-## Limitations
-Only one of the 32 block rams is used.  
-The laser can be pulsed at 50 MHZ but data can only be streamed to the laser scanner at 25 megabits per second.  
-Parameters can not be changed on the fly. The binary has to be recompiled and uploaded to the scanhead. This is typically fast, i.e. seconds.  
-The current implentation is targeted at a system with one laser bundle  
-System is for writing to, i.e. exposing, a substrate. Reading should also be possible to enable optical coherence tomagraphy.  
-System has no link for LIDAR measurements, circuit can be found [here](https://hackaday.io/project/163501-open-source-lidar-unruly).  
-The FPGA controls all the stepper motors. At the moment it is not possible to use GCODE or apply acceleration profiles.  
-  
-Most of these implementation can be removed by improving the code. The current focus is on a proof of principle.
-Next step would be to create a copy of [beagleg](https://github.com/hzeller/beagleg) with a FPGA code parser.
-In a later stage, they might be merged.
-
-## Alignment procedure
-Note, I should have used principal component analysis to determine properties of a line.
-An instruction video is shown below;  
-[![Alignment procedure image not showing](http://img.youtube.com/vi/Ri6DAneEzw4/0.jpg)](http://www.youtube.com/watch?v=Ri6DAneEzw4 "Alignment procedure")
-
-## Other notes
-### Migen examples
-Examples used to gain experience with migen.
+## Stepper drivers
+Install the python wrapper for TMC stepper [drivers](https://github.com/hstarmans/TMCStepper).
 
 ### OpenCV 
 For image operations, opencv is required.
@@ -186,22 +155,32 @@ This will produce output, here 28 is the address of the I2C device.
 60: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
 70: -- -- -- -- -- -- -- --
 ```
+## Motion
+Splines, Bezier, B-splines, and NURBS (Non-Uniform Rational B-splines) curves are the common parametric techniques 
+used for tool path [design](https://zero.sci-hub.se/2496/cb390d406cc077ef156deb76b34099af/desantiago-perez2013.pdf#lb0030).  
+A notebook on bezier is available in the notebook folder. Bezier is not used as there is no DSP or feedback at the moment.
+The controller gets a number of points along curve. The curve is divided in segments and this 
+segment is approximated with a polynomal of third degree. There are no multipliers, DSP,
+on the ICE40HX4k chip used for this project. As a result, it is has not been implemented.
 
-
-### APIO
-An alternative to apio is yowasp or compile from source. Apio is chosen as compilation takes a long time on a Raspberry.
-[Yowasp](http://yowasp.org/) comes with python support but only works on a X86 system. Yowasp takes a lot of time to run the first time.
-The FPGA toolchain can be build from source via [ICE40](http://www.clifford.at/icestorm/).  
-
-
-# FPGA G
-
-The goal of this project is to create nmigen core for CNC control. This is needed for my [laser scanner project](https://github.com/hstarmans/hexastorm).  
-A proof of concept video is shown below;
-
-[![Proof of concept not showing ](http://img.youtube.com/vi/-0uB2MydtrE/0.jpg)](https://youtu.be/-0uB2MydtrE "Proof of woking code")
-
-
+## Parameters
+The following parameters describe the system.  
+| parameter | description |
+|---|---|
+| RPM | revolutions per minute of the rotor |
+| Start% | fraction of period where scanline starts |
+| End% | fraction of period where scanline stops |
+| SPINUP_TIME | seconds system waits for the rotor to stabilize speed |
+| STABLE_TIME | seconds system tries to determine position laser with photodiode |
+| FACETS | number of polygon facets|
+| DIRECTION | exposure direction, i.e. forward or backward |
+| SINGLE_LINE | system exposes fixed pattern, i.e. line|
+| SINGLE_FACET | only one of the facets is used|
+  
+Using the above, the code determines the number of bits in a scanline. Via a serial port interface the user can push data to the scanner.
+A line is preceded with a command which can be SCAN or STOP. The data is stored on the chip in block ram. 
+Once turned on, the scanner reads out this memory via First In First Out (FIFO).
+  
 # Brief Description
 The controller sends over a command with a word to the peripheral which updates the motor state.
 The command is 8 bits long and the word 64 bits. Only for write commands, word is not empty.
@@ -266,47 +245,21 @@ can establish precedence between instructions.
 | TICKSPERSTEP | 55 | ticks per half period step
 | DATA | 64 | information for lasers in chunks of 8 bytes
 
-
 A user can read but not write directly to pins. This ensures that the host
 can establish precedence between instructions.
 
-# Installation
+## Detailed description
+Look at the test folders and individually tests on how to use the code. The whole scanhead can be simulated virtually. 
+As such, a scanner is not needed.
 
-## FPGA Toolchain
-Although deprecated tools are installed via apio;
-```
-export PATH=/home/pi/.local/bin:$PATH
-export PATH=/home/pi/.apio/packages/toolchain-yosys/bin:$PATH
-export PATH=/home/pi/.apio/packages/toolchain-ice40/bin:$PATH
-``` 
-Code partially depends on Luna. Firstarter board can be selected via
-```
-export LUNA_PLATFORM="FPGAG.board:Firestarter"
-```
-Signal traces for GTKWave can be generated via;
-```
-export GENERATE_VCDS=1
-```
-
-## Stepper drivers
-Install the python wrapper for TMC stepper [drivers](https://github.com/hstarmans/TMCStepper).
-
-# Limitations
+## Limitations 
+System is for writing to, i.e. exposing, a substrate. Reading should also be possible to enable optical coherence tomagraphy.  
+System has no link for LIDAR measurements, circuit can be found [here](https://hackaday.io/project/163501-open-source-lidar-unruly).  
+The FPGA controls all the stepper motors. At the moment it is not possible to use GCODE or apply acceleration profiles.
 Add maximum-length linear-feedback shift register sequence and CRC check.
 If you do a sequence of very short moves, e.g. 10 steps, you might notice high-latency due to SPI communcation. 
 
-## Background
-Splines, Bezier, B-splines, and NURBS (Non-Uniform Rational B-splines) curves are the common parametric techniques 
-used for tool path [design](https://zero.sci-hub.se/2496/cb390d406cc077ef156deb76b34099af/desantiago-perez2013.pdf#lb0030).  
-A notebook on bezier is available in the notebook folder. This is finally all ignored. 
-The controller gets a number of points along curve. The curve is divided in segments and this 
-segment is approximated with a polynomal of third degree. There are no multipliers, DSP,
-on the ICE40HX4k chip used for this project. As a result, it is has not been implemented.
-
-
 <!-- 
 TODO:
-  do experiments with movement
   add docs
-  retest single line mode
  -->
