@@ -241,7 +241,7 @@ class PrintTest(Base):
 
         # enable scanhead
         yield from self.host.enable_comp(synchronize=True)
-        LANEWIDTH = 5.562357895217289
+        LANEWIDTH = 9.2
         self.host.enable_steppers = True
         print('Homing X and Y axis')
         yield from host.home_axes([1, 1, 0])
@@ -264,12 +264,20 @@ class PrintTest(Base):
                 print("Start exposing back lane")
             for _ in range(lines):
                 scanlines = round(thickness/steps)
+                if direction:
+                    bitlst = laser_on
+                else:
+                    bitlst = laser_off
                 for _ in range(scanlines):
-                    yield from host.writeline(bitlst=laser_on,
+                    yield from host.writeline(bitlst=bitlst,
                                               stepsperline=steps,
                                               direction=direction)
+                if direction:
+                    bitlst = laser_off
+                else:
+                    bitlst = laser_on
                 for _ in range(scanlines):
-                    yield from host.writeline(bitlst=laser_off,
+                    yield from host.writeline(bitlst=bitlst,
                                               stepsperline=steps,
                                               direction=direction)
             # send stopline

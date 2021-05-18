@@ -51,19 +51,23 @@ class OpticalTest(unittest.TestCase):
 class Tests(unittest.TestCase):
     ''' Optical test for scanhead'''
     @classmethod
-    def setUpClass(cls, flash=False):
+    def setUpClass(cls, flash=False, cam=True):
         cls.host = Host()
+        cls.host.enable_steppers = False
+        cls.cam = cam
         if flash:
             cls.host.build()
         else:
             print('Resetting the machine')
             cls.host.reset()
-        cls.cam = camera.Cam()
-        cls.cam.init()
+        if cam:
+            cls.cam = camera.Cam()
+            cls.cam.init()
 
     @classmethod
     def tearDownClass(cls):
-        cls.cam.close()
+        if cls.cam:
+            cls.cam.close()
 
     @executor
     def alignlaser(self):
