@@ -290,8 +290,10 @@ class PrintTest(Base):
         print("Finished exposure")
 
     @executor
-    def test_print(self):
+    def test_print(self, abortlane=1000):
         '''the LDgraphy test pattern is printed
+
+        abortlane -- lane after which to abort to speed up
         '''
         host = self.host
         host.init_steppers()
@@ -320,6 +322,10 @@ class PrintTest(Base):
         yield from self.host.enable_comp(synchronize=True)
         bits_inlane = FACETS_IN_LANE * bitsinline
         for lane in range(0, round(len(bits)/bits_inlane)):
+            if lane > abortlane:
+                print('Aborting')
+                yield from host.writeline([])
+                break
             print(f"Exposing lane {lane}")
             if lane > 0:
                 print("Moving in x-direction for next lane")

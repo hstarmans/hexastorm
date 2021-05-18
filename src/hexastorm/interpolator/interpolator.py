@@ -98,7 +98,7 @@ class Interpolator:
         '''
         sets parameters for slicer based on parameters from board
 
-        In principle, the board support both reflective and refractive 
+        In principle, the board support both reflective and refractive
         polygon scanning. The cut is not very clean but in principle
         the prism nature of the system is seperated and only present here.
 
@@ -137,9 +137,10 @@ class Interpolator:
             # height/width of the sample gridth [mm]
             'samplegridsize': 0.015,
             # mm/s
-            'stagespeed': ((stepsperline/platform.stepspermm[platform.laser_axis])
-                           *(var['RPM']/60)*var['FACETS']),
-            # pixel determined via camera
+            'stagespeed': ((stepsperline /
+                            platform.stepspermm[platform.laser_axis])
+                           * (var['RPM']/60)*var['FACETS']),
+            # first calculates all bits in scanline and then the start
             'startpixel': ((var['BITSINSCANLINE']/(var['END%']-var['START%']))
                            * var['START%']),
             # number of pixels in a line [new 785]
@@ -188,6 +189,13 @@ class Interpolator:
             raise Exception("Postscript file is empty")
         return tmp_array
 
+    def lanewidth(self):
+        params = self.params
+        lanewidth = ((fxpos(0, params) -
+                     fxpos(params['BITSINSCANLINE']-1, params))
+                     * params['samplegridsize'])
+        return lanewidth
+
     def createcoordinates(self):
         '''returns the x, y position of the laserdiode
         for each pixel, for all lanes
@@ -201,9 +209,7 @@ class Interpolator:
                 fxpos(params['BITSINSCANLINE']-1, params) > 0):
             raise Exception('Line seems ill positioned')
         # mm
-        lanewidth = ((fxpos(0, params) -
-                     fxpos(params['BITSINSCANLINE']-1, params))
-                     * params['samplegridsize'])
+        lanewidth = self.lanewidth()
         lanes = math.ceil(params['samplexsize']/lanewidth)
         facets_inlane = math.ceil(params['rotationfrequency']
                                   * params['FACETS'] *

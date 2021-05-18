@@ -279,6 +279,7 @@ class Laserhead(Elaboratable):
                             m.d.sync += self.read_discard.eq(1)
                         with m.Else():
                             m.d.sync += self.read_commit.eq(1)
+                        m.d.sync += self.lasers.eq(0)
                         m.next = 'WAIT_END'
                     with m.Else():
                         m.d.sync += [lasercnt.eq(dct['LASERTICKS']-1),
