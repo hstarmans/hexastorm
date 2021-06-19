@@ -11,7 +11,7 @@ exclude_patterns: [LICENSE.md]
 
 # Information about where the book exists on the web
 repository:
-  url  : https://github.com/NZR/workshop-computational-reproducibility
+  url  : https://github.com/jurra/hexastorm
 
 
 
@@ -22,7 +22,7 @@ html:
   use_repository_button: true
   comments:
     utterances:
-      repo: "NZR/workshop-computational-reproducibility" 
+      repo: "jurra/hexastorm" 
   
   home_page_in_navbar: true
   extra_footer: |
