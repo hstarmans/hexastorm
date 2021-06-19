@@ -1,0 +1,30 @@
+# in _config.yml
+title: "Hexastorm Laserscanner"
+logo: images/logo.jpg
+# author: TU Delft DCC
+execute:
+  execute_notebooks: "off"
+
+only_build_toc_files: true
+
+exclude_patterns: [LICENSE.md]
+
+# Information about where the book exists on the web
+repository:
+  url  : https://github.com/NZR/workshop-computational-reproducibility
+
+
+
+sphinx:
+    config:
+      html_show_copyright: false
+html:
+  use_repository_button: true
+  comments:
+    utterances:
+      repo: "NZR/workshop-computational-reproducibility" 
+  
+  home_page_in_navbar: true
+  extra_footer: |
+      <a rel="license" href="http://creativecommons.org/licenses/by/4.0/"><img alt="Creative Commons License" style="border-width:0" src="https://i.creativecommons.org/l/by/4.0/88x31.png" /></a><br />This work is licensed under a <a rel="license" href="http://creativecommons.org/licenses/by/4.0/">Creative Commons Attribution 4.0 International License</a>.
+  
