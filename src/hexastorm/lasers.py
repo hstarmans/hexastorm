@@ -217,7 +217,8 @@ class Laserhead(Elaboratable):
                 with m.Else():
                     m.d.sync += tickcounter.eq(tickcounter+1)
             with m.State('WAIT_STABLE'):
-                m.d.sync += photodiode_d.eq(photodiode)
+                m.d.sync += [photodiode_d.eq(photodiode),
+                             self.write_commit_2.eq(0)]
                 with m.If(tickcounter >= stablethresh):
                     m.d.sync += self.error.eq(1)
                     m.next = 'STOP'
@@ -243,7 +244,8 @@ class Laserhead(Elaboratable):
                             thresh = min(round(10.1*dct['TICKSINFACET']),
                                          dct['STABLETICKS'])
                             m.d.sync += [stablethresh.eq(thresh),
-                                         self.read_en.eq(1)]
+                                         self.read_en.eq(1),
+                                         write_data_2.eq(scanlinenumber)]
                             m.next = 'READ_INSTRUCTION'
                     with m.Else():
                         m.d.sync += self.synchronized.eq(0)
@@ -261,7 +263,7 @@ class Laserhead(Elaboratable):
                     with m.Else():
                         m.d.sync += scanlinenumber.eq(0)
                     m.d.sync += [move.eq(1),
-                                 write_data_2.eq(scanlinenumber),
+                                 self.write_en_2.eq(1),
                                  self.dir.eq(read_data[8]),
                                  stephalfperiod.eq(read_data[9:])]
                     m.next = 'WAIT_FOR_DATA_RUN'
@@ -276,13 +278,14 @@ class Laserhead(Elaboratable):
                     m.next = 'READ_INSTRUCTION'
             with m.State('WAIT_FOR_DATA_RUN'):
                 m.d.sync += [tickcounter.eq(tickcounter+1),
+                             self.write_en_2.eq(0),
                              readbit.eq(0),
                              scanbit.eq(0),
                              lasercnt.eq(0)]
                 tickcnt_thresh = int(dct['START%']*dct['TICKSINFACET'])
                 assert tickcnt_thresh > 0
                 with m.If(tickcounter >= tickcnt_thresh):
-                    m.d.sync += [self.read_en.eq(1), self.write_en_2.eq(1)]
+                    m.d.sync += self.read_en.eq(1)
                     m.next = 'DATA_RUN'
             with m.State('DATA_RUN'):
                 m.d.sync += tickcounter.eq(tickcounter+1)
@@ -292,7 +295,7 @@ class Laserhead(Elaboratable):
                 #      lasercnt used to pulse laser at certain freq
                 with m.If(lasercnt == 0):
                     with m.If(scanbit >= dct['BITSINSCANLINE']):
-                        m.d.sync += self.write_commit_2.eq(1)
+                        m.d.sync += self.write_en_2.eq(0)
                         with m.If(dct['SINGLE_LINE'] & self.empty):
                             m.d.sync += self.read_discard.eq(1)
                         with m.Else():
@@ -309,10 +312,12 @@ class Laserhead(Elaboratable):
                                          self.read_en.eq(0),
                                          self.write_en_2.eq(0)]
                         with m.Elif(readbit == MEMWIDTH-1):
-                            m.d.sync += [write_data_2.eq(write_new),
-                                         self.lasers[0].eq(read_old[0])]
+                            m.d.sync += self.lasers[0].eq(read_old[0])
                         with m.Else():
                             m.d.sync += self.lasers[0].eq(read_old[0])
+                        with m.If((readbit == MEMWIDTH - 1) |
+                                  scanbit == (dct['BITSINSCANLINE']-1)):
+                            m.d.sync += write_data_2.eq(write_new)
                 with m.Else():
                     m.d.sync += lasercnt.eq(lasercnt-1)
                     # NOTE: read enable can only be high for 1 cycle
@@ -329,15 +334,16 @@ class Laserhead(Elaboratable):
                             # is needed
                             # -1 as counting in python is different
                             with m.If(scanbit < (dct['BITSINSCANLINE'])):
-                                m.d.sync += [self.read_en.eq(1),
-                                             self.write_en_2.eq(1)]
+                                m.d.sync += self.read_en.eq(1)
                             m.d.sync += readbit.eq(0)
                         with m.Else():
                             m.d.sync += [readbit.eq(readbit+1),
                                          read_old.eq(read_old >> 1)]
+                        with m.If((readbit == MEMWIDTH-1)
+                                  | (scanbit >= dct['BITSINSCANLINE'])):
+                            m.d.sync += self.write_en_2.eq(1)
             with m.State('WAIT_END'):
-                m.d.sync += [tickcounter.eq(tickcounter+1),
-                             self.write_commit_2.eq(0)]
+                m.d.sync += tickcounter.eq(tickcounter+1)
                 with m.If(dct['SINGLE_LINE'] & self.empty):
                     m.d.sync += self.read_discard.eq(0)
                 with m.Else():
@@ -346,7 +352,8 @@ class Laserhead(Elaboratable):
                 # -2 as you need 1 tick to process
                 with m.If(tickcounter >= round(dct['TICKSINFACET']
                           - dct['JITTERTICKS']-2)):
-                    m.d.sync += lasers.eq(int('11', 2))
+                    m.d.sync += [lasers.eq(int('11', 2)),
+                                 self.write_commit_2.eq(1)]
                     m.next = 'WAIT_STABLE'
                 with m.Elif(~self.synchronize):
                     m.next = 'STOP'
@@ -522,7 +529,7 @@ class BaseTest(LunaGatewareTestCase):
         self.assertEqual((yield self.dut.error), False)
         self.assertEqual((yield dut.synchronized), True)
 
-    def read_line(self, totalbytes):
+    def read_line(self):
         '''reads line from fifo
 
         This is a helper function to allow testing of the module
@@ -530,12 +537,11 @@ class BaseTest(LunaGatewareTestCase):
         '''
         dut = self.dut
         # read the line number
-        yield from self.pulse(dut.read_en_2)
         data_out = [(yield dut.read_data_2)]
-        print(data_out)
-        for i in range(0, totalbytes, WORD_BYTES):
-            yield from self.pulse(dut.read_en_2)
+        yield from self.pulse(dut.read_en_2)
+        for i in range(0, dut.dct['BITSINSCANLINE'], WORD_BYTES):
             data_out.append((yield dut.read_data_2))
+            yield from self.pulse(dut.read_en_2)
         yield from self.pulse(dut.read_commit_2)
         return data_out
 
@@ -640,8 +646,14 @@ class SinglelineTest(BaseTest):
             yield
         self.assertEqual((yield dut.expose_finished), 1)
         yield dut.synchronize.eq(0)
-        for _ in range(2):
-            print((yield from self.read_line(dut.dct['BITSINSCANLINE'])))
+        # TODO: not perfect
+        #    there are more lines in memory
+        #    check is too simple, only checks line number
+        for i in range(2):
+            lst = (yield from self.read_line())
+            self.assertEqual(lst[0], i)
+            # photodiode 2 is fixed at zero and only 1 bit wide
+            self.assertEqual(lst[1], 0)
         yield from self.waituntilState('STOP')
         self.assertEqual((yield dut.error), False)
 
