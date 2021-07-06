@@ -866,3 +866,5 @@ if __name__ == "__main__":
 #       prism spins up and systems goes into sync
 #
 #       spin up of prism is done without profile
+#
+#       sensor write should be tested better and hooked to main class
