@@ -72,7 +72,7 @@ class LaserScannerLayout(Layout):
             ("laser0", 1),
             ("laser1", 1),
             ("photodiode", 1),
-            ("photodiode_2", 1),
+            ("photodiode2", 1),
             ("pwm", 1),
             ("en", 1),
         ])
@@ -108,7 +108,7 @@ def LaserscannerResource(*args, laser0, laser1,
               conn=conn, assert_width=1)))
     io.append(Subsignal("photodiode",
               Pins(photodiode, dir="i", conn=conn, assert_width=1)))
-    io.append(Subsignal("photodiode_2",
+    io.append(Subsignal("photodiode2",
               Pins(photodiode2, dir="i", conn=conn, assert_width=1)))
     io.append(Subsignal("pwm", Pins(pwm, dir="o", conn=conn, assert_width=1)))
     io.append(Subsignal("en", PinsN(enable, dir="o",
