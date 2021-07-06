@@ -96,7 +96,7 @@ class Laserhead(Elaboratable):
         self.error = Signal()
         self.photodiode = Signal()
         self.photodiode_t = Signal()
-        self.photodiode_2 = Signal()
+        self.photodiode2 = Signal()
         # memory; read operations
         self.read_commit = Signal()
         self.read_en = Signal()
@@ -313,7 +313,7 @@ class Laserhead(Elaboratable):
                         m.d.sync += [lasercnt.eq(dct['LASERTICKS']-1),
                                      scanbit.eq(scanbit+1)]
                         m.d.sync += (write_new[:write_step]
-                                     .eq(self.photodiode_2))
+                                     .eq(self.photodiode2))
                         # read operation
                         with m.If(readbit == 0):
                             m.d.sync += [self.lasers.eq(read_data[:read_step]),
@@ -356,7 +356,7 @@ class Laserhead(Elaboratable):
                         with m.Else():
                             m.d.sync += [writebit.eq(writebit+write_step),
                                          write_new.eq(
-                                             Cat(self.photodiode_2,
+                                             Cat(self.photodiode2,
                                                  write_new[:-write_step]))]
             with m.State('WAIT_END'):
                 m.d.sync += tickcounter.eq(tickcounter+1)

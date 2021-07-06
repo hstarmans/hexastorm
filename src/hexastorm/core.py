@@ -59,10 +59,13 @@ class SPIParser(Elaboratable):
         self.pinstate = Signal(8)
         self.read_commit = Signal()
         self.read_en = Signal()
+        self.read_data = Signal(MEMWIDTH)
         self.read_discard = Signal()
+        self.write_commit_2 = Signal()
+        self.write_en_2 = Signal()
+        self.write_data_2 = Signal(MEMWIDTH)
         self.dispatcherror = Signal()
         self.execute = Signal()
-        self.read_data = Signal(MEMWIDTH)
         self.empty = Signal()
 
     def elaborate(self, platform):
@@ -81,13 +84,20 @@ class SPIParser(Elaboratable):
         # FIFO connection
         fifo = TransactionalizedFIFO(width=MEMWIDTH,
                                      depth=platform.memdepth)
+        fifo2 = TransactionalizedFIFO(width=MEMWIDTH,
+                                      depth=platform.memdepth)
         if platform.name == 'Test':
             self.fifo = fifo
+            self.fifo2 = fifo2
         m.submodules.fifo = fifo
+        m.submodules.fifo2 = fifo2
         m.d.comb += [self.read_data.eq(fifo.read_data),
                      fifo.read_commit.eq(self.read_commit),
                      fifo.read_discard.eq(self.read_discard),
                      fifo.read_en.eq(self.read_en),
+                     fifo2.write_data.eq(self.write_data_2),
+                     fifo2.write_commit.eq(self.write_commit_2),
+                     fifo2.write_en.eq(self.write_en_2),
                      self.empty.eq(fifo.empty)]
         # Parser
         mtrcntr = Signal(range(platform.motors))
@@ -243,7 +253,8 @@ class Dispatcher(Elaboratable):
                          | lh.lasers[1])]
         else:
             laserhead = Laserhead(platform=platform)
-            m.d.comb += laserhead.photodiode.eq(laserheadpins.photodiode)
+            m.d.comb += [laserhead.photodiode.eq(laserheadpins.photodiode),
+                         laserhead.photodiode2.eq(laserheadpins.photodiode2)]
         m.submodules.laserhead = laserhead
         if platform.name == 'Test':
             self.laserhead = laserhead
@@ -266,7 +277,10 @@ class Dispatcher(Elaboratable):
             self.empty.eq(parser.empty),
             parser.read_commit.eq(self.read_commit | laserhead.read_commit),
             parser.read_en.eq(self.read_en | laserhead.read_en),
-            parser.read_discard.eq(self.read_discard | laserhead.read_discard)
+            parser.read_discard.eq(self.read_discard | laserhead.read_discard),
+            parser.write_data_2.eq(laserhead.write_data_2),
+            parser.write_en_2.eq(laserhead.write_en_2),
+            parser.write_commit_2.eq(laserhead.write_commit_2)
         ]
         # connect motors
         for idx, stepper in enumerate(steppers):

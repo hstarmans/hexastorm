@@ -183,7 +183,8 @@ class Firestarter(LatticeICE40Platform):
                         Attrs(IO_STANDARD="SB_LVCMOS")),
                # Laserscanner resource
                LaserscannerResource(number=0, laser0='134', laser1='135',
-                                    photodiode='137', pwm='139', enable='141',
+                                    photodiode='137', photodiode2='122',
+                                    pwm='139', enable='141',
                                     attrs=Attrs(IO_STANDARD="SB_LVCMOS")),
                # x-stepper
                StepperResource(number=0, step="38", direction="37",

@@ -72,6 +72,7 @@ class LaserScannerLayout(Layout):
             ("laser0", 1),
             ("laser1", 1),
             ("photodiode", 1),
+            ("photodiode_2", 1),
             ("pwm", 1),
             ("en", 1),
         ])
@@ -84,7 +85,8 @@ class LaserscannerRecord(Record):
 
 
 def LaserscannerResource(*args, laser0, laser1,
-                         photodiode, pwm, enable,
+                         photodiode, photodiode2,
+                         pwm, enable,
                          number=None,
                          conn=None, attrs=None):
     """ Resource for laser scanner
@@ -95,6 +97,7 @@ def LaserscannerResource(*args, laser0, laser1,
         O: laser0         -- laser channel 0
         O: laser1         -- laser channel 1
         I: photodiode     -- photodiode used to measure position of laser
+        I: photodiode_2   -- photodiode 2 used to measure feedback from laser
         O: pwm            -- polygon is rotated with pwm
         O: en             -- on low polygon motor is enabled (depends on type)
     """
@@ -105,6 +108,8 @@ def LaserscannerResource(*args, laser0, laser1,
               conn=conn, assert_width=1)))
     io.append(Subsignal("photodiode",
               Pins(photodiode, dir="i", conn=conn, assert_width=1)))
+    io.append(Subsignal("photodiode_2",
+              Pins(photodiode2, dir="i", conn=conn, assert_width=1)))
     io.append(Subsignal("pwm", Pins(pwm, dir="o", conn=conn, assert_width=1)))
     io.append(Subsignal("en", PinsN(enable, dir="o",
                         conn=conn, assert_width=1)))
