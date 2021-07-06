@@ -3,7 +3,7 @@ from struct import unpack
 from copy import deepcopy
 from random import randint
 
-from nmigen import Signal, Elaboratable
+from nmigen import Signal, Elaboratable, Cat
 from nmigen import Module
 from luna.gateware.test import LunaGatewareTestCase, sync_test_case
 from luna.gateware.memory import TransactionalizedFIFO
@@ -120,6 +120,8 @@ class Laserhead(Elaboratable):
     def elaborate(self, platform):
         m = Module()
         dct = self.dct
+        if platform is None:
+            platform = self.platform
 
         # Pulse generator for prism motor
         pwmcnt = Signal(range(dct['POLYPERIOD']))
@@ -168,6 +170,7 @@ class Laserhead(Elaboratable):
         write_new = Signal.like(write_data_2)
         read_old = Signal.like(read_data)
         readbit = Signal(range(MEMWIDTH))
+        writebit = Signal(range(MEMWIDTH))
         photodiode_d = Signal()
         lasers = self.lasers
         if self.platform.name == 'Test':
@@ -195,6 +198,7 @@ class Laserhead(Elaboratable):
                              self.synchronized.eq(0),
                              self.enable_prism.eq(0),
                              readbit.eq(0),
+                             writebit.eq(0),
                              facetcnt.eq(0),
                              scanbit.eq(0),
                              lasercnt.eq(0),
@@ -280,6 +284,7 @@ class Laserhead(Elaboratable):
                 m.d.sync += [tickcounter.eq(tickcounter+1),
                              self.write_en_2.eq(0),
                              readbit.eq(0),
+                             writebit.eq(0),
                              scanbit.eq(0),
                              lasercnt.eq(0)]
                 tickcnt_thresh = int(dct['START%']*dct['TICKSINFACET'])
@@ -293,6 +298,8 @@ class Laserhead(Elaboratable):
                 #      readbit is your current position in memory
                 #      scanbit current byte position in scanline
                 #      lasercnt used to pulse laser at certain freq
+                read_step = platform.laser_bits
+                write_step = platform.sensor_bits
                 with m.If(lasercnt == 0):
                     with m.If(scanbit >= dct['BITSINSCANLINE']):
                         m.d.sync += self.write_en_2.eq(0)
@@ -305,29 +312,32 @@ class Laserhead(Elaboratable):
                     with m.Else():
                         m.d.sync += [lasercnt.eq(dct['LASERTICKS']-1),
                                      scanbit.eq(scanbit+1)]
-                        m.d.sync += write_new[0].eq(self.photodiode_2)
+                        m.d.sync += (write_new[:write_step]
+                                     .eq(self.photodiode_2))
+                        # read operation
                         with m.If(readbit == 0):
-                            m.d.sync += [self.lasers[0].eq(read_data[0]),
-                                         read_old.eq(read_data >> 1),
-                                         self.read_en.eq(0),
-                                         self.write_en_2.eq(0)]
-                        with m.Elif(readbit == MEMWIDTH-1):
-                            m.d.sync += self.lasers[0].eq(read_old[0])
+                            m.d.sync += [self.lasers.eq(read_data[:read_step]),
+                                         read_old.eq(read_data >> read_step),
+                                         self.read_en.eq(0)]
                         with m.Else():
-                            m.d.sync += self.lasers[0].eq(read_old[0])
-                        with m.If((readbit == MEMWIDTH - 1) |
+                            m.d.sync += self.lasers.eq(read_old[:read_step])
+                        # write operation
+                        with m.If((writebit == MEMWIDTH - writebit) |
                                   scanbit == (dct['BITSINSCANLINE']-1)):
                             m.d.sync += write_data_2.eq(write_new)
+                        with m.Else():
+                            m.d.sync += self.write_en_2.eq(0)
                 with m.Else():
                     m.d.sync += lasercnt.eq(lasercnt-1)
                     # NOTE: read enable can only be high for 1 cycle
                     #       as a result this is done right before the "read"
                     with m.If(lasercnt == 1):
+                        # read part
                         with m.If(readbit == 0):
-                            m.d.sync += [readbit.eq(readbit+1)]
+                            m.d.sync += readbit.eq(readbit+read_step)
                         # final read bit copy memory
                         # move to next address, i.e. byte, if end is reached
-                        with m.Elif(readbit == MEMWIDTH-1):
+                        with m.Elif(readbit == MEMWIDTH-read_step):
                             # If fifo is empty it will give errors later
                             # so it can be ignored here
                             # Only grab a new line if more than current
@@ -337,11 +347,17 @@ class Laserhead(Elaboratable):
                                 m.d.sync += self.read_en.eq(1)
                             m.d.sync += readbit.eq(0)
                         with m.Else():
-                            m.d.sync += [readbit.eq(readbit+1),
-                                         read_old.eq(read_old >> 1)]
-                        with m.If((readbit == MEMWIDTH-1)
-                                  | (scanbit >= dct['BITSINSCANLINE'])):
-                            m.d.sync += self.write_en_2.eq(1)
+                            m.d.sync += [readbit.eq(readbit+read_step),
+                                         read_old.eq(read_old >> read_step)]
+                        # write part
+                        with m.If((writebit == MEMWIDTH-write_step) |
+                                  (scanbit >= dct['BITSINSCANLINE'])):
+                            m.d.sync += [self.write_en_2.eq(1), writebit.eq(0)]
+                        with m.Else():
+                            m.d.sync += [writebit.eq(writebit+write_step),
+                                         write_new.eq(
+                                             Cat(self.photodiode_2,
+                                                 write_new[:-write_step]))]
             with m.State('WAIT_END'):
                 m.d.sync += tickcounter.eq(tickcounter+1)
                 with m.If(dct['SINGLE_LINE'] & self.empty):
@@ -352,7 +368,7 @@ class Laserhead(Elaboratable):
                 # -2 as you need 1 tick to process
                 with m.If(tickcounter >= round(dct['TICKSINFACET']
                           - dct['JITTERTICKS']-2)):
-                    m.d.sync += [lasers.eq(int('11', 2)),
+                    m.d.sync += [lasers.eq(int('1'*read_step, 2)),
                                  self.write_commit_2.eq(1)]
                     m.next = 'WAIT_STABLE'
                 with m.Elif(~self.synchronize):
