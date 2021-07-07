@@ -411,20 +411,21 @@ class Host:
         if self.generator:
             maxtrials = 10
         result = []
-        for i in range(0, len(bytelst), 8):
+        for i in range(0, len(bytelst), WORD_BYTES):
             trials = 0
-            lst = bytelst[i:i+8]
+            lst = bytelst[i:i+WORD_BYTES]
             lst.reverse()
             data = write_byte + bytes(lst)
             while True:
                 trials += 1
                 data_out = (yield from self.send_command(data))
-                if not (yield from self.memfull(data_out)):
-                    break
+                if (yield from self.memfull(data_out)) and (i == 0):
+                    if trials > maxtrials:
+                        raise Memfull("Too many trials needed")
                 else:
-                    result.append(data_out)
-                if trials > maxtrials:
-                    raise Memfull("Too many trials needed")
+                    result.append(int.from_bytes(data_out, 'big'))
+                    break
+
         return result
 
     def bittobytelist(self, bitlst, stepsperline=1,

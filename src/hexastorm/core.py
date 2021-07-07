@@ -159,7 +159,6 @@ class SPIParser(Elaboratable):
                         with m.If((byte0 > 0) & (byte0 < 6)):
                             m.d.sync += [instruction.eq(byte0),
                                          fifo.write_en.eq(1),
-                                         fifo2.read_en.eq(1),
                                          wordsreceived.eq(wordsreceived+1),
                                          fifo.write_data.eq(
                                              interf.word_received)]
@@ -395,6 +394,40 @@ class TestParser(SPIGatewareTestCase):
         self.assertEqual((yield self.dut.fifo.space_available),
                          (self.platform.memdepth - check))
 
+    def write_line_fifo2(self, linenumbr, bitlst, bitorder='little'):
+        '''write scanline to fifo2
+
+        FIFO is used for writing and FIFO2 is used
+        for reading. For testing, this method allows to
+        place information in FIFO2
+
+        bitlst      -- bits in scanline
+        line number -- number of of scanline
+        '''
+        dut = self.dut
+        assert len(bitlst) == self.host.laser_params['BITSINSCANLINE']
+        assert max(bitlst) <= 1
+        assert min(bitlst) >= 0
+
+        def remainder(bytelst):
+            '''NOTE: function also present in controller
+            '''
+            rem = (len(bytelst) % WORD_BYTES)
+            if rem > 0:
+                res = WORD_BYTES - rem
+            else:
+                res = 0
+            return res
+        bytelst = [linenumbr]
+        bytelst = np.packbits(bitlst, bitorder=bitorder).tolist()
+        bytelst += remainder(bytelst)*[0]
+
+        for i in range(0, len(bytelst), WORD_BYTES):
+            lst = int.from_bytes(bytes(bytelst[i:i+WORD_BYTES]), bitorder)
+            yield dut.fifo2.write_data.eq(lst)
+            yield from self.pulse(dut.fifo2.write_en)
+        yield from self.pulse(dut.fifo2.write_commit)
+
     @sync_test_case
     def test_getposition(self):
         decimals = 3
@@ -404,6 +437,16 @@ class TestParser(SPIGatewareTestCase):
         lst = (yield from self.host.position).round(decimals)
         stepspermm = np.array(list(self.platform.stepspermm.values()))
         assert_array_equal(lst, (position/stepspermm).round(decimals))
+
+    @sync_test_case
+    def test_readscanline(self):
+        host = self.host
+        bits = self.host.laser_params['BITSINSCANLINE']
+        bitlst = [1]*bits
+        yield from self.write_line_fifo2(2, bitlst)
+        lst = yield from host.writeline([1] * bits)
+        # TODO: not finished
+        print(lst)
 
     @sync_test_case
     def test_writescanline(self):
