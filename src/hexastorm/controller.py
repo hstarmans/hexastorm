@@ -313,7 +313,7 @@ class Host:
         if data is None:
             data = (yield from self._read_state())
         bits = "{:08b}".format(data[-1])
-        return int(bits[STATE.FULL])
+        return int(bits[STATE.FIFOFULL])
 
     def send_command(self, data, format='!Q'):
         assert len(data) == WORD_BYTES+COMMAND_BYTES
@@ -403,11 +403,14 @@ class Host:
         return response
 
     def writeline(self, bitlst, stepsperline=1, direction=0, maxtrials=1E5):
+        '''method write and reads line from memory
+        '''
         bytelst = self.bittobytelist(bitlst, stepsperline, direction)
         write_byte = COMMANDS.WRITE.to_bytes(1, 'big')
         # TODO: merge write line with send commands
         if self.generator:
             maxtrials = 10
+        result = []
         for i in range(0, len(bytelst), 8):
             trials = 0
             lst = bytelst[i:i+8]
@@ -418,8 +421,11 @@ class Host:
                 data_out = (yield from self.send_command(data))
                 if not (yield from self.memfull(data_out)):
                     break
+                else:
+                    result.append(data_out)
                 if trials > maxtrials:
                     raise Memfull("Too many trials needed")
+        return result
 
     def bittobytelist(self, bitlst, stepsperline=1,
                       direction=0, bitorder='little'):

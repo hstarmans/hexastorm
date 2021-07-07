@@ -106,7 +106,8 @@ class SPIParser(Elaboratable):
         # Peripheral state
         state = Signal(8)
         m.d.sync += [state[STATE.PARSING].eq(self.execute),
-                     state[STATE.FULL].eq(fifo.space_available <= 1),
+                     state[STATE.FIFOFULL].eq(fifo.space_available <= 1),
+                     state[STATE.FIFO2FULL].eq(fifo.space_available <= 1),
                      state[STATE.ERROR].eq(self.dispatcherror | error)]
         # remember which word we are processing
         instruction = Signal(8)
@@ -127,8 +128,11 @@ class SPIParser(Elaboratable):
                         m.next = 'WAIT_COMMAND'
                         m.d.sync += self.execute.eq(0)
                     with m.Elif(interf.command == COMMANDS.WRITE):
-                        m.d.sync += interf.word_to_send.eq(word)
-                        with m.If(state[STATE.FULL] == 0):
+                        with m.If(wordsreceived == 0):
+                            m.d.sync += interf.word_to_send.eq(word)
+                        with m.Else():
+                            m.d.sync += interf.word_to_send.eq(fifo2.read_data)
+                        with m.If(state[STATE.FIFOFULL] == 0):
                             m.next = 'WAIT_WORD'
                         with m.Else():
                             m.next = 'WAIT_COMMAND'
@@ -148,10 +152,14 @@ class SPIParser(Elaboratable):
             with m.State('WAIT_WORD'):
                 with m.If(interf.word_complete):
                     byte0 = interf.word_received[:8]
+                    # WRITE operation is COMMAND_WRITE + INSTRUCTION
+                    # multiple write operation can be chained
+                    # the following checks if the instruction is valid
                     with m.If(wordsreceived == 0):
                         with m.If((byte0 > 0) & (byte0 < 6)):
                             m.d.sync += [instruction.eq(byte0),
                                          fifo.write_en.eq(1),
+                                         fifo2.read_en.eq(1),
                                          wordsreceived.eq(wordsreceived+1),
                                          fifo.write_data.eq(
                                              interf.word_received)]
@@ -161,11 +169,12 @@ class SPIParser(Elaboratable):
                             m.next = 'WAIT_COMMAND'
                     with m.Else():
                         m.d.sync += [fifo.write_en.eq(1),
+                                     fifo2.read_en.eq(1),
                                      wordsreceived.eq(wordsreceived+1),
                                      fifo.write_data.eq(interf.word_received)]
                         m.next = 'WRITE'
             with m.State('WRITE'):
-                m.d.sync += fifo.write_en.eq(0)
+                m.d.sync += [fifo.write_en.eq(0), fifo2.read_en.eq(0)]
                 wordslaser = wordsinscanline(
                     params(platform)['BITSINSCANLINE'])
                 wordsmotor = wordsinmove(platform.motors)
@@ -177,12 +186,13 @@ class SPIParser(Elaboratable):
                           (wordsreceived >= wordslaser)
                           )):
                     m.d.sync += [wordsreceived.eq(0),
+                                 fifo2.read_commit.eq(1),
                                  fifo.write_commit.eq(1)]
                     m.next = 'COMMIT'
                 with m.Else():
                     m.next = 'WAIT_COMMAND'
             with m.State('COMMIT'):
-                m.d.sync += fifo.write_commit.eq(0)
+                m.d.sync += [fifo.write_commit.eq(0), fifo2.read_commit.eq(0)]
                 m.next = 'WAIT_COMMAND'
         return m
 
