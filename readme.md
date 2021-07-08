@@ -243,7 +243,7 @@ can establish precedence between instructions.
 | INSTRUCTION | 8 | type of instructions, here start or stop scanline
 | DIRECTION | 1 | scanning direction
 | TICKSPERSTEP | 55 | ticks per half period step
-| DATA | 64 | information for lasers in chunks of 8 bytes
+| DATA | 64 | information for lasers in chunks of 8 bytes, i.e. at least 64 bits
 
 A user can read but not write directly to pins. This ensures that the host
 can establish precedence between instructions.

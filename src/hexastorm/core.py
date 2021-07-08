@@ -1,6 +1,7 @@
 import unittest
 from random import randint
 from copy import deepcopy
+from struct import pack
 
 import numpy as np
 from numpy.testing import assert_array_equal
@@ -149,6 +150,8 @@ class SPIParser(Elaboratable):
                         m.d.sync += interf.word_to_send.eq(
                                                 self.position[mtrcntr])
                         m.next = 'WAIT_COMMAND'
+            wordslaser = wordsinscanline(
+                params(platform)['BITSINSCANLINE'])
             with m.State('WAIT_WORD'):
                 with m.If(interf.word_complete):
                     byte0 = interf.word_received[:8]
@@ -167,22 +170,24 @@ class SPIParser(Elaboratable):
                             m.d.sync += error.eq(1)
                             m.next = 'WAIT_COMMAND'
                     with m.Else():
-                        m.d.sync += [fifo.write_en.eq(1),
-                                     fifo2.read_en.eq(1),
-                                     wordsreceived.eq(wordsreceived+1),
-                                     fifo.write_data.eq(interf.word_received)]
+                        m.d.sync += wordsreceived.eq(wordsreceived+1)
+                        with m.If(instruction == INSTRUCTIONS.SCANLINE):
+                            m.d.sync += fifo2.read_en.eq(1),
+                        with m.If((instruction != INSTRUCTIONS.SCANLINE) |
+                                  (wordsreceived <= wordslaser-1)):
+                            m.d.sync += [fifo.write_en.eq(1),
+                                         fifo.write_data.eq(
+                                             interf.word_received)]
                         m.next = 'WRITE'
             with m.State('WRITE'):
                 m.d.sync += [fifo.write_en.eq(0), fifo2.read_en.eq(0)]
-                wordslaser = wordsinscanline(
-                    params(platform)['BITSINSCANLINE'])
                 wordsmotor = wordsinmove(platform.motors)
                 with m.If(((instruction == INSTRUCTIONS.MOVE) &
                           (wordsreceived >= wordsmotor))
                           | (instruction == INSTRUCTIONS.WRITEPIN)
                           | (instruction == INSTRUCTIONS.LASTSCANLINE)
                           | ((instruction == INSTRUCTIONS.SCANLINE) &
-                          (wordsreceived >= wordslaser)
+                          (wordsreceived >= (wordslaser+1))
                           )):
                     m.d.sync += [wordsreceived.eq(0),
                                  fifo2.read_commit.eq(1),
@@ -418,12 +423,13 @@ class TestParser(SPIGatewareTestCase):
             else:
                 res = 0
             return res
-        bytelst = [linenumbr]
-        bytelst = np.packbits(bitlst, bitorder=bitorder).tolist()
-        bytelst += remainder(bytelst)*[0]
+        bytelst = pack('<q', linenumbr)
+        bytelst += bytes(np.packbits(bitlst, bitorder=bitorder).tolist())
+
+        bytelst += remainder(bytelst)*b'\x00'
 
         for i in range(0, len(bytelst), WORD_BYTES):
-            lst = int.from_bytes(bytes(bytelst[i:i+WORD_BYTES]), bitorder)
+            lst = int.from_bytes(bytelst[i:i+WORD_BYTES], bitorder)
             yield dut.fifo2.write_data.eq(lst)
             yield from self.pulse(dut.fifo2.write_en)
         yield from self.pulse(dut.fifo2.write_commit)
@@ -439,14 +445,14 @@ class TestParser(SPIGatewareTestCase):
         assert_array_equal(lst, (position/stepspermm).round(decimals))
 
     @sync_test_case
-    def test_readscanline(self):
+    def test_readscanline(self, linenumber=2):
         host = self.host
         bits = self.host.laser_params['BITSINSCANLINE']
         bitlst = [1]*bits
-        yield from self.write_line_fifo2(2, bitlst)
-        lst = yield from host.writeline([1] * bits)
-        # TODO: not finished
-        print(lst)
+        yield from self.write_line_fifo2(linenumber, bitlst)
+        dct = yield from host.writeline([1] * bits)
+        self.assertEqual(dct['linenumber'], linenumber)
+        self.assertEqual(dct['data'], np.packbits(bitlst, bitorder='little'))
 
     @sync_test_case
     def test_writescanline(self):
@@ -739,6 +745,11 @@ if __name__ == "__main__":
 #  -- Polynomal integrator --> determines position via integrating counters
 
 # TODO:
+
+#   -- there can be no data in readfifo!! add check for this  (START behavior)
+#   -- stop behavior --> last line read until memory is empty
+#   -- parse data taking into account bitwidth
+
 #   -- in practice, position is not reached with small differences like 0.02 mm
 #   -- test execution speed to ensure the right PLL is propagated
 #   -- use CRC packet for tranmission failure (it is in litex but not luna)

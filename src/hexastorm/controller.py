@@ -423,10 +423,22 @@ class Host:
                     if trials > maxtrials:
                         raise Memfull("Too many trials needed")
                 else:
-                    result.append(int.from_bytes(data_out, 'big'))
+                    if i > 0:
+                        result.append(int.from_bytes(data_out, 'big'))
                     break
-
-        return result
+        # not last line
+        if len(bitlst) > 0:
+            # one more write to retrieve all data
+            data = write_byte + bytes([0]*WORD_BYTES)
+            result.append(int.from_bytes(
+                (yield from self.send_command(data)), 'big'))
+            dct = {'linenumber': result[0],
+                   'data': result[1:]}
+        else:
+            dct = {}
+        # TODO:
+        # last line --> read till FIFO2 is empty
+        return dct
 
     def bittobytelist(self, bitlst, stepsperline=1,
                       direction=0, bitorder='little'):
