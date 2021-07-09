@@ -1,0 +1,782 @@
+
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Laserscanner &#8212; Hexastorm Laserscanner</title>
+    
+  <link href="_static/css/theme.css" rel="stylesheet" />
+  <link href="_static/css/index.c5995385ac14fb8791e8eb36b4908be2.css" rel="stylesheet" />
+
+    
+  <link rel="stylesheet"
+    href="_static/vendor/fontawesome/5.13.0/css/all.min.css">
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+    href="_static/vendor/fontawesome/5.13.0/webfonts/fa-solid-900.woff2">
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+    href="_static/vendor/fontawesome/5.13.0/webfonts/fa-brands-400.woff2">
+
+    
+      
+
+    
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="stylesheet" href="_static/sphinx-book-theme.acff12b8f9c144ce68a297486a2fa670.css" type="text/css" />
+    <link rel="stylesheet" type="text/css" href="_static/togglebutton.css" />
+    <link rel="stylesheet" type="text/css" href="_static/copybutton.css" />
+    <link rel="stylesheet" type="text/css" href="_static/mystnb.css" />
+    <link rel="stylesheet" type="text/css" href="_static/sphinx-thebe.css" />
+    <link rel="stylesheet" type="text/css" href="_static/panels-main.c949a650a448cc0ae9fd3441c0e17fb0.css" />
+    <link rel="stylesheet" type="text/css" href="_static/panels-variables.06eb56fa6e07937060861dad626602ad.css" />
+    
+  <link rel="preload" as="script" href="_static/js/index.1c5a1a01449ed65a7b51.js">
+
+    <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/togglebutton.js"></script>
+    <script src="_static/clipboard.min.js"></script>
+    <script src="_static/copybutton.js"></script>
+    <script kind="utterances">
+
+    var commentsRunWhenDOMLoaded = cb => {
+    if (document.readyState != 'loading') {
+        cb()
+    } else if (document.addEventListener) {
+        document.addEventListener('DOMContentLoaded', cb)
+    } else {
+        document.attachEvent('onreadystatechange', function() {
+        if (document.readyState == 'complete') cb()
+        })
+    }
+}
+
+var addUtterances = () => {
+    var script = document.createElement("script");
+    script.type = "text/javascript";
+    script.src = "https://utteranc.es/client.js";
+    script.async = "async";
+
+    script.setAttribute("repo", "jurra/hexastorm");
+    script.setAttribute("issue-term", "pathname");
+    script.setAttribute("theme", "github-light");
+    script.setAttribute("label", "💬 comment");
+    script.setAttribute("crossorigin", "anonymous");
+
+    sections = document.querySelectorAll("div.section");
+    if (sections !== null) {
+        section = sections[sections.length-1];
+        section.appendChild(script);
+    }
+}
+commentsRunWhenDOMLoaded(addUtterances);
+</script>
+    <script >var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
+    <script src="_static/sphinx-book-theme.12a9622fbb08dcb3a2a40b2c02b83a57.js"></script>
+    <script async="async" src="https://unpkg.com/thebelab@latest/lib/index.js"></script>
+    <script >
+        const thebe_selector = ".thebe"
+        const thebe_selector_input = "pre"
+        const thebe_selector_output = ".output"
+    </script>
+    <script async="async" src="_static/sphinx-thebe.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Welcome!" href="01_Welcome%21/0_README.html" />
+    <link rel="prev" title="Hexastorm: Laserscanner and Gateware Library" href="index.html" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="docsearch:language" content="en" />
+    
+  </head>
+  <body data-spy="scroll" data-target="#bd-toc-nav" data-offset="80">
+    
+    <div class="container-fluid" id="banner"></div>
+
+    
+
+    <div class="container-xl">
+      <div class="row">
+          
+<div class="col-12 col-md-3 bd-sidebar site-navigation show" id="site-navigation">
+    
+        <div class="navbar-brand-box">
+    <a class="navbar-brand text-wrap" href="index.html">
+      
+      <img src="_static/logo.jpg" class="logo" alt="logo">
+      
+      
+      <h1 class="site-logo" id="site-title">Hexastorm Laserscanner</h1>
+      
+    </a>
+</div><form class="bd-search d-flex align-items-center" action="search.html" method="get">
+  <i class="icon fas fa-search"></i>
+  <input type="search" class="form-control" name="q" id="search-input" placeholder="Search this book..." aria-label="Search this book..." autocomplete="off" >
+</form><nav class="bd-links" id="bd-docs-nav" aria-label="Main navigation">
+    <div class="bd-toc-item active">
+        <ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="index.html">
+   Hexastorm: Laserscanner and Gateware Library
+  </a>
+ </li>
+</ul>
+<ul class="current nav bd-sidenav">
+ <li class="toctree-l1 current active">
+  <a class="current reference internal" href="#">
+   Laserscanner
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="01_Welcome%21/0_README.html">
+   Welcome!
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="02_Getting_Started/0_Project_Setup.html">
+   Project Management
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="03_Design/README.html">
+   Documentation
+  </a>
+ </li>
+</ul>
+
+    </div>
+</nav> <!-- To handle the deprecated key -->
+
+<div class="navbar_extra_footer">
+  Powered by <a href="https://jupyterbook.org">Jupyter Book</a>
+</div>
+
+</div>
+
+
+          
+
+
+          
+<main class="col py-md-3 pl-md-4 bd-content overflow-auto" role="main">
+    
+    <div class="topbar container-xl fixed-top">
+    <div class="topbar-contents row">
+        <div class="col-12 col-md-3 bd-topbar-whitespace site-navigation show"></div>
+        <div class="col pl-md-4 topbar-main">
+            
+            <button id="navbar-toggler" class="navbar-toggler ml-0" type="button" data-toggle="collapse"
+                data-toggle="tooltip" data-placement="bottom" data-target=".site-navigation" aria-controls="navbar-menu"
+                aria-expanded="true" aria-label="Toggle navigation" aria-controls="site-navigation"
+                title="Toggle navigation" data-toggle="tooltip" data-placement="left">
+                <i class="fas fa-bars"></i>
+                <i class="fas fa-arrow-left"></i>
+                <i class="fas fa-arrow-up"></i>
+            </button>
+            
+            
+<div class="dropdown-buttons-trigger">
+    <button id="dropdown-buttons-trigger" class="btn btn-secondary topbarbtn" aria-label="Download this page"><i
+            class="fas fa-download"></i></button>
+
+    <div class="dropdown-buttons">
+        <!-- ipynb file if we had a myst markdown file -->
+        
+        <!-- Download raw file -->
+        <a class="dropdown-buttons" href="_sources/README.md"><button type="button"
+                class="btn btn-secondary topbarbtn" title="Download source file" data-toggle="tooltip"
+                data-placement="left">.md</button></a>
+        <!-- Download PDF via print -->
+        <button type="button" id="download-print" class="btn btn-secondary topbarbtn" title="Print to PDF"
+            onClick="window.print()" data-toggle="tooltip" data-placement="left">.pdf</button>
+    </div>
+</div>
+
+            <!-- Source interaction buttons -->
+
+<div class="dropdown-buttons-trigger">
+    <button id="dropdown-buttons-trigger" class="btn btn-secondary topbarbtn"
+        aria-label="Connect with source repository"><i class="fab fa-github"></i></button>
+    <div class="dropdown-buttons sourcebuttons">
+        <a class="repository-button"
+            href="https://github.com/jurra/hexastorm"><button type="button" class="btn btn-secondary topbarbtn"
+                data-toggle="tooltip" data-placement="left" title="Source repository"><i
+                    class="fab fa-github"></i>repository</button></a>
+        
+        
+    </div>
+</div>
+
+            <!-- Full screen (wrap in <a> to have style consistency -->
+
+<a class="full-screen-button"><button type="button" class="btn btn-secondary topbarbtn" data-toggle="tooltip"
+        data-placement="bottom" onclick="toggleFullScreen()" aria-label="Fullscreen mode"
+        title="Fullscreen mode"><i
+            class="fas fa-expand"></i></button></a>
+
+            <!-- Launch buttons -->
+
+        </div>
+
+        <!-- Table of contents -->
+        <div class="d-none d-md-block col-md-2 bd-toc show">
+            
+            <div class="tocsection onthispage pt-5 pb-3">
+                <i class="fas fa-list"></i> Contents
+            </div>
+            <nav id="bd-toc-nav">
+                <ul class="visible nav section-nav flex-column">
+ <li class="toc-h1 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#">
+   Laserscanner
+  </a>
+  <ul class="visible nav section-nav flex-column">
+   <li class="toc-h2 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#install-notes">
+     Install Notes
+    </a>
+   </li>
+   <li class="toc-h2 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#fpga-debugging">
+     FPGA Debugging
+    </a>
+   </li>
+   <li class="toc-h2 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#stepper-drivers">
+     Stepper drivers
+    </a>
+    <ul class="nav section-nav flex-column">
+     <li class="toc-h3 nav-item toc-entry">
+      <a class="reference internal nav-link" href="#opencv">
+       OpenCV
+      </a>
+     </li>
+     <li class="toc-h3 nav-item toc-entry">
+      <a class="reference internal nav-link" href="#camera">
+       Camera
+      </a>
+      <ul class="nav section-nav flex-column">
+       <li class="toc-h4 nav-item toc-entry">
+        <a class="reference internal nav-link" href="#ueye-camera">
+         uEye camera
+        </a>
+       </li>
+       <li class="toc-h4 nav-item toc-entry">
+        <a class="reference internal nav-link" href="#arducam">
+         Arducam
+        </a>
+       </li>
+      </ul>
+     </li>
+     <li class="toc-h3 nav-item toc-entry">
+      <a class="reference internal nav-link" href="#config">
+       Config
+      </a>
+     </li>
+     <li class="toc-h3 nav-item toc-entry">
+      <a class="reference internal nav-link" href="#i2c">
+       I2C
+      </a>
+     </li>
+    </ul>
+   </li>
+   <li class="toc-h2 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#motion">
+     Motion
+    </a>
+   </li>
+   <li class="toc-h2 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#parameters">
+     Parameters
+    </a>
+   </li>
+  </ul>
+ </li>
+ <li class="toc-h1 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#brief-description">
+   Brief Description
+  </a>
+ </li>
+ <li class="toc-h1 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#commands">
+   Commands
+  </a>
+  <ul class="visible nav section-nav flex-column">
+   <li class="toc-h2 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#write">
+     Write
+    </a>
+    <ul class="nav section-nav flex-column">
+     <li class="toc-h3 nav-item toc-entry">
+      <a class="reference internal nav-link" href="#move-instruction">
+       Move instruction
+      </a>
+     </li>
+     <li class="toc-h3 nav-item toc-entry">
+      <a class="reference internal nav-link" href="#pin-instruction">
+       Pin instruction
+      </a>
+     </li>
+     <li class="toc-h3 nav-item toc-entry">
+      <a class="reference internal nav-link" href="#laserline-instruction">
+       Laserline instruction
+      </a>
+     </li>
+    </ul>
+   </li>
+   <li class="toc-h2 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#detailed-description">
+     Detailed description
+    </a>
+   </li>
+   <li class="toc-h2 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#limitations">
+     Limitations
+    </a>
+   </li>
+  </ul>
+ </li>
+</ul>
+
+            </nav>
+        </div>
+    </div>
+</div>
+    <div id="main-content" class="row">
+        <div class="col-12 col-md-9 pl-md-3 pr-md-0">
+        
+              <div>
+                
+  <div class="section" id="laserscanner-documentation-status">
+<h1>Laserscanner <a class="reference external" href="https://hexastorm.readthedocs.io/en/latest/?badge=latest"><img alt="Documentation Status" src="https://readthedocs.org/projects/luna/badge/?version=latest" /></a><a class="headerlink" href="#laserscanner-documentation-status" title="Permalink to this headline">¶</a></h1>
+<p>Implementation of a laserscanner on a FPGA. In a high-speed polygon scanner system, the laser is deflected by a rotating prism or reflective mirror.
+The position of the laser is determined via a sensor such as a photodiode.<br />
+<img src="https://cdn.hackaday.io/images/7106161566426847098.jpg" align="center" height="300"/><br />
+Code is tested on the system shown above, branded as <a class="reference external" href="https://www.hexastorm.com">Hexastorm</a>.
+The bill of materials (BOM) and links to FreeCad and PCB designs can be found on
+<a class="reference external" href="https://hackaday.io/project/21933-open-hardware-fast-high-resolution-laser">Hackaday</a>.
+The code took most inspiration from <a class="reference external" href="https://github.com/hzeller/ldgraphy">LDGraphy</a>.<br />
+A video of the scanhead exposing with latest code can be seen below;<br />
+<a class="reference external" href="http://www.youtube.com/watch?v=KQgnZkochu4"><img alt="video in action not showing" src="https://img.youtube.com/vi/KQgnZkochu4/0.jpg" /></a>.</p>
+<p>The alignment procedure is shown in the following video.</p>
+<p><a class="reference external" href="http://www.youtube.com/watch?v=Ri6DAneEzw4"><img alt="Alignment procedure image not showing" src="http://img.youtube.com/vi/Ri6DAneEzw4/0.jpg" /></a></p>
+<div class="section" id="install-notes">
+<h2>Install Notes<a class="headerlink" href="#install-notes" title="Permalink to this headline">¶</a></h2>
+<p>The code works on Raspberry Pi 3B and beyond. The SD-card should be at least 8 GB, ideally 16 gb.
+Both Raspbian and Ubuntu can be used. Raspbian is not yet available at 64 bit.
+Besides 64 bit, Ubuntu has the advantage that latest toolchain for Yosys is easier to install.
+The arducam, used in the alignment, does not work at 64 bit.
+On Raspbian, install libatlas so latest Numpy, etc. can be installed via pip.</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">sudo apt update</span>
+<span class="go">sudo apt install libatlas3-base</span>
+</pre></div>
+</div>
+<p>Install luna and checkout at f54de01. Code after this date does not work yet.
+Install required libraries</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">pip3 install -r requirements.txt</span>
+</pre></div>
+</div>
+<p>Install Hexastorm in develop mode so you can edit.</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">python3 setup.py develop --user</span>
+</pre></div>
+</div>
+<p>On 32 bits raspbian, install ice40 and yosys. These are outdated but work. For the latest, you need to build from source.</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">apio install yosys</span>
+<span class="go">apio install ice40</span>
+</pre></div>
+</div>
+<p>On 64-bit use</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">pip3 install yowasp-yosys</span>
+<span class="go">pip3 install yowasp-nextpnr-ice40-8k</span>
+</pre></div>
+</div>
+<p>Install icezprog, on ubuntu you need to add <code class="docutils literal notranslate"><span class="pre">-lcrypt</span> <span class="pre">-lm</span></code> to makefile.</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">git clone https://github.com/cliffordwolf/icotools</span>
+<span class="go">cd ~/icotools/examples/icezero</span>
+<span class="go">make icezprog</span>
+<span class="go">mv icezprog ~/.local/bin</span>
+</pre></div>
+</div>
+<p>In the <code class="docutils literal notranslate"><span class="pre">~/.bashrc</span></code> for Raspbian add</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>export PATH=/home/pi/.local/bin:$PATH
+export PATH=/home/pi/.apio/packages/toolchain-yosys/bin:$PATH
+export PATH=/home/pi/.apio/packages/toolchain-ice40/bin:$PATH
+</pre></div>
+</div>
+<p>for Ubuntu add</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1">## add python files to path</span>
+<span class="n">export</span> <span class="n">PATH</span><span class="o">=</span><span class="s2">&quot;/home/ubuntu/.local/bin:$PATH&quot;</span>
+<span class="c1">## these lines only needed for ubuntu core</span>
+<span class="n">export</span> <span class="n">YOSYS</span><span class="o">=</span><span class="s2">&quot;yowasp-yosys&quot;</span>
+<span class="n">export</span> <span class="n">ICEPACK</span><span class="o">=</span><span class="s2">&quot;yowasp-icepack&quot;</span>
+<span class="n">export</span> <span class="n">NEXTPNR_ICE40</span><span class="o">=</span><span class="s2">&quot;yowasp-nextpnr-ice40&quot;</span>
+</pre></div>
+</div>
+<p>You can enable wifi using <a class="reference external" href="https://github.com/sraodev/Raspberry-Pi-Headless-Setup-via-Network-Manager">link</a></p>
+<p>The slicer relies on numba for acceleration</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># latest is 12 but pip3 only supports 10 for now</span>
+<span class="n">sudo</span> <span class="n">apt</span><span class="o">-</span><span class="n">get</span> <span class="n">install</span> <span class="n">llvm</span><span class="o">-</span><span class="mi">10</span>
+<span class="c1"># if you can&#39;t locate llvm-config use</span>
+<span class="c1"># find / -name llvm-config</span>
+<span class="n">LLVM_CONFIG</span><span class="o">=/</span><span class="n">usr</span><span class="o">/</span><span class="n">lib</span><span class="o">/</span><span class="n">llvm</span><span class="o">-</span><span class="mi">10</span><span class="o">/</span><span class="nb">bin</span><span class="o">/</span><span class="n">llvm</span><span class="o">-</span><span class="n">config</span> <span class="n">pip3</span> <span class="n">install</span> <span class="n">llvmlite</span>
+<span class="n">pip3</span> <span class="n">install</span> <span class="n">numba</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="fpga-debugging">
+<h2>FPGA Debugging<a class="headerlink" href="#fpga-debugging" title="Permalink to this headline">¶</a></h2>
+<p>Signal traces for GTKWave can be generated via;</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">export</span> <span class="n">GENERATE_VCDS</span><span class="o">=</span><span class="mi">1</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="stepper-drivers">
+<h2>Stepper drivers<a class="headerlink" href="#stepper-drivers" title="Permalink to this headline">¶</a></h2>
+<p>Install the python wrapper for TMC stepper <a class="reference external" href="https://github.com/hstarmans/TMCStepper">drivers</a>.</p>
+<div class="section" id="opencv">
+<h3>OpenCV<a class="headerlink" href="#opencv" title="Permalink to this headline">¶</a></h3>
+<p>For image operations, opencv is required.</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">pip3 install opencv-python</span>
+</pre></div>
+</div>
+<p>Also install the following dependencies</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">sudo apt install -y libopenjp2-7 libilmbase-dev libopenexr-dev libgstreamer1.0-dev ffmpeg</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="camera">
+<h3>Camera<a class="headerlink" href="#camera" title="Permalink to this headline">¶</a></h3>
+<p>Two camera’s have been tried; uEye camera and Arducam Global shutter ov2311.
+Currently, the ov2311 chip is used.</p>
+<div class="section" id="ueye-camera">
+<h4>uEye camera<a class="headerlink" href="#ueye-camera" title="Permalink to this headline">¶</a></h4>
+<p>Disadvantages; the uEye is more expensive, drivers require an account and there is no good Python driver.<br />
+Advantages; the product is more mature.<br />
+On Ueye website select Ueye 2240 monochrome. Download and install the driver for
+linux, arm v7, as this is the raspberry pi platform.  A python library for the camera is available in the source code.
+My version can be installed via <a class="reference external" href="https://github.com/hstarmans/ueyecamera">uEyeCamera</a>.</p>
+</div>
+<div class="section" id="arducam">
+<h4>Arducam<a class="headerlink" href="#arducam" title="Permalink to this headline">¶</a></h4>
+<p>Install my version of the Python libary <a class="reference external" href="https://github.com/hstarmans/Arducampython">ArducamPython</a>.</p>
+</div>
+</div>
+<div class="section" id="config">
+<h3>Config<a class="headerlink" href="#config" title="Permalink to this headline">¶</a></h3>
+<p>Raspberry pi uses <code class="docutils literal notranslate"><span class="pre">/boot/config.txt</span></code> and ubuntu uses <code class="docutils literal notranslate"><span class="pre">/boot/firmware/usercnf.txt.</span></code>
+The following lines need to be available;</p>
+<p>In the current board, the SPI1-1 select pin is not routed to the correct pin on the Raspberry.
+In /boot/config.txt ensure you have the following</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># I2C for laserdriver and camera</span>
+<span class="n">i2c_arm</span><span class="o">=</span><span class="n">on</span>
+<span class="n">dtparam</span><span class="o">=</span><span class="n">i2c_vc</span><span class="o">=</span><span class="n">on</span>
+<span class="c1"># SPI</span>
+<span class="n">dtoverlay</span><span class="o">=</span><span class="n">spi0</span><span class="o">-</span><span class="mi">1</span><span class="n">cs</span><span class="p">,</span><span class="n">cs0_pin</span><span class="o">=</span><span class="mi">18</span>
+<span class="n">dtoverlay</span><span class="o">=</span><span class="n">spi1</span><span class="o">-</span><span class="mi">1</span><span class="n">cs</span><span class="p">,</span><span class="n">cs0_pin</span><span class="o">=</span><span class="mi">7</span>
+<span class="c1"># camera</span>
+<span class="n">dtoverlay</span><span class="o">=</span><span class="n">vc4</span><span class="o">-</span><span class="n">fkms</span><span class="o">-</span><span class="n">v3d</span>
+<span class="n">start_x</span><span class="o">=</span><span class="mi">1</span>
+<span class="n">gpu_mem</span><span class="o">=</span><span class="mi">300</span>
+</pre></div>
+</div>
+<p>There should not be dtparam=spi=on, somewhere. This would enable two chip selects for SPI0 and
+create a conflict with the pin select of SPI1. You can check the configuration via</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">ls /dev/spi*</span>
+<span class="go">sudo vcdbg log msg</span>
+</pre></div>
+</div>
+<p>Usefull links are <a class="reference external" href="http://terminal28.blogspot.com/2016/05/enabling-spi1-on-raspberry-pi-bzero23.html">1</a> and <a class="reference external" href="https://bootlin.com/blog/enabling-new-hardware-on-raspberry-pi-with-device-tree-overlays/">2</a>.</p>
+</div>
+<div class="section" id="i2c">
+<h3>I2C<a class="headerlink" href="#i2c" title="Permalink to this headline">¶</a></h3>
+<p>In the current scanhead, I2C is used to set the power of the laser via a digipot.
+I2C can be enabled on the Raspberry Pi as <a class="reference external" href="https://pimylifeup.com/raspberry-pi-i2c/">follows</a>.</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">i2cdetect -y 1</span>
+</pre></div>
+</div>
+<p>This will produce output, here 28 is the address of the I2C device.</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">     0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f</span>
+<span class="go">00:          -- -- -- -- -- -- -- -- -- -- -- -- -- </span>
+<span class="go">10: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- </span>
+<span class="go">20: -- -- -- -- -- -- -- -- 28 -- -- -- -- -- -- -- </span>
+<span class="go">30: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- </span>
+<span class="go">40: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- </span>
+<span class="go">50: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- </span>
+<span class="go">60: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- </span>
+<span class="go">70: -- -- -- -- -- -- -- --</span>
+</pre></div>
+</div>
+</div>
+</div>
+<div class="section" id="motion">
+<h2>Motion<a class="headerlink" href="#motion" title="Permalink to this headline">¶</a></h2>
+<p>Splines, Bezier, B-splines, and NURBS (Non-Uniform Rational B-splines) curves are the common parametric techniques
+used for tool path <a class="reference external" href="https://zero.sci-hub.se/2496/cb390d406cc077ef156deb76b34099af/desantiago-perez2013.pdf#lb0030">design</a>.<br />
+A notebook on bezier is available in the notebook folder. Bezier is not used as there is no DSP or feedback at the moment.
+The controller gets a number of points along curve. The curve is divided in segments and this
+segment is approximated with a polynomal of third degree. There are no multipliers, DSP,
+on the ICE40HX4k chip used for this project. As a result, it is has not been implemented.</p>
+</div>
+<div class="section" id="parameters">
+<h2>Parameters<a class="headerlink" href="#parameters" title="Permalink to this headline">¶</a></h2>
+<p>The following parameters describe the system.</p>
+<table class="colwidths-auto table">
+<thead>
+<tr class="row-odd"><th class="head"><p>parameter</p></th>
+<th class="head"><p>description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>RPM</p></td>
+<td><p>revolutions per minute of the rotor</p></td>
+</tr>
+<tr class="row-odd"><td><p>Start%</p></td>
+<td><p>fraction of period where scanline starts</p></td>
+</tr>
+<tr class="row-even"><td><p>End%</p></td>
+<td><p>fraction of period where scanline stops</p></td>
+</tr>
+<tr class="row-odd"><td><p>SPINUP_TIME</p></td>
+<td><p>seconds system waits for the rotor to stabilize speed</p></td>
+</tr>
+<tr class="row-even"><td><p>STABLE_TIME</p></td>
+<td><p>seconds system tries to determine position laser with photodiode</p></td>
+</tr>
+<tr class="row-odd"><td><p>FACETS</p></td>
+<td><p>number of polygon facets</p></td>
+</tr>
+<tr class="row-even"><td><p>DIRECTION</p></td>
+<td><p>exposure direction, i.e. forward or backward</p></td>
+</tr>
+<tr class="row-odd"><td><p>SINGLE_LINE</p></td>
+<td><p>system exposes fixed pattern, i.e. line</p></td>
+</tr>
+<tr class="row-even"><td><p>SINGLE_FACET</p></td>
+<td><p>only one of the facets is used</p></td>
+</tr>
+</tbody>
+</table>
+<p>Using the above, the code determines the number of bits in a scanline. Via a serial port interface the user can push data to the scanner.
+A line is preceded with a command which can be SCAN or STOP. The data is stored on the chip in block ram.
+Once turned on, the scanner reads out this memory via First In First Out (FIFO).</p>
+</div>
+</div>
+<div class="section" id="brief-description">
+<h1>Brief Description<a class="headerlink" href="#brief-description" title="Permalink to this headline">¶</a></h1>
+<p>The controller sends over a command with a word to the peripheral which updates the motor state.
+The command is 8 bits long and the word 64 bits. Only for write commands, word is not empty.
+Typically, the word received by the host is empty unless the memory is full or a read command is issued.</p>
+</div>
+<div class="section" id="commands">
+<h1>Commands<a class="headerlink" href="#commands" title="Permalink to this headline">¶</a></h1>
+<p>The following commands are possible;</p>
+<table class="colwidths-auto table">
+<thead>
+<tr class="row-odd"><th class="head"><p>command</p></th>
+<th class="head"><p>reply</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>POSITION</p></td>
+<td><p>get position of all motors</p></td>
+</tr>
+<tr class="row-odd"><td><p>READ</p></td>
+<td><p>get state of the peripheral and settings of certain pins</p></td>
+</tr>
+<tr class="row-even"><td><p>START</p></td>
+<td><p>enable execution of instructions stored in SRAM</p></td>
+</tr>
+<tr class="row-odd"><td><p>STOP</p></td>
+<td><p>halt execution of instructions stored in SRAM</p></td>
+</tr>
+<tr class="row-even"><td><p>WRITE</p></td>
+<td><p>sent over an instruction and store it in SRAM</p></td>
+</tr>
+</tbody>
+</table>
+<div class="section" id="write">
+<h2>Write<a class="headerlink" href="#write" title="Permalink to this headline">¶</a></h2>
+<p>A write commmand is followed by an instruction which is placed in the SRAM.
+If the dispatcher is enabled, these instructions are carried out unless an error is raised.
+A word can often not store all information for an instruction. So an instruction
+consists out of multiple commands and words in series.
+If prior to the sequence, the memory is already full or there is a parsing error, a status word is sent back.
+If the reply is zero, the peripheral is operating normally. The information to be sent over is indicated for
+each instruction</p>
+<div class="section" id="move-instruction">
+<h3>Move instruction<a class="headerlink" href="#move-instruction" title="Permalink to this headline">¶</a></h3>
+<table class="colwidths-auto table">
+<thead>
+<tr class="row-odd"><th class="head"><p>data</p></th>
+<th class="head"><p>number of bytes</p></th>
+<th class="head"><p>description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>INSTRUCTION</p></td>
+<td><p>1</p></td>
+<td><p>type of instructions, here move instruction</p></td>
+</tr>
+<tr class="row-odd"><td><p>TICKS</p></td>
+<td><p>7</p></td>
+<td><p>number of ticks in a move, cannot be larger than TICKS_MOVE, i.e. 10_000</p></td>
+</tr>
+<tr class="row-even"><td><p>C00</p></td>
+<td><p>8</p></td>
+<td><p>motor 0, coeff 0</p></td>
+</tr>
+<tr class="row-odd"><td><p>C01</p></td>
+<td><p>8</p></td>
+<td><p>motor 0, coeff 1</p></td>
+</tr>
+<tr class="row-even"><td><p>C02</p></td>
+<td><p>8</p></td>
+<td><p>motor 0, coeff 2</p></td>
+</tr>
+</tbody>
+</table>
+<p>The motor will then the follow the path, coef_0 * t + coef_1 * t^2 + coef_2 * t^3.
+The coefficients can be interpreted as; velocity, acceleration and jerk. These are slightly different.
+If the position is x, then in the formula x = v<em>t + 1/2</em>a<em>t^2 + 1/3</em>1/2<em>b</em>t^3 ; v, a and b are the velocity
+acceleration and jerk respectively.
+The trajectory of a motor is divided in multiple segments where a segment length is typically 10_000 ticks.
+If is longer, it is repeated. If it is shorter, this is communicated by setting ticks to lower than 10_000.
+If multiple motors are used; TICKS, C00, C01, C02 are repeated.
+Step speed must be lower than 1/2 oscillator speed (Nyquist criterion).
+For a <a class="reference external" href="https://blog.prusaprinters.org/calculator_3416/">typical stepper motor</a> with 400 steps per mm,
+max speed is 3.125 m/s with an oscillator frequency of 1 MHz.
+If other properties are desired, alter max_ticks per step, bit_length or motor sampling frequency.
+The default motor sampling frequency is 1 MHz.</p>
+</div>
+<div class="section" id="pin-instruction">
+<h3>Pin instruction<a class="headerlink" href="#pin-instruction" title="Permalink to this headline">¶</a></h3>
+<table class="colwidths-auto table">
+<thead>
+<tr class="row-odd"><th class="head"><p>data</p></th>
+<th class="head"><p>number of bytes</p></th>
+<th class="head"><p>description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>INSTRUCTION</p></td>
+<td><p>1</p></td>
+<td><p>type of instructions, here set pin instruction</p></td>
+</tr>
+<tr class="row-odd"><td><p>PINS</p></td>
+<td><p>7</p></td>
+<td><p>Last byte set pins. The last bits set polygon, laser0, laser1</p></td>
+</tr>
+</tbody>
+</table>
+<p>A user can read but not write directly to pins. This ensures that the host
+can establish precedence between instructions.</p>
+</div>
+<div class="section" id="laserline-instruction">
+<h3>Laserline instruction<a class="headerlink" href="#laserline-instruction" title="Permalink to this headline">¶</a></h3>
+<table class="colwidths-auto table">
+<thead>
+<tr class="row-odd"><th class="head"><p>data</p></th>
+<th class="head"><p>number of bits</p></th>
+<th class="head"><p>description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>INSTRUCTION</p></td>
+<td><p>8</p></td>
+<td><p>type of instructions, here start or stop scanline</p></td>
+</tr>
+<tr class="row-odd"><td><p>DIRECTION</p></td>
+<td><p>1</p></td>
+<td><p>scanning direction</p></td>
+</tr>
+<tr class="row-even"><td><p>TICKSPERSTEP</p></td>
+<td><p>55</p></td>
+<td><p>ticks per half period step</p></td>
+</tr>
+<tr class="row-odd"><td><p>DATA</p></td>
+<td><p>64</p></td>
+<td><p>information for lasers in chunks of 8 bytes</p></td>
+</tr>
+</tbody>
+</table>
+<p>A user can read but not write directly to pins. This ensures that the host
+can establish precedence between instructions.</p>
+</div>
+</div>
+<div class="section" id="detailed-description">
+<h2>Detailed description<a class="headerlink" href="#detailed-description" title="Permalink to this headline">¶</a></h2>
+<p>Look at the test folders and individually tests on how to use the code. The whole scanhead can be simulated virtually.
+As such, a scanner is not needed.</p>
+</div>
+<div class="section" id="limitations">
+<h2>Limitations<a class="headerlink" href="#limitations" title="Permalink to this headline">¶</a></h2>
+<p>System is for writing to, i.e. exposing, a substrate. Reading should also be possible to enable optical coherence tomagraphy.<br />
+System has no link for LIDAR measurements, circuit can be found <a class="reference external" href="https://hackaday.io/project/163501-open-source-lidar-unruly">here</a>.<br />
+The FPGA controls all the stepper motors. At the moment it is not possible to use GCODE or apply acceleration profiles.
+Add maximum-length linear-feedback shift register sequence and CRC check.
+If you do a sequence of very short moves, e.g. 10 steps, you might notice high-latency due to SPI communcation.</p>
+<!-- 
+TODO:
+  add docs
+ -->
+</div>
+</div>
+
+    <script type="text/x-thebe-config">
+    {
+        requestKernel: true,
+        binderOptions: {
+            repo: "binder-examples/jupyter-stacks-datascience",
+            ref: "master",
+        },
+        codeMirrorConfig: {
+            theme: "abcdef",
+            mode: "python"
+        },
+        kernelOptions: {
+            kernelName: "python3",
+            path: "./."
+        },
+        predefinedOutput: true
+    }
+    </script>
+    <script>kernelName = 'python3'</script>
+
+              </div>
+              
+        
+        <div class='prev-next-bottom'>
+            
+    <a class='left-prev' id="prev-link" href="index.html" title="previous page">Hexastorm: Laserscanner and Gateware Library</a>
+    <a class='right-next' id="next-link" href="01_Welcome%21/0_README.html" title="next page">Welcome!</a>
+
+        </div>
+        
+        </div>
+    </div>
+    <footer class="footer mt-5 mt-md-0">
+    <div class="container">
+      <p>
+        
+          By The Jupyter Book community<br/>
+        
+          <div class="extra_footer">
+            <a rel="license" href="http://creativecommons.org/licenses/by/4.0/"><img alt="Creative Commons License" style="border-width:0" src="https://i.creativecommons.org/l/by/4.0/88x31.png" /></a><br />This work is licensed under a <a rel="license" href="http://creativecommons.org/licenses/by/4.0/">Creative Commons Attribution 4.0 International License</a>.
+
+          </div>
+      </p>
+    </div>
+  </footer>
+</main>
+
+
+      </div>
+    </div>
+  
+  <script src="_static/js/index.1c5a1a01449ed65a7b51.js"></script>
+
+  
+  </body>
+</html>
