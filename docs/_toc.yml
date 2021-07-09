@@ -1,0 +1,7 @@
+root: index
+entries:
+- file: README
+- file: 01_Welcome!/0_README
+- file: 02_Getting_Started/0_Project_Setup
+- file: 03_Design/README
+
