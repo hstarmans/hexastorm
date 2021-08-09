@@ -14,6 +14,9 @@ from hexastorm.platforms import TestPlatform
 class Polynomal(Elaboratable):
     """ Sets motor states using a polynomal algorithm
 
+        This code requires a lot of LUT and should be replaced
+        by DSP. Only order 2 is supported on UP5k
+
         A polynomal up to 3 order, e.g. c*x^3+b*x^2+a*x,
         is evaluated using the assumption that x starts at 0
         and y starts at 0. The polynomal determines the stepper
@@ -43,7 +46,7 @@ class Polynomal(Elaboratable):
         self.platform = platform
         self.order = DEGREE
         # change code for other orders
-        assert self.order == 3
+        assert (3 > self.order > 1)
         self.motors = platform.motors
         self.max_steps = int(MOVE_TICKS/2)  # Nyquist
         # inputs
@@ -118,16 +121,19 @@ class Polynomal(Elaboratable):
                     m.d.sync += [ticks.eq(ticks+1),
                                  cntr.eq(0)]
                     for motor in range(self.motors):
-                        idx = motor*self.order
-                        op3 = 3*2*self.coeff[idx+2] + cntrs[idx+2]
-                        op2 = (cntrs[idx+2] + 2*self.coeff[idx+1]
-                               + cntrs[idx+1])
+                        order = self.order
+                        idx = motor*order
+                        if order > 2:
+                            op3 = 3*2*self.coeff[idx+2] + cntrs[idx+2]
+                            m.d.sync += cntrs[idx+2].eq(op3)
+                        if order > 1:
+                            op2 = (cntrs[idx+2] + 2*self.coeff[idx+1]
+                                   + cntrs[idx+1])
+                            m.d.sync += cntrs[idx+1].eq(op2)
                         op1 = (self.coeff[idx+2] + self.coeff[idx+1]
                                + self.coeff[idx] + cntrs[idx+2] +
                                cntrs[idx+1] + cntrs[idx])
-                        m.d.sync += [cntrs[idx+2].eq(op3),
-                                     cntrs[idx+1].eq(op2),
-                                     cntrs[idx].eq(op1)]
+                        m.d.sync += cntrs[idx].eq(op1)
                 with m.Elif(ticks < self.ticklimit):
                     m.d.sync += cntr.eq(cntr+1)
                 with m.Else():
@@ -186,6 +192,10 @@ class TestPolynomal(LunaGatewareTestCase):
     @sync_test_case
     def test_calculation(self, a=2, b=3, c=1):
         ''' Test a simple relation e.g. cx^3+bx^2+ax '''
+        if DEGREE < 3:
+            c = 0
+        if DEGREE < 2:
+            b = 0
         yield from self.send_coefficients(a, b, c)
         while (yield self.dut.busy):
             yield
@@ -194,15 +204,17 @@ class TestPolynomal(LunaGatewareTestCase):
 
     @sync_test_case
     def test_jerk(self):
-        '''Test lower limit of c, i.e. the jerk
+        '''Test lower limit of highest degree, e.g. order 3 the jerk
 
-        Smallest value required is defined by pure jerk move
+        Smallest value required is defined by pure higest order move
         with 1 step.
-        Test if jerk move can be executed with one step.
+        Test if higest order move can be executed with one step.
         '''
         steps = 1
-        c = round(self.host.steps_to_count(steps)/pow(MOVE_TICKS, 3))
-        yield from self.send_coefficients(0, 0, c)
+        coef = round(self.host.steps_to_count(steps)/pow(MOVE_TICKS, DEGREE))
+        coeffs = [0]*3
+        coeffs[DEGREE-1] = coef
+        yield from self.send_coefficients(*coeffs)
         while (yield self.dut.busy):
             yield
         dut_count = (yield self.dut.cntrs[0])

@@ -213,7 +213,6 @@ class Dispatcher(Elaboratable):
         if platform:
             board_spi = platform.request("debug_spi")
             spi = synchronize(m, board_spi)
-            m.submodules.car = platform.clock_domain_generator()
             laserheadpins = platform.request("laserscanner")
             steppers = [res for res in get_all_resources(platform, "stepper")]
             assert len(steppers) != 0

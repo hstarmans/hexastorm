@@ -532,7 +532,8 @@ class BaseTest(LunaGatewareTestCase):
         # read the line number
         yield from self.pulse(dut.read_en_2)
         data_out = [(yield dut.read_data_2)]
-        print(data_out)
+        # TODO: THIS CODE IS HALFWAY COMMIT
+        # print(data_out)
         for i in range(0, totalbytes, WORD_BYTES):
             yield from self.pulse(dut.read_en_2)
             data_out.append((yield dut.read_data_2))
@@ -640,8 +641,9 @@ class SinglelineTest(BaseTest):
             yield
         self.assertEqual((yield dut.expose_finished), 1)
         yield dut.synchronize.eq(0)
-        for _ in range(2):
-            print((yield from self.read_line(dut.dct['BITSINSCANLINE'])))
+        # TODO: this code is half-way microscopy commit
+        # for _ in range(2):
+        #    print((yield from self.read_line(dut.dct['BITSINSCANLINE'])))
         yield from self.waituntilState('STOP')
         self.assertEqual((yield dut.error), False)
 

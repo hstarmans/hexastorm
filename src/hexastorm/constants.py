@@ -23,7 +23,7 @@ WORD_BYTES = 8
 MEMWIDTH = WORD_BYTES*8
 FREQ = 1E6  # motor move interpolation freq in Hz
 MOVE_INSTRUCTION = {'INSTRUCTION': 1, 'TICKS': 7}
-DEGREE = 3  # only third degree polynomal
+DEGREE = 2  # third degree polynomal supported in code but not on UP5K
 
 
 # these numbers must be tested with minimum
