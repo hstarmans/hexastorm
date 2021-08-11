@@ -6,7 +6,7 @@ upstream has been notified https://github.com/greatscottgadgets/luna/issues/101
 """
 from nmigen import Elaboratable, Module
 
-from FPGAG.platforms import Firestarter
+from hexastorm.platforms import Firestarter
 
 from luna import top_level_cli
 from luna.gateware.utils.cdc import synchronize

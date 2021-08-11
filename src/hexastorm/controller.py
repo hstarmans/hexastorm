@@ -78,6 +78,7 @@ class Host:
         self.platform.laser_var = self.laser_params
         self.platform.build(core.Dispatcher(self.platform),
                             do_program=do_program, verbose=verbose)
+        raise Exception("Fomu-flash needs to be changed or python restarted after flashing.")
 
     def reset(self):
         'reset the chip by raising and lowering the reset pin'

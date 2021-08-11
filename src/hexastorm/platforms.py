@@ -53,20 +53,26 @@ class Firestarter(LatticeICE40Platform):
     memdepth = 256
     device = 'iCE40UP5K'
     package = 'SG48'
-    default_clk = 'clk13_56mhz'
+    default_clk = "SB_HFOSC"
+    hfosc_div   = 0
+    # This division setting selects the internal oscillator speed:
+    # 0: 48MHz, 1: 24MHz, 2: 12MHz, 3: 6MHz.
+    #hfosc_div   = 2
+    # default_clk = "clk13"
     # clock_domain_generator = FirestarterDomainGenerator
     resources = [
-               Resource("clk13_56mhz", 0, Pins("35", dir="i"),
-                        Clock(13.56e6), Attrs(IO_STANDARD="SB_LVCMOS")),
-               *LEDResources(pins='39 40 41',
+               Resource("clk13", 0, Pins("35", dir="i"),
+                        Clock(13.56e6), Attrs(GLOBAL=True, IO_STANDARD="SB_LVCMOS")),
+               # TODO: replate with RGB led resource
+               *LEDResources(pins='39 40 41', invert=True,
                              attrs=Attrs(IO_STANDARD="SB_LVCMOS")),
                # NOTE: there is a proper resource in nmigen_boards
                #       this is used as it is also done by luna
                Resource("debug_spi", 0,
-                        Subsignal("sck", Pins("15", dir="i")),
-                        Subsignal("sdi", Pins("17", dir="i")),
-                        Subsignal("sdo", Pins("14", dir="o")),
-                        Subsignal("cs", PinsN("16", dir="i")),
+                        Subsignal("sck", Pins("18", dir="i")),
+                        Subsignal("sdi", Pins("21", dir="i")),
+                        Subsignal("sdo", Pins("19", dir="o")),
+                        Subsignal("cs", PinsN("13", dir="i")),
                         Attrs(IO_STANDARD="SB_LVCMOS")),
                # Laserscanner resource
                LaserscannerResource(number=0, laser0='32', laser1='31',
@@ -89,10 +95,13 @@ class Firestarter(LatticeICE40Platform):
     connectors = []
 
     def toolchain_program(self, products, name, **kwargs):
-        icezprog = os.environ.get("ICEZPROG", "icezprog")
+        # adapted sudo visudo to run program without asking for password
         with products.extract("{}.bin".format(name)) as bitstream_filename:
-            subprocess.check_call([icezprog, bitstream_filename])
-
+            subprocess.check_call(['sudo', 'fomu-flash', '-w', bitstream_filename])
+        subprocess.check_call(['sudo', 'fomu-flash', '-r'])
+        # this is needed to fix an issue with fomu-flash
+        subprocess.check_call(['sudo', 'rmmod', 'spi_bcm2835'])
+        subprocess.check_call(['sudo', 'modprobe', 'spi_bcm2835'])
 
 if __name__ == "__main__":
     Firestarter().build(Blinky(), do_program=True, verbose=True)
