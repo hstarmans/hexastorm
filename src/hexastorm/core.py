@@ -1,6 +1,7 @@
 import unittest
 from random import randint
 from copy import deepcopy
+from struct import pack
 
 import numpy as np
 from numpy.testing import assert_array_equal
@@ -106,7 +107,8 @@ class SPIParser(Elaboratable):
         # Peripheral state
         state = Signal(8)
         m.d.sync += [state[STATE.PARSING].eq(self.execute),
-                     state[STATE.FULL].eq(fifo.space_available <= 1),
+                     state[STATE.FIFOFULL].eq(fifo.space_available <= 1),
+                     state[STATE.FIFO2FULL].eq(fifo.space_available <= 1),
                      state[STATE.ERROR].eq(self.dispatcherror | error)]
         # remember which word we are processing
         instruction = Signal(8)
@@ -127,8 +129,11 @@ class SPIParser(Elaboratable):
                         m.next = 'WAIT_COMMAND'
                         m.d.sync += self.execute.eq(0)
                     with m.Elif(interf.command == COMMANDS.WRITE):
-                        m.d.sync += interf.word_to_send.eq(word)
-                        with m.If(state[STATE.FULL] == 0):
+                        with m.If(wordsreceived == 0):
+                            m.d.sync += interf.word_to_send.eq(word)
+                        with m.Else():
+                            m.d.sync += interf.word_to_send.eq(fifo2.read_data)
+                        with m.If(state[STATE.FIFOFULL] == 0):
                             m.next = 'WAIT_WORD'
                         with m.Else():
                             m.next = 'WAIT_COMMAND'
@@ -145,9 +150,14 @@ class SPIParser(Elaboratable):
                         m.d.sync += interf.word_to_send.eq(
                                                 self.position[mtrcntr])
                         m.next = 'WAIT_COMMAND'
+            wordslaser = wordsinscanline(
+                params(platform)['BITSINSCANLINE'])
             with m.State('WAIT_WORD'):
                 with m.If(interf.word_complete):
                     byte0 = interf.word_received[:8]
+                    # WRITE operation is COMMAND_WRITE + INSTRUCTION
+                    # multiple write operation can be chained
+                    # the following checks if the instruction is valid
                     with m.If(wordsreceived == 0):
                         with m.If((byte0 > 0) & (byte0 < 6)):
                             m.d.sync += [instruction.eq(byte0),
@@ -160,29 +170,33 @@ class SPIParser(Elaboratable):
                             m.d.sync += error.eq(1)
                             m.next = 'WAIT_COMMAND'
                     with m.Else():
-                        m.d.sync += [fifo.write_en.eq(1),
-                                     wordsreceived.eq(wordsreceived+1),
-                                     fifo.write_data.eq(interf.word_received)]
+                        m.d.sync += wordsreceived.eq(wordsreceived+1)
+                        with m.If(instruction == INSTRUCTIONS.SCANLINE):
+                            m.d.sync += fifo2.read_en.eq(1),
+                        with m.If((instruction != INSTRUCTIONS.SCANLINE) |
+                                  (wordsreceived <= wordslaser-1)):
+                            m.d.sync += [fifo.write_en.eq(1),
+                                         fifo.write_data.eq(
+                                             interf.word_received)]
                         m.next = 'WRITE'
             with m.State('WRITE'):
-                m.d.sync += fifo.write_en.eq(0)
-                wordslaser = wordsinscanline(
-                    params(platform)['BITSINSCANLINE'])
+                m.d.sync += [fifo.write_en.eq(0), fifo2.read_en.eq(0)]
                 wordsmotor = wordsinmove(platform.motors)
                 with m.If(((instruction == INSTRUCTIONS.MOVE) &
                           (wordsreceived >= wordsmotor))
                           | (instruction == INSTRUCTIONS.WRITEPIN)
                           | (instruction == INSTRUCTIONS.LASTSCANLINE)
                           | ((instruction == INSTRUCTIONS.SCANLINE) &
-                          (wordsreceived >= wordslaser)
+                          (wordsreceived >= (wordslaser+1))
                           )):
                     m.d.sync += [wordsreceived.eq(0),
+                                 fifo2.read_commit.eq(1),
                                  fifo.write_commit.eq(1)]
                     m.next = 'COMMIT'
                 with m.Else():
                     m.next = 'WAIT_COMMAND'
             with m.State('COMMIT'):
-                m.d.sync += fifo.write_commit.eq(0)
+                m.d.sync += [fifo.write_commit.eq(0), fifo2.read_commit.eq(0)]
                 m.next = 'WAIT_COMMAND'
         return m
 
@@ -385,6 +399,41 @@ class TestParser(SPIGatewareTestCase):
         self.assertEqual((yield self.dut.fifo.space_available),
                          (self.platform.memdepth - check))
 
+    def write_line_fifo2(self, linenumbr, bitlst, bitorder='little'):
+        '''write scanline to fifo2
+
+        FIFO is used for writing and FIFO2 is used
+        for reading. For testing, this method allows to
+        place information in FIFO2
+
+        bitlst      -- bits in scanline
+        line number -- number of of scanline
+        '''
+        dut = self.dut
+        assert len(bitlst) == self.host.laser_params['BITSINSCANLINE']
+        assert max(bitlst) <= 1
+        assert min(bitlst) >= 0
+
+        def remainder(bytelst):
+            '''NOTE: function also present in controller
+            '''
+            rem = (len(bytelst) % WORD_BYTES)
+            if rem > 0:
+                res = WORD_BYTES - rem
+            else:
+                res = 0
+            return res
+        bytelst = pack('<q', linenumbr)
+        bytelst += bytes(np.packbits(bitlst, bitorder=bitorder).tolist())
+
+        bytelst += remainder(bytelst)*b'\x00'
+
+        for i in range(0, len(bytelst), WORD_BYTES):
+            lst = int.from_bytes(bytelst[i:i+WORD_BYTES], bitorder)
+            yield dut.fifo2.write_data.eq(lst)
+            yield from self.pulse(dut.fifo2.write_en)
+        yield from self.pulse(dut.fifo2.write_commit)
+
     @sync_test_case
     def test_getposition(self):
         decimals = 3
@@ -394,6 +443,16 @@ class TestParser(SPIGatewareTestCase):
         lst = (yield from self.host.position).round(decimals)
         stepspermm = np.array(list(self.platform.stepspermm.values()))
         assert_array_equal(lst, (position/stepspermm).round(decimals))
+
+    @sync_test_case
+    def test_readscanline(self, linenumber=2):
+        host = self.host
+        bits = self.host.laser_params['BITSINSCANLINE']
+        bitlst = [1]*bits
+        yield from self.write_line_fifo2(linenumber, bitlst)
+        dct = yield from host.writeline([1] * bits)
+        self.assertEqual(dct['linenumber'], linenumber)
+        self.assertEqual(dct['data'], np.packbits(bitlst, bitorder='little'))
 
     @sync_test_case
     def test_writescanline(self):
@@ -686,6 +745,11 @@ if __name__ == "__main__":
 #  -- Polynomal integrator --> determines position via integrating counters
 
 # TODO:
+
+#   -- there can be no data in readfifo!! add check for this  (START behavior)
+#   -- stop behavior --> last line read until memory is empty
+#   -- parse data taking into account bitwidth
+
 #   -- in practice, position is not reached with small differences like 0.02 mm
 #   -- test execution speed to ensure the right PLL is propagated
 #   -- use CRC packet for tranmission failure (it is in litex but not luna)

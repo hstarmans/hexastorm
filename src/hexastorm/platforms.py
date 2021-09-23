@@ -22,7 +22,6 @@ class TestPlatform:
     name = 'Test'
     stepspermm = {'x': 400, 'y': 400}
     laser_bits = 1
-    sensor_bits = 1
     laser_axis = 'y'
     laser_var = {'RPM': 2000,
                  'FACETS': 4, 'SINGLE_LINE': False, 'TICKSINFACET': 18,
@@ -153,7 +152,6 @@ class Firestarter(LatticeICE40Platform):
     enable_pin = 17    # enable pin for stepper motors
     reset_pin = 26     # can be used to reset FPGA
     laser_bits = 1     # enables adding pwm to laser (not widely tested)
-    sensor_bits = 1
     stepspermm = {'x': 76.2,
                   'y': 76.2,
                   'z': 1600}

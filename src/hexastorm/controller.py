@@ -313,7 +313,7 @@ class Host:
         if data is None:
             data = (yield from self._read_state())
         bits = "{:08b}".format(data[-1])
-        return int(bits[STATE.FULL])
+        return int(bits[STATE.FIFOFULL])
 
     def send_command(self, data, format='!Q'):
         assert len(data) == WORD_BYTES+COMMAND_BYTES
@@ -403,23 +403,42 @@ class Host:
         return response
 
     def writeline(self, bitlst, stepsperline=1, direction=0, maxtrials=1E5):
+        '''method write and reads line from memory
+        '''
         bytelst = self.bittobytelist(bitlst, stepsperline, direction)
         write_byte = COMMANDS.WRITE.to_bytes(1, 'big')
         # TODO: merge write line with send commands
         if self.generator:
             maxtrials = 10
-        for i in range(0, len(bytelst), 8):
+        result = []
+        for i in range(0, len(bytelst), WORD_BYTES):
             trials = 0
-            lst = bytelst[i:i+8]
+            lst = bytelst[i:i+WORD_BYTES]
             lst.reverse()
             data = write_byte + bytes(lst)
             while True:
                 trials += 1
                 data_out = (yield from self.send_command(data))
-                if not (yield from self.memfull(data_out)):
+                if (yield from self.memfull(data_out)) and (i == 0):
+                    if trials > maxtrials:
+                        raise Memfull("Too many trials needed")
+                else:
+                    if i > 0:
+                        result.append(int.from_bytes(data_out, 'big'))
                     break
-                if trials > maxtrials:
-                    raise Memfull("Too many trials needed")
+        # not last line
+        if len(bitlst) > 0:
+            # one more write to retrieve all data
+            data = write_byte + bytes([0]*WORD_BYTES)
+            result.append(int.from_bytes(
+                (yield from self.send_command(data)), 'big'))
+            dct = {'linenumber': result[0],
+                   'data': result[1:]}
+        else:
+            dct = {}
+        # TODO:
+        # last line --> read till FIFO2 is empty
+        return dct
 
     def bittobytelist(self, bitlst, stepsperline=1,
                       direction=0, bitorder='little'):
