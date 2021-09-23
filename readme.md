@@ -13,6 +13,12 @@ The alignment procedure is shown in the following video.
 
 [![Alignment procedure image not showing](http://img.youtube.com/vi/Ri6DAneEzw4/0.jpg)](http://www.youtube.com/watch?v=Ri6DAneEzw4 "Alignment procedure")
 
+
+## UP5K
+
+All code should work and exposure should result be distorted.
+
+
 ## Install Notes
 The code works on Raspberry Pi 3B and beyond. The SD-card should be at least 8 GB, ideally 16 gb.
 Both Raspbian and Ubuntu can be used. Raspbian is not yet available at 64 bit.
