@@ -5,7 +5,7 @@ from copy import deepcopy
 import numpy as np
 
 import hexastorm.lasers as lasers
-from hexastorm.constants import (INSTRUCTIONS, COMMANDS, FREQ, STATE,
+from hexastorm.constants import (INSTRUCTIONS, COMMANDS, FREQ, STATE, DEGREE,
                                  BIT_SHIFT, MOVE_TICKS, WORD_BYTES,
                                  COMMAND_BYTES)
 from hexastorm.platforms import Firestarter
@@ -345,8 +345,12 @@ class Host:
     def send_move(self, ticks, a, b, c, maxtrials=1E5):
         '''send move instruction with data
 
-        data            -- coefficients for polynomal move
+        ticks           -- number of ticks in move
+        a,b,c           -- coefficients of polynomal move
         maxtrials       -- max number of communcation trials
+
+        NOTE: you always need to send 3 coefficients, even if your
+              FPGA is only configured for 2 and does not use the third!
 
         returns array with status home switches
         Zero implies home switch is hit
@@ -387,10 +391,10 @@ class Host:
         commands = []
         commands += [write_byte +
                      ticks[0].to_bytes(7, 'big') + move_byte]
+        coeff = [a, b, c]
         for motor in range(self.platform.motors):
-            commands += [write_byte + a[motor].to_bytes(8, 'big', signed=True)]
-            commands += [write_byte + b[motor].to_bytes(8, 'big', signed=True)]
-            commands += [write_byte + c[motor].to_bytes(8, 'big', signed=True)]
+            for degree in range(DEGREE):
+                commands += [write_byte + coeff[degree][motor].to_bytes(8, 'big', signed=True)]
         return commands
 
     def spi_exchange_data(self, data):

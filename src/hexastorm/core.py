@@ -249,7 +249,7 @@ class Dispatcher(Elaboratable):
         # position adder
         busy_d = Signal()
         m.d.sync += busy_d.eq(polynomal.busy)
-        coeffcnt = Signal(range(len(polynomal.coeff)))
+        coeffcnt = Signal(range(len(polynomal.coeff)+1))
         # connect laserhead
         m.d.comb += [
             laserheadpins.pwm.eq(laserhead.pwm),
@@ -613,8 +613,14 @@ class TestDispatcher(SPIGatewareTestCase):
     def test_movereceipt(self, ticks=10_000):
         'verify move instruction send over with send_move'
         a = list(range(1, self.platform.motors+1))
-        b = list(range(3, self.platform.motors+3))
-        c = list(range(5, self.platform.motors+5))
+        if DEGREE > 2:
+            b = list(range(3, self.platform.motors+3))
+        else:
+            b = [0]*self.platform.motors
+        if DEGREE > 3:
+            c = list(range(5, self.platform.motors+5))
+        else:
+            c = [0]*self.platform.motors
         yield from self.host.send_move([ticks],
                                        a,
                                        b,
