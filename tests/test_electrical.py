@@ -101,7 +101,7 @@ class LaserheadTest(Base):
         yield from self.host.enable_comp(laser1=True)
         print(f'Laser on for {timeout} seconds')
         sleep(timeout)
-        yield from self.host.enable_comp(laser0=False)
+        yield from self.host.enable_comp(laser1=False)
         self.assertEqual((yield from self.host.error), False)
 
     @executor

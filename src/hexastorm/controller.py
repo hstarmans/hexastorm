@@ -75,7 +75,7 @@ class Host:
 
     def build(self, do_program=True, verbose=True):
         self.platform = Firestarter()
-        self.platform.laser_var = self.laser_params
+        self.platform.laser_var = self.laser_params      
         self.platform.build(core.Dispatcher(self.platform),
                             do_program=do_program, verbose=verbose)
         raise Exception("Fomu-flash needs to be changed or python restarted after flashing.")
@@ -88,6 +88,11 @@ class Host:
         sleep(1)
         reset_pin.on()
         sleep(1)
+        # in first design on HX4K this was not needed
+        # however, for communication with the UP5K to succeed
+        # a blank needs to be send, Statictest succeeds but 
+        # testlaser fails in test_electrical
+        self.spi_exchange_data([0]*(WORD_BYTES+COMMAND_BYTES))  
 
     def _read_state(self):
         '''reads the state and returns bytearray'''
@@ -335,7 +340,8 @@ class Host:
         polygon  -- False enables polygon motor
         '''
         laser0, laser1, polygon = (int(bool(laser0)),
-                                   int(bool(laser1)), int(bool(polygon)))
+                                   int(bool(laser1)),
+                                   int(bool(polygon)))
         synchronize = int(bool(synchronize))
         data = ([COMMANDS.WRITE] + [0]*(WORD_BYTES-2) +
                 [int(f'{synchronize}{polygon}{laser1}{laser0}', 2)]
