@@ -6,11 +6,11 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.5.2
+#       jupytext_version: 1.11.2
 #   kernelspec:
-#     display_name: Python [conda env:dalry]
+#     display_name: Python 3
 #     language: python
-#     name: conda-env-dalry-py
+#     name: python3
 # ---
 
 # **Author:** Rik Starmans  
@@ -173,15 +173,22 @@ sympy.collect(casteljau(2).expand(), ['b0', 'b1', 'b2'])
 
 time = np.arange(0, 10, 0.1)
 amplitude = np.sin(time)
-plot.plot(time, amplitude)
-plot.title('Sine wave')
-plot.xlabel('Time')
-plot.ylabel('Amplitude')
-plot.grid(True, which='both')
-plot.axhline(y=0, color='k')
-plot.show()
+plt.plot(time, amplitude)
+plt.title('Sine wave')
+plt.xlabel('Time')
+plt.ylabel('Amplitude')
+plt.grid(True, which='both')
+plt.axhline(y=0, color='k')
+plt.show()
 x_points = np.arange(0, 10, 0.1)
 y_points = np.sin(x_points)
 print(f"The number of points equals {len(x_points)}")
 
-binomial(15, 8
+# # Final Notes
+#
+# Main challenge is not DSP but that you don't have floating point arithmetic on the FPGA.
+# You work around this using bitshifts but, this gets more complicated when the order increases.
+# There are core for floating point arithmetic, https://pypi.org/project/libresoc-ieee754fpu/.
+# I am not sure how to use these and mailed upstream for support.
+
+
