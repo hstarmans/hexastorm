@@ -75,10 +75,11 @@ class Host:
 
     def build(self, do_program=True, verbose=True):
         self.platform = Firestarter()
-        self.platform.laser_var = self.laser_params      
+        self.platform.laser_var = self.laser_params
         self.platform.build(core.Dispatcher(self.platform),
                             do_program=do_program, verbose=verbose)
-        raise Exception("Fomu-flash needs to be changed or python restarted after flashing.")
+        raise Exception("Fomu-flash needs to be changed\
+                        or python restarted after flashing.")
 
     def reset(self):
         'reset the chip by raising and lowering the reset pin'
@@ -90,9 +91,9 @@ class Host:
         sleep(1)
         # in first design on HX4K this was not needed
         # however, for communication with the UP5K to succeed
-        # a blank needs to be send, Statictest succeeds but 
+        # a blank needs to be send, Statictest succeeds but
         # testlaser fails in test_electrical
-        self.spi_exchange_data([0]*(WORD_BYTES+COMMAND_BYTES))  
+        self.spi_exchange_data([0]*(WORD_BYTES+COMMAND_BYTES))
 
     def _read_state(self):
         '''reads the state and returns bytearray'''
@@ -400,7 +401,8 @@ class Host:
         coeff = [a, b, c]
         for motor in range(self.platform.motors):
             for degree in range(DEGREE):
-                commands += [write_byte + coeff[degree][motor].to_bytes(8, 'big', signed=True)]
+                commands += [write_byte + coeff[degree][motor].to_bytes(8,
+                             'big', signed=True)]
         return commands
 
     def spi_exchange_data(self, data):

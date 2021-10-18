@@ -2,7 +2,6 @@
 To use it, you'll need to set your LUNA_PLATFORM variable:
     > export LUNA_PLATFORM="FPGAG.board:Firestarter"
 """
-import os
 import subprocess
 
 from nmigen.build import (Resource, Attrs, Pins, PinsN, Clock,
@@ -54,15 +53,15 @@ class Firestarter(LatticeICE40Platform):
     device = 'iCE40UP5K'
     package = 'SG48'
     default_clk = "SB_HFOSC"
-    hfosc_div   = 0
     # This division setting selects the internal oscillator speed:
     # 0: 48MHz, 1: 24MHz, 2: 12MHz, 3: 6MHz.
-    #hfosc_div   = 2
+    hfosc_div = 0
     # default_clk = "clk13"
     # clock_domain_generator = FirestarterDomainGenerator
     resources = [
                Resource("clk13", 0, Pins("35", dir="i"),
-                        Clock(13.56e6), Attrs(GLOBAL=True, IO_STANDARD="SB_LVCMOS")),
+                        Clock(13.56e6),
+                        Attrs(GLOBAL=True, IO_STANDARD="SB_LVCMOS")),
                # TODO: replate with RGB led resource
                *LEDResources(pins='39 40 41', invert=True,
                              attrs=Attrs(IO_STANDARD="SB_LVCMOS")),
@@ -97,11 +96,13 @@ class Firestarter(LatticeICE40Platform):
     def toolchain_program(self, products, name, **kwargs):
         # adapted sudo visudo to run program without asking for password
         with products.extract("{}.bin".format(name)) as bitstream_filename:
-            subprocess.check_call(['sudo', 'fomu-flash', '-w', bitstream_filename])
+            subprocess.check_call(['sudo', 'fomu-flash', '-w',
+                                  bitstream_filename])
         subprocess.check_call(['sudo', 'fomu-flash', '-r'])
         # this is needed to fix an issue with fomu-flash
         subprocess.check_call(['sudo', 'rmmod', 'spi_bcm2835'])
         subprocess.check_call(['sudo', 'modprobe', 'spi_bcm2835'])
+
 
 if __name__ == "__main__":
     Firestarter().build(Blinky(), do_program=True, verbose=True)
