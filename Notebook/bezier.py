@@ -6,7 +6,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.11.2
+#       jupytext_version: 1.13.0
 #   kernelspec:
 #     display_name: Python 3
 #     language: python
@@ -14,14 +14,42 @@
 # ---
 
 # **Author:** Rik Starmans  
-# **Abstract:** Splines, Bezier, B-splines, and NURBS (Non-Uniform Rational B-splines) curves are the common parametric techniques used for tool path [design](https://zero.sci-hub.se/2496/cb390d406cc077ef156deb76b34099af/desantiago-perez2013.pdf#lb0030).  For none of these an open source tool set is available,
-# which can interoperate with laser scanning devices such as a prism scanner. Prism scanning would be a lot easier, if it can be combined with deposition or milling techniques.
-# These techniques typically rely on G-code instruction. 
-# The purpose of this notebook is to explore Bezier curves and provide an implementation on FPGA.
+# **Title:** Motion control
+# **Abstract:**  Motion control and its implemenation on a FPGA is discussed
+
+# # Overview
+# A robot updates its position multiple times during a move. In practice it is impossible to sent over each position indivually due to data transfer limits.
+# The controller solves this via interpolation.  The starting and end-conditions, i.e. boundary conditions, are given for a move.
+# Possible boundary conditions are not only position but can be acceleration, jerk or number of steps in a move. It all depends on the mathematical interpretation chosen.
+# Instructions for a 3D printer are created as follows. A design is made in a CAD program. The design is translated to instructions.
+# Most programs like Cura and slicer store the final instructions as [G-code](https://en.wikipedia.org/wiki/G-code).
+# I extensively looked at two mathematical solutions; [splines](https://en.wikipedia.org/wiki/Spline_(mathematics)) and [Bezier curves](https://en.wikipedia.org/wiki/B%C3%A9zier_curve).
+# Other options are B-splines and NURBS (Non-Uniform Rational B-splines) see [article](https://zero.sci-hub.se/2496/cb390d406cc077ef156deb76b34099af/desantiago-perez2013.pdf#lb0030).
+#
+# # Limitations on FPGA
+# Not all mathematical operations can be done on the fly on a FPGA. For instance, multiplication and floating point arithmetic do not exist on default.
+# A core for floating point arithmetic is available for nmigen, https://pypi.org/project/libresoc-ieee754fpu/. 
+# I opted for [fixed point arithmetic](https://vha3.github.io/FixedPoint/FixedPoint.html) as this requires less resources.
+#
+# # Splines
+# This is desribed accurately in movement.py in the class defintion of Polynomal.
+#
+# # Beziers
+# It is possible to multiply 32 bit wide numbers on the UP5K; see test/old/dsp/multiplation.py.
+# Beziers are not implemented yet. I would again assume a maximum of 10_000 ticks per segment and a sampling speed of 1 MHz.
+# The number of coefficients you need to sent over to fpga is order of Bezier multipled by the number of axes.
+# The start and end point can't be too far away; the speed is limited by the Nyquist sample criterion.
+# The minimum distance should at least be one step.
+# I would assume you start at position zero and sent over the step displacement.
+#
+# The problem is currently have is in a segment time goes from 0 to 1, i actually want it to go from 0 to 10_000.
+# I can't use a divider on the FPGA. Multiplcations like 0.01x0.01 have a high risk for underflow.
+# This problem has not been solved and is omitted for now.
+
+# The purpose of this notebook is to explore Bezier curves. It does not reach a conclusion, it is mainly exploritory.
 # A bezier curve is fitted through the tool path using least squares. This fitting approach is adopted from
 # the [work](https://stackoverflow.com/questions/12643079/b%C3%A9zier-curve-fitting-with-scipy) of Tim Andrew Pastva "Bezier curve fitting".
 # The idea is that these points are sent to a FPGA. The intermediate positions between points, i.e. motor positions, are calculated using [De Casteljau's algorithm](https://en.wikipedia.org/wiki/De_Casteljau%27s_algorithm).
-
 # In the following, a line segment is defined between a start and end point. A function is defined along this segment which maps time to space.  
 # This line is approximated with a Bezier curve of certain degree. To fit a third order bezier curve on a segment you need four points on this segment.
 

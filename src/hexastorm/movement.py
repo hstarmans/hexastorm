@@ -13,13 +13,13 @@ from hexastorm.platforms import TestPlatform
 class Polynomal(Elaboratable):
     """ Sets motor states using a polynomal algorithm
 
-        A polynomal up to 3 order, e.g. c*t^3+b*t^2+a*t,
-        is evaluated using the assumption that t starts at 0
-        and has a maximum of say 10_000.
-        The polynomal determines the stepper position of 1 axis.
-        The motor position can be a 32 bit number.
-        If a certain bit of this number changes, a step is sent to the motor.
-        The bitshift determines this number.
+        A polynomal up to 3 order, i.e. c*t^3+b*t^2+a*t,
+        is evaluated under the assumption that t starts at 0
+        and has a maximum of say 10_000 ticks.
+        The polynomal describes the stepper position of a single axis.
+        A counter is used to capture the state of the polynomal.
+        If a given bit, denoted by bitshift, of the counter changes,
+        a step is sent to the motor.
         In every tick the step can at most increase
         with one count.
 
@@ -27,8 +27,10 @@ class Polynomal(Elaboratable):
         It is assumed that the user can completely determine
         the outcome of the calculation.
         To ascertain step accuracy, c is submitted with a very high accuracy.
-        For third oder, this requires 64 bit wide numbers
+        For third order, this requires 41 bit wide numbers
         and is a "weakness" in the code.
+        The code might be sped up via Horner's method and the use of DSPs.
+        The current code does not require a DSP.
 
         Assumptions:
         max ticks per move is 10_000
@@ -72,7 +74,7 @@ class Polynomal(Elaboratable):
 
     def elaborate(self, platform):
         m = Module()
-        # add 1 MHZ clock domain
+        # add 1 MHz clock domain
         cntr = Signal(range(self.divider))
         # pos
         max_bits = (self.max_steps << self.bit_shift).bit_length()
