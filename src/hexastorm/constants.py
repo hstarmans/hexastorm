@@ -14,22 +14,29 @@ INSTRUCTIONS = namedtuple('INSTRUCTIONS', ['MOVE', 'WRITEPIN', 'SCANLINE',
                           defaults=range(1, 5))()
 STATE = namedtuple('STATE', ['FULL', 'PARSING', 'ERROR'],
                    defaults=range(3))()
-# one block is 4K there are 32 blocks (officially 20 in HX4K)
-# max of 1 block is 16*256 but if you use a larger memwidth you seem to
-# use more blocks so this might work
-# MEMDEPTH = 256  memdepth is defined on the board so it can be changed
+
 COMMAND_BYTES = 1
 WORD_BYTES = 8
 MEMWIDTH = WORD_BYTES*8
 FREQ = 1E6  # motor move interpolation freq in Hz
+MOVE_TICKS = 10_000  # maximum ticks in move segment
+
 MOVE_INSTRUCTION = {'INSTRUCTION': 1, 'TICKS': 7}
-DEGREE = 2  # third degree polynomal supported in code but not on UP5K
 
 
-# these numbers must be tested with minimum
-# jerk and maximum velocity move
-BIT_SHIFT = 40
-MOVE_TICKS = 10_000
+def bit_shift(platform):
+    '''retrieve bit shif for a give degree
+
+    Determined by running the test of
+    movement.py and varying parameter
+    '''
+    if platform.poldegree == 3:
+        bit_shift = 40
+    elif platform.poldegree == 2:
+        bit_shift = 25
+    else:
+        raise Exception("Order not supported")
+    return bit_shift
 
 
 def wordsinscanline(bits):
@@ -38,23 +45,16 @@ def wordsinscanline(bits):
     return ceil(bytesinline/WORD_BYTES)
 
 
-def wordsinmove(motors):
+def wordsinmove(platform):
     '''calcuates number of words for a single move instruction'''
     bytesingcode = (sum(MOVE_INSTRUCTION.values())
-                    + motors*DEGREE*WORD_BYTES)
+                    + platform.motors*platform.poldegree*WORD_BYTES)
     bytesingcode += bytesingcode % WORD_BYTES
     return ceil(bytesingcode/WORD_BYTES)
 
 
-def getmovedct(motors):
+def getmovedct(platform):
     dct = MOVE_INSTRUCTION
-    for i in range(motors):
-        for j in range(DEGREE):
+    for i in range(platform.motors):
+        for j in range(platform.poldegree):
             dct.update({f'C{i}{j}': 8})
-
-
-# NOTE: following doesnt work due to bug
-# in pylint https://github.com/PyCQA/pylint/issues/3876
-# def customnamedtuple(typename, field_names) -> namedtuple:
-#    return namedtuple(typename, field_names,
-#                      defaults=range(len(field_names)))

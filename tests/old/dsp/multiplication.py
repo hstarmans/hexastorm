@@ -37,7 +37,47 @@ if __name__ == "__main__":
     os.environ['NMIGEN_synth_opts'] = '-dsp'
     platform = Firestarter()
     # needs to be less than 30 Mhz
+    # BEGINT MET INFO
+    # LLC 113, DSP 1, pass op 24 MHZ
     platform.hfosc_div = 2
-    platform.build(Multest(),
-                   do_program=False,
-                   verbose=True)
+    # print(help(platform.build))
+    # look at *.tim
+    platform.build(Multest(), do_program=True, verbose=False)
+
+# 16 bit 
+# Info: Device utilisation:
+# Info: 	         ICESTORM_LC:   112/ 5280     2%
+# Info: 	        ICESTORM_RAM:     0/   30     0%
+# Info: 	               SB_IO:     1/   96     1%
+# Info: 	               SB_GB:     2/    8    25%
+# Info: 	        ICESTORM_PLL:     0/    1     0%
+# Info: 	         SB_WARMBOOT:     0/    1     0%
+# Info: 	        ICESTORM_DSP:     1/    8    12%
+# Info: 	      ICESTORM_HFOSC:     1/    1   100%
+# Info: 	      ICESTORM_LFOSC:     0/    1     0%
+# Info: 	              SB_I2C:     0/    2     0%
+# Info: 	              SB_SPI:     0/    2     0%
+# Info: 	              IO_I3C:     0/    2     0%
+# Info: 	         SB_LEDDA_IP:     0/    1     0%
+# Info: 	         SB_RGBA_DRV:     0/    1     0%
+# Info: 	      ICESTORM_SPRAM:     0/    4     0%
+
+
+
+# 32 bit
+# Info: Device utilisation:
+# Info: 	         ICESTORM_LC:   192/ 5280     3%
+# Info: 	        ICESTORM_RAM:     0/   30     0%
+# Info: 	               SB_IO:     1/   96     1%
+# Info: 	               SB_GB:     4/    8    50%
+# Info: 	        ICESTORM_PLL:     0/    1     0%
+# Info: 	         SB_WARMBOOT:     0/    1     0%
+# Info: 	        ICESTORM_DSP:     2/    8    25%
+# Info: 	      ICESTORM_HFOSC:     1/    1   100%
+# Info: 	      ICESTORM_LFOSC:     0/    1     0%
+# Info: 	              SB_I2C:     0/    2     0%
+# Info: 	              SB_SPI:     0/    2     0%
+# Info: 	              IO_I3C:     0/    2     0%
+# Info: 	         SB_LEDDA_IP:     0/    1     0%
+# Info: 	         SB_RGBA_DRV:     0/    1     0%
+# Info: 	      ICESTORM_SPRAM:     0/    4     0%

@@ -20,8 +20,7 @@ from hexastorm.resources import get_all_resources
 from hexastorm.lasers import Laserhead, DiodeSimulator, params
 from hexastorm.constants import (COMMAND_BYTES, WORD_BYTES, STATE,
                                  INSTRUCTIONS, MEMWIDTH, COMMANDS,
-                                 DEGREE, FREQ, wordsinscanline,
-                                 wordsinmove)
+                                 FREQ, wordsinscanline, wordsinmove)
 
 
 class SPIParser(Elaboratable):
@@ -91,7 +90,7 @@ class SPIParser(Elaboratable):
                      self.empty.eq(fifo.empty)]
         # Parser
         mtrcntr = Signal(range(platform.motors))
-        wordsreceived = Signal(range(wordsinmove(platform.motors)+1))
+        wordsreceived = Signal(range(wordsinmove(platform)+1))
         error = Signal()
         # Peripheral state
         state = Signal(8)
@@ -158,7 +157,7 @@ class SPIParser(Elaboratable):
                 m.d.sync += fifo.write_en.eq(0)
                 wordslaser = wordsinscanline(
                     params(platform)['BITSINSCANLINE'])
-                wordsmotor = wordsinmove(platform.motors)
+                wordsmotor = wordsinmove(platform)
                 with m.If(((instruction == INSTRUCTIONS.MOVE) &
                           (wordsreceived >= wordsmotor))
                           | (instruction == INSTRUCTIONS.WRITEPIN)
@@ -184,15 +183,12 @@ class Dispatcher(Elaboratable):
         and dispatches the instructions to the corresponding module.
         This is the top module
     """
-    def __init__(self, platform=None, divider=50, simdiode=False):
+    def __init__(self, platform=None, simdiode=False):
         """
             platform  -- used to pass test platform
-            divider   -- if sys clk is 50 MHz and divider is 50
-                        motor state is update with 1 Mhz
         """
         self.simdiode = simdiode
         self.platform = platform
-        self.divider = divider
         self.read_commit = Signal()
         self.read_en = Signal()
         self.read_data = Signal(MEMWIDTH)
@@ -208,7 +204,7 @@ class Dispatcher(Elaboratable):
         # disabled "dispatching"
         busy = Signal()
         # Polynomal Move
-        polynomal = Polynomal(self.platform, self.divider)
+        polynomal = Polynomal(self.platform)
         m.submodules.polynomal = polynomal
         if platform:
             board_spi = platform.request("debug_spi")
@@ -412,7 +408,7 @@ class TestParser(SPIGatewareTestCase):
                                        [1]*self.platform.motors,
                                        [2]*self.platform.motors,
                                        [3]*self.platform.motors)
-        words = wordsinmove(self.platform.motors)
+        words = wordsinmove(self.platform)
         yield from self.instruction_ready(words)
 
     @sync_test_case
@@ -470,7 +466,7 @@ class TestParser(SPIGatewareTestCase):
 class TestDispatcher(SPIGatewareTestCase):
     platform = TestPlatform()
     FRAGMENT_UNDER_TEST = Dispatcher
-    FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1,
+    FRAGMENT_ARGUMENTS = {'platform': platform,
                           'simdiode': True}
 
     def initialize_signals(self):
@@ -613,11 +609,12 @@ class TestDispatcher(SPIGatewareTestCase):
     def test_movereceipt(self, ticks=10_000):
         'verify move instruction send over with send_move'
         a = list(range(1, self.platform.motors+1))
-        if DEGREE > 2:
+        degree = self.platform.poldegree
+        if degree > 2:
             b = list(range(3, self.platform.motors+3))
         else:
             b = [0]*self.platform.motors
-        if DEGREE > 3:
+        if degree > 3:
             c = list(range(5, self.platform.motors+5))
         else:
             c = [0]*self.platform.motors
@@ -635,14 +632,14 @@ class TestDispatcher(SPIGatewareTestCase):
         self.assertEqual((yield self.dut.pol.ticklimit), 10_000)
         coefficients = [a, b, c]
         for motor in range(self.platform.motors):
-            for coef in range(DEGREE):
-                indx = motor*(DEGREE)+coef
+            for coef in range(degree):
+                indx = motor*(degree)+coef
                 self.assertEqual((yield self.dut.pol.coeff[indx]),
                                  coefficients[coef][motor])
         while (yield self.dut.pol.busy):
             yield
         for motor in range(self.platform.motors):
-            self.assertEqual((yield self.dut.pol.cntrs[motor*DEGREE]),
+            self.assertEqual((yield self.dut.pol.cntrs[motor*degree]),
                              a[motor]*ticks + b[motor]*pow(ticks, 2)
                              + c[motor]*pow(ticks, 3))
 

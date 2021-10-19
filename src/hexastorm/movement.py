@@ -5,8 +5,7 @@ from nmigen.hdl.mem import Array
 from luna.gateware.test import LunaGatewareTestCase, sync_test_case
 
 from hexastorm.resources import get_all_resources
-from hexastorm.constants import (DEGREE, BIT_SHIFT,
-                                 MOVE_TICKS)
+from hexastorm.constants import MOVE_TICKS, bit_shift
 from hexastorm.controller import Host
 from hexastorm.platforms import TestPlatform
 
@@ -14,15 +13,26 @@ from hexastorm.platforms import TestPlatform
 class Polynomal(Elaboratable):
     """ Sets motor states using a polynomal algorithm
 
-        This code requires a lot of LUT and should be replaced
-        by DSP. Only order 2 is supported on UP5k
-
-        A polynomal up to 3 order, e.g. c*x^3+b*x^2+a*x,
-        is evaluated using the assumption that x starts at 0
-        and y starts at 0. The polynomal determines the stepper
-        position. The bitshift bit determines
-        the position. In every tick the step can at most increase
+        A polynomal up to 3 order, e.g. c*t^3+b*t^2+a*t,
+        is evaluated using the assumption that t starts at 0
+        and has a maximum of say 10_000.
+        The polynomal determines the stepper position of 1 axis.
+        The motor position can be a 32 bit number.
+        If a certain bit of this number changes, a step is sent to the motor.
+        The bitshift determines this number.
+        In every tick the step can at most increase
         with one count.
+
+        This code requires a lot of LUT, only order 2 is supported on UP5k
+        It is assumed that the user can completely determine
+        the outcome of the calculation.
+        To ascertain step accuracy, c is submitted with a very high accuracy.
+        For third oder, this requires 64 bit wide numbers
+        and is a "weakness" in the code.
+
+        Assumptions:
+        max ticks per move is 10_000
+        update frequency motor is 1 MHz
 
         I/O signals:
         I: coeff          -- polynomal coefficients
@@ -33,27 +43,24 @@ class Polynomal(Elaboratable):
         O: dir            -- direction; 1 is postive and 0 is negative
         O: step           -- step signal
     """
-    def __init__(self, platform=None, divider=12, top=False):
+    def __init__(self, platform=None, top=False):
         '''
             platform  -- pass test platform
-            divider   -- original clock of 100 MHz via PLL reduced to 50 MHz
-                         if this is divided by 50 motor state updated
-                         with 1 Mhz
             top       -- trigger synthesis of module
         '''
         self.top = top
-        self.divider = divider
         self.platform = platform
-        self.order = DEGREE
-        assert (4 > self.order > 1)
+        self.divider = platform.clks[platform.hfosc_div]
+        self.order = platform.poldegree
+        self.bit_shift = bit_shift(platform)
         self.motors = platform.motors
         self.max_steps = int(MOVE_TICKS/2)  # Nyquist
         # inputs
         self.coeff = Array()
         for _ in range(self.motors):
-            self.coeff.extend([Signal(signed(64)),
-                               Signal(signed(64)),
-                               Signal(signed(64))][:self.order])
+            self.coeff.extend([Signal(signed(self.bit_shift+1)),
+                               Signal(signed(self.bit_shift+1)),
+                               Signal(signed(self.bit_shift+1))][:self.order])
         self.start = Signal()
         self.ticklimit = Signal(MOVE_TICKS.bit_length())
         # output
@@ -68,7 +75,7 @@ class Polynomal(Elaboratable):
         # add 1 MHZ clock domain
         cntr = Signal(range(self.divider))
         # pos
-        max_bits = (self.max_steps << BIT_SHIFT).bit_length()
+        max_bits = (self.max_steps << self.bit_shift).bit_length()
         cntrs = Array(Signal(signed(max_bits+1))
                       for _ in range(len(self.coeff)))
         assert max_bits <= 64
@@ -86,9 +93,9 @@ class Polynomal(Elaboratable):
         # steps
         for motor in range(self.motors):
             m.d.comb += [self.step[motor].eq(
-                         cntrs[motor*self.order][BIT_SHIFT]),
+                         cntrs[motor*self.order][self.bit_shift]),
                          self.totalsteps[motor].eq(
-                         cntrs[motor*self.order] >> (BIT_SHIFT+1))]
+                         cntrs[motor*self.order] >> (self.bit_shift+1))]
         # directions
         counter_d = Array(Signal(signed(max_bits+1))
                           for _ in range(self.motors))
@@ -109,7 +116,7 @@ class Polynomal(Elaboratable):
                 with m.If(self.start):
                     for motor in range(self.motors):
                         coef0 = motor*self.order
-                        for degree in range(DEGREE):
+                        for degree in range(self.order):
                             m.d.sync += cntrs[coef0+degree].eq(0)
                         m.d.sync += counter_d[motor].eq(0)
                     m.d.sync += self.busy.eq(1)
@@ -145,7 +152,7 @@ class Polynomal(Elaboratable):
 class TestPolynomal(LunaGatewareTestCase):
     platform = TestPlatform()
     FRAGMENT_UNDER_TEST = Polynomal
-    FRAGMENT_ARGUMENTS = {'platform': platform, 'divider': 1}
+    FRAGMENT_ARGUMENTS = {'platform': platform}
 
     def initialize_signals(self):
         self.host = Host(self.platform)
@@ -178,7 +185,18 @@ class TestPolynomal(LunaGatewareTestCase):
 
     @sync_test_case
     def test_ticklimit(self):
-        ''' Test different upper tick limits'''
+        ''' Test wich max speed can be reached
+
+        Suppose max RPM stepper motor is 600, microstepping 16,
+        update frequency 1 MHz
+         --> (600*60*16)/1E6 = 0.576 step per tick.
+        If there are 10_000 ticks per segment;
+          5760 steps is maximum you can do in one segment from a physical
+          point of view
+        At max speed, the motor is on and subsequenctly off
+        in subsequent steps, ergo your motor update frequency determines max
+        speed (see also Nyquist frequency)
+        '''
         def limittest(limit, steps):
             a = round(self.host.steps_to_count(steps)/limit)
             yield self.dut.ticklimit.eq(limit)
@@ -186,15 +204,15 @@ class TestPolynomal(LunaGatewareTestCase):
             while (yield self.dut.busy):
                 yield
             self.assertEqual((yield self.dut.totalsteps[0]), steps)
-        yield from limittest(5000, 10)
-        yield from limittest(2000, 30)
+        yield from limittest(MOVE_TICKS, 4000)
+        yield from limittest(10_000, 1)
 
     @sync_test_case
     def test_calculation(self, a=2, b=3, c=1):
         ''' Test a simple relation e.g. cx^3+bx^2+ax '''
-        if DEGREE < 3:
+        if self.dut.order < 3:
             c = 0
-        if DEGREE < 2:
+        if self.dut.order < 2:
             b = 0
         yield from self.send_coefficients(a, b, c)
         while (yield self.dut.busy):
@@ -211,14 +229,15 @@ class TestPolynomal(LunaGatewareTestCase):
         Test if higest order move can be executed with one step.
         '''
         steps = 1
-        coef = round(self.host.steps_to_count(steps)/pow(MOVE_TICKS, DEGREE))
+        coef = round(self.host.steps_to_count(steps)
+                     / pow(MOVE_TICKS, self.dut.order))
         coeffs = [0]*3
-        coeffs[DEGREE-1] = coef
+        coeffs[self.dut.order-1] = coef
         yield from self.send_coefficients(*coeffs)
         while (yield self.dut.busy):
             yield
         dut_count = (yield self.dut.cntrs[0])
-        self.assertEqual(dut_count >> BIT_SHIFT, steps*2)
+        self.assertEqual(dut_count >> self.dut.bit_shift, steps*2)
         self.assertEqual((yield self.dut.totalsteps[0]), steps)
 
     @sync_test_case
@@ -237,7 +256,7 @@ class TestPolynomal(LunaGatewareTestCase):
             count = (yield from self.count_steps(0))
             self.assertEqual(count, steps)
             dut_count = (yield self.dut.cntrs[0])
-            self.assertEqual(dut_count >> BIT_SHIFT, steps*2)
+            self.assertEqual(dut_count >> self.dut.bit_shift, steps*2)
             self.assertEqual((yield self.dut.totalsteps[0]), steps)
         steps = round(0.4*MOVE_TICKS)
         yield from do_move(steps)

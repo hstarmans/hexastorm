@@ -5,8 +5,8 @@ from copy import deepcopy
 import numpy as np
 
 import hexastorm.lasers as lasers
-from hexastorm.constants import (INSTRUCTIONS, COMMANDS, FREQ, STATE, DEGREE,
-                                 BIT_SHIFT, MOVE_TICKS, WORD_BYTES,
+from hexastorm.constants import (INSTRUCTIONS, COMMANDS, FREQ, STATE,
+                                 MOVE_TICKS, WORD_BYTES, bit_shift,
                                  COMMAND_BYTES)
 from hexastorm.platforms import Firestarter
 import hexastorm.core as core
@@ -229,7 +229,8 @@ class Host:
         You need to count slightly over the threshold. That is why
         +1 is added.
         '''
-        count = (steps << (1+BIT_SHIFT))+(1 << (BIT_SHIFT-1))
+        bitshift = bit_shift(self.platform)
+        count = (steps << (1+bitshift))+(1 << (bitshift-1))
         return count
 
     def gotopoint(self, position, speed=None, absolute=True):
@@ -400,7 +401,7 @@ class Host:
                      ticks[0].to_bytes(7, 'big') + move_byte]
         coeff = [a, b, c]
         for motor in range(self.platform.motors):
-            for degree in range(DEGREE):
+            for degree in range(self.platform.poldegree):
                 commands += [write_byte + coeff[degree][motor].to_bytes(8,
                              'big', signed=True)]
         return commands

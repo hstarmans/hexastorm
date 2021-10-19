@@ -18,6 +18,9 @@ from hexastorm.resources import (StepperResource, StepperRecord,
 class TestPlatform:
     name = 'Test'
     stepspermm = {'x': 400, 'y': 400}
+    clks = {0: 1}   # dictionary to determine clock divider, e.g. movement.py
+    hfosc_div = 0   # selects clock speed on UP5K and clk divider
+    poldegree = 2   # degree of polynomal
     laser_bits = 1
     laser_axis = 'y'
     laser_var = {'RPM': 2000,
@@ -25,9 +28,11 @@ class TestPlatform:
                  'BITSINSCANLINE': 2, 'LASERTICKS': 4,
                  'SINGLE_FACET': False, 'DIRECTION': 0}
     motors = len(stepspermm.keys())
-    memdepth = wordsinmove(motors)*2+1
     steppers = [StepperRecord()]*motors
     laserhead = LaserscannerRecord()
+
+    def __init__(self):
+        self.memdepth = wordsinmove(self)*2+1
 
 
 class Firestarter(LatticeICE40Platform):
@@ -40,6 +45,7 @@ class Firestarter(LatticeICE40Platform):
     enable_pin = 17    # enable pin for stepper motors
     reset_pin = 26     # can be used to reset FPGA
     laser_bits = 1     # enables adding pwm to laser (not widely tested)
+    poldegree = 2      # degree of polynomal to execute move, see movement.py
     stepspermm = {'x': 76.2,
                   'y': 76.2,
                   'z': 1600}
@@ -55,7 +61,8 @@ class Firestarter(LatticeICE40Platform):
     default_clk = "SB_HFOSC"
     # This division setting selects the internal oscillator speed:
     # 0: 48MHz, 1: 24MHz, 2: 12MHz, 3: 6MHz.
-    hfosc_div = 0
+    clks = {0: 48, 1: 24, 2: 12, 3: 6}
+    hfosc_div = 2
     # default_clk = "clk13"
     # clock_domain_generator = FirestarterDomainGenerator
     resources = [
