@@ -161,38 +161,15 @@ This will produce output, here 28 is the address of the I2C device.
 60: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
 70: -- -- -- -- -- -- -- --
 ```
-## Motion
-Splines, Bezier, B-splines, and NURBS (Non-Uniform Rational B-splines) curves are the common parametric techniques 
-used for tool path [design](https://zero.sci-hub.se/2496/cb390d406cc077ef156deb76b34099af/desantiago-perez2013.pdf#lb0030).  
-A notebook on bezier is available in the notebook folder. Bezier is not used as there is no DSP or feedback at the moment.
-The controller gets a number of points along curve. The curve is divided in segments and this 
-segment is approximated with a polynomal of third degree. There are no multipliers, DSP,
-on the ICE40HX4k chip used for this project. As a result, it is has not been implemented.
 
-## Parameters
-The following parameters describe the system.  
-| parameter | description |
-|---|---|
-| RPM | revolutions per minute of the rotor |
-| Start% | fraction of period where scanline starts |
-| End% | fraction of period where scanline stops |
-| SPINUP_TIME | seconds system waits for the rotor to stabilize speed |
-| STABLE_TIME | seconds system tries to determine position laser with photodiode |
-| FACETS | number of polygon facets|
-| DIRECTION | exposure direction, i.e. forward or backward |
-| SINGLE_LINE | system exposes fixed pattern, i.e. line|
-| SINGLE_FACET | only one of the facets is used|
-  
-Using the above, the code determines the number of bits in a scanline. Via a serial port interface the user can push data to the scanner.
-A line is preceded with a command which can be SCAN or STOP. The data is stored on the chip in block ram. 
-Once turned on, the scanner reads out this memory via First In First Out (FIFO).
-  
 # Brief Description
-The controller sends over a command with a word to the peripheral which updates the motor state.
-The command is 8 bits long and the word 64 bits. Only for write commands, word is not empty.
-Typically, the word received by the host is empty unless the memory is full or a read command is issued.
 
-# Commands
+The controller sends over a command with a word to the FPGA which stores it in SRAM.
+The command is 8 bits long and the word 64 bits. Only for write commands, word is not empty.
+If the memory is full, the FPGA send this back to the host. 
+The instructions are parsed from the the SRAM if execution is enabled.
+
+## Commands
 The following commands are possible;
 | command | reply |
 |---|---|
@@ -212,7 +189,33 @@ If prior to the sequence, the memory is already full or there is a parsing error
 If the reply is zero, the peripheral is operating normally. The information to be sent over is indicated for
 each instruction
 
-### Move instruction
+## Parameters
+The following parameters describe the system.  
+| parameter | description |
+|---|---|
+| RPM | revolutions per minute of the rotor |
+| Start% | fraction of period where scanline starts |
+| End% | fraction of period where scanline stops |
+| SPINUP_TIME | seconds system waits for the rotor to stabilize speed |
+| STABLE_TIME | seconds system tries to determine position laser with photodiode |
+| FACETS | number of polygon facets|
+| DIRECTION | exposure direction, i.e. forward or backward |
+| SINGLE_LINE | system exposes fixed pattern, i.e. line|
+| SINGLE_FACET | only one of the facets is used|
+  
+Using the above, the code determines the number of bits in a scanline. Via a serial port interface the user can push data to the scanner.
+A line is preceded with a command which can be SCAN or STOP. The data is stored on the chip in block ram. 
+Once turned on, the scanner reads out this memory via First In First Out (FIFO).
+  
+### Motion
+
+A robot updates its position multiple times during a move. In practice it is impossible to sent over each position indivually due to data transfer limits.
+The controller solves this via interpolation.  The starting and end-conditions, i.e. boundary conditions, are given for a move.
+Possible boundary conditions are not only position but can be acceleration, jerk or number of steps in a move. It depends on the mathematical formulation chosen.
+I extensively looked at two mathematical solutions; [splines](https://en.wikipedia.org/wiki/Spline_(mathematics)) and [Bezier curves](https://en.wikipedia.org/wiki/B%C3%A9zier_curve).
+Other options are B-splines and NURBS (Non-Uniform Rational B-splines) see [article](https://zero.sci-hub.se/2496/cb390d406cc077ef156deb76b34099af/desantiago-perez2013.pdf#lb0030).
+Most programs like Cura and slicer store the final instructions as [G-code](https://en.wikipedia.org/wiki/G-code).
+There is no link between g-code and my interpretation yet.
 
 ### Splines
 | data | number of bytes | description
@@ -232,6 +235,10 @@ If is longer, it is repeated. If it is shorter, this is communicated by setting 
 If multiple motors are used; TICKS, C00, C01, C02 are repeated. Step speed must be lower than 1/2 oscillator speed (Nyquist criterion).
 For a [typical stepper motor](https://blog.prusaprinters.org/calculator_3416/) with 400 steps per mm,
 max speed is 3.125 m/s with an oscillator frequency of 1 MHz.
+
+### Bezier Curves
+
+I made a sketch for an implementation in test/old/dsp/casteljau.py
 
 ### Pin instruction
 | data | number of bytes | description
