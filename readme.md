@@ -1,35 +1,33 @@
 # Laserscanner [![Documentation Status](https://readthedocs.org/projects/luna/badge/?version=latest)](https://hexastorm.readthedocs.io/en/latest/?badge=latest)
-Implementation of a laserscanner on a FPGA. In a high-speed polygon scanner system, the laser is deflected by a rotating prism or reflective mirror. 
-The position of the laser is determined via a sensor such as a photodiode.  
+Implementation of a laserscanner on a FPGA. In a high-speed polygon scanner system, the laser is deflected by a rotating prism or mirror. 
+The position of the laser is determined via a photodiode.  
 <img src="https://cdn.hackaday.io/images/7106161566426847098.jpg" align="center" height="300"/>  
 Code is tested on the system shown above, branded as [Hexastorm](https://www.hexastorm.com). 
-The bill of materials (BOM) and links to FreeCad and PCB designs can be found on
-[Hackaday](https://hackaday.io/project/21933-open-hardware-fast-high-resolution-laser).
+The FreeCad design is shared [here](https://github.com/hstarmans/hexastorm_design) 
+and PCB designs are found [here](https://github.com/hstarmans/firestarter).
+A blog can be found on [Hackaday](https://hackaday.io/project/21933-open-hardware-fast-high-resolution-laser).
 The code took most inspiration from [LDGraphy](https://github.com/hzeller/ldgraphy).  
-A video of the scanhead exposing with latest code can be seen below;  
+A video of the scanhead exposing is seen below;  
 [![video in action not showing](https://img.youtube.com/vi/KQgnZkochu4/0.jpg)](http://www.youtube.com/watch?v=KQgnZkochu4 "Moving laserhead").
+
 
 The alignment procedure is shown in the following video.
 
 [![Alignment procedure image not showing](http://img.youtube.com/vi/Ri6DAneEzw4/0.jpg)](http://www.youtube.com/watch?v=Ri6DAneEzw4 "Alignment procedure")
 
-
-## UP5K
-
-All code should work and exposure should result be distorted.
-
-
-## Install Notes
-The code works on Raspberry Pi 3B and beyond. The SD-card should be at least 8 GB, ideally 16 gb.
+## Installation
+Code is tested on a Raspberry Pi 3B and 4B. The SD-card should be at least 8 GB, ideally 16 GB.
 Both Raspbian and Ubuntu can be used. Raspbian is not yet available at 64 bit.
-Besides 64 bit, Ubuntu has the advantage that latest toolchain for Yosys is easier to install.
-The arducam, used in the alignment, does not work at 64 bit.
+The ArduCam, a camera used for alignment, does not have a driver for 64 bit.
+
 On Raspbian, install libatlas so latest Numpy, etc. can be installed via pip.
 ```console
 sudo apt update
 sudo apt install libatlas3-base
 ```
-Install luna and checkout at f54de01. Code after this date does not work yet.
+Install [luna](https://github.com/greatscottgadgets/luna) and checkout at f54de01.
+So after git cloning, run ```git checkout f54de01```.
+Code after this date has not been tested.
 Install required libraries
 ```console
 pip3 install -r requirements.txt
@@ -38,30 +36,30 @@ Install Hexastorm in develop mode so you can edit.
 ```console
 python3 setup.py develop --user
 ```
-On 32 bits raspbian, install ice40 and yosys. These are outdated but work. For the latest, you need to build from source.
+Install ice40 and yosys. These are outdated but work. For the latest, you need to build from source.
 ```console
 apio install yosys
 apio install ice40
 ```
-On 64-bit use
+An alternative is yowasp but this is not supported.
 ```console
 pip3 install yowasp-yosys
-pip3 install yowasp-nextpnr-ice40-8k
+pip3 install yowasp-nextpnr-ice40-all
 ```
-Install icezprog, on ubuntu you need to add ```-lcrypt -lm``` to makefile.
+Install fomu-flash for flashing the FPGA.
 ```console
-git clone https://github.com/cliffordwolf/icotools
-cd ~/icotools/examples/icezero
-make icezprog
-mv icezprog ~/.local/bin
+git clone https://github.com/hstarmans/fomu-flash
+cd ~/fomu-flash
+make
+make install
 ```
-In the ```~/.bashrc``` for Raspbian add 
+If apio is used, add in ```~/.bashrc```  
 ```
 export PATH=/home/pi/.local/bin:$PATH
 export PATH=/home/pi/.apio/packages/toolchain-yosys/bin:$PATH
 export PATH=/home/pi/.apio/packages/toolchain-ice40/bin:$PATH
 ``` 
-for Ubuntu add
+If yowasp is used, add in  ```~/.bashrc```
 ```
 ## add python files to path
 export PATH="/home/ubuntu/.local/bin:$PATH"
@@ -70,59 +68,26 @@ export YOSYS="yowasp-yosys"
 export ICEPACK="yowasp-icepack"
 export NEXTPNR_ICE40="yowasp-nextpnr-ice40"
 ```
+Run  ```source ~/.bashrc``` afterwards.
 You can enable wifi using [link](https://github.com/sraodev/Raspberry-Pi-Headless-Setup-via-Network-Manager)
 
-The slicer relies on numba for acceleration
-```
-# latest is 12 but pip3 only supports 10 for now
+The slicer relies on numba for acceleration. Latest is llvm-12 but pip3 only supports 10 now.
+```console
 sudo apt-get install llvm-10
-# if you can't locate llvm-config use
-# find / -name llvm-config
 LLVM_CONFIG=/usr/lib/llvm-10/bin/llvm-config pip3 install llvmlite
 pip3 install numba
 ```
-
-## FPGA Debugging
-Signal traces for GTKWave can be generated via;
+The location of llvm-config can be found with
+```console
+find / -name llvm-config
 ```
+If the behaviour of the FPGA is simulated, signal traces for [GTKWave](http://gtkwave.sourceforge.net/) are generated if the following flag is set.
+```console
 export GENERATE_VCDS=1
 ```
-
-## Stepper drivers
-Install the python wrapper for TMC stepper [drivers](https://github.com/hstarmans/TMCStepper).
-
-### OpenCV 
-For image operations, opencv is required.
-```console
-pip3 install opencv-python
-```
-Also install the following dependencies
-```console
-sudo apt install -y libopenjp2-7 libilmbase-dev libopenexr-dev libgstreamer1.0-dev ffmpeg
-```
-
-### Camera
-Two camera's have been tried; uEye camera and Arducam Global shutter ov2311.
-Currently, the ov2311 chip is used.
-
-#### uEye camera
-Disadvantages; the uEye is more expensive, drivers require an account and there is no good Python driver.  
-Advantages; the product is more mature.  
-On Ueye website select Ueye 2240 monochrome. Download and install the driver for
-linux, arm v7, as this is the raspberry pi platform.  A python library for the camera is available in the source code.
-My version can be installed via [uEyeCamera](https://github.com/hstarmans/ueyecamera).
-
-#### Arducam
-Install my version of the Python libary [ArducamPython](https://github.com/hstarmans/Arducampython).
-
-
-### Config
-Raspberry pi uses ```/boot/config.txt``` and ubuntu uses ```/boot/firmware/usercnf.txt.```
-The following lines need to be available;
-
-
-In the current board, the SPI1-1 select pin is not routed to the correct pin on the Raspberry.
-In /boot/config.txt ensure you have the following
+Install the Python wrapper for TMC stepper [drivers](https://github.com/hstarmans/TMCStepper).  
+Raspbian uses ```/boot/config.txt``` and Ubuntu uses ```/boot/firmware/usercnf.txt.```
+The following lines need to be in the config file;
 ```
 # I2C for laserdriver and camera
 i2c_arm=on
@@ -136,31 +101,31 @@ start_x=1
 gpu_mem=300
 ```
 There should not be dtparam=spi=on, somewhere. This would enable two chip selects for SPI0 and 
-create a conflict with the pin select of SPI1. You can check the configuration via
+creates a conflict with the pin select of SPI1. After rebooting, you can check the configuration via
 ```console
 ls /dev/spi*
 sudo vcdbg log msg
 ```
-Usefull links are [1](http://terminal28.blogspot.com/2016/05/enabling-spi1-on-raspberry-pi-bzero23.html) and [2](https://bootlin.com/blog/enabling-new-hardware-on-raspberry-pi-with-device-tree-overlays/).
+Usefull links are [1](http://terminal28.blogspot.com/2016/05/enabling-spi1-on-raspberry-pi-bzero23.html) and [2](https://bootlin.com/blog/enabling-new-hardware-on-raspberry-pi-with-device-tree-overlays/).  
 
-### I2C
-In the current scanhead, I2C is used to set the power of the laser via a digipot.
-I2C can be enabled on the Raspberry Pi as [follows](https://pimylifeup.com/raspberry-pi-i2c/).
+
+### Camera
+The operation of the laser scanner can be verified with a camera.
+Two camera's have been tried; [uEye](https://en.ids-imaging.com/) 2240 monochrome camera and [Arducam Global shutter](https://www.arducam.com/products/camera-breakout-board/global-shutter-camera/) which used the OV2311 chip.
+The images of the cameras are analyzed with [OpenCV](https://opencv.org/).
 ```console
-i2cdetect -y 1
+sudo apt install -y libopenjp2-7 libilmbase-dev libopenexr-dev libgstreamer1.0-dev ffmpeg
+pip3 install opencv-python
 ```
-This will produce output, here 28 is the address of the I2C device.
-```console
-     0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f
-00:          -- -- -- -- -- -- -- -- -- -- -- -- -- 
-10: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
-20: -- -- -- -- -- -- -- -- 28 -- -- -- -- -- -- -- 
-30: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
-40: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
-50: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
-60: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
-70: -- -- -- -- -- -- -- --
-```
+#### uEye camera
+Disadvantages; uEye is more expensive, drivers require an account and there is no good Python driver.  
+Advantages; product is more mature.  
+On uEye website select uEye 2240 monochrome. Download and install the driver for
+linux, arm v7 (Raspberry pi platform). A Python library for the camera is available in the source code.
+My version can be installed via [uEyeCamera](https://github.com/hstarmans/ueyecamera).
+
+#### Arducam
+Install my version of the Python libary available at [ArducamPython](https://github.com/hstarmans/Arducampython).
 
 # Brief Description
 
@@ -265,12 +230,10 @@ Look at the test folders and individually tests on how to use the code. The whol
 As such, a scanner is not needed.
 
 ## Limitations 
-System is for writing to, i.e. exposing, a substrate. Reading should also be possible to enable optical coherence tomagraphy.  
-System has no link for LIDAR measurements, circuit can be found [here](https://hackaday.io/project/163501-open-source-lidar-unruly).  
-The FPGA controls all the stepper motors. At the moment it is not possible to use GCODE or apply acceleration profiles.
-Add maximum-length linear-feedback shift register sequence and CRC check.
-If you do a sequence of very short moves, e.g. 10 steps, you might notice high-latency due to SPI communcation. 
-
+System is for writing to, i.e. exposing, a substrate. Reading should also be possible to enable optical coherence tomagraphy.    
+System has no link for LIDAR measurements, circuit can be found [here](https://hackaday.io/project/163501-open-source-lidar-unruly).    
+The FPGA controls all the stepper motors. At the moment it is not possible to read instruction from a GCODE file.  
+Add maximum-length linear-feedback shift register sequence and CRC check.  
 <!-- 
 TODO:
   add docs

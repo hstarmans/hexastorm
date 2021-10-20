@@ -85,6 +85,8 @@ class LaserheadTest(Base):
         '''
         self.host.laser_power = power
         assert self.host.laser_power == power
+        # if this doesnt work check i2cdetect -y 1
+        # it should produce a matrix with -- and one value with 28.
 
     @executor
     def spinprism(self, timeout=3):

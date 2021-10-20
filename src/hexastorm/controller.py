@@ -8,15 +8,15 @@ import hexastorm.lasers as lasers
 from hexastorm.constants import (INSTRUCTIONS, COMMANDS, FREQ, STATE,
                                  MOVE_TICKS, WORD_BYTES, bit_shift,
                                  COMMAND_BYTES)
-from hexastorm.platforms import Firestarter
+from hexastorm.platforms import Firestarter, TestPlatform
 import hexastorm.core as core
 
 
 def executor(func):
     '''executes generator until stop iteration
 
-    Nmigen uses generator syntax and this leaks into our
-    python code. As a result, it is required to iterate.
+    Nmigen uses generator syntax and this is needed
+    to execute functions.
     '''
     def inner(self):
         for _ in func(self):
@@ -25,14 +25,22 @@ def executor(func):
 
 
 class Memfull(Exception):
-    'Custom exception for memfull'
+    '''SRAM memory of FPGA is full
+        
+    Exception is raised when the memory is full.
+    '''
     pass
 
 
 class Host:
-    'Class for sending instructions to core'
-    def __init__(self, platform=None):
-        if platform is None:
+    '''Class to interact with FPGA
+    '''
+    def __init__(self, test=False):
+        '''  test  -- True if behavior of FPGA is simulated
+        '''
+        if test:
+            self.platform = TestPlatform
+        else:
             from gpiozero import LED
             import spidev
             from smbus2 import SMBus
@@ -45,18 +53,20 @@ class Host:
             self.spi.mode = 1
             self.spi.max_speed_hz = round(1E6)
             self.chip_select = LED(8)
+            # TMC2130 stepper initialization
             self.init_steppers()
+            # FPGA intialization
             self.enable = LED(self.platform.enable_pin)
-            # TODO: generator syntax is no longer needed!
-            self.generator = False
-        else:
-            self.platform = platform
-            self.generator = True
+        self.test = test
         self.laser_params = lasers.params(self.platform)
         self._position = np.array([0]*self.platform.motors)
 
     def init_steppers(self):
-        '''configure steppers via SPI using teemuatflut CPP library'''
+        '''configure TMC2130 steppers via SPI 
+        
+        Uses teemuatflut CPP library with custom python wrapper
+            https://github.com/hstarmans/TMCStepper
+        '''
         import steppers
         self.motors = [steppers.TMC2130(link_index=i)
                        for i in range(1, 1+self.platform.motors)]
@@ -70,29 +80,34 @@ class Host:
             motor.rms_current(600)
             motor.microsteps(16)
             motor.en_pwm_mode(True)
-        # close bcm2835
         steppers.bcm2835_close()
 
     def build(self, do_program=True, verbose=True):
+        '''builds the FPGA code using Nmigen, Yosys and Nextpnr
+           
+           do_program  -- flashes the FPGA chip using fomu-flash
+           verbose     -- print output of Yosys, Nextpnr
+        '''
         self.platform = Firestarter()
         self.platform.laser_var = self.laser_params
         self.platform.build(core.Dispatcher(self.platform),
-                            do_program=do_program, verbose=verbose)
+                            do_program=do_program, 
+                            verbose=verbose)
         raise Exception("Fomu-flash needs to be changed\
                         or python restarted after flashing.")
 
     def reset(self):
-        'reset the chip by raising and lowering the reset pin'
+        'restart the FPGA by flipping the reset pin'
         from gpiozero import LED
         reset_pin = LED(self.platform.reset_pin)
         reset_pin.off()
         sleep(1)
         reset_pin.on()
         sleep(1)
-        # in first design on HX4K this was not needed
-        # however, for communication with the UP5K to succeed
         # a blank needs to be send, Statictest succeeds but
         # testlaser fails in test_electrical
+        # in first design on HX4K this was not needed
+        # is required for the UP5K
         self.spi_exchange_data([0]*(WORD_BYTES+COMMAND_BYTES))
 
     def _read_state(self):
@@ -276,7 +291,7 @@ class Host:
 
             ticks_total = np.copy(ticks)
             steps_total = np.zeros_like(dist_steps, dtype='int64')
-            if self.generator:
+            if self.test:
                 (yield from self._executionsetter(True))
             else:
                 self._executionsetter(True)
@@ -325,7 +340,7 @@ class Host:
 
     def send_command(self, data, format='!Q'):
         assert len(data) == WORD_BYTES+COMMAND_BYTES
-        if self.generator:
+        if self.test:
             data = (yield from self.spi_exchange_data(data))
         else:
             data = (self.spi_exchange_data(data))
@@ -363,7 +378,7 @@ class Host:
         returns array with status home switches
         Zero implies home switch is hit
         '''
-        if self.generator:
+        if self.test:
             maxtrials = 10
         commands = self.move_commands(ticks, a, b, c)
         # TODO: this has been changed, remove if passes checks on machine
@@ -420,7 +435,7 @@ class Host:
         bytelst = self.bittobytelist(bitlst, stepsperline, direction)
         write_byte = COMMANDS.WRITE.to_bytes(1, 'big')
         # TODO: merge write line with send commands
-        if self.generator:
+        if self.test:
             maxtrials = 10
         for i in range(0, len(bytelst), 8):
             trials = 0
