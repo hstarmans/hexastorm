@@ -25,7 +25,7 @@ def executor(func):
 
 
 class Memfull(Exception):
-    '''SRAM memory of FPGA is full
+    '''SRAM memory of FPGA, i.e. FIFO, is full
         
     Exception is raised when the memory is full.
     '''
@@ -83,10 +83,10 @@ class Host:
         steppers.bcm2835_close()
 
     def build(self, do_program=True, verbose=True):
-        '''builds the FPGA code using Nmigen, Yosys and Nextpnr
+        '''builds the FPGA code using Nmigen, Yosys, Nextpnr and icepack
            
            do_program  -- flashes the FPGA chip using fomu-flash
-           verbose     -- print output of Yosys, Nextpnr
+           verbose     -- print output of Yosys, Nextpnr and icepack
         '''
         self.platform = Firestarter()
         self.platform.laser_var = self.laser_params
@@ -105,20 +105,54 @@ class Host:
         reset_pin.on()
         sleep(1)
         # a blank needs to be send, Statictest succeeds but
-        # testlaser fails in test_electrical
-        # in first design on HX4K this was not needed
+        # testlaser fails in test_electrical.py
+        # on HX4K this was not needed
         # is required for the UP5K
         self.spi_exchange_data([0]*(WORD_BYTES+COMMAND_BYTES))
 
-    def _read_state(self):
-        '''reads the state and returns bytearray'''
-        command = [COMMANDS.READ] + WORD_BYTES*[0]
-        read_data = (yield from self.send_command(command))
-        return read_data
+    def get_state(self, data=None):
+        '''retrieves the state of the FPGA as dictionary
+        
+        data: string to decode to state, if None data is retrieved first
+
+        dictionary has the following keys
+          parsing: True if commands are executed
+          mem_full: True if memory is full
+          error: True if an error state is reached by any of
+                 the submodules
+          x, y, z:            State of motor endswitches
+          photodiode_trigger: True if photodiode is triggered during one
+                              rotation of prism
+          synchronized: True if laserhead is being synchronized by photodiode
+        '''
+        if data is None:
+            command = [COMMANDS.READ] + WORD_BYTES*[0]
+            data = (yield from self.send_command(command))
+        
+        dct = {}
+        bits = "{:08b}".format(data[-1])
+        dct['parsing'] = int(bits[STATE.PARSING])
+        dct['error'] = int(bits[STATE.ERROR])
+        dct ['mem_full'] = int(bits[STATE.FULL])
+        # TODO: fix this
+        bits = "{:08b}".format(data[-2])
+        mapping = ['x', 'y']
+        for i in range(self.platform.motors):
+            dct[mapping[i]] = int(bits[i])
+        dct['photodiode_trigger'] = int(bits[self.platform.motors])
+        dct['synchronized'] = int(bits[self.platform.motors+1])
+        return dct
 
     @property
     def position(self):
-        '''retrieves and updates position'''
+        '''retrieves position from FPGA and updates internal position
+        
+           position is stored on the FPGA in steps 
+           position is stored on object in mm
+
+           return positions as np.array in mm
+                  order is x, y, z
+        '''
         command = [COMMANDS.POSITION] + WORD_BYTES*[0]
         for i in range(self.platform.motors):
             read_data = (yield from self.send_command(command))
@@ -129,30 +163,15 @@ class Host:
         return self._position
 
     @property
-    def pinstate(self):
-        '''retrieves pin state as dictionary'''
-        data = (yield from self._read_state())
-        bits = "{:08b}".format(data[-2])
-        mapping = ['x', 'y', 'z', 'extruder']
-        dct = {}
-        for i in range(self.platform.motors):
-            dct[mapping[i]] = int(bits[i])
-        dct['photodiode_trigger'] = int(bits[self.platform.motors])
-        dct['synchronized'] = int(bits[self.platform.motors+1])
-        return dct
-
-    @property
-    def error(self):
-        '''retrieves dispatch error status of FPGA via SPI'''
-        data = (yield from self._read_state())
-        bits = "{:08b}".format(data[-1])
-        return int(bits[STATE.ERROR])
-
-    @property
     def enable_steppers(self):
-        '''get status enables pin motors
+        '''returns value of enable pin stepper motor drivers
 
-        Execution might still be disabled on the FPGA
+        The enable pin for the stepper drivers is not routed via FPGA.
+        Enabled stepper motor can still not work if the FPGA is 
+        not parsing instructions from SRAM.
+
+        returns 0 if steppers are enabled
+                1 otherwise.
         '''
         from gpiozero import LED
         enable = LED(self.platform.enable_pin)
@@ -160,10 +179,7 @@ class Host:
 
     @enable_steppers.setter
     def enable_steppers(self, val):
-        '''disable stepper motors
-
-        sets enable pin on raspberry pi platform
-        send enable or disable command to FPGA core
+        '''set enable pin stepper motor drivers and parsing FIFO buffer by FPGA
 
         val -- boolean, True enables steppers
         '''
@@ -177,50 +193,41 @@ class Host:
 
     @property
     def laser_power(self):
-        'return laser power in range [0-255]'
+        '''return laser current per channel as integer 
+        
+        both channels have the same current
+        integer ranges from 0 to 255 where 
+        0 no current and 255 full driver current respectively
+        '''
         return self.bus.read_byte_data(self.platform.ic_address, 0)
 
     @laser_power.setter
     def laser_power(self, val):
-        '''
-        set the maximum laser current of driver chip to given value in range
-         [0-255]. This does not turn on or off the laser. Laser will be set
-        to this current if pulsed. The laser power can be changed in two ways.
-        First by using one or two channels. Second by setting a value between
+        '''set the maximum laser current of laser driver per channel
+         
+        This does not turn on or off the laser. Laser is set
+        to this current if pulsed. Laser current is set by enabling one or two channels.
+        Second by setting a value between
         0-255 at the laser driver chip for the laser current. The laser
-         needs a minimum current. It most likely does not work at low currents.
+        needs a minimum current.
         '''
         if val < 0 or val > 255:
-            raise Exception('Invalid laser power')
+            raise Exception('Invalid laser current')
         self.bus.write_byte_data(self.platform.ic_address, 0, val)
 
-    @property
-    def execution(self):
-        '''determine wether code in SRAM is dispatched
-
-        The dispatcher on the FPGA can be on or off
+    def set_parsing(self, value):
+        '''enables or disables parsing of FIFO by FPGA
+        
+        val -- True   FPGA parses FIFO
+               False  FPGA does not parse FIFO
         '''
-        data = (yield from self._read_state())
-        bits = "{:08b}".format(data[-1])
-        return int(bits[STATE.PARSING])
-
-    def _executionsetter(self, val):
-        'not able to call execution with yield from'
-        assert type(val) == bool
-        if val:
+        assert type(value) == bool
+        if value:
             command = [COMMANDS.START]
         else:
             command = [COMMANDS.STOP]
         command += WORD_BYTES*[0]
         return (yield from self.send_command(command))
-
-    @execution.setter
-    def execution(self, val):
-        '''set dispatcher on or of
-
-        val -- True, dispatcher is enabled
-        '''
-        self._executionsetter(val)
 
     def home_axes(self, axes, speed=None, pos=-200):
         '''home given axes
@@ -292,9 +299,9 @@ class Host:
             ticks_total = np.copy(ticks)
             steps_total = np.zeros_like(dist_steps, dtype='int64')
             if self.test:
-                (yield from self._executionsetter(True))
+                (yield from self.set_parsing(True))
             else:
-                self._executionsetter(True)
+                self.set_parsing(True)
             hit_home = np.zeros_like(dist_steps, dtype='int64')
             while ticks.sum() > 0:
                 ticks_move = get_ticks_v(ticks)
@@ -317,26 +324,17 @@ class Host:
                 a = (cnts/ticks_move).round().astype('int64')
                 ticks -= MOVE_TICKS
                 ticks[ticks < 0] = 0
+                # TODO: hit_home is only 2 long, why?
                 hit_home = (yield from self.send_move(ticks_move.tolist(),
                                                       a.tolist(),
                                                       [0]*self.platform.motors,
                                                       [0]*self.platform.motors
-                                                      ))
+                                                      ))[:2]
                 if dist_steps[(hit_home == 0) | (a > 0)].sum() == 0:
                     break
             dist_mm = steps_total / steps_per_mm
             self._position = self._position + dist_mm
             self._position[hit_home == 1] = 0
-
-    def memfull(self, data=None):
-        '''check if memory is full
-
-        data -- data received from peripheral
-        '''
-        if data is None:
-            data = (yield from self._read_state())
-        bits = "{:08b}".format(data[-1])
-        return int(bits[STATE.FULL])
 
     def send_command(self, data, format='!Q'):
         assert len(data) == WORD_BYTES+COMMAND_BYTES
@@ -372,7 +370,7 @@ class Host:
         a,b,c           -- coefficients of polynomal move
         maxtrials       -- max number of communcation trials
 
-        NOTE: you always need to send 3 coefficients, even if your
+        TODO: you always need to send 3 coefficients, even if your
               FPGA is only configured for 2 and does not use the third!
 
         returns array with status home switches
@@ -386,17 +384,16 @@ class Host:
             trials = 0
             while True:
                 data_out = (yield from self.send_command(command))
+                state = (yield from self.get_state(data_out))
                 trials += 1
-                bits = [int(i) for i in "{:08b}".format(data_out[-1])]
-                if int(bits[STATE.ERROR]):
+                if state['error']:
                     raise Exception("Error detected on FPGA")
-                bits = [int(i) for i in "{:08b}".format(data_out[-2])]
-                home_bits = np.array(bits[:self.platform.motors])
-                if not (yield from self.memfull(data_out)):
+                if not state['mem_full']:
                     break
                 if trials > maxtrials:
                     raise Memfull(f"Too many trials {trials} needed")
-        return home_bits
+        # TODO: add z!
+        return np.array([state['x'], state['y']])
 
     def move_commands(self, ticks, a, b, c):
         '''get list of commands for move instruction with
@@ -445,7 +442,7 @@ class Host:
             while True:
                 trials += 1
                 data_out = (yield from self.send_command(data))
-                if not (yield from self.memfull(data_out)):
+                if not (yield from self.get_state(data_out))['mem_full']:
                     break
                 if trials > maxtrials:
                     raise Memfull("Too many trials needed")

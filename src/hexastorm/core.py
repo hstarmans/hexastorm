@@ -28,8 +28,8 @@ class SPIParser(Elaboratable):
 
     The following commmands are possible
       status -- send back state of the peripheriral
-      start  -- enable execution of gcode
-      stop   -- halt execution of gcode
+      start  -- enables parsing of FIFO
+      stop   -- halts parsing of FIFO
       write  -- write instruction to FIFO or report memory is full
 
     I/O signals:
@@ -60,7 +60,7 @@ class SPIParser(Elaboratable):
         self.read_en = Signal()
         self.read_discard = Signal()
         self.dispatcherror = Signal()
-        self.execute = Signal()
+        self.parse = Signal()
         self.read_data = Signal(MEMWIDTH)
         self.empty = Signal()
 
@@ -94,14 +94,14 @@ class SPIParser(Elaboratable):
         error = Signal()
         # Peripheral state
         state = Signal(8)
-        m.d.sync += [state[STATE.PARSING].eq(self.execute),
+        m.d.sync += [state[STATE.PARSING].eq(self.parse),
                      state[STATE.FULL].eq(fifo.space_available <= 1),
                      state[STATE.ERROR].eq(self.dispatcherror | error)]
         # remember which word we are processing
         instruction = Signal(8)
         with m.FSM(reset='RESET', name='parser'):
             with m.State('RESET'):
-                m.d.sync += [self.execute.eq(1), wordsreceived.eq(0),
+                m.d.sync += [self.parse.eq(1), wordsreceived.eq(0),
                              error.eq(0)]
                 m.next = 'WAIT_COMMAND'
             with m.State('WAIT_COMMAND'):
@@ -111,10 +111,10 @@ class SPIParser(Elaboratable):
                         m.next = 'WAIT_COMMAND'
                     with m.Elif(interf.command == COMMANDS.START):
                         m.next = 'WAIT_COMMAND'
-                        m.d.sync += self.execute.eq(1)
+                        m.d.sync += self.parse.eq(1)
                     with m.Elif(interf.command == COMMANDS.STOP):
                         m.next = 'WAIT_COMMAND'
-                        m.d.sync += self.execute.eq(0)
+                        m.d.sync += self.parse.eq(0)
                     with m.Elif(interf.command == COMMANDS.WRITE):
                         m.d.sync += interf.word_to_send.eq(word)
                         with m.If(state[STATE.FULL] == 0):
@@ -296,7 +296,7 @@ class Dispatcher(Elaboratable):
                 m.d.sync += pins.eq(0)
             with m.State('WAIT_INSTRUCTION'):
                 m.d.sync += [self.read_commit.eq(0), polynomal.start.eq(0)]
-                with m.If((self.empty == 0) & parser.execute & (busy == 0)):
+                with m.If((self.empty == 0) & parser.parse & (busy == 0)):
                     m.d.sync += self.read_en.eq(1)
                     m.next = 'PARSEHEAD'
             # check which instruction we r handling
@@ -415,7 +415,14 @@ class TestParser(SPIGatewareTestCase):
     def test_readpinstate(self):
         '''set pins to random state'''
         def test_pins():
-            olddct = (yield from self.host.pinstate)
+            def get_pinstate():
+                # TODO: add z
+                keys =  ['x', 'y',
+                         'photodiode_trigger',
+                         'synchronized']
+                state = (yield from self.host.get_state())
+                return {k: state[k] for k in keys}
+            olddct = (yield from get_pinstate())
             for k in olddct.keys():
                 olddct[k] = randint(0, 1)
             bitlist = list(olddct.values())
@@ -423,7 +430,7 @@ class TestParser(SPIGatewareTestCase):
             b = int("".join(str(i) for i in bitlist), 2)
             yield self.dut.pinstate.eq(b)
             yield
-            newdct = (yield from self.host.pinstate)
+            newdct = (yield from get_pinstate())
             self.assertDictEqual(olddct, newdct)
         yield from test_pins()
         yield from test_pins()
@@ -432,16 +439,16 @@ class TestParser(SPIGatewareTestCase):
     def test_enableparser(self):
         '''enables SRAM parser via command and verifies status with
         different command'''
-        yield from self.host._executionsetter(False)
-        self.assertEqual((yield self.dut.execute), 0)
-        self.assertEqual((yield from self.host.execution), 0)
+        yield from self.host.set_parsing(False)
+        self.assertEqual((yield self.dut.parse), 0)
+        self.assertEqual((yield from self.host.get_state())['parsing'], 0)
 
     @sync_test_case
     def test_invalidwrite(self):
         '''write invalid instruction and verify error is raised'''
         command = [COMMANDS.WRITE] + [0]*WORD_BYTES
         yield from self.host.send_command(command)
-        self.assertEqual((yield from self.host.error), True)
+        self.assertEqual((yield from self.host.get_state())['error'], True)
 
     @sync_test_case
     def test_memfull(self):
@@ -450,7 +457,7 @@ class TestParser(SPIGatewareTestCase):
         self.assertEqual((yield self.dut.empty), 1)
         # should fill the memory as move instruction is
         # larger than the memdepth
-        self.assertEqual((yield from self.host.memfull()), False)
+        self.assertEqual((yield from self.host.get_state())['mem_full'], False)
         try:
             for _ in range(platform.memdepth):
                 yield from self.host.send_move([1000],
@@ -460,7 +467,7 @@ class TestParser(SPIGatewareTestCase):
                                                maxtrials=1)
         except Memfull:
             pass
-        self.assertEqual((yield from self.host.memfull()), True)
+        self.assertEqual((yield from self.host.get_state())['mem_full'], True)
 
 
 class TestDispatcher(SPIGatewareTestCase):
@@ -486,14 +493,14 @@ class TestDispatcher(SPIGatewareTestCase):
 
     @sync_test_case
     def test_memfull(self):
-        '''write move instruction until memory is full, execute
-           and ensure there is no parser error i.e. error
+        '''write move instruction until memory is full, enable parser
+           and ensure there is no parser error.
         '''
         platform = self.platform
         # should fill the memory as move instruction is
         # larger than the memdepth
-        self.assertEqual((yield from self.host.memfull()), False)
-        yield from self.host._executionsetter(False)
+        self.assertEqual((yield from self.host.get_state())['mem_full'], False)
+        yield from self.host.set_parsing(False)
         try:
             for _ in range(platform.memdepth):
                 yield from self.host.send_move([1000],
@@ -503,15 +510,15 @@ class TestDispatcher(SPIGatewareTestCase):
                                                maxtrials=1)
         except Memfull:
             pass
-        self.assertEqual((yield from self.host.memfull()), True)
-        yield from self.host._executionsetter(True)
+        self.assertEqual((yield from self.host.get_state())['mem_full'], True)
+        yield from self.host.set_parsing(True)
         # data should now be processed from sram and empty become 1
         while (yield self.dut.parser.empty) == 0:
             yield
         # 2 clocks needed for error to propagate
         yield
         yield
-        self.assertEqual((yield from self.host.error), False)
+        self.assertEqual((yield from self.host.get_state())['error'], False)
 
     @sync_test_case
     def test_readdiode(self):
@@ -521,7 +528,7 @@ class TestDispatcher(SPIGatewareTestCase):
         has been triggered for each cycle.
         The photodiode is triggered by the simdiode.
         '''
-        yield from self.host._executionsetter(False)
+        yield from self.host.set_parsing(False)
         yield from self.host.enable_comp(laser0=True,
                                          polygon=True)
         for _ in range(self.dut.laserhead.dct['TICKSINFACET']*2):
@@ -529,8 +536,8 @@ class TestDispatcher(SPIGatewareTestCase):
         self.assertEqual((yield self.dut.laserhead.photodiode_t),
                          False)
         # not triggered as laser and polygon not on
-        yield from self.host._executionsetter(True)
-        val = (yield from self.host.pinstate)['photodiode_trigger']
+        yield from self.host.set_parsing(True)
+        val = (yield from self.host.get_state())['photodiode_trigger']
         for _ in range(self.dut.laserhead.dct['TICKSINFACET']*2):
             yield
         self.assertEqual((yield self.dut.laserhead.photodiode_t),
@@ -547,7 +554,7 @@ class TestDispatcher(SPIGatewareTestCase):
         while (yield self.dut.parser.empty):
             yield
         yield
-        self.assertEqual((yield from self.host.error), False)
+        self.assertEqual((yield from self.host.get_state())['error'], False)
         self.assertEqual((yield self.dut.laserheadpins.laser0), 1)
         self.assertEqual((yield self.dut.laserheadpins.laser1), 0)
         self.assertEqual((yield self.dut.laserheadpins.en), 0)
@@ -571,7 +578,7 @@ class TestDispatcher(SPIGatewareTestCase):
     def test_invalidwrite(self):
         '''write invalid instruction and verify error is raised'''
         fifo = self.dut.parser.fifo
-        self.assertEqual((yield from self.host.error), False)
+        self.assertEqual((yield from self.host.get_state())['error'], False)
         # write illegal byte to queue and commit
         yield fifo.write_data.eq(0xAA)
         yield from self.pulse(fifo.write_en)
@@ -583,7 +590,7 @@ class TestDispatcher(SPIGatewareTestCase):
         # 2 clocks needed for error to propagate
         yield
         yield
-        self.assertEqual((yield from self.host.error), True)
+        self.assertEqual((yield from self.host.get_state())['error'], True)
 
     @sync_test_case
     def test_ptpmove(self, steps=[800], ticks=[30_000]):
@@ -651,14 +658,14 @@ class TestDispatcher(SPIGatewareTestCase):
             yield from self.host.writeline([1] *
                                            host.laser_params['BITSINSCANLINE'])
         yield from host.writeline([])
-        self.assertEqual((yield from self.host.pinstate)['synchronized'],
+        self.assertEqual((yield from self.host.get_state())['synchronized'],
                          True)
         yield from self.host.enable_comp(synchronize=False)
         while (yield self.dut.parser.empty) == 0:
             yield
-        self.assertEqual((yield from self.host.pinstate)['synchronized'],
+        self.assertEqual((yield from self.host.get_state())['synchronized'],
                          False)
-        self.assertEqual((yield from self.host.error), False)
+        self.assertEqual((yield from self.host.get_state())['error'], False)
 
 
 if __name__ == "__main__":
@@ -675,7 +682,7 @@ if __name__ == "__main__":
 
 # TODO:
 #   -- in practice, position is not reached with small differences like 0.02 mm
-#   -- test execution speed to ensure the right PLL is propagated
+#   -- test exucution speed to ensure the right PLL is propagated
 #   -- use CRC packet for tranmission failure (it is in litex but not luna)
 #   -- try to replace value == 0 with ~value
 #   -- xfer3 is faster in transaction
