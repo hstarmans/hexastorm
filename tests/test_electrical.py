@@ -83,8 +83,8 @@ class LaserheadTest(Base):
         sets value on digipot via I2C
         and verifies this is equal to readed value of digipot
         '''
-        self.host.laser_power = power
-        assert self.host.laser_power == power
+        self.host.laser_current = power
+        assert self.host.laser_current == power
         # if this doesnt work check i2cdetect -y 1
         # it should produce a matrix with -- and one value with 28.
 
