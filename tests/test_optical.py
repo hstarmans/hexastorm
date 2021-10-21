@@ -87,7 +87,7 @@ class Tests(unittest.TestCase):
         a final image is taken.
         '''
         yield from self.host.enable_comp(laser1=True, polygon=True)
-        self.host.laser_power = 120
+        self.host.laser_current = 120
         self.cam.set_exposure(36000)
         print("This will open up a window")
         print("Press escape to quit live view")
@@ -103,7 +103,7 @@ class Tests(unittest.TestCase):
         a final image is taken.
         '''
         # NOTE: all ND filters and a single channel is used
-        self.host.laser_power = laserpower
+        self.host.laser_current = laserpower
         self.cam.set_exposure(1499)
         yield from self.host.enable_comp(laser1=True)
         print("Calibrate the camera with live view \
@@ -134,7 +134,7 @@ class Tests(unittest.TestCase):
         self.host.laser_params['SINGLE_FACET'] = False
         if build:
             self.host.build()
-        self.host.laser_power = 120
+        self.host.laser_current = 120
         self.cam.set_exposure(36000)
         yield from self.writepattern([0]*8+[1]*8)
         self.cam.live_view(scale=0.6)

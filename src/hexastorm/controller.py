@@ -5,7 +5,7 @@ from copy import deepcopy
 import numpy as np
 
 import hexastorm.lasers as lasers
-from hexastorm.constants import (INSTRUCTIONS, COMMANDS, FREQ, STATE,
+from hexastorm.constants import (INSTRUCTIONS, COMMANDS, MOTORFREQ, STATE,
                                  MOVE_TICKS, WORD_BYTES, bit_shift,
                                  COMMAND_BYTES)
 from hexastorm.platforms import Firestarter, TestPlatform
@@ -59,7 +59,7 @@ class Host:
             self.enable = LED(self.platform.enable_pin)
         self.test = test
         self.laser_params = lasers.params(self.platform)
-        self._position = np.array([0]*self.platform.motors)
+        self._position = np.array([0]*self.platform.motors, dtype='float64')
 
     def init_steppers(self):
         '''configure TMC2130 steppers via SPI 
@@ -130,13 +130,14 @@ class Host:
             data = (yield from self.send_command(command))
         
         dct = {}
+        # 9 bytes are returned
+        # the state is decoded from byte 7 and 8, i.e. -2 and -1
         bits = "{:08b}".format(data[-1])
         dct['parsing'] = int(bits[STATE.PARSING])
         dct['error'] = int(bits[STATE.ERROR])
         dct ['mem_full'] = int(bits[STATE.FULL])
-        # TODO: fix this
         bits = "{:08b}".format(data[-2])
-        mapping = ['x', 'y']
+        mapping = list(self.platform.stepspermm.keys())
         for i in range(self.platform.motors):
             dct[mapping[i]] = int(bits[i])
         dct['photodiode_trigger'] = int(bits[self.platform.motors])
@@ -150,8 +151,8 @@ class Host:
            position is stored on the FPGA in steps 
            position is stored on object in mm
 
-           return positions as np.array in mm
-                  order is x, y, z
+           return positions as np.array in mm 
+                  order is [x, y, z]
         '''
         command = [COMMANDS.POSITION] + WORD_BYTES*[0]
         for i in range(self.platform.motors):
@@ -164,18 +165,15 @@ class Host:
 
     @property
     def enable_steppers(self):
-        '''returns value of enable pin stepper motor drivers
+        '''returns 1 if steppers are enabled, 0 otherwise
 
         The enable pin for the stepper drivers is not routed via FPGA.
-        Enabled stepper motor can still not work if the FPGA is 
+        The enable pin is low if enabled.
+        Enabled stepper motor do not move if the FPGA is 
         not parsing instructions from SRAM.
-
-        returns 0 if steppers are enabled
-                1 otherwise.
         '''
         from gpiozero import LED
-        enable = LED(self.platform.enable_pin)
-        return enable.value
+        return not LED(self.platform.enable_pin).value
 
     @enable_steppers.setter
     def enable_steppers(self, val):
@@ -192,7 +190,7 @@ class Host:
             self.spi_exchange_data([COMMANDS.STOP]+WORD_BYTES*[0])
 
     @property
-    def laser_power(self):
+    def laser_current(self):
         '''return laser current per channel as integer 
         
         both channels have the same current
@@ -201,13 +199,13 @@ class Host:
         '''
         return self.bus.read_byte_data(self.platform.ic_address, 0)
 
-    @laser_power.setter
-    def laser_power(self, val):
-        '''set the maximum laser current of laser driver per channel
+    @laser_current.setter
+    def laser_current(self, val):
+        '''sets maximum laser current of laser driver per channel
          
         This does not turn on or off the laser. Laser is set
-        to this current if pulsed. Laser current is set by enabling one or two channels.
-        Second by setting a value between
+        to this current if pulsed. Laser current is set by enabling 
+        one or two channels. Second by setting a value between
         0-255 at the laser driver chip for the laser current. The laser
         needs a minimum current.
         '''
@@ -229,19 +227,19 @@ class Host:
         command += WORD_BYTES*[0]
         return (yield from self.send_command(command))
 
-    def home_axes(self, axes, speed=None, pos=-200):
-        '''home given axes
+    def home_axes(self, axes, speed=None, displacement=-200):
+        '''home given axes, [1,0,1] homes x, z and not y
 
-        e.g. axes = [1,0,1] will home x and z
-        axes  -- list with axes numbers to home
-        speed -- speed in mm/s used to home
-        pos   -- position to home to
+        axes         -- list with axes to home
+        speed        -- speed in mm/s used to home
+        displacement -- displacement used to touch home switch
         '''
         assert len(axes) == self.platform.motors
-        dist = np.array(axes)*np.array([pos]*self.platform.motors)
+        dist = np.array(axes)*np.array([displacement]*self.platform.motors)
         yield from self.gotopoint(position=dist.tolist(),
                                   speed=speed, absolute=False)
 
+    #TODO: this is strange, should it be here?
     def steps_to_count(self, steps):
         '''compute count for a given number of steps
 
@@ -256,85 +254,90 @@ class Host:
         return count
 
     def gotopoint(self, position, speed=None, absolute=True):
-        '''move steppers to point with constant speed
+        '''move machine to position or with displacement at constant speed
 
-        Multiple axes can move in same instruction but ticks has to be uniform.
-        To simplify calculation each axes is moved independently
+        Axes are moved independently to simply the calculation. 
+        The move is carried out as a first order spline, i.e. only velocity.
 
-        postion      -- list with coordinate or distance in mm
-        absolute     -- absolute position otherwise coordinate is distance
-        speed        -- speed in mm/s
+        position     -- list with position or displacement in mm for each motor
+        speed        -- list with speed in mm/s, if None default speeds are used
+        absolute     -- True if position, False if displacement
         '''
         assert len(position) == self.platform.motors
         if speed is not None:
             assert len(speed) == self.platform.motors
         else:
             speed = [10]*self.platform.motors
-        if absolute:
-            dist = np.array(position) - self._position
-        else:
-            dist = np.array(position)
         speed = np.array(speed)
+        displacement = np.array(position)
+        if absolute:
+            displacement -= self._position
+            
         for idx, _ in enumerate(position):
-            if dist[idx] == 0:
+            if displacement[idx] == 0:
+                # no displacement, go to next axis
                 continue
-            # NOTE: ticks is equal for all axes
-            t = np.array([np.absolute((dist/speed))[idx]])
-            ticks = (t*FREQ).round().astype(int)
-            steps_per_mm = np.array(list(self.platform.stepspermm.values()))
+            # Time needed for move
+            #    unit oscillator ticks (times motor position is updated)
+            time = np.array([np.absolute((displacement/speed))[idx]])
+            ticks_total = (time*MOTORFREQ).round().astype(int)
             # select axis
             select = np.zeros_like(position, dtype='int64')
             select[idx] = 1
             # mm -> steps
-            dist_steps = dist * steps_per_mm * select
-            dist_steps = dist_steps.round().astype('int64')
+            steps_per_mm = np.array(list(self.platform.stepspermm.values()))
+            displacement_steps = \
+            (displacement * steps_per_mm * select).round().astype('int64')
+            
 
-            def get_ticks(x):
-                if x >= MOVE_TICKS:
+            def move_ticks(move_ticks):
+                '''number of ticks in next segment
+                
+                If move ticks is 15000, next segment 
+                is 10_000 long if this is max.
+                '''
+                if move_ticks >= MOVE_TICKS:
                     return MOVE_TICKS
                 else:
-                    return x
-            get_ticks_v = np.vectorize(get_ticks)
+                    return move_ticks
+            move_ticks_v = np.vectorize(move_ticks)
 
-            ticks_total = np.copy(ticks)
-            steps_total = np.zeros_like(dist_steps, dtype='int64')
+            ticks_remaing = np.copy(ticks_total)
+            total_moved_steps = np.zeros_like(displacement_steps,
+                                        dtype='int64')
             if self.test:
                 (yield from self.set_parsing(True))
             else:
                 self.set_parsing(True)
-            hit_home = np.zeros_like(dist_steps, dtype='int64')
-            while ticks.sum() > 0:
-                ticks_move = get_ticks_v(ticks)
+            while ticks_remaing.sum() > 0:
+                ticks_move = move_ticks_v(ticks_remaing)
+                ticks_remaing -= ticks_move
                 # steps -> count
                 # this introduces a rounding error
-                steps_move = np.zeros_like(dist_steps, dtype='int64')
-                steps_move = (dist_steps*(ticks_move/ticks_total))
-                steps_move = steps_move.round().astype('int64')
-                steps_total += steps_move
-                # TODO: this is an ugly fix of the rounding error
-                #       expression is also evaluated multiple times
-                cond = (np.absolute(steps_total)
-                        > np.absolute(dist_steps))
+                move_steps = (displacement_steps*(ticks_move/ticks_total)).round().astype('int64')
+                total_moved_steps += move_steps
+                # due to rounding we could move more than wanted
+                # correct if this is the case
+                cond = (np.absolute(total_moved_steps)
+                        > np.absolute(displacement_steps))
                 if cond.any():
-                    steps_move[cond] -= (
-                     (steps_total-dist_steps)[cond])
-                    steps_total[cond] = (
-                     dist_steps[cond])
-                cnts = self.steps_to_count(steps_move)
-                a = (cnts/ticks_move).round().astype('int64')
-                ticks -= MOVE_TICKS
-                ticks[ticks < 0] = 0
-                # TODO: hit_home is only 2 long, why?
-                hit_home = (yield from self.send_move(ticks_move.tolist(),
-                                                      a.tolist(),
-                                                      [0]*self.platform.motors,
-                                                      [0]*self.platform.motors
-                                                      ))[:2]
-                if dist_steps[(hit_home == 0) | (a > 0)].sum() == 0:
+                    move_steps[cond] -= (
+                     (total_moved_steps-displacement_steps)[cond])
+                    total_moved_steps[cond] = displacement_steps[cond]
+                cnts = self.steps_to_count(move_steps)
+                velocity = (cnts/ticks_move).round().astype('int64')
+                homeswitches_hit = (yield from self.spline_move(int(ticks_move),
+                                                                velocity.tolist()))
+                # move is aborted if home switch is hit and
+                # velocity is negative
+                cond = (homeswitches_hit == 0) | (velocity > 0)
+                if displacement_steps[cond].sum() == 0:
                     break
-            dist_mm = steps_total / steps_per_mm
-            self._position = self._position + dist_mm
-            self._position[hit_home == 1] = 0
+            # update internally stored position
+            dist_mm = total_moved_steps / steps_per_mm
+            self._position += dist_mm
+            # position to zero if home switch hit
+            self._position[homeswitches_hit == 1] = 0
 
     def send_command(self, data, format='!Q'):
         assert len(data) == WORD_BYTES+COMMAND_BYTES
@@ -363,23 +366,44 @@ class Host:
                 + [INSTRUCTIONS.WRITEPIN])
         yield from self.send_command(data)
 
-    def send_move(self, ticks, a, b, c, maxtrials=1E5):
-        '''send move instruction with data
+    def spline_move(self, ticks, coefficients, maxtrials=1E5):
+        '''write spline move instruction with ticks and coefficients to FIFO
 
-        ticks           -- number of ticks in move
-        a,b,c           -- coefficients of polynomal move
-        maxtrials       -- max number of communcation trials
+        If you have 2 motors and execute a second order spline
+        You send 4 coefficients.
+        If the controller supports a third order spline,
+        remaining coefficients are padded as zero.
+        User needs to submit all coefficients up to highest order used.
 
-        TODO: you always need to send 3 coefficients, even if your
-              FPGA is only configured for 2 and does not use the third!
+        ticks           -- number of ticks in move, integer
+        coefficients    -- coefficients for spline move per axis, list
+        maxtrials       -- max number of communication trials
 
-        returns array with status home switches
-        Zero implies home switch is hit
+        returns array with zero if home switch is hit
         '''
         if self.test:
             maxtrials = 10
-        commands = self.move_commands(ticks, a, b, c)
-        # TODO: this has been changed, remove if passes checks on machine
+        # maximum allowable ticks is move ticks, otherwise overflow
+        assert ticks <= MOVE_TICKS
+    
+        assert len(coefficients)%self.platform.motors == 0
+
+        write_byte = COMMANDS.WRITE.to_bytes(1, 'big')
+        move_byte = INSTRUCTIONS.MOVE.to_bytes(1, 'big')
+        commands = []
+        commands += [write_byte +
+                     ticks.to_bytes(7, 'big') + move_byte]
+
+        for motor in range(self.platform.motors):
+            for degree in range(self.platform.poldegree):
+                idx = degree+motor*self.platform.motors
+                if idx >= len(coefficients):
+                    coeff = 0
+                else:
+                    coeff = coefficients[idx]
+                data = coeff.to_bytes(8, 'big', signed=True)
+                commands += [write_byte + data]
+        
         for command in commands:
             trials = 0
             while True:
@@ -392,31 +416,8 @@ class Host:
                     break
                 if trials > maxtrials:
                     raise Memfull(f"Too many trials {trials} needed")
-        # TODO: add z!
-        return np.array([state['x'], state['y']])
-
-    def move_commands(self, ticks, a, b, c):
-        '''get list of commands for move instruction with
-           [a,b,c] for ax+bx^2+cx^3
-
-           ticks        -- ticks in move
-           speed        -- speed in mm/s
-           acceleration -- acceleration in mm/s2
-           postion      -- list with position in mm
-        '''
-        assert len(ticks) == 1
-        assert len(a) == len(b) == len(c) == self.platform.motors
-        write_byte = COMMANDS.WRITE.to_bytes(1, 'big')
-        move_byte = INSTRUCTIONS.MOVE.to_bytes(1, 'big')
-        commands = []
-        commands += [write_byte +
-                     ticks[0].to_bytes(7, 'big') + move_byte]
-        coeff = [a, b, c]
-        for motor in range(self.platform.motors):
-            for degree in range(self.platform.poldegree):
-                commands += [write_byte + coeff[degree][motor].to_bytes(8,
-                             'big', signed=True)]
-        return commands
+        axes_names = list(self.platform.stepspermm.keys())
+        return np.array([state[key] for key in axes_names])
 
     def spi_exchange_data(self, data):
         '''writes data to peripheral, returns reply'''

@@ -20,7 +20,7 @@ from hexastorm.resources import get_all_resources
 from hexastorm.lasers import Laserhead, DiodeSimulator, params
 from hexastorm.constants import (COMMAND_BYTES, WORD_BYTES, STATE,
                                  INSTRUCTIONS, MEMWIDTH, COMMANDS,
-                                 FREQ, wordsinscanline, wordsinmove)
+                                 MOTORFREQ, wordsinscanline, wordsinmove)
 
 
 class SPIParser(Elaboratable):
@@ -404,10 +404,8 @@ class TestParser(SPIGatewareTestCase):
     def test_writemoveinstruction(self):
         'write move instruction and verify FIFO is no longer empty'
         self.assertEqual((yield self.dut.empty), 1)
-        yield from self.host.send_move([1000],
-                                       [1]*self.platform.motors,
-                                       [2]*self.platform.motors,
-                                       [3]*self.platform.motors)
+        coeff = [randint(0,10)]*self.platform.motors*self.platform.poldegree
+        yield from self.host.spline_move(1000, coeff)
         words = wordsinmove(self.platform)
         yield from self.instruction_ready(words)
 
@@ -416,10 +414,8 @@ class TestParser(SPIGatewareTestCase):
         '''set pins to random state'''
         def test_pins():
             def get_pinstate():
-                # TODO: add z
-                keys =  ['x', 'y',
-                         'photodiode_trigger',
-                         'synchronized']
+                keys =  list(self.platform.stepspermm.keys())
+                keys += ['photodiode_trigger', 'synchronized']
                 state = (yield from self.host.get_state())
                 return {k: state[k] for k in keys}
             olddct = (yield from get_pinstate())
@@ -460,11 +456,9 @@ class TestParser(SPIGatewareTestCase):
         self.assertEqual((yield from self.host.get_state())['mem_full'], False)
         try:
             for _ in range(platform.memdepth):
-                yield from self.host.send_move([1000],
-                                               [1]*platform.motors,
-                                               [2]*platform.motors,
-                                               [3]*platform.motors,
-                                               maxtrials=1)
+                yield from self.host.spline_move(1000,
+                                                 [1]*platform.motors,
+                                                 maxtrials=1)
         except Memfull:
             pass
         self.assertEqual((yield from self.host.get_state())['mem_full'], True)
@@ -503,11 +497,9 @@ class TestDispatcher(SPIGatewareTestCase):
         yield from self.host.set_parsing(False)
         try:
             for _ in range(platform.memdepth):
-                yield from self.host.send_move([1000],
-                                               [1]*platform.motors,
-                                               [2]*platform.motors,
-                                               [3]*platform.motors,
-                                               maxtrials=1)
+                yield from self.host.spline_move(1000,
+                                                 [1]*platform.motors,
+                                                 maxtrials=1)
         except Memfull:
             pass
         self.assertEqual((yield from self.host.get_state())['mem_full'], True)
@@ -570,7 +562,7 @@ class TestDispatcher(SPIGatewareTestCase):
 
         yield from self.host.home_axes(axes=np.array([1]*self.platform.motors),
                                        speed=None,
-                                       pos=-0.1)
+                                       displacement=-0.1)
         assert_array_equal(self.host._position,
                            np.array([0]*self.platform.motors))
 
@@ -602,7 +594,7 @@ class TestDispatcher(SPIGatewareTestCase):
         '''
         steps = steps*self.platform.motors
         mm = np.array(steps)/np.array(list(self.platform.stepspermm.values()))
-        time = np.array(ticks)/FREQ
+        time = np.array(ticks)/MOTORFREQ
         speed = mm/time
         yield from self.host.gotopoint(mm.tolist(),
                                        speed.tolist())
@@ -614,21 +606,11 @@ class TestDispatcher(SPIGatewareTestCase):
 
     @sync_test_case
     def test_movereceipt(self, ticks=10_000):
-        'verify move instruction send over with send_move'
-        a = list(range(1, self.platform.motors+1))
-        degree = self.platform.poldegree
-        if degree > 2:
-            b = list(range(3, self.platform.motors+3))
-        else:
-            b = [0]*self.platform.motors
-        if degree > 3:
-            c = list(range(5, self.platform.motors+5))
-        else:
-            c = [0]*self.platform.motors
-        yield from self.host.send_move([ticks],
-                                       a,
-                                       b,
-                                       c)
+        'verify move instruction send over with spline move'
+        platform = self.platform
+
+        coeff = [randint(0,10)]*platform.motors*platform.poldegree
+        yield from self.host.spline_move(ticks, coeff)
         # wait till instruction is received
         while (yield self.dut.pol.start) == 0:
             yield
@@ -636,19 +618,22 @@ class TestDispatcher(SPIGatewareTestCase):
         while (yield self.dut.pol.busy):
             yield
         # confirm receipt tick limit and coefficients
-        self.assertEqual((yield self.dut.pol.ticklimit), 10_000)
-        coefficients = [a, b, c]
-        for motor in range(self.platform.motors):
-            for coef in range(degree):
-                indx = motor*(degree)+coef
+        self.assertEqual((yield self.dut.pol.ticklimit), ticks)
+        for motor in range(platform.motors):
+            for coef in range(platform.poldegree):
+                indx = motor*platform.poldegree+coef
                 self.assertEqual((yield self.dut.pol.coeff[indx]),
-                                 coefficients[coef][motor])
+                                 coeff[indx])
         while (yield self.dut.pol.busy):
             yield
-        for motor in range(self.platform.motors):
-            self.assertEqual((yield self.dut.pol.cntrs[motor*degree]),
-                             a[motor]*ticks + b[motor]*pow(ticks, 2)
-                             + c[motor]*pow(ticks, 3))
+        for motor in range(platform.motors):
+            cnt = 0 
+            for degree in range(platform.poldegree):
+                indx = motor*platform.poldegree+degree
+                cnt += ticks**(degree+1)*coeff[indx]
+            self.assertEqual(
+                (yield self.dut.pol.cntrs[motor*platform.poldegree]),
+                cnt)
 
     @sync_test_case
     def test_writeline(self, numblines=3):

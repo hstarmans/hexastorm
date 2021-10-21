@@ -18,7 +18,7 @@ STATE = namedtuple('STATE', ['FULL', 'PARSING', 'ERROR'],
 COMMAND_BYTES = 1
 WORD_BYTES = 8
 MEMWIDTH = WORD_BYTES*8
-FREQ = 1E6  # motor move interpolation freq in Hz
+MOTORFREQ = 1E6  # motor move interpolation freq in Hz
 MOVE_TICKS = 10_000  # maximum ticks in move segment
 
 MOVE_INSTRUCTION = {'INSTRUCTION': 1, 'TICKS': 7}
