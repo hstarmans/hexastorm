@@ -93,8 +93,6 @@ class Host:
         self.platform.build(core.Dispatcher(self.platform),
                             do_program=do_program, 
                             verbose=verbose)
-        raise Exception("Fomu-flash needs to be changed\
-                        or python restarted after flashing.")
 
     def reset(self):
         'restart the FPGA by flipping the reset pin'

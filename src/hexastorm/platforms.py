@@ -101,14 +101,9 @@ class Firestarter(LatticeICE40Platform):
     connectors = []
 
     def toolchain_program(self, products, name, **kwargs):
-        # adapted sudo visudo to run program without asking for password
         with products.extract("{}.bin".format(name)) as bitstream_filename:
-            subprocess.check_call(['sudo', 'fomu-flash', '-w',
-                                  bitstream_filename])
-        subprocess.check_call(['sudo', 'fomu-flash', '-r'])
-        # this is needed to fix an issue with fomu-flash
-        subprocess.check_call(['sudo', 'rmmod', 'spi_bcm2835'])
-        subprocess.check_call(['sudo', 'modprobe', 'spi_bcm2835'])
+            subprocess.check_call(['fomu-flash', '-w', bitstream_filename])
+        subprocess.check_call(['fomu-flash', '-r'])
 
 
 if __name__ == "__main__":
