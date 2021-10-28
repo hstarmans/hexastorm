@@ -381,29 +381,29 @@ class Host:
 
         returns array with zero if home switch is hit
         '''
+        platform = self.platform
         if self.test:
             maxtrials = 10
         # maximum allowable ticks is move ticks, otherwise overflow
         assert ticks <= MOVE_TICKS
-    
-        assert len(coefficients)%self.platform.motors == 0
+        assert len(coefficients)%platform.motors == 0
 
         write_byte = COMMANDS.WRITE.to_bytes(1, 'big')
         move_byte = INSTRUCTIONS.MOVE.to_bytes(1, 'big')
-        commands = []
-        commands += [write_byte +
+        commands = [write_byte +
                      ticks.to_bytes(7, 'big') + move_byte]
-
-        for motor in range(self.platform.motors):
-            for degree in range(self.platform.poldegree):
-                idx = degree+motor*self.platform.motors
-                if idx >= len(coefficients):
+        # check max order given by caller of function
+        max_coeff_order = (len(coefficients)//platform.motors)
+        for motor in range(platform.motors):
+            for degree in range(platform.poldegree):
+                # set to zero if coeff not provided by caller
+                if degree > max_coeff_order-1:
                     coeff = 0
                 else:
+                    idx = degree+motor*max_coeff_order
                     coeff = coefficients[idx]
                 data = coeff.to_bytes(8, 'big', signed=True)
                 commands += [write_byte + data]
-        
         for command in commands:
             trials = 0
             while True:
@@ -416,7 +416,7 @@ class Host:
                     break
                 if trials > maxtrials:
                     raise Memfull(f"Too many trials {trials} needed")
-        axes_names = list(self.platform.stepspermm.keys())
+        axes_names = list(platform.stepspermm.keys())
         return np.array([state[key] for key in axes_names])
 
     def spi_exchange_data(self, data):
