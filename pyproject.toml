@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "hexastorm"
 version = "0.1.0"
-description = ""
+description = "nMigen framework for writing to and reading from a substrate with a laser"
 authors = ["Rik Starmans <hstarmans@hexastorm.com>"]
 
 [tool.poetry.dependencies]

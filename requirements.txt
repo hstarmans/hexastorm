@@ -1,7 +1,0 @@
-spidev==3.4
-numpy==1.19
-opencv-python
-gpiozero==1.5.1
-smbus2
-apio
-rpi.gpio
