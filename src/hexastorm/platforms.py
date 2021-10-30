@@ -1,7 +1,4 @@
-""" Firstarter Platform definitions.
-To use it, you'll need to set your LUNA_PLATFORM variable:
-    > export LUNA_PLATFORM="FPGAG.board:Firestarter"
-"""
+import os
 import subprocess
 
 from nmigen.build import (Resource, Attrs, Pins, PinsN, Clock,
@@ -99,6 +96,13 @@ class Firestarter(LatticeICE40Platform):
                                attrs=Attrs(IO_STANDARD="SB_LVCMOS"))
                ]
     connectors = []
+
+    def build(self, *args, **kwargs):
+        base = 'apio raw "which '
+        os.environ['YOSYS'] = subprocess.getoutput(base+'yosys"')
+        os.environ['NEXTPNR_ICE40'] = subprocess.getoutput(base+'nextpnr-ice40"')
+        os.environ['ICEPACK'] = subprocess.getoutput(base+'icepack"')
+        super().build(*args, **kwargs)
 
     def toolchain_program(self, products, name, **kwargs):
         with products.extract("{}.bin".format(name)) as bitstream_filename:

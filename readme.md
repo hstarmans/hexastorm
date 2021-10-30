@@ -15,79 +15,32 @@ The alignment procedure is shown in the following video.
 
 [![Alignment procedure image not showing](http://img.youtube.com/vi/Ri6DAneEzw4/0.jpg)](http://www.youtube.com/watch?v=Ri6DAneEzw4 "Alignment procedure")
 
-## Installation
+## Requirements
 Code is tested on a Raspberry Pi 3B and 4B. The SD-card should be at least 8 GB, ideally 16 GB.
 Both Raspbian and Ubuntu can be used. Raspbian is not yet available at 64 bit.
 The ArduCam, a camera used for alignment, does not have a driver for 64 bit.
 
-On Raspbian, install libatlas so latest Numpy, etc. can be installed via pip.
+# Install
+Install poetry and python
 ```console
-sudo apt update
-sudo apt install libatlas3-base
+sudo apt install python3 python3-pip
+curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py | python3 -
 ```
-Install [luna](https://github.com/greatscottgadgets/luna) and checkout at f54de01.
-So after git cloning, run ```git checkout f54de01```.
-Code after this date has not been tested.
-Install required libraries
+Use poetry to install the dependencies in pyproject.toml
 ```console
-pip3 install -r requirements.txt
+poetry install
 ```
-Install Hexastorm in develop mode so you can edit.
+The above allows you to test the code. 
 ```console
-python3 setup.py develop --user
+poetry run python3 src/hexastorm/movement.py
 ```
-Install ice40 and yosys. These are outdated but work. For the latest, you need to build from source.
+If you want to interact with the stepper motors and flash the fpga.
 ```console
-apio install yosys
-apio install ice40
+./install.sh
 ```
-An alternative is yowasp but this is not supported.
-```console
-pip3 install yowasp-yosys
-pip3 install yowasp-nextpnr-ice40-all
-```
-Install fomu-flash for flashing the FPGA.
-```console
-git clone https://github.com/hstarmans/fomu-flash
-cd ~/fomu-flash
-make
-make install
-```
-If apio is used, add in ```~/.bashrc```  
-```
-export PATH=/home/pi/.local/bin:$PATH
-export PATH=/home/pi/.apio/packages/toolchain-yosys/bin:$PATH
-export PATH=/home/pi/.apio/packages/toolchain-ice40/bin:$PATH
-``` 
-If yowasp is used, add in  ```~/.bashrc```
-```
-## add python files to path
-export PATH="/home/ubuntu/.local/bin:$PATH"
-## these lines only needed for ubuntu core
-export YOSYS="yowasp-yosys"
-export ICEPACK="yowasp-icepack"
-export NEXTPNR_ICE40="yowasp-nextpnr-ice40"
-```
-Run  ```source ~/.bashrc``` afterwards.
-You can enable wifi using [link](https://github.com/sraodev/Raspberry-Pi-Headless-Setup-via-Network-Manager)
 
-The slicer relies on numba for acceleration. Latest is llvm-12 but pip3 only supports 10 now.
-```console
-sudo apt-get install llvm-10
-LLVM_CONFIG=/usr/lib/llvm-10/bin/llvm-config pip3 install llvmlite
-pip3 install numba
-```
-The location of llvm-config can be found with
-```console
-find / -name llvm-config
-```
-If the behaviour of the FPGA is simulated, signal traces for [GTKWave](http://gtkwave.sourceforge.net/) are generated if the following flag is set.
-```console
-export GENERATE_VCDS=1
-```
-Install the Python wrapper for TMC stepper [drivers](https://github.com/hstarmans/TMCStepper).  
-Raspbian uses ```/boot/config.txt``` and Ubuntu uses ```/boot/firmware/usercnf.txt.```
-The following lines need to be in the config file;
+## Raspberry pi
+The following lines need to be in the /boot/config.txt;
 ```
 # I2C for laserdriver and camera
 i2c_arm=on
@@ -101,140 +54,7 @@ start_x=1
 gpu_mem=300
 ```
 There should not be dtparam=spi=on, somewhere. This would enable two chip selects for SPI0 and 
-creates a conflict with the pin select of SPI1. After rebooting, you can check the configuration via
-```console
-ls /dev/spi*
-sudo vcdbg log msg
-```
-Usefull links are [1](http://terminal28.blogspot.com/2016/05/enabling-spi1-on-raspberry-pi-bzero23.html) and [2](https://bootlin.com/blog/enabling-new-hardware-on-raspberry-pi-with-device-tree-overlays/).  
+creates a conflict with the pin select of SPI1. 
 
-
-### Camera
-The operation of the laser scanner can be verified with a camera.
-Two camera's have been tried; [uEye](https://en.ids-imaging.com/) 2240 monochrome camera and [Arducam Global shutter](https://www.arducam.com/products/camera-breakout-board/global-shutter-camera/) which used the OV2311 chip.
-The images of the cameras are analyzed with [OpenCV](https://opencv.org/).
-```console
-sudo apt install -y libopenjp2-7 libilmbase-dev libopenexr-dev libgstreamer1.0-dev ffmpeg
-pip3 install opencv-python
-```
-#### uEye camera
-Disadvantages; uEye is more expensive, drivers require an account and there is no good Python driver.  
-Advantages; product is more mature.  
-On uEye website select uEye 2240 monochrome. Download and install the driver for
-linux, arm v7 (Raspberry pi platform). A Python library for the camera is available in the source code.
-My version can be installed via [uEyeCamera](https://github.com/hstarmans/ueyecamera).
-
-#### Arducam
+## Arducam
 Install my version of the Python libary available at [ArducamPython](https://github.com/hstarmans/Arducampython).
-
-# Brief Description
-
-The controller sends over a command with a word to the FPGA which stores it in SRAM.
-The command is 8 bits long and the word 64 bits. Only for write commands, word is not empty.
-If the memory is full, the FPGA send this back to the host. 
-The instructions are parsed from the the SRAM if execution is enabled.
-
-## Commands
-The following commands are possible;
-| command | reply |
-|---|---|
-| POSITION | get position of all motors |
-| READ | get state of the peripheral and settings of certain pins |
-| START | enable execution of instructions stored in SRAM |
-| STOP | halt execution of instructions stored in SRAM |
-| WRITE | sent over an instruction and store it in SRAM |
-
-
-## Write
-A write commmand is followed by an instruction which is placed in the SRAM.
-If the dispatcher is enabled, these instructions are carried out unless an error is raised.
-A word can often not store all information for an instruction. So an instruction 
-consists out of multiple commands and words in series.
-If prior to the sequence, the memory is already full or there is a parsing error, a status word is sent back.
-If the reply is zero, the peripheral is operating normally. The information to be sent over is indicated for
-each instruction
-
-## Parameters
-The following parameters describe the system.  
-| parameter | description |
-|---|---|
-| RPM | revolutions per minute of the rotor |
-| Start% | fraction of period where scanline starts |
-| End% | fraction of period where scanline stops |
-| SPINUP_TIME | seconds system waits for the rotor to stabilize speed |
-| STABLE_TIME | seconds system tries to determine position laser with photodiode |
-| FACETS | number of polygon facets|
-| DIRECTION | exposure direction, i.e. forward or backward |
-| SINGLE_LINE | system exposes fixed pattern, i.e. line|
-| SINGLE_FACET | only one of the facets is used|
-  
-Using the above, the code determines the number of bits in a scanline. Via a serial port interface the user can push data to the scanner.
-A line is preceded with a command which can be SCAN or STOP. The data is stored on the chip in block ram. 
-Once turned on, the scanner reads out this memory via First In First Out (FIFO).
-  
-### Motion
-
-A robot updates its position multiple times during a move. In practice it is impossible to sent over each position indivually due to data transfer limits.
-The controller solves this via interpolation.  The starting and end-conditions, i.e. boundary conditions, are given for a move.
-Possible boundary conditions are not only position but can be acceleration, jerk or number of steps in a move. It depends on the mathematical formulation chosen.
-I extensively looked at two mathematical solutions; [splines](https://en.wikipedia.org/wiki/Spline_(mathematics)) and [Bezier curves](https://en.wikipedia.org/wiki/B%C3%A9zier_curve).
-Other options are B-splines and NURBS (Non-Uniform Rational B-splines) see [article](https://zero.sci-hub.se/2496/cb390d406cc077ef156deb76b34099af/desantiago-perez2013.pdf#lb0030).
-Most programs like Cura and slicer store the final instructions as [G-code](https://en.wikipedia.org/wiki/G-code).
-There is no link between g-code and my interpretation yet.
-
-### Splines
-| data | number of bytes | description
-|---|---|---|
-| INSTRUCTION | 1 | type of instructions, here move instruction
-| TICKS | 7 | number of ticks in a move, cannot be larger than TICKS_MOVE, i.e. 10_000
-| C00 | 8 | motor 0, coeff 0
-| C01 | 8 | motor 0, coeff 1
-| C02 | 8 | motor 0, coeff 2
-
-The motor follows the path, C00 * t + C01 * t^2 + C02 * t^3. The default motor sampling frequency is 1 MHz.
-The coefficients can be interpreted as; velocity, acceleration and jerk. These are slightly different.
-In the formula x = v*t + 1/2*a*t^2 + 1/3*1/2*b*t^3; v, a, b, x are the velocity
-acceleration, jerk and position respectively.
-The trajectory of a motor is divided in multiple segments where a segment length has a maximum of 10_000 ticks. 
-If is longer, it is repeated. If it is shorter, this is communicated by setting ticks to lower than 10_000.
-If multiple motors are used; TICKS, C00, C01, C02 are repeated. Step speed must be lower than 1/2 oscillator speed (Nyquist criterion).
-For a [typical stepper motor](https://blog.prusaprinters.org/calculator_3416/) with 400 steps per mm,
-max speed is 3.125 m/s with an oscillator frequency of 1 MHz.
-
-### Bezier Curves
-
-I made a sketch for an implementation in test/old/dsp/casteljau.py
-
-### Pin instruction
-| data | number of bytes | description
-|---|---|---|
-| INSTRUCTION | 1 | type of instructions, here set pin instruction
-| PINS | 7 | Last byte set pins. The last bits set polygon, laser0, laser1
-
-A user can read but not write directly to pins. This ensures that the host
-can establish precedence between instructions.
-
-### Laserline instruction
-| data | number of bits | description
-|---|---|---|
-| INSTRUCTION | 8 | type of instructions, here start or stop scanline
-| DIRECTION | 1 | scanning direction
-| TICKSPERSTEP | 55 | ticks per half period step
-| DATA | 64 | information for lasers in chunks of 8 bytes
-
-A user can read but not write directly to pins. This ensures that the host
-can establish precedence between instructions.
-
-## Detailed description
-Look at the test folders and individually tests on how to use the code. The whole scanhead can be simulated virtually. 
-As such, a scanner is not needed.
-
-## Limitations 
-System is for writing to, i.e. exposing, a substrate. Reading should also be possible to enable optical coherence tomagraphy.    
-System has no link for LIDAR measurements, circuit can be found [here](https://hackaday.io/project/163501-open-source-lidar-unruly).    
-The FPGA controls all the stepper motors. At the moment it is not possible to read instruction from a GCODE file.  
-Add maximum-length linear-feedback shift register sequence and CRC check.  
-<!-- 
-TODO:
-  add docs
- -->
