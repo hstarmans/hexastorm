@@ -59,10 +59,13 @@ class Host:
             self.init_steppers()
             # stepper motor enable pin
             self.enable = LED(self.platform.enable_pin)
-            self.test = True
+            self.test = False
         else:
             self.platform = platform
             self.test = True
+        # maximum number of times tried to write to FIFO
+        # if memoery is full
+        self.maxtrials = 10 if self.test else 1E5
         self.laser_params = lasers.params(self.platform)
         self._position = np.array([0]*self.platform.motors, dtype='float64')
 
@@ -345,16 +348,12 @@ class Host:
             # set position to zero if home switch hit
             self._position[homeswitches_hit == 1] = 0
 
-    def send_command(self, command, blocking=False, maxtrials=1E5):
+    def send_command(self, command, blocking=False):
         '''writes command to spi port
         
         blocking  --  try again if memory is full
-        maxtrials --  maximum number of trials used to send command
-             
         returns bytearray with length equal to data sent
         '''
-        if self.test:
-            maxtrials = 10
         def send_command(command):
             assert len(command) == WORD_BYTES+COMMAND_BYTES
             if self.test:
@@ -372,7 +371,7 @@ class Host:
                     raise Exception("Error detected on FPGA")
                 if not state['mem_full']:
                     break
-                if trials > maxtrials:
+                if trials > self.maxtrials:
                     raise Memfull(f"Too many trials {trials} needed")
         else:
             data = (yield from send_command(command))
@@ -409,7 +408,6 @@ class Host:
 
         ticks           -- number of ticks in move, integer
         coefficients    -- coefficients for spline move per axis, list
-        maxtrials       -- max number of communication trials
 
         returns array with zero if home switch is hit
         '''

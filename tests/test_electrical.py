@@ -34,45 +34,46 @@ class StaticTest(Base):
         You fill the entire memory and see if it is properly emptied
         by ensuring that the position changes as excepted.
         '''
-        yield from self.host._executionsetter(False)
+        host = self.host
+        yield from self.host.set_parsing(False)
         self.host.enable_steppers = False
         # with false check if this results in block
         # you can do a blink test to verify move
         motors = Firestarter.motors
-        host = self.host
         mm = np.array([1]*motors)
         steps = mm * np.array(list(host.platform.stepspermm.values()))
         limit = floor(host.platform.memdepth /
-                      wordsinmove(host.platform.motors))
+                      wordsinmove(host.platform))
+        host.maxtrials = 10
         for _ in range(host.platform.memdepth):
-            a = ((host.steps_to_count(steps.astype('int64'))/MOVE_TICKS)
-                 .round().astype('int64'))
+            coeff = ((host.steps_to_count(steps.astype('int64'))/MOVE_TICKS)
+                    .round().astype('int64'))
             try:
-                yield from host.send_move([MOVE_TICKS],
-                                          a.tolist(),
-                                          [0]*motors,
-                                          [0]*motors, maxtrials=10)
+                yield from host.spline_move(MOVE_TICKS,
+                                            coeff.tolist())
             except Memfull:
                 pass
-        self.assertEqual((yield from self.host.memfull()), True)
-        yield from self.host._executionsetter(True)
+        host.maxtrials = 1E5
+        self.assertEqual((yield from self.host.get_state())['mem_full'], True)
+        yield from self.host.set_parsing(True)
         sleep(1)
-        self.assertEqual((yield from self.host.memfull()), False)
-        assert_array_almost_equal(
-            (yield from self.host.position),
-            mm*limit)
+        self.assertEqual((yield from self.host.get_state())['mem_full'], False)
+        assert_array_almost_equal((yield from self.host.position),
+                                  mm*limit)
         self.assertEqual((yield from self.host.error), False)
         self.host.reset()
 
     @executor
     def test_invalidinstruction(self):
         '''write invalid instruction and verify it passes dispatcher'''
+        host = self.host
         command = [COMMANDS.WRITE] + [0]*WORD_BYTES
-        for _ in range(wordsinmove(self.host.platform.motors)):
-            yield from self.host.send_command(command)
+        for _ in range(wordsinmove(host.platform)):
+            yield from host.send_command(command)
         sleep(3)
-        self.assertEqual((yield from self.host.memfull()), False)
-        self.assertEqual((yield from self.host.error), True)
+        state = (yield from host.get_state())
+        self.assertEqual(state['mem_full'], False)
+        self.assertEqual(state['error'], True)
         self.host.reset()
 
 
