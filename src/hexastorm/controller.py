@@ -345,12 +345,37 @@ class Host:
             # set position to zero if home switch hit
             self._position[homeswitches_hit == 1] = 0
 
-    def send_command(self, data):
-        assert len(data) == WORD_BYTES+COMMAND_BYTES
+    def send_command(self, command, blocking=False, maxtrials=1E5):
+        '''writes command to spi port
+        
+        blocking  --  try again if memory is full
+        maxtrials --  maximum number of trials used to send command
+             
+        returns bytearray with length equal to data sent
+        '''
         if self.test:
-            data = (yield from self.spi_exchange_data(data))
+            maxtrials = 10
+        def send_command(command):
+            assert len(command) == WORD_BYTES+COMMAND_BYTES
+            if self.test:
+                data = (yield from self.spi_exchange_data(command))
+            else:
+                data = (self.spi_exchange_data(command))
+            return data
+        if blocking:
+            trials = 0
+            while True:
+                trials += 1
+                data = (yield from send_command(command))
+                state = (yield from self.get_state(data))
+                if state['error']:
+                    raise Exception("Error detected on FPGA")
+                if not state['mem_full']:
+                    break
+                if trials > maxtrials:
+                    raise Memfull(f"Too many trials {trials} needed")
         else:
-            data = (self.spi_exchange_data(data))
+            data = (yield from send_command(command))
         return data
 
     def enable_comp(self, laser0=False, laser1=False,
@@ -371,9 +396,9 @@ class Host:
         data = ([COMMANDS.WRITE] + [0]*(WORD_BYTES-2) +
                 [int(f'{synchronize}{polygon}{laser1}{laser0}', 2)]
                 + [INSTRUCTIONS.WRITEPIN])
-        yield from self.send_command(data)
+        yield from self.send_command(data, blocking=True)
 
-    def spline_move(self, ticks, coefficients, maxtrials=1E5):
+    def spline_move(self, ticks, coefficients):
         '''write spline move instruction with ticks and coefficients to FIFO
 
         If you have 2 motors and execute a second order spline
@@ -389,8 +414,6 @@ class Host:
         returns array with zero if home switch is hit
         '''
         platform = self.platform
-        if self.test:
-            maxtrials = 10
         # maximum allowable ticks is move ticks, 
         # otherwise counters overflow in FPGA
         assert ticks <= MOVE_TICKS
@@ -415,25 +438,18 @@ class Host:
                 commands += [write_byte + data]
         # send commands to FPGA
         for command in commands:
-            trials = 0
-            while True:
-                data_out = (yield from self.send_command(command))
-                state = (yield from self.get_state(data_out))
-                trials += 1
-                if state['error']:
-                    raise Exception("Error detected on FPGA")
-                if not state['mem_full']:
-                    break
-                if trials > maxtrials:
-                    raise Memfull(f"Too many trials {trials} needed")
+            data_out = (yield from self.send_command(command,
+                                                     blocking=True))
+            state = (yield from self.get_state(data_out))
         axes_names = list(platform.stepspermm.keys())
         return np.array([state[key] for key in axes_names])
 
     def spi_exchange_data(self, data):
         '''writes data to peripheral
         
-        data  --  COMMAND byte followed with word BYTES
-                  
+        data  --  command followed with word
+                     list of multiple bytes
+             
         returns bytearray with length equal to data sent
         '''
         assert len(data) == (COMMAND_BYTES + WORD_BYTES)
@@ -444,43 +460,44 @@ class Host:
         self.chip_select.on()
         return response
 
-    def writeline(self, bitlst, stepsperline=1, direction=0, maxtrials=1E5):
+    def writeline(self, bitlst, stepsperline=1, direction=0):
+        '''write bits to FIFO
+
+           bit list      bits which are written to substrate
+                         at the moment laser can only be on of off
+                         if bitlst is empty stop command is sent
+           stepsperline  stepsperline, should be greater than 0
+                         if you don't want to move simply disable motor
+           direction     motor direction of scanning axis
+        '''
         bytelst = self.bittobytelist(bitlst, stepsperline, direction)
         write_byte = COMMANDS.WRITE.to_bytes(1, 'big')
-        # TODO: merge write line with send commands
-        if self.test:
-            maxtrials = 10
         for i in range(0, len(bytelst), 8):
-            trials = 0
             lst = bytelst[i:i+8]
             lst.reverse()
             data = write_byte + bytes(lst)
-            while True:
-                trials += 1
-                data_out = (yield from self.send_command(data))
-                if not (yield from self.get_state(data_out))['mem_full']:
-                    break
-                if trials > maxtrials:
-                    raise Memfull("Too many trials needed")
+            (yield from self.send_command(data, blocking=True))
 
     def bittobytelist(self, bitlst, stepsperline=1,
                       direction=0, bitorder='little'):
         '''converts bitlst to bytelst
 
-           bit list      set laser on and off
+           bit list      bits which are written to substrate
+                         at the moment laser can only be on of off
                          if bitlst is empty stop command is sent
            stepsperline  stepsperline, should be greater than 0
                          if you don't want to move simply disable motor
-           direction     scanning direction
+           direction     motor direction of scanning axis
         '''
-        # NOTE: the halfperiod is sent over
-        #       this is the amount of ticks in half a cycle of
-        #       the motor
-        halfperiod = round((self.laser_params['TICKSINFACET']-1)
-                           / (stepsperline*2))
+        # the halfperiod is sent over
+        # this is the amount of ticks in half a cycle of
+        # the motor
         # watch out for python "banker's rounding"
         # sometimes target might not be equal to steps
-        # this is ignored for now
+        halfperiod = round((self.laser_params['TICKSINFACET']-1)
+                           / (stepsperline*2))
+        # TODO: is this still an issue?
+        # you could check as follows
         # steps = self.laser_params['TICKSINFACET']/(halfperiod*2)
         #    print(f"{steps} is actual steps per line")
         direction = [int(bool(direction))]

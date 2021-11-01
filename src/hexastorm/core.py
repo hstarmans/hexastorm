@@ -457,8 +457,7 @@ class TestParser(SPIGatewareTestCase):
         try:
             for _ in range(platform.memdepth):
                 yield from self.host.spline_move(1000,
-                                                 [1]*platform.motors,
-                                                 maxtrials=1)
+                                                 [1]*platform.motors)
         except Memfull:
             pass
         self.assertEqual((yield from self.host.get_state())['mem_full'], True)
@@ -498,8 +497,7 @@ class TestDispatcher(SPIGatewareTestCase):
         try:
             for _ in range(platform.memdepth):
                 yield from self.host.spline_move(1000,
-                                                 [1]*platform.motors,
-                                                 maxtrials=1)
+                                                 [1]*platform.motors)
         except Memfull:
             pass
         self.assertEqual((yield from self.host.get_state())['mem_full'], True)
