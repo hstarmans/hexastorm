@@ -35,12 +35,14 @@ class Memfull(Exception):
 class Host:
     '''Class to interact with FPGA
     '''
-    def __init__(self, test=False):
-        '''  test  -- True if behavior of FPGA is simulated
+    def __init__(self, platform=None):
+        '''  platform  -- object which has gateware settings
+                          only passed to controller if virtual
+                          test is executed. Needed in lasers.py
+                          as each test here has a slightly
+                          different TestPlatform
         '''
-        if test:
-            self.platform = TestPlatform
-        else:
+        if platform is None:
             from gpiozero import LED
             import spidev
             from smbus2 import SMBus
@@ -57,7 +59,10 @@ class Host:
             self.init_steppers()
             # stepper motor enable pin
             self.enable = LED(self.platform.enable_pin)
-        self.test = test
+            self.test = True
+        else:
+            self.platform = platform
+            self.test = True
         self.laser_params = lasers.params(self.platform)
         self._position = np.array([0]*self.platform.motors, dtype='float64')
 
