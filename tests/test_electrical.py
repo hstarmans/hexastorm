@@ -92,43 +92,49 @@ class LaserheadTest(Base):
     @executor
     def spinprism(self, timeout=3):
         'spin for timeout seconds'
-        yield from self.host.enable_comp(polygon=True)
+        host = self.host
+        yield from host.enable_comp(polygon=True)
         print(f'Spinning prism for {timeout} seconds')
         sleep(timeout)
-        yield from self.host.enable_comp(polygon=False)
-        self.assertEqual((yield from self.host.error), False)
+        yield from host.enable_comp(polygon=False)
+        self.assertEqual((yield from host.get_state())['error'],
+                         False)
 
     @executor
     def lasertest(self, timeout=3):
         'enable laser for timeout seconds'
-        yield from self.host.enable_comp(laser1=True)
+        host = self.host
+        yield from host.enable_comp(laser1=True)
         print(f'Laser on for {timeout} seconds')
         sleep(timeout)
-        yield from self.host.enable_comp(laser1=False)
-        self.assertEqual((yield from self.host.error), False)
+        yield from host.enable_comp(laser1=False)
+        self.assertEqual((yield from host.get_state())['error'],
+                         False)
 
     @executor
     def test_diode(self, timeout=3):
         'enable motor, laser and verify photodiode is triggered'
-        res = (yield from self.host.pinstate)['photodiode_trigger']
+        host = self.host
+        res = (yield from host.pinstate)['photodiode_trigger']
         self.assertEqual(res, 0)
-        yield from self.host.enable_comp(laser1=True, polygon=True)
+        yield from host.enable_comp(laser1=True, polygon=True)
         print(f'Wait for diode trigger, {timeout} seconds')
         sleep(timeout)
-        res = (yield from self.host.pinstate)['photodiode_trigger']
-        yield from self.host.enable_comp(laser1=False, polygon=False)
+        yield from host.enable_comp(laser1=False, polygon=False)
+        res = (yield from host.get_state())['photodiode_trigger']
         self.assertEqual(res, 1)
-        self.assertEqual((yield from self.host.error), False)
+        self.assertEqual((yield from host.error), False)
 
     @executor
     def test_stable(self, timeout=3):
-        yield from self.host.enable_comp(synchronize=True)
+        host = self.host
+        yield from host.enable_comp(synchronize=True)
         print(f'Wait for synchronization, {timeout} seconds')
         sleep(timeout)
-        res = (yield from self.host.pinstate)['photodiode_trigger']
+        res = (yield from host.pinstate)['photodiode_trigger']
         self.assertEqual(res, 1)
-        yield from self.host.enable_comp(synchronize=False)
-        self.assertEqual((yield from self.host.error), False)
+        yield from host.enable_comp(synchronize=False)
+        self.assertEqual((yield from host.error), False)
 
     @executor
     def test_move(self, dist=10, stepsperline=1, timeout=3):
@@ -143,32 +149,35 @@ class LaserheadTest(Base):
         numblines = round(dist *
                           host.platform.stepspermm[host.platform.laser_axis]
                           * stepsperline)
-        yield from self.host.enable_comp(synchronize=True)
-        self.host.enable_steppers = True
+        yield from host.enable_comp(synchronize=True)
+        host.enable_steppers = True
         print(f'Wait for synchronization, {timeout} seconds')
         sleep(timeout)
         line = [0] * laser_params['BITSINSCANLINE']
         for direction in [0, 1]:
             for _ in range(numblines):
-                yield from self.host.writeline(line, stepsperline, direction)
+                yield from host.writeline(line, stepsperline, direction)
             print('switching direction')
         yield from host.writeline([])
         print(f'Wait for stopline to execute, {timeout} seconds')
         sleep(timeout)
-        self.assertEqual((yield from host.error), False)
+        self.assertEqual((yield from host.get_state())['error'],
+                         False)
         yield from host.enable_comp(synchronize=False)
         self.host.enable_steppers = False
 
     @executor
     def test_scanline(self, timeout=3, numblines=1000):
-        line = [1] * self.host.laser_params['BITSINSCANLINE']
+        host = self.host
+        line = [1] * host.laser_params['BITSINSCANLINE']
         for _ in range(numblines):
-            yield from self.host.writeline(line)
-        yield from self.host.writeline([])
+            yield from host.writeline(line)
+        yield from host.writeline([])
         print(f'Wait for stopline to execute, {timeout} seconds')
         sleep(timeout)
-        self.assertEqual((yield from self.host.error), False)
-        yield from self.host.enable_comp(synchronize=False)
+        self.assertEqual((yield from host.get_state())['error'],
+                         False)
+        yield from host.enable_comp(synchronize=False)
 
 
 class MoveTest(Base):
