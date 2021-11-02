@@ -381,8 +381,8 @@ class Host:
                     polygon=False, synchronize=False):
         '''enable components
 
-        FPGA should be parsing FIFO otherwise there
-        is no result
+        FPGA does need to be parsing FIFO
+        These instructions are executed directly.
 
         laser0   -- True enables laser channel 0
         laser1   -- True enables laser channel 1
