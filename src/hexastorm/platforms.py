@@ -66,7 +66,7 @@ class Firestarter(LatticeICE40Platform):
                Resource("clk13", 0, Pins("35", dir="i"),
                         Clock(13.56e6),
                         Attrs(GLOBAL=True, IO_STANDARD="SB_LVCMOS")),
-               # TODO: replate with RGB led resource
+               # TODO: replace with RGB led resource 
                *LEDResources(pins='39 40 41', invert=True,
                              attrs=Attrs(IO_STANDARD="SB_LVCMOS")),
                # NOTE: there is a proper resource in nmigen_boards

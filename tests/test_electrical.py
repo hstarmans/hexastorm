@@ -101,10 +101,10 @@ class LaserheadTest(Base):
                          False)
 
     @executor
-    def lasertest(self, timeout=3):
+    def lasertest(self, timeout=15):
         'enable laser for timeout seconds'
         host = self.host
-        yield from host.enable_comp(laser1=True)
+        yield from host.enable_comp(laser1=True, laser0=True)
         print(f'Laser on for {timeout} seconds')
         sleep(timeout)
         yield from host.enable_comp(laser1=False)
@@ -115,7 +115,7 @@ class LaserheadTest(Base):
     def test_diode(self, timeout=3):
         'enable motor, laser and verify photodiode is triggered'
         host = self.host
-        res = (yield from host.pinstate)['photodiode_trigger']
+        res = (yield from host.get_state())['photodiode_trigger']
         self.assertEqual(res, 0)
         yield from host.enable_comp(laser1=True, polygon=True)
         print(f'Wait for diode trigger, {timeout} seconds')
@@ -131,10 +131,12 @@ class LaserheadTest(Base):
         yield from host.enable_comp(synchronize=True)
         print(f'Wait for synchronization, {timeout} seconds')
         sleep(timeout)
-        res = (yield from host.pinstate)['photodiode_trigger']
+        res = (yield from host.get_state())['photodiode_trigger']
         self.assertEqual(res, 1)
         yield from host.enable_comp(synchronize=False)
-        self.assertEqual((yield from host.error), False)
+        self.assertEqual((yield from host.get_state())['error'],
+                         False)
+
 
     @executor
     def test_move(self, dist=10, stepsperline=1, timeout=3):
