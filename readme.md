@@ -1,9 +1,12 @@
-# Laserscanner [![Documentation Status](https://readthedocs.org/projects/luna/badge/?version=latest)](https://hexastorm.readthedocs.io/en/latest/?badge=latest)
-Implementation of a laserscanner on a FPGA. In a high-speed polygon scanner system, the laser is deflected by a rotating prism or mirror. 
+# Laser scanner [![Documentation Status](https://readthedocs.org/projects/luna/badge/?version=latest)](https://hexastorm.readthedocs.io/en/latest/?badge=latest)
+[Laser scanning](https://en.wikipedia.org/wiki/Laser_scanning) is the controlled deflection of laser beams, visible or invisible.
+In a high-speed polygon scanner system, the laser is deflected by a rotating prism or mirror. 
 The position of the laser is determined via a photodiode.  
-<img src="https://cdn.hackaday.io/images/7106161566426847098.jpg" align="center" height="300"/>  
+Hexastorm is a full toolkit for working with polygon lasers scanners using FPGA technology; and provides hardware, gateware, and software 
+to enable laser scanning applications.  
+<img src="https://cdn.hackaday.io/images/490011635348687883.jpg" align="center" height="300"/>  
 Code is tested on the system shown above, branded as [Hexastorm](https://www.hexastorm.com). 
-The FreeCad design is shared [here](https://github.com/hstarmans/hexastorm_design) 
+The FreeCAD design is shared [here](https://github.com/hstarmans/hexastorm_design) 
 and PCB designs are found [here](https://github.com/hstarmans/firestarter).
 A blog can be found on [Hackaday](https://hackaday.io/project/21933-open-hardware-fast-high-resolution-laser).
 The code took most inspiration from [LDGraphy](https://github.com/hzeller/ldgraphy).  
