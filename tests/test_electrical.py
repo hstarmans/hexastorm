@@ -101,11 +101,10 @@ class LaserheadTest(Base):
                          False)
 
     @executor
-    def lasertest(self, timeout=15):
+    def lasertest(self, timeout=3):
         'enable laser for timeout seconds'
         host = self.host
-        yield from host.enable_comp(laser1=True, laser0=True)
-        print(f'Laser on for {timeout} seconds')
+        yield from host.enable_comp(laser1=True, laser0=False)
         sleep(timeout)
         yield from host.enable_comp(laser1=False)
         self.assertEqual((yield from host.get_state())['error'],
@@ -123,7 +122,8 @@ class LaserheadTest(Base):
         yield from host.enable_comp(laser1=False, polygon=False)
         res = (yield from host.get_state())['photodiode_trigger']
         self.assertEqual(res, 1)
-        self.assertEqual((yield from host.error), False)
+        self.assertEqual((yield from host.get_state())['error'],
+                         False)
 
     @executor
     def test_stable(self, timeout=3):

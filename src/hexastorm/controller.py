@@ -93,7 +93,8 @@ class Host:
     def build(self, do_program=True, verbose=True):
         '''builds the FPGA code using nMigen, Yosys, Nextpnr and icepack
            
-           do_program  -- flashes the FPGA chip using fomu-flash
+           do_program  -- flashes the FPGA chip using fomu-flash,
+                          resets aftwards
            verbose     -- prints output of Yosys, Nextpnr and icepack
         '''
         self.platform = Firestarter()
@@ -101,6 +102,8 @@ class Host:
         self.platform.build(core.Dispatcher(self.platform),
                             do_program=do_program, 
                             verbose=verbose)
+        if do_program:
+            self.platform.reset()
 
     def reset(self):
         'restart the FPGA by flipping the reset pin'

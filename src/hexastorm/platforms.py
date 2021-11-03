@@ -47,10 +47,6 @@ class Firestarter(LatticeICE40Platform):
                   'y': 76.2,
                   'z': 1600}
     laser_axis = 'y'
-    laser_var = {'RPM': 2000, 'SPINUP_TIME': 1.5, 'STABLE_TIME': 1.125,
-                 'FACETS': 4, 'CRYSTAL_HZ': 50E6, 'LASER_HZ': 100E3,
-                 'END%': 0.7, 'START%': 0.35, 'SINGLE_LINE': False,
-                 'SINGLE_FACET': False, 'DIRECTION': 0}
     motors = len(stepspermm.keys())
     memdepth = 256
     device = 'iCE40UP5K'
@@ -60,6 +56,11 @@ class Firestarter(LatticeICE40Platform):
     # 0: 48MHz, 1: 24MHz, 2: 12MHz, 3: 6MHz.
     clks = {0: 48, 1: 24, 2: 12, 3: 6}
     hfosc_div = 2
+    laser_var = {'RPM': 2000, 'SPINUP_TIME': 1.5, 'STABLE_TIME': 1.125,
+                 'FACETS': 4, 'CRYSTAL_HZ': clks[hfosc_div]*1E6, 'LASER_HZ': 100E3,
+                 'END%': 0.7, 'START%': 0.35, 'SINGLE_LINE': False,
+                 'SINGLE_FACET': False, 'DIRECTION': 0}
+    
     # default_clk = "clk13"
     # clock_domain_generator = FirestarterDomainGenerator
     resources = [
