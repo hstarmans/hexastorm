@@ -194,7 +194,9 @@ class MoveTest(Base):
         '''
         self.host.enable_steppers = False
         while True:
-            print((yield from self.host.pinstate))
+            dct = (yield from self.host.get_state())
+            print(f"[x, y, z] is [{dct['x']}, " +
+                  f"{dct['y']}, {dct['z']}]")
             sleep(1)
 
     @executor
@@ -202,11 +204,9 @@ class MoveTest(Base):
         '''test if motors are enabled and execution is enabled/disabled
            via communication with FPGA'''
         self.host.enable_steppers = True
-        self.assertEqual((yield from self.host.execution), True)
         print('Check manually if axes are blocked and require force to move.')
         input()
         self.host.enable_steppers = False
-        self.assertEqual((yield from self.host.execution), False)
 
     @executor
     def multiplemove(self, decimals=1):
@@ -215,10 +215,11 @@ class MoveTest(Base):
         decimals -- number of decimals
         '''
         motors = Firestarter.motors
-        dist = np.array([2, 2, 0])
+        dist = np.array([2, 2, 2])
         pos = (yield from self.host.position)
         for direction in [-1, 1]:
-            self.assertEqual((yield from self.host.error), False)
+            self.assertEqual((yield from self.host.get_state())['error'],
+                             False)
             self.host.enable_steppers = True
             yield from self.host.gotopoint(position=dist*direction,
                                            speed=[1]*motors,
