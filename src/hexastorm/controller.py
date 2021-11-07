@@ -8,7 +8,7 @@ import hexastorm.lasers as lasers
 from hexastorm.constants import (INSTRUCTIONS, COMMANDS, MOTORFREQ, STATE,
                                  MOVE_TICKS, WORD_BYTES, bit_shift,
                                  COMMAND_BYTES)
-from hexastorm.platforms import Firestarter, TestPlatform
+from hexastorm.platforms import Firestarter
 import hexastorm.core as core
 
 
@@ -26,7 +26,7 @@ def executor(func):
 
 class Memfull(Exception):
     '''SRAM memory of FPGA, i.e. FIFO, is full
-        
+
     Exception is raised when the memory is full.
     '''
     pass
@@ -55,7 +55,7 @@ class Host:
             self.spi.mode = 1
             self.spi.max_speed_hz = round(1E6)
             self.chip_select = LED(8)
-            # programs TMC2130 
+            # programs TMC2130
             self.init_steppers()
             # stepper motor enable pin
             self.enable = LED(self.platform.enable_pin)
@@ -70,8 +70,8 @@ class Host:
         self._position = np.array([0]*self.platform.motors, dtype='float64')
 
     def init_steppers(self):
-        '''configure TMC2130 steppers via SPI 
-        
+        '''configure TMC2130 steppers via SPI
+
         Uses teemuatflut CPP library with custom python wrapper
             https://github.com/hstarmans/TMCStepper
         '''
@@ -92,7 +92,7 @@ class Host:
 
     def build(self, do_program=True, verbose=True):
         '''builds the FPGA code using nMigen, Yosys, Nextpnr and icepack
-           
+
            do_program  -- flashes the FPGA chip using fomu-flash,
                           resets aftwards
            verbose     -- prints output of Yosys, Nextpnr and icepack
@@ -100,7 +100,7 @@ class Host:
         self.platform = Firestarter()
         self.platform.laser_var = self.laser_params
         self.platform.build(core.Dispatcher(self.platform),
-                            do_program=do_program, 
+                            do_program=do_program,
                             verbose=verbose)
         if do_program:
             self.platform.reset()
@@ -121,7 +121,7 @@ class Host:
 
     def get_state(self, data=None):
         '''retrieves the state of the FPGA as dictionary
-        
+
         data: string to decode to state, if None data is retrieved from FPGA
 
         dictionary with the following keys
@@ -137,14 +137,14 @@ class Host:
         if data is None:
             command = [COMMANDS.READ] + WORD_BYTES*[0]
             data = (yield from self.send_command(command))
-        
+
         dct = {}
         # 9 bytes are returned
         # the state is decoded from byte 7 and 8, i.e. -2 and -1
         bits = "{:08b}".format(data[-1])
         dct['parsing'] = int(bits[STATE.PARSING])
         dct['error'] = int(bits[STATE.ERROR])
-        dct ['mem_full'] = int(bits[STATE.FULL])
+        dct['mem_full'] = int(bits[STATE.FULL])
         bits = "{:08b}".format(data[-2])
         mapping = list(self.platform.stepspermm.keys())
         for i in range(self.platform.motors):
@@ -156,11 +156,11 @@ class Host:
     @property
     def position(self):
         '''retrieves position from FPGA and updates internal position
-        
-           position is stored on the FPGA in steps 
+
+           position is stored on the FPGA in steps
            position is stored on object in mm
 
-           return positions as np.array in mm 
+           return positions as np.array in mm
                   order is [x, y, z]
         '''
         command = [COMMANDS.POSITION] + WORD_BYTES*[0]
@@ -178,7 +178,7 @@ class Host:
 
         The enable pin for the stepper drivers is not routed via FPGA.
         The enable pin is low if enabled.
-        Enabled stepper motor do not move if the FPGA is 
+        Enabled stepper motor do not move if the FPGA is
         not parsing instructions from FIFO.
         '''
         from gpiozero import LED
@@ -200,10 +200,10 @@ class Host:
 
     @property
     def laser_current(self):
-        '''return laser current per channel as integer 
-        
+        '''return laser current per channel as integer
+
         both channels have the same current
-        integer ranges from 0 to 255 where 
+        integer ranges from 0 to 255 where
         0 no current and 255 full driver current
         '''
         return self.bus.read_byte_data(self.platform.ic_address, 0)
@@ -211,9 +211,9 @@ class Host:
     @laser_current.setter
     def laser_current(self, val):
         '''sets maximum laser current of laser driver per channel
-         
+
         This does not turn on or off the laser. Laser is set
-        to this current if pulsed. Laser current is set by enabling 
+        to this current if pulsed. Laser current is set by enabling
         one or two channels. Second by setting a value between
         0-255 at the laser driver chip for the laser current. The laser
         needs a minimum current.
@@ -224,7 +224,7 @@ class Host:
 
     def set_parsing(self, value):
         '''enables or disables parsing of FIFO by FPGA
-        
+
         val -- True   FPGA parses FIFO
                False  FPGA does not parse FIFO
         '''
@@ -248,7 +248,10 @@ class Host:
         yield from self.gotopoint(position=dist.tolist(),
                                   speed=speed, absolute=False)
 
-    #TODO: this is strange, should it be here?
+    # TODO: this is strange, should it be here
+    #       on the board steps and count is stored
+    #       you could move this to spline_coefficients
+    #       the flow over method of a certain bit comes from beagleg
     def steps_to_count(self, steps):
         '''compute count for a given number of steps
 
@@ -265,11 +268,11 @@ class Host:
     def gotopoint(self, position, speed=None, absolute=True):
         '''move machine to position or with displacement at constant speed
 
-        Axes are moved independently to simplify the calculation. 
+        Axes are moved independently to simplify the calculation.
         The move is carried out as a first order spline, i.e. only velocity.
 
         position     -- list with position or displacement in mm for each motor
-        speed        -- list with speed in mm/s, if None default speeds are used
+        speed        -- list with speed in mm/s, if None default speeds used
         absolute     -- True if position, False if displacement
         '''
         assert len(position) == self.platform.motors
@@ -277,83 +280,54 @@ class Host:
             assert len(speed) == self.platform.motors
         else:
             speed = [10]*self.platform.motors
-        speed = np.array(speed)
+        # conversions to steps / count give rounding errors
+        # minimized by setting speed to integer
+        speed = np.array(speed).round()
         displacement = np.array(position)
         if absolute:
             displacement -= self._position
-            
-        for idx, _ in enumerate(position):
-            if displacement[idx] == 0:
+
+        homeswitches_hit = [0]*len(position)
+        for idx, disp in enumerate(displacement):
+            if disp == 0:
                 # no displacement, go to next axis
                 continue
             # Time needed for move
             #    unit oscillator ticks (times motor position is updated)
-            time = np.array([np.absolute((displacement/speed))[idx]])
+            time = disp/speed[idx]
+
             ticks_total = (time*MOTORFREQ).round().astype(int)
-            # select axis
-            select = np.zeros_like(position, dtype='int64')
-            select[idx] = 1
             # mm -> steps
-            steps_per_mm = np.array(list(self.platform.stepspermm.values()))
-            displacement_steps = \
-            (displacement * steps_per_mm * select).round().astype('int64')
-            
+            steps_per_mm = list(self.platform.stepspermm.values())[idx]
+            speed_steps = int(round((speed[idx] * steps_per_mm)))
+            speed_cnts = int(self.steps_to_count(speed_steps)/MOTORFREQ)
+            velocity = np.zeros_like(speed).astype('int64')
+            velocity[idx] = speed_cnts
 
-            def move_ticks(move_ticks):
-                '''number of ticks in next segment
-                
-                If there are 15 ticks left and max per
-                segment is 10 ticks, next segment is 
-                10 ticks and 5 remain
-                '''
-                if move_ticks >= MOVE_TICKS:
-                    return MOVE_TICKS
-                else:
-                    return move_ticks
-            move_ticks_v = np.vectorize(move_ticks)
-
-            ticks_remain = np.copy(ticks_total)
-            total_moved_steps = np.zeros_like(displacement_steps,
-                                              dtype='int64')
             if self.test:
                 (yield from self.set_parsing(True))
             else:
                 self.set_parsing(True)
-            while ticks_remain.sum() > 0:
-                ticks_move = move_ticks_v(ticks_remain)
-                ticks_remain -= ticks_move
-                # steps -> count
-                # this introduces a rounding error
-                move_steps = (displacement_steps*(ticks_move/ticks_total)).round().astype('int64')
-                total_moved_steps += move_steps
-                # due to rounding we could move more than wanted
-                # correct if this is the case
-                cond = (np.absolute(total_moved_steps)
-                        > np.absolute(displacement_steps))
-                if cond.any():
-                    move_steps[cond] -= (
-                     (total_moved_steps-displacement_steps)[cond])
-                    total_moved_steps[cond] = displacement_steps[cond]
-                # prepare arguments for spline move
-                cnts = self.steps_to_count(move_steps)
-                velocity = (cnts/ticks_move).round().astype('int64')
+            while ticks_total > 0:
+                ticks_move = \
+                     MOVE_TICKS if ticks_total >= MOVE_TICKS else ticks_total
                 # execute move and retrieve if switch is hit
-                homeswitches_hit = (yield from self.spline_move(int(ticks_move),
-                                                                velocity.tolist()))
+                switches_hit = (yield from self.spline_move(int(ticks_move),
+                                                            velocity.tolist()))
+                ticks_total -= ticks_move
                 # move is aborted if home switch is hit and
                 # velocity is negative
-                cond = (homeswitches_hit == 0) | (velocity > 0)
-                if displacement_steps[cond].sum() == 0:
+                cond = (switches_hit[idx] == 0) & (speed[idx] < 0)
+                if cond:
                     break
-            # update internally stored position
-            dist_mm = total_moved_steps / steps_per_mm
-            self._position += dist_mm
-            # set position to zero if home switch hit
-            self._position[homeswitches_hit == 1] = 0
+        # update internally stored position
+        self._position += displacement
+        # set position to zero if home switch hit
+        self._position[homeswitches_hit == 1] = 0
 
     def send_command(self, command, blocking=False):
         '''writes command to spi port
-        
+
         blocking  --  try again if memory is full
         returns bytearray with length equal to data sent
         '''
@@ -415,10 +389,10 @@ class Host:
         returns array with zero if home switch is hit
         '''
         platform = self.platform
-        # maximum allowable ticks is move ticks, 
+        # maximum allowable ticks is move ticks,
         # otherwise counters overflow in FPGA
         assert ticks <= MOVE_TICKS
-        assert len(coefficients)%platform.motors == 0
+        assert len(coefficients) % platform.motors == 0
 
         write_byte = COMMANDS.WRITE.to_bytes(1, 'big')
         move_byte = INSTRUCTIONS.MOVE.to_bytes(1, 'big')
@@ -447,10 +421,10 @@ class Host:
 
     def spi_exchange_data(self, data):
         '''writes data to peripheral
-        
+
         data  --  command followed with word
                      list of multiple bytes
-             
+
         returns bytearray with length equal to data sent
         '''
         assert len(data) == (COMMAND_BYTES + WORD_BYTES)

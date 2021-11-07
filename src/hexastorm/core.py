@@ -404,7 +404,7 @@ class TestParser(SPIGatewareTestCase):
     def test_writemoveinstruction(self):
         'write move instruction and verify FIFO is no longer empty'
         self.assertEqual((yield self.dut.empty), 1)
-        coeff = [randint(0,10)]*self.platform.motors*self.platform.poldegree
+        coeff = [randint(0, 10)]*self.platform.motors*self.platform.poldegree
         yield from self.host.spline_move(1000, coeff)
         words = wordsinmove(self.platform)
         yield from self.instruction_ready(words)
@@ -414,7 +414,7 @@ class TestParser(SPIGatewareTestCase):
         '''set pins to random state'''
         def test_pins():
             def get_pinstate():
-                keys =  list(self.platform.stepspermm.keys())
+                keys = list(self.platform.stepspermm.keys())
                 keys += ['photodiode_trigger', 'synchronized']
                 state = (yield from self.host.get_state())
                 return {k: state[k] for k in keys}
@@ -606,8 +606,7 @@ class TestDispatcher(SPIGatewareTestCase):
     def test_movereceipt(self, ticks=10_000):
         'verify move instruction send over with spline move'
         platform = self.platform
-
-        coeff = [randint(0,10)]*platform.motors*platform.poldegree
+        coeff = [randint(0, 10)]*platform.motors*platform.poldegree
         yield from self.host.spline_move(ticks, coeff)
         # wait till instruction is received
         while (yield self.dut.pol.start) == 0:
@@ -625,7 +624,7 @@ class TestDispatcher(SPIGatewareTestCase):
         while (yield self.dut.pol.busy):
             yield
         for motor in range(platform.motors):
-            cnt = 0 
+            cnt = 0
             for degree in range(platform.poldegree):
                 indx = motor*platform.poldegree+degree
                 cnt += ticks**(degree+1)*coeff[indx]

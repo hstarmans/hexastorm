@@ -57,17 +57,18 @@ class Firestarter(LatticeICE40Platform):
     clks = {0: 48, 1: 24, 2: 12, 3: 6}
     hfosc_div = 2
     laser_var = {'RPM': 2000, 'SPINUP_TIME': 1.5, 'STABLE_TIME': 1.125,
-                 'FACETS': 4, 'CRYSTAL_HZ': clks[hfosc_div]*1E6, 'LASER_HZ': 100E3,
-                 'END%': 0.7, 'START%': 0.35, 'SINGLE_LINE': False,
-                 'SINGLE_FACET': False, 'DIRECTION': 0}
-    
+                 'FACETS': 4, 'CRYSTAL_HZ': clks[hfosc_div]*1E6,
+                 'LASER_HZ': 100E3, 'END%': 0.7, 'START%': 0.35,
+                 'SINGLE_LINE': False, 'SINGLE_FACET': False,
+                 'DIRECTION': 0}
+
     # default_clk = "clk13"
     # clock_domain_generator = FirestarterDomainGenerator
     resources = [
                Resource("clk13", 0, Pins("35", dir="i"),
                         Clock(13.56e6),
                         Attrs(GLOBAL=True, IO_STANDARD="SB_LVCMOS")),
-               # TODO: replace with RGB led resource 
+               # TODO: replace with RGB led resource
                *LEDResources(pins='39 40 41', invert=True,
                              attrs=Attrs(IO_STANDARD="SB_LVCMOS")),
                # NOTE: there is a proper resource in nmigen_boards
@@ -101,7 +102,8 @@ class Firestarter(LatticeICE40Platform):
     def build(self, *args, **kwargs):
         base = 'apio raw "which '
         os.environ['YOSYS'] = subprocess.getoutput(base+'yosys"')
-        os.environ['NEXTPNR_ICE40'] = subprocess.getoutput(base+'nextpnr-ice40"')
+        os.environ['NEXTPNR_ICE40'] = \
+            subprocess.getoutput(base+'nextpnr-ice40"')
         os.environ['ICEPACK'] = subprocess.getoutput(base+'icepack"')
         super().build(*args, **kwargs)
 
