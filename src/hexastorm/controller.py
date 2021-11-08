@@ -282,7 +282,7 @@ class Host:
             speed = [10]*self.platform.motors
         # conversions to steps / count give rounding errors
         # minimized by setting speed to integer
-        speed = np.array(speed).round()
+        speed = np.absolute(np.array(speed).round())
         displacement = np.array(position)
         if absolute:
             displacement -= self._position
@@ -294,15 +294,14 @@ class Host:
                 continue
             # Time needed for move
             #    unit oscillator ticks (times motor position is updated)
-            time = abs(disp)/speed[idx]
-
+            time = abs(disp/speed[idx])
             ticks_total = (time*MOTORFREQ).round().astype(int)
             # mm -> steps
             steps_per_mm = list(self.platform.stepspermm.values())[idx]
-            speed_steps = int(round((speed[idx] * steps_per_mm)))
+            speed_steps = int(round(speed[idx] * steps_per_mm*np.sign(disp)))
             speed_cnts = int(self.steps_to_count(speed_steps)/MOTORFREQ)
             velocity = np.zeros_like(speed).astype('int64')
-            velocity[idx] = speed_cnts*np.sign(disp)
+            velocity[idx] = speed_cnts
 
             if self.test:
                 (yield from self.set_parsing(True))
@@ -312,8 +311,6 @@ class Host:
                 ticks_move = \
                      MOVE_TICKS if ticks_total >= MOVE_TICKS else ticks_total
                 # execute move and retrieve if switch is hit
-                print(ticks_move)
-                print(velocity)
                 switches_hit = (yield from self.spline_move(int(ticks_move),
                                                             velocity.tolist()))
                 ticks_total -= ticks_move
@@ -395,7 +392,6 @@ class Host:
         # otherwise counters overflow in FPGA
         assert ticks <= MOVE_TICKS
         assert len(coefficients) % platform.motors == 0
-
         write_byte = COMMANDS.WRITE.to_bytes(1, 'big')
         move_byte = INSTRUCTIONS.MOVE.to_bytes(1, 'big')
         commands = [write_byte +

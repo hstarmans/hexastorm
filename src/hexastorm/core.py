@@ -583,7 +583,7 @@ class TestDispatcher(SPIGatewareTestCase):
         self.assertEqual((yield from self.host.get_state())['error'], True)
 
     @sync_test_case
-    def test_ptpmove(self, steps=[800], ticks=[30_000]):
+    def test_ptpmove(self, steps=[-800], ticks=[30_000]):
         '''verify point to point move
 
         If ticks is longer than tick limit the moves is broken up.
@@ -593,12 +593,14 @@ class TestDispatcher(SPIGatewareTestCase):
         steps = steps*self.platform.motors
         mm = np.array(steps)/np.array(list(self.platform.stepspermm.values()))
         time = np.array(ticks)/MOTORFREQ
-        speed = mm/time
+        speed = np.absolute(mm/time)
         yield from self.host.gotopoint(mm.tolist(),
                                        speed.tolist())
         yield from self.wait_complete()
         calculated = deepcopy(self.host._position)
-        assert calculated.sum() > 0
+        #print(calculated)
+        #input()
+        #assert calculated.sum() > 0
         assert_array_equal((yield from self.host.position),
                            calculated)
 
@@ -606,7 +608,7 @@ class TestDispatcher(SPIGatewareTestCase):
     def test_movereceipt(self, ticks=10_000):
         'verify move instruction send over with spline move'
         platform = self.platform
-        coeff = [randint(0, 10)]*platform.motors*platform.poldegree
+        coeff = [randint(-10, 10)]*platform.motors*platform.poldegree
         yield from self.host.spline_move(ticks, coeff)
         # wait till instruction is received
         while (yield self.dut.pol.start) == 0:
