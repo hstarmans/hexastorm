@@ -215,8 +215,8 @@ class MoveTest(Base):
         decimals -- number of decimals
         '''
         motors = Firestarter.motors
-        dist = np.array([2, 2, 2])
-        pos = (yield from self.host.position)
+        dist = np.array([2, 0, 0])
+        startpos = (yield from self.host.position)
         for direction in [-1, 1]:
             self.assertEqual((yield from self.host.get_state())['error'],
                              False)
@@ -224,11 +224,10 @@ class MoveTest(Base):
             yield from self.host.gotopoint(position=dist*direction,
                                            speed=[1]*motors,
                                            absolute=False)
-            assert_array_almost_equal(
-                (yield from self.host.position),
-                (dist*direction)+pos,
-                decimal=decimals)
-            pos = (yield from self.host.position)
+        assert_array_almost_equal(
+            (yield from self.host.position),
+            startpos,
+            decimal=decimals)
         self.host.enable_steppers = False
 
 
