@@ -47,7 +47,7 @@ class StaticTest(Base):
         host.maxtrials = 10
         for _ in range(host.platform.memdepth):
             coeff = ((host.steps_to_count(steps.astype('int64'))/MOVE_TICKS)
-                    .round().astype('int64'))
+                     .round().astype('int64'))
             try:
                 yield from host.spline_move(MOVE_TICKS,
                                             coeff.tolist())
@@ -136,7 +136,6 @@ class LaserheadTest(Base):
         yield from host.enable_comp(synchronize=False)
         self.assertEqual((yield from host.get_state())['error'],
                          False)
-
 
     @executor
     def test_move(self, dist=10, stepsperline=1, timeout=3):
