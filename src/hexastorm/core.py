@@ -583,7 +583,7 @@ class TestDispatcher(SPIGatewareTestCase):
         self.assertEqual((yield from self.host.get_state())['error'], True)
 
     @sync_test_case
-    def test_ptpmove(self, steps=[-800], ticks=[30_000]):
+    def test_ptpmove(self, steps=[800], ticks=[30_000]):
         '''verify point to point move
 
         If ticks is longer than tick limit the moves is broken up.
@@ -591,18 +591,22 @@ class TestDispatcher(SPIGatewareTestCase):
         also test blocking behaviour.
         '''
         steps = steps*self.platform.motors
-        mm = np.array(steps)/np.array(list(self.platform.stepspermm.values()))
+        mm = -np.array(steps)/np.array(list(self.platform.stepspermm.values()))
         time = np.array(ticks)/MOTORFREQ
         speed = np.absolute(mm/time)
         yield from self.host.gotopoint(mm.tolist(),
                                        speed.tolist())
         yield from self.wait_complete()
         calculated = deepcopy(self.host._position)
-        #print(calculated)
-        #input()
-        #assert calculated.sum() > 0
+        # assert_array_equal((yield from self.host.position),
+        #                    calculated, decimals=1)
+        mm = np.array(steps)/np.array(list(self.platform.stepspermm.values()))
+        yield from self.host.gotopoint(mm.tolist(),
+                                       speed.tolist(), absolute=False)
+        yield from self.wait_complete()
+
         assert_array_equal((yield from self.host.position),
-                           calculated)
+                           np.zeros(self.platform.motors))
 
     @sync_test_case
     def test_movereceipt(self, ticks=10_000):
