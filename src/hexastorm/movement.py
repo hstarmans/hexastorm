@@ -22,6 +22,7 @@ class Polynomal(Elaboratable):
         a step is sent to the motor.
         In every tick the step can at most increase
         with one count.
+        Counters are set to zero before segment starts.
 
         This code requires a lot of LUT, only order 2 is supported on UP5k
         It is assumed that the user can completely determine
@@ -67,8 +68,6 @@ class Polynomal(Elaboratable):
         self.ticklimit = Signal(MOVE_TICKS.bit_length())
         # output
         self.busy = Signal()
-        self.totalsteps = Array(Signal(signed(self.max_steps.bit_length()+1))
-                                for _ in range(self.motors))
         self.dir = Array(Signal() for _ in range(self.motors))
         self.step = Array(Signal() for _ in range(self.motors))
 
@@ -94,10 +93,9 @@ class Polynomal(Elaboratable):
 
         # steps
         for motor in range(self.motors):
-            m.d.comb += [self.step[motor].eq(
-                         cntrs[motor*self.order][self.bit_shift]),
-                         self.totalsteps[motor].eq(
-                         cntrs[motor*self.order] >> (self.bit_shift+1))]
+            m.d.comb += self.step[motor].eq(
+                cntrs[motor*self.order][self.bit_shift])
+
         # directions
         counter_d = Array(Signal(signed(max_bits+1))
                           for _ in range(self.motors))
@@ -112,17 +110,19 @@ class Polynomal(Elaboratable):
         with m.FSM(reset='RESET', name='polynomen'):
             with m.State('RESET'):
                 m.next = 'WAIT_START'
+
                 m.d.sync += self.busy.eq(0)
             with m.State('WAIT_START'):
-                m.d.sync += self.busy.eq(0)
                 with m.If(self.start):
                     for motor in range(self.motors):
                         coef0 = motor*self.order
                         for degree in range(self.order):
                             m.d.sync += cntrs[coef0+degree].eq(0)
-                        m.d.sync += counter_d[motor].eq(0)
+                        m.d.sync += counter_d[motor].eq(0)                    
                     m.d.sync += self.busy.eq(1)
                     m.next = 'RUNNING'
+                with m.Else():
+                    m.d.sync += self.busy.eq(0)
             with m.State('RUNNING'):
                 with m.If((ticks < self.ticklimit) & (cntr >= self.divider-1)):
                     m.d.sync += [ticks.eq(ticks+1),
@@ -203,9 +203,8 @@ class TestPolynomal(LunaGatewareTestCase):
             a = round(self.host.steps_to_count(steps)/limit)
             yield self.dut.ticklimit.eq(limit)
             yield from self.send_coefficients(a, 0, 0)
-            while (yield self.dut.busy):
-                yield
-            self.assertEqual((yield self.dut.totalsteps[0]), steps)
+            step_count = (yield from self.count_steps(0))
+            self.assertEqual(step_count, steps)
         yield from limittest(MOVE_TICKS, 4000)
         yield from limittest(10_000, 1)
 
@@ -236,11 +235,8 @@ class TestPolynomal(LunaGatewareTestCase):
         coeffs = [0]*3
         coeffs[self.dut.order-1] = coef
         yield from self.send_coefficients(*coeffs)
-        while (yield self.dut.busy):
-            yield
-        dut_count = (yield self.dut.cntrs[0])
-        self.assertEqual(dut_count >> self.dut.bit_shift, steps*2)
-        self.assertEqual((yield self.dut.totalsteps[0]), steps)
+        step_count = (yield from self.count_steps(0))
+        self.assertEqual(step_count, steps)
 
     @sync_test_case
     def test_move(self):
@@ -257,9 +253,6 @@ class TestPolynomal(LunaGatewareTestCase):
             yield from self.send_coefficients(a, 0, 0)
             count = (yield from self.count_steps(0))
             self.assertEqual(count, steps)
-            dut_count = (yield self.dut.cntrs[0])
-            self.assertEqual(dut_count >> self.dut.bit_shift, steps*2)
-            self.assertEqual((yield self.dut.totalsteps[0]), steps)
         steps = round(0.4*MOVE_TICKS)
         yield from do_move(steps)
         yield from do_move(-steps)

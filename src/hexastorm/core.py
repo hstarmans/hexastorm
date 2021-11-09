@@ -242,9 +242,7 @@ class Dispatcher(Elaboratable):
         m.submodules.laserhead = laserhead
         if platform.name == 'Test':
             self.laserhead = laserhead
-        # position adder
-        busy_d = Signal()
-        m.d.sync += busy_d.eq(polynomal.busy)
+        # polynomal iterates over count
         coeffcnt = Signal(range(len(polynomal.coeff)+1))
         # connect laserhead
         m.d.comb += [
@@ -281,13 +279,27 @@ class Dispatcher(Elaboratable):
                          parser.pinstate[idx].eq(stepper.limit)]
         m.d.comb += (parser.pinstate[len(steppers):].
                      eq(Cat(laserhead.photodiode_t, laserhead.synchronized)))
+        # update position
+        stepper_d = Array(Signal() for _ in range(len(steppers)))
+        for idx, stepper in enumerate(steppers):
+            pos = parser.position[idx]
+            m.d.sync += stepper_d[idx].eq(stepper.step)
+            with m.If(stepper.limit == 1):
+                m.d.sync += parser.position[idx].eq(0)
+            # assuming position is signed
+            pos_max = pow(2, pos.width-1)-2
+            with m.Elif((pos > pos_max) | (pos < -pos_max)):
+                m.d.sync += parser.position[idx].eq(0)
+            with m.Elif((stepper.step == 1) & (stepper_d[idx] == 0)):
+                with m.If(stepper.dir):
+                    m.d.sync += pos.eq(pos+1)
+                with m.Else():
+                    m.d.sync += pos.eq(pos-1)
+        
         # Busy signal
         m.d.comb += busy.eq(polynomal.busy | laserhead.process_lines)
         # connect spi
         m.d.comb += parser.spi.connect(spi)
-        with m.If((busy_d == 1) & (busy == 0)):
-            for idx, position in enumerate(parser.position):
-                m.d.sync += position.eq(position+polynomal.totalsteps[idx])
         # pins you can write to
         pins = Cat(lasers, enable_prism, laserhead.synchronize)
         with m.FSM(reset='RESET', name='dispatcher'):
@@ -583,7 +595,7 @@ class TestDispatcher(SPIGatewareTestCase):
         self.assertEqual((yield from self.host.get_state())['error'], True)
 
     @sync_test_case
-    def test_ptpmove(self, steps=[800], ticks=[30_000]):
+    def test_ptpmove(self, steps=[80], ticks=[20_000]):
         '''verify point to point move
 
         If ticks is longer than tick limit the moves is broken up.
@@ -598,13 +610,12 @@ class TestDispatcher(SPIGatewareTestCase):
                                        speed.tolist())
         yield from self.wait_complete()
         calculated = deepcopy(self.host._position)
-        # assert_array_equal((yield from self.host.position),
-        #                    calculated, decimals=1)
+        assert_array_equal((yield from self.host.position),
+                           calculated)
         mm = np.array(steps)/np.array(list(self.platform.stepspermm.values()))
         yield from self.host.gotopoint(mm.tolist(),
                                        speed.tolist(), absolute=False)
         yield from self.wait_complete()
-
         assert_array_equal((yield from self.host.position),
                            np.zeros(self.platform.motors))
 
