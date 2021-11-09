@@ -117,8 +117,10 @@ class Polynomal(Elaboratable):
                 with m.If(self.start):
                     for motor in range(self.motors):
                         coef0 = motor*self.order
-                        m.d.sync += [cntrs[coef0].eq(cntrs[coef0][:self.bit_shift]),
-                                     counter_d[motor].eq(counter_d[motor][:self.bit_shift])]    
+                        step_bit = self.bit_shift+1
+                        m.d.sync += [
+                            cntrs[coef0].eq(cntrs[coef0][:step_bit]),
+                            counter_d[motor].eq(counter_d[motor][:step_bit])]
                         for degree in range(1, self.order):
                             m.d.sync += cntrs[coef0+degree].eq(0)
                     m.d.sync += self.busy.eq(1)

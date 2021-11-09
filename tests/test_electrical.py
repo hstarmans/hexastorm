@@ -16,7 +16,7 @@ from hexastorm.constants import (WORD_BYTES, COMMANDS, MOVE_TICKS,
 
 class Base(unittest.TestCase):
     @classmethod
-    def setUpClass(cls, flash=False):
+    def setUpClass(cls, flash=True):
         cls.host = Host()
         if flash:
             cls.host.build()
@@ -214,15 +214,23 @@ class MoveTest(Base):
         decimals -- number of decimals
         '''
         motors = Firestarter.motors
-        dist = np.array([2, 0, 0])
-        startpos = (yield from self.host.position)
+        dist = np.array([1, 1, 1])
+        from copy import deepcopy
+        startpos = deepcopy((yield from self.host.position))
         for direction in [-1, 1]:
             self.assertEqual((yield from self.host.get_state())['error'],
                              False)
             self.host.enable_steppers = True
-            yield from self.host.gotopoint(position=dist*direction,
+            current = deepcopy((yield from self.host.position))
+            disp = dist*direction
+            yield from self.host.gotopoint(position=disp,
                                            speed=[1]*motors,
                                            absolute=False)
+            sleep(3)
+            assert_array_almost_equal(
+                    (yield from self.host.position),
+                    current+disp,
+                    decimal=decimals)
         assert_array_almost_equal(
             (yield from self.host.position),
             startpos,
