@@ -1,6 +1,5 @@
 import unittest
 from random import randint
-from copy import deepcopy
 
 import numpy as np
 from numpy.testing import assert_array_equal, assert_array_almost_equal
@@ -287,6 +286,7 @@ class Dispatcher(Elaboratable):
             with m.If(stepper.limit == 1):
                 m.d.sync += parser.position[idx].eq(0)
             # assuming position is signed
+            # TODO: this might eat LUT, optimize
             pos_max = pow(2, pos.width-1)-2
             with m.Elif((pos > pos_max) | (pos < -pos_max)):
                 m.d.sync += parser.position[idx].eq(0)
@@ -295,7 +295,7 @@ class Dispatcher(Elaboratable):
                     m.d.sync += pos.eq(pos+1)
                 with m.Else():
                     m.d.sync += pos.eq(pos-1)
-        
+
         # Busy signal
         m.d.comb += busy.eq(polynomal.busy | laserhead.process_lines)
         # connect spi
