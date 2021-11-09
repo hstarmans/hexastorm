@@ -22,7 +22,8 @@ class Polynomal(Elaboratable):
         a step is sent to the motor.
         In every tick the step can at most increase
         with one count.
-        Counters are set to zero before segment starts.
+        Non step part of base Counters are kept after segment.
+        Higher orders, velocity etc are removed.
 
         This code requires a lot of LUT, only order 2 is supported on UP5k
         It is assumed that the user can completely determine
@@ -116,9 +117,10 @@ class Polynomal(Elaboratable):
                 with m.If(self.start):
                     for motor in range(self.motors):
                         coef0 = motor*self.order
-                        for degree in range(self.order):
+                        m.d.sync += [cntrs[coef0].eq(cntrs[coef0][:self.bit_shift]),
+                                     counter_d[motor].eq(counter_d[motor][:self.bit_shift])]    
+                        for degree in range(1, self.order):
                             m.d.sync += cntrs[coef0+degree].eq(0)
-                        m.d.sync += counter_d[motor].eq(0)                    
                     m.d.sync += self.busy.eq(1)
                     m.next = 'RUNNING'
                 with m.Else():

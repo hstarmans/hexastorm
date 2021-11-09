@@ -3,7 +3,7 @@ from random import randint
 from copy import deepcopy
 
 import numpy as np
-from numpy.testing import assert_array_equal
+from numpy.testing import assert_array_equal, assert_array_almost_equal
 from nmigen import Signal, Elaboratable, signed, Cat
 from nmigen import Module
 from nmigen.hdl.mem import Array
@@ -595,7 +595,7 @@ class TestDispatcher(SPIGatewareTestCase):
         self.assertEqual((yield from self.host.get_state())['error'], True)
 
     @sync_test_case
-    def test_ptpmove(self, steps=[80], ticks=[20_000]):
+    def test_ptpmove(self, steps=[800], ticks=30_000):
         '''verify point to point move
 
         If ticks is longer than tick limit the moves is broken up.
@@ -604,20 +604,23 @@ class TestDispatcher(SPIGatewareTestCase):
         '''
         steps = steps*self.platform.motors
         mm = -np.array(steps)/np.array(list(self.platform.stepspermm.values()))
-        time = np.array(ticks)/MOTORFREQ
+        time = ticks/MOTORFREQ
         speed = np.absolute(mm/time)
         yield from self.host.gotopoint(mm.tolist(),
                                        speed.tolist())
         yield from self.wait_complete()
-        calculated = deepcopy(self.host._position)
-        assert_array_equal((yield from self.host.position),
-                           calculated)
-        mm = np.array(steps)/np.array(list(self.platform.stepspermm.values()))
+        # if 76.3 steps per mm then 1/76.3 = 0.013 is max resolution
+        assert_array_almost_equal((yield from self.host.position),
+                                  mm,
+                                  decimal=1)
+        # TODO: they are not symmetric! if start with mm does not work
+        mm = -mm
         yield from self.host.gotopoint(mm.tolist(),
                                        speed.tolist(), absolute=False)
         yield from self.wait_complete()
-        assert_array_equal((yield from self.host.position),
-                           np.zeros(self.platform.motors))
+        assert_array_almost_equal((yield from self.host.position),
+                                  np.zeros(self.platform.motors),
+                                  decimal=1)
 
     @sync_test_case
     def test_movereceipt(self, ticks=10_000):

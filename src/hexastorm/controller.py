@@ -282,7 +282,7 @@ class Host:
             speed = [10]*self.platform.motors
         # conversions to steps / count give rounding errors
         # minimized by setting speed to integer
-        speed = np.absolute(np.array(speed).round())
+        speed = np.absolute(np.array(speed))
         displacement = np.array(position)
         if absolute:
             displacement -= self._position
