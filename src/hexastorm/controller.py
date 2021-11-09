@@ -103,7 +103,7 @@ class Host:
                             do_program=do_program,
                             verbose=verbose)
         if do_program:
-            self.platform.reset()
+            self.reset()
 
     def reset(self):
         'restart the FPGA by flipping the reset pin'
@@ -299,7 +299,7 @@ class Host:
             # mm -> steps
             steps_per_mm = list(self.platform.stepspermm.values())[idx]
             speed_steps = int(round(speed[idx] * steps_per_mm*np.sign(disp)))
-            speed_cnts = int(self.steps_to_count(speed_steps)/MOTORFREQ)
+            speed_cnts = self.steps_to_count(speed_steps)/MOTORFREQ
             velocity = np.zeros_like(speed).astype('int64')
             velocity[idx] = speed_cnts
 

@@ -100,11 +100,17 @@ class Firestarter(LatticeICE40Platform):
     connectors = []
 
     def build(self, *args, **kwargs):
-        base = 'apio raw "which '
-        os.environ['YOSYS'] = subprocess.getoutput(base+'yosys"')
+        apio = False
+        if apio:
+            base = 'apio raw "which '
+            end = '"'
+        else:
+            base = 'which yowasp-'
+            end = ''
+        os.environ['YOSYS'] = subprocess.getoutput(base+'yosys'+end)
         os.environ['NEXTPNR_ICE40'] = \
-            subprocess.getoutput(base+'nextpnr-ice40"')
-        os.environ['ICEPACK'] = subprocess.getoutput(base+'icepack"')
+            subprocess.getoutput(base+'nextpnr-ice40'+end)
+        os.environ['ICEPACK'] = subprocess.getoutput(base+'icepack'+end)
         super().build(*args, **kwargs)
 
     def toolchain_program(self, products, name, **kwargs):
