@@ -16,7 +16,7 @@ from hexastorm.constants import (WORD_BYTES, COMMANDS, MOVE_TICKS,
 
 class Base(unittest.TestCase):
     @classmethod
-    def setUpClass(cls, flash=True):
+    def setUpClass(cls, flash=False):
         cls.host = Host()
         if flash:
             cls.host.build()
@@ -35,32 +35,21 @@ class StaticTest(Base):
         by ensuring that the position changes as excepted.
         '''
         host = self.host
-        yield from self.host.set_parsing(False)
-        self.host.enable_steppers = False
-        # with false check if this results in block
-        # you can do a blink test to verify move
-        motors = Firestarter.motors
-        mm = np.array([1]*motors)
-        steps = mm * np.array(list(host.platform.stepspermm.values()))
-        limit = floor(host.platform.memdepth /
-                      wordsinmove(host.platform))
+        yield from host.set_parsing(False)
+        host.enable_steppers = False
         host.maxtrials = 10
         for _ in range(host.platform.memdepth):
-            coeff = ((host.steps_to_count(steps.astype('int64'))/MOVE_TICKS)
-                     .round().astype('int64'))
+            coeff = [3]*host.platform.motors
             try:
                 yield from host.spline_move(MOVE_TICKS,
-                                            coeff.tolist())
+                                            coeff)
             except Memfull:
                 pass
         host.maxtrials = 1E5
-        self.assertEqual((yield from self.host.get_state())['mem_full'], True)
-        yield from self.host.set_parsing(True)
-        sleep(1)
-        self.assertEqual((yield from self.host.get_state())['mem_full'], False)
-        assert_array_almost_equal((yield from self.host.position),
-                                  mm*limit)
-        self.assertEqual((yield from self.host.error), False)
+        self.assertEqual((yield from host.get_state())['mem_full'], True)
+        yield from host.set_parsing(True)
+        self.assertEqual((yield from host.get_state())['mem_full'], False)
+        self.assertEqual((yield from host.get_state())['error'], False)
         self.host.reset()
 
     @executor

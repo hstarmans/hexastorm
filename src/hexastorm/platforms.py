@@ -100,7 +100,7 @@ class Firestarter(LatticeICE40Platform):
     connectors = []
 
     def build(self, *args, **kwargs):
-        apio = False
+        apio = True
         if apio:
             base = 'apio raw "which '
             end = '"'
