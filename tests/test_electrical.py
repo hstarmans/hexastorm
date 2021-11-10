@@ -1,6 +1,6 @@
 import unittest
 from time import sleep
-from math import floor
+from copy import deepcopy
 import os
 from pathlib import Path
 
@@ -140,6 +140,7 @@ class LaserheadTest(Base):
                           host.platform.stepspermm[host.platform.laser_axis]
                           * stepsperline)
         yield from host.enable_comp(synchronize=True)
+        startpos = deepcopy((yield from host.position))
         host.enable_steppers = True
         print(f'Wait for synchronization, {timeout} seconds')
         sleep(timeout)
@@ -147,7 +148,14 @@ class LaserheadTest(Base):
         for direction in [0, 1]:
             for _ in range(numblines):
                 yield from host.writeline(line, stepsperline, direction)
-            print('switching direction')
+            print(f'Wait for move to complete, {timeout} seconds')
+            sleep(timeout)
+            indx = list(host.platform.stepspermm.keys())
+            indx = indx.index(host.platform.laser_axis)
+            # assume y axis is 1
+            startpos[indx] += dist if direction else -dist
+            assert_array_almost_equal((yield from host.position),
+                                      startpos, decimal=1)
         yield from host.writeline([])
         print(f'Wait for stopline to execute, {timeout} seconds')
         sleep(timeout)
