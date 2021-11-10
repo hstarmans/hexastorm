@@ -285,6 +285,8 @@ class Host:
         speed = np.absolute(np.array(speed))
         displacement = np.array(position)
         if absolute:
+            # TODO: position machine should be in line with self._position
+            #       which to pick?
             displacement -= self._position
 
         homeswitches_hit = [0]*len(position)
@@ -316,7 +318,7 @@ class Host:
                 ticks_total -= ticks_move
                 # move is aborted if home switch is hit and
                 # velocity is negative
-                cond = (switches_hit[idx] == 0) & (speed[idx] < 0)
+                cond = (switches_hit[idx] == 1) & (np.sign(disp) < 0)
                 if cond:
                     break
         # update internally stored position

@@ -238,27 +238,31 @@ class MoveTest(Base):
 class PrintTest(Base):
     @executor
     def test_dose(self, lines=10, thickness=75, stepsperline=[0.25, 0.5, 1]):
-        '''prints lines at different steps per line, aka speed or dosage
+        '''prints lines with thickness in microns for a range of stagespeeds
+           in steps per line
 
-        For each dosage, measure in steps per line, several lines are made.
-        The lines are multiple scanline wide as they otherwise would be
-        hard to see.
-        Scanline per dosage is;  lines*thickness
+        For stage speed in mm/s, lines are made of thickness micrometers
+        wide.
 
-        number of lines -- number of lines
-        thickness       -- lines
-        stepsperline    -- list with steps per line
+        number of lines -- number of lines made per dosage
+        thickness       -- line thickness in number of scanlines
+        stepsperline    -- stagespeed of optical head in steps per line
         '''
         host = self.host
-        scanstepsmm = host.platform.stepspermm[host.platform.laser_axis]
-        # laser diameter estimated to be 60 microns
-        if max(stepsperline)*(1/scanstepsmm) > 0.03:
-            # checks Nyquist criterion
-            print('Recommended is to use a stepsize of \
-                   half the laser diameter')
 
-        # enable scanhead
-        yield from self.host.enable_comp(synchronize=True)
+        laser_var = host.platform.laser_var
+
+        lines_per_second = laser_var['RPM']/60*laser_var['FACETS']
+        stepspermm = host.platform.stepspermm[host.platform.laser_axis]
+
+        stagespeeds = lines_per_second/(stepspermm*np.array(stepsperline))
+
+        print(f"Stagepeeds are {stagespeeds.round(2)} mm/s")
+
+        # laser diameter estimated to be 60 microns
+        if max(stepsperline)*(1/stepspermm) > 0.03:
+            # checks Nyquist criterion
+            raise Exception('Lines too far apart, exposure is not uniform.')
         LANEWIDTH = 9.2
         self.host.enable_steppers = True
         print('Homing X and Y axis')
