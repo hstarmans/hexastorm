@@ -112,7 +112,7 @@ class Interpolator:
         var = paramsfunc(platform)
         dct2 = {
             # angle [radians], for a definition see figure 7
-            # https://reprap.org/wiki/Transparent_Polygon_Scanning
+            # https://reprap.org/wiki/Open_hardware_fast_high_resolution_LASER
             'tiltangle': np.radians(90),
             'LASER_HZ': var['LASER_HZ'],   # Hz
             # rotation frequency polygon [Hz]
@@ -166,28 +166,33 @@ class Interpolator:
                 params[item] = round(params[item])
         return params
 
-    def pstoarray(self, url):
+    def pstoarray(self, url, pixelsize=0.3527777778):
         '''converts postscript file to an array
 
-        url  --  path to postcript file
+        url       --  path to postcript file
+        pixelsize -- pixel size in mm
         '''
-        params = self.params
-        # post script pixel in mm
-        psppoint = 0.3527777778
-        tmp = Image.open(url)
-        x_size, y_size = [i*psppoint for i in tmp.size]
+        params = self.params 
+        img = Image.open(url)
+        y_size, x_size = [i*pixelsize for i in img.size]
         if x_size > params['pltfxsize'] or y_size > params['pltfysize']:
             raise Exception('Object does not fit on platform')
+        print(f"Sample size is {x_size:.2f} mm by {y_size:.2f} mm")
         # NOTE: this is only a crude approximation
         params['samplexsize'] = x_size
         params['sampleysize'] = y_size
         self.params = params
-        scale = psppoint/params['samplegridsize']
-        tmp.load(scale=scale)
-        tmp_array = np.array(tmp.convert('1'))
-        if tmp_array.max() == 0:
+        scale = pixelsize/params['samplegridsize']
+        # post script procedure
+        try:
+            img.load(scale=scale)
+        except TypeError:
+        # other files e.g. png
+            img = img.resize([round(x*scale)for x in img.size])
+        img_array = np.array(img.convert('1'))
+        if img_array.max() == 0:
             raise Exception("Postscript file is empty")
-        return tmp_array
+        return img_array
 
     def lanewidth(self):
         params = self.params
@@ -214,7 +219,7 @@ class Interpolator:
         facets_inlane = math.ceil(params['rotationfrequency']
                                   * params['FACETS'] *
                                   (params['sampleysize']/params['stagespeed']))
-        print("The lanewidth is {}".format(lanewidth))
+        print("The lanewidth is {:.2f} mm".format(lanewidth))
         print("The facets in lane are {}".format(facets_inlane))
         # single facet
 
@@ -284,27 +289,28 @@ class Interpolator:
         ids = np.concatenate(([xpos], [ypos]))
         return ids
 
-    def patternfile(self, url, test=False):
+    def patternfile(self, url, pixelsize=0.3527777778, test=False):
         '''returns the pattern file as numpy array
 
-        mostly a convenience function which wraps other functions in this class
+        Converts image at URL to pattern for laser scanner
+
         url   -- path to postscript file
         test  -- runs a sampling test, whether laser
                  frequency sufficient to provide accurate sample
         '''
         from time import time
         ctime = time()
-        layerarr = self.pstoarray(url).astype(np.uint8)
+        layerarr = self.pstoarray(url, pixelsize).astype(np.uint8)
         if test:
             img = Image.fromarray(layerarr.astype(np.uint8)*255)
             img.save(os.path.join(self.debug_folder, 'nyquistcheck.png'))
         if test:
             layerarr = np.ones_like(layerarr)
-        print("Retrieved layerarr")
-        print(f"Elapsed {time()-ctime:.2f}")
+        print("Retrieved image")
+        print(f"Elapsed {time()-ctime:.2f} seconds")
         ids = self.createcoordinates()
-        print("Retrieved coordinates")
-        print(f"Elapsed {time()-ctime:.2f}")
+        print("Created coordinates for interpolation")
+        print(f"Elapsed {time()-ctime:.2f} seconds")
         if test:
             ptrn = ndimage.map_coordinates(input=layerarr, output=np.uint8,
                                            coordinates=ids, order=1,
@@ -314,9 +320,9 @@ class Interpolator:
                                            coordinates=ids, order=1,
                                            mode="constant", cval=0)
         print("Completed interpolation")
-        print(f"Elapsed {time()-ctime:.2f}")
+        print(f"Elapsed {time()-ctime:.2f} seconds")
         if ptrn.min() < 0 or ptrn.max() > 1:
-            raise Exception('This is not a bit list.')
+            raise Exception('This is not a bit list')
         ptrn = np.logical_not(ptrn)
         ptrn = np.repeat(ptrn, self.params['downsamplefactor'])
         ptrn = np.packbits(ptrn)
@@ -391,7 +397,6 @@ if __name__ == "__main__":
     url = os.path.join(dir_path, 'test-patterns', 'line-resolution-test.ps')
     ptrn = interpolator.patternfile(url)
     interpolator.writebin(ptrn, "test.bin")
-    interpolator.pstoarray(url)
     pat = interpolator.readbin("test.bin")
     print(f"The shape of the pattern is {pat.shape}")
     interpolator.plotptrn(ptrn=pat, step=1)
