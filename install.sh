@@ -29,3 +29,4 @@ cd TMCStepper
 poetry run python3 setup.py install
 cd ..
 sudo rm -r TMCStepper
+sudo apt install ghostscript 
