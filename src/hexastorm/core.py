@@ -269,7 +269,8 @@ class Dispatcher(Elaboratable):
                 direction = polynomal.dir[idx]
             # connect the motor in which the laserhead moves to laser core
             else:
-                step = ((polynomal.step[idx] | laserhead.step)
+                step = ((polynomal.step[idx] & polynomal.busy) |
+                        (laserhead.process_lines & laserhead.step)
                         & ((stepper.limit == 0) | stepper.dir))
                 direction = ((polynomal.dir[idx] & polynomal.busy)
                              | (laserhead.dir & laserhead.process_lines))

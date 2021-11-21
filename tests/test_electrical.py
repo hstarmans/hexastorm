@@ -67,7 +67,7 @@ class StaticTest(Base):
 
 
 class LaserheadTest(Base):
-    def test_setlaserpower(self, power=100):
+    def test_setlaserpower(self, power=130):
         '''test if laser power can be set
 
         sets value on digipot via I2C
@@ -237,7 +237,7 @@ class MoveTest(Base):
 
 class PrintTest(Base):
     @executor
-    def test_dose(self, lines=10, thickness=75, stepsperline=[0.25, 0.5, 1]):
+    def test_dose(self, lines=10, thickness=100, stepsperline=[0.25, 0.5, 1]):
         '''prints lines with thickness in microns for a range of stagespeeds
            in steps per line
 
@@ -263,12 +263,12 @@ class PrintTest(Base):
         if max(stepsperline)*(1/stepspermm) > 0.03:
             # checks Nyquist criterion
             raise Exception('Lines too far apart, exposure is not uniform.')
-        LANEWIDTH = 9.2
+        LANEWIDTH = 5.4
         self.host.enable_steppers = True
         print('Homing X and Y axis')
         yield from host.home_axes([1, 1, 0])
         print("Move to start")
-        yield from host.gotopoint([70, 0, 0],
+        yield from host.gotopoint([70, 8, 0],
                                   absolute=False)
         bitsinline = host.laser_params['BITSINSCANLINE']
         laser_on = [1]*bitsinline
@@ -312,13 +312,108 @@ class PrintTest(Base):
         print("Finished exposure")
 
     @executor
-    def test_print(self, abortlane=1000):
-        '''the LDgraphy test pattern is printed
+    def test_moveoffset(self, offsets=[5.3, 5.3, 5.4, 5.4], stepsperline=1,
+                        thickness=300):
+        '''prints lanes with different parallel offset
 
-        abortlane -- lane after which to abort to speed up
+        offsets -- offset parallel to scanline between lanes
+        stepsperline -- number of steps between scanlines
+        thickness -- thickness in number of scanines
         '''
         host = self.host
-        host.init_steppers()
+        host.enable_steppers = True
+        print('Homing X and Y axis')
+        yield from host.home_axes([1, 1, 0])
+        print("Move to start")
+        yield from host.gotopoint([70, 0, 0],
+                                  absolute=False)
+        bitsinline = host.laser_params['BITSINSCANLINE']
+        laser_on = [1]*bitsinline
+        # you don't move first lane so offset is 0
+        offsets = [0] + offsets
+        for lane, offset in enumerate(offsets):
+            if lane > 0:
+                print("Moving in x-direction for next lane")
+                yield from host.gotopoint([offset, 0, 0],
+                                          absolute=False)
+            if lane % 2 == 1:
+                direction = 0
+                print("Start exposing forward lane")
+            else:
+                direction = 1
+                print("Start exposing back lane")
+            for _ in range(thickness):
+                yield from host.writeline(bitlst=laser_on,
+                                          stepsperline=stepsperline,
+                                          direction=direction)
+            # send stopline
+            yield from host.writeline([])
+        # disable scanhead
+        sleep(3)
+        print('Waiting for stopline to execute')
+        yield from self.host.enable_comp(synchronize=False)
+        self.host.enable_steppers = False
+        print("Finished exposure")
+
+    @executor
+    def test_lineoffset(self, offset_lines=[1, 1, 1, 1, 1], stepsperline=1,
+                        thickness=600):
+        '''prints lanes with different offset in lines
+
+        it is assumed lanes do not overlap due to backlash
+        see https://en.wikipedia.org/wiki/Backlash_(engineering)
+
+        stepsperline -- number of steps between scanlines
+        thickness -- thickness in number of scanines
+        '''
+        host = self.host
+        host.enable_steppers = True
+        print('Homing X and Y axis')
+        yield from host.home_axes([1, 1, 0])
+        print("Move to start")
+        yield from host.gotopoint([70, 0, 0],
+                                  absolute=False)
+        bitsinline = host.laser_params['BITSINSCANLINE']
+        laser_on = [1]*bitsinline
+        laser_off = [0]*bitsinline
+        # first offset zero by definition
+        offset_lines += [0] + offset_lines
+        offset = 5.4
+        for lane, offset_line in enumerate(offset_lines):
+            if lane > 0:
+                print("Moving in x-direction for next lane")
+                yield from host.gotopoint([offset, 0, 0],
+                                          absolute=False)
+            if lane % 2 == 1:
+                direction = 0
+                print("Start exposing forward lane")
+            else:
+                direction = 1
+                print("Start exposing back lane")
+            if lane > 0:
+                for _ in range(offset_line):
+                    yield from host.writeline(bitlst=laser_off,
+                                              stepsperline=stepsperline,
+                                              direction=direction)
+            for _ in range(thickness):
+                yield from host.writeline(bitlst=laser_on,
+                                          stepsperline=stepsperline,
+                                          direction=direction)
+            # send stopline
+            yield from host.writeline([])
+        # disable scanhead
+        sleep(3)
+        print('Waiting for stopline to execute')
+        yield from self.host.enable_comp(synchronize=False)
+        self.host.enable_steppers = False
+        print("Finished exposure")
+
+    @executor
+    def test_print(self):
+        '''the LDgraphy test pattern is printed
+        '''
+        host = self.host
+        host.enable_steppers = True
         dir_path = os.path.dirname(interpolator.__file__)
         FILENAME = Path(dir_path, 'debug', 'test.bin')
         # it assumed the binary is already created and
@@ -326,16 +421,18 @@ class PrintTest(Base):
         if not os.path.isfile(FILENAME):
             raise Exception('File not found')
         FACETS_IN_LANE = 5377
-        LANEWIDTH = 5.562357895217289
+        LANEWIDTH = 5.45
         bitsinline = host.laser_params['BITSINSCANLINE']
         stepsperline = 1
         # z is not homed as it should be already in
         # position so laser is in focus
         self.host.enable_steppers = True
+        self.host.laser_current = 130  # assuming 1 channel
         print('Homing X and Y axis')
         yield from host.home_axes([1, 1, 0])
         print("Move to start")
-        yield from host.gotopoint([70, 0, 0],
+        # scaning direction offset is needed to prevent lock with home
+        yield from host.gotopoint([70, 5, 0],
                                   absolute=False)
         print("Reading binary")
         data = np.fromfile(FILENAME, dtype=np.uint8)
@@ -344,10 +441,6 @@ class PrintTest(Base):
         yield from self.host.enable_comp(synchronize=True)
         bits_inlane = FACETS_IN_LANE * bitsinline
         for lane in range(0, round(len(bits)/bits_inlane)):
-            if lane > abortlane:
-                print('Aborting')
-                yield from host.writeline([])
-                break
             print(f"Exposing lane {lane}")
             if lane > 0:
                 print("Moving in x-direction for next lane")

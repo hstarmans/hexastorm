@@ -172,7 +172,7 @@ class Interpolator:
         url       --  path to postcript file
         pixelsize -- pixel size in mm
         '''
-        params = self.params 
+        params = self.params
         img = Image.open(url)
         y_size, x_size = [i*pixelsize for i in img.size]
         if x_size > params['pltfxsize'] or y_size > params['pltfysize']:
@@ -187,7 +187,7 @@ class Interpolator:
         try:
             img.load(scale=scale)
         except TypeError:
-        # other files e.g. png
+            # other files e.g. png
             img = img.resize([round(x*scale)for x in img.size])
         img_array = np.array(img.convert('1'))
         if img_array.max() == 0:
@@ -394,6 +394,7 @@ if __name__ == "__main__":
     # camera)
     interpolator = Interpolator()
     dir_path = os.path.dirname(os.path.realpath(__file__))
+    # hexastorm.png pixelsize 0.035
     url = os.path.join(dir_path, 'test-patterns', 'line-resolution-test.ps')
     ptrn = interpolator.patternfile(url)
     interpolator.writebin(ptrn, "test.bin")

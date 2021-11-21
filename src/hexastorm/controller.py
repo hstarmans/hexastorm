@@ -218,8 +218,9 @@ class Host:
         0-255 at the laser driver chip for the laser current. The laser
         needs a minimum current.
         '''
-        if val < 0 or val > 255:
-            raise Exception('Invalid laser current')
+        if val < 0 or val > 150:
+            # 255 kills laser at single channel
+            raise Exception('Invalid or too high laser current')
         self.bus.write_byte_data(self.platform.ic_address, 0, val)
 
     def set_parsing(self, value):

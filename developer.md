@@ -163,6 +163,13 @@ can establish precedence between instructions.
 A user can read but not write directly to pins. This ensures that the host
 can establish precedence between instructions.
 
+## Alignment procedure
+
+You start by printing several patterns with a different dosage.
+The correct dosage and the actual size of a lane is determined.
+You then try several offsets between lanes to find the optimum.
+The backlash is ignored for the moment. 
+
 ## Detailed description
 Look at the test folders and individually tests on how to use the code. The whole scanhead can be simulated virtually. 
 As such, a scanner is not needed.
