@@ -1,7 +1,10 @@
 import math
 import os
-from numba import jit, typed, types
+from io import BytesIO
+import xml.etree.ElementTree
 
+from cairosvg.surface import PNGSurface
+from numba import jit, typed, types
 import numpy as np
 from scipy import ndimage
 from PIL import Image
@@ -88,8 +91,8 @@ class Interpolator:
     The objects supports different tilt angles which are required by
     the original light engine described in US10114289B2.
     '''
-    def __init__(self):
-        self.params = self.parameters()
+    def __init__(self, stepsperline=1):
+        self.params = self.parameters(stepsperline)
         self.params = self.downsample(self.params)
         currentdir = os.path.dirname(os.path.realpath(__file__))
         self.debug_folder = os.path.join(currentdir, 'debug')
@@ -166,32 +169,64 @@ class Interpolator:
                 params[item] = round(params[item])
         return params
 
-    def pstoarray(self, url, pixelsize=0.3527777778):
-        '''converts postscript file to an array
+
+    def svgtopil(self, svg):
+        '''converts SVG snippets to a PIL Image
+        '''
+        tree = xml.etree.ElementTree.parse(svg)
+        root = tree.getroot()
+        dpi = 25.4/self.params['samplegridsize']
+        bytestring = BytesIO(PNGSurface.convert(bytestring=xml.etree.ElementTree.tostring(root), dpi=dpi))
+        img = Image.open(bytestring)
+        # convert PIL Image to 8 bit black and white PIL Image
+        img = img.convert('L') # PIL doesn't support 2 bit images
+        return img
+
+    def pstopil(self, url, pixelsize=0.3527777778):
+        '''converts postscript file to a PIL Image
 
         url       --  path to postcript file
         pixelsize -- pixel size in mm
         '''
-        params = self.params
         img = Image.open(url)
-        y_size, x_size = [i*pixelsize for i in img.size]
-        if x_size > params['pltfxsize'] or y_size > params['pltfysize']:
+        scale = pixelsize/self.params['samplegridsize']
+        img.load(scale=scale)
+        return img
+
+    def imgtopil(self, url, pixelsize):
+        '''converts image to a PIL image
+        
+        url       --  path to PIL image, e.g. PNG or BMP
+        '''
+        img = Image.open(url)
+        scale = pixelsize/self.params['samplegridsize']
+        img = img.resize([round(x*scale)for x in img.size])
+        return img
+
+    def piltoarray(self, pil):
+        '''converts PIL Image to numpy array
+
+        Method also changes the settings of on the objects
+        and clips to the area of interest
+
+        pil
+        '''
+        img_array = np.array(pil.convert('1'))
+        if img_array.max() == 0:
+            raise Exception("Image is empty")
+        # clip image
+        nonzero_col = np.argwhere(img_array.sum(axis=0)).squeeze()
+        nonzero_row = np.argwhere(img_array.sum(axis=1)).squeeze()
+        img_array = img_array[nonzero_row[0]:nonzero_row[-1], 
+                              nonzero_col[0]:nonzero_col[-1]]   
+        # update settings
+        x_size, y_size = [i*self.params['samplegridsize'] for i in img_array.shape]
+        if x_size > self.params['pltfxsize'] or y_size > self.params['pltfysize']:
             raise Exception('Object does not fit on platform')
         print(f"Sample size is {x_size:.2f} mm by {y_size:.2f} mm")
         # NOTE: this is only a crude approximation
-        params['samplexsize'] = x_size
-        params['sampleysize'] = y_size
-        self.params = params
-        scale = pixelsize/params['samplegridsize']
-        # post script procedure
-        try:
-            img.load(scale=scale)
-        except TypeError:
-            # other files e.g. png
-            img = img.resize([round(x*scale)for x in img.size])
-        img_array = np.array(img.convert('1'))
-        if img_array.max() == 0:
-            raise Exception("Postscript file is empty")
+        self.params['samplexsize'] = x_size
+        self.params['sampleysize'] = y_size
         return img_array
 
     def lanewidth(self):
@@ -289,18 +324,28 @@ class Interpolator:
         ids = np.concatenate(([xpos], [ypos]))
         return ids
 
-    def patternfile(self, url, pixelsize=0.3527777778, test=False):
+    def patternfile(self, url, pixelsize=0.3527777778, test=False,
+                    positiveresist=True):
         '''returns the pattern file as numpy array
 
         Converts image at URL to pattern for laser scanner
 
-        url   -- path to postscript file
+        url   -- path to file
+        positivistresist -- False if negative resist
         test  -- runs a sampling test, whether laser
                  frequency sufficient to provide accurate sample
         '''
         from time import time
         ctime = time()
-        layerarr = self.pstoarray(url, pixelsize).astype(np.uint8)
+        _, extension = os.path.splitext(url)
+        if extension == '.svg':
+            pil = self.svgtopil(url)
+            pil.save('debug.png')
+        elif extension == '.ps':
+            pil = self.pstopil(url)
+        else:
+            pil = self.imgtopil(url, pixelsize)
+        layerarr = self.piltoarray(pil).astype(np.uint8)
         if test:
             img = Image.fromarray(layerarr.astype(np.uint8)*255)
             img.save(os.path.join(self.debug_folder, 'nyquistcheck.png'))
@@ -323,7 +368,8 @@ class Interpolator:
         print(f"Elapsed {time()-ctime:.2f} seconds")
         if ptrn.min() < 0 or ptrn.max() > 1:
             raise Exception('This is not a bit list')
-        ptrn = np.logical_not(ptrn)
+        if not positiveresist:
+            ptrn = np.logical_not(ptrn)
         ptrn = np.repeat(ptrn, self.params['downsamplefactor'])
         ptrn = np.packbits(ptrn)
         return ptrn
@@ -392,7 +438,9 @@ if __name__ == "__main__":
     # parallelization could not be used, as I am
     # still on 32 bit (this is easier with
     # camera)
-    interpolator = Interpolator()
+    # PCB stepsperline 0.5, single channel, current 130
+    # Fotholithopaper stepsperline 0.5, single channel, current 130
+    interpolator = Interpolator(stepsperline=0.5)
     dir_path = os.path.dirname(os.path.realpath(__file__))
     # hexastorm.png pixelsize 0.035
     url = os.path.join(dir_path, 'test-patterns', 'line-resolution-test.ps')
