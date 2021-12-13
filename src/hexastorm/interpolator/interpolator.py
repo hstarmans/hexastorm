@@ -382,12 +382,15 @@ class Interpolator:
         ptrn = np.packbits(ptrn)
         return ptrn
 
-    def plotptrn(self, ptrn, step, filename='plot'):
-        '''function can be used to plot a pattern file.
-        Result is returned as numpy array and stored
+    def plotptrn(self, ptrn_df, step, filename='plot'):
+        '''function can be used to plot a dataframe with laser data
+        
+        The settings are retrieved from the dataframe 
+        and the plotted as an image.
+        The result is returned as numpy array and stored
         in script folder under filename.
 
-        ptrnfile --  result of the functions patternfiles
+        ptrn_df  --  dataframe with laserdata
         step     --  pixel step, can be used to lower the number
                      of pixels that are plotted
         filename --  filename to store pattern
@@ -397,6 +400,10 @@ class Interpolator:
         #        this will not be there in
         #        reality as the laser spot is larger
         ids = self.createcoordinates()
+
+        for k in self.params.keys():
+            self.params[k] = ptrn_df[k][0]
+
         ids = np.repeat(ids, self.params['downsamplefactor'], axis=1)
         # repeat adden
         xcor = ids[0, ::step]
@@ -408,7 +415,7 @@ class Interpolator:
             print('YCOR negative, weird!')
             ycor += abs(ycor.min())
         arr = np.zeros((xcor.max() + 1, ycor.max() + 1), dtype=np.uint8)
-        ptrn = np.unpackbits(ptrn)
+        ptrn = np.unpackbits(ptrn_df['data'])
         # TODO: this is strange, added as quick fix on may 9 2021
         ptrn = ptrn[:len(xcor)]
         arr[xcor[:], ycor[:]] = ptrn[0: len(ptrn): step]
@@ -447,7 +454,7 @@ if __name__ == "__main__":
     # still on 32 bit (this is easier with
     # camera)
     # PCB stepsperline 0.5, single channel, current 130
-    # Fotholithopaper stepsperline 0.5, single channel, current 130
+    # photholithopaper stepsperline 0.5, single channel, current 130
     interpolator = Interpolator(stepsperline=0.5)
     dir_path = os.path.dirname(os.path.realpath(__file__))
     # hexastorm.png pixelsize 0.035
@@ -455,6 +462,4 @@ if __name__ == "__main__":
     ptrn = interpolator.patternfile(url)
     interpolator.writebin(ptrn, "test.parquet")
     df = interpolator.readbin("test.parquet")
-    print(df['data'].shape)
-    print(f"The shape of the pattern is {df['data'].shape}")
-    interpolator.plotptrn(ptrn=df['data'], step=1)
+    interpolator.plotptrn(df, step=1)
