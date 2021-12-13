@@ -3,6 +3,7 @@ import os
 from io import BytesIO
 import xml.etree.ElementTree
 
+import pandas as pd
 from cairosvg.surface import PNGSurface
 from numba import jit, typed, types
 import numpy as np
@@ -45,7 +46,7 @@ def fxpos(pixel, params, xstart=0):
                 your xstart is larger than 0 as the displacement
                 can be negative
     '''
-    line_pixel = params['startpixel'] + pixel % params['BITSINSCANLINE']
+    line_pixel = params['startpixel'] + pixel % params['bitsinscanline']
     xpos = (np.sin(params['tiltangle']) *
             displacement(line_pixel, params)
             + xstart)
@@ -63,7 +64,7 @@ def fypos(pixel, params, direction, ystart=0):
     direction  -- True is +, False is -
     ystart     -- the y-start position [mm]
     '''
-    line_pixel = params['startpixel'] + pixel % params['BITSINSCANLINE']
+    line_pixel = params['startpixel'] + pixel % params['bitsinscanline']
     if direction:
         ypos = -np.cos(params['tiltangle'])*displacement(line_pixel,
                                                          params)
@@ -139,6 +140,8 @@ class Interpolator:
             #       you then again sample the sampled image
             # height/width of the sample gridth [mm]
             'samplegridsize': 0.015,
+            'stepsperline': stepsperline,
+            'facetsperlane': 0, # set when file is parsed
             # mm/s
             'stagespeed': ((stepsperline /
                             platform.stepspermm[platform.laser_axis])
@@ -147,13 +150,16 @@ class Interpolator:
             'startpixel': ((var['BITSINSCANLINE']/(var['END%']-var['START%']))
                            * var['START%']),
             # number of pixels in a line [new 785]
-            'BITSINSCANLINE': var['BITSINSCANLINE'],
+            'bitsinscanline': var['BITSINSCANLINE'],
             # each can be repeated, to speed up interpolation
             # this was used on the beaglebone
             'downsamplefactor': 1
         }
         for k, v in dct2.items():
             dct[k] = v
+        dct['lanewidth'] = ((fxpos(0, dct) -
+                fxpos(dct['bitsinscanline']-1, dct))
+                * dct['samplegridsize'])
         return dct
 
     def downsample(self, params):
@@ -163,7 +169,7 @@ class Interpolator:
         the frequency
         '''
         if params['downsamplefactor'] > 1:
-            lst = ['LASER_HZ', 'startpixel', 'BITSINSCANLINE']
+            lst = ['LASER_HZ', 'startpixel', 'bitsinscanline']
             for item in lst:
                 params[item] /= params['downsamplefactor']
                 params[item] = round(params[item])
@@ -232,7 +238,7 @@ class Interpolator:
     def lanewidth(self):
         params = self.params
         lanewidth = ((fxpos(0, params) -
-                     fxpos(params['BITSINSCANLINE']-1, params))
+                     fxpos(params['bitsinscanline']-1, params))
                      * params['samplegridsize'])
         return lanewidth
 
@@ -246,7 +252,7 @@ class Interpolator:
         if not params['sampleysize'] or not params['samplexsize']:
             raise Exception('Sampleysize or samplexsize are set to zero.')
         if (fxpos(0, params) < 0 or
-                fxpos(params['BITSINSCANLINE']-1, params) > 0):
+                fxpos(params['bitsinscanline']-1, params) > 0):
             raise Exception('Line seems ill positioned')
         # mm
         lanewidth = self.lanewidth()
@@ -254,6 +260,8 @@ class Interpolator:
         facets_inlane = math.ceil(params['rotationfrequency']
                                   * params['FACETS'] *
                                   (params['sampleysize']/params['stagespeed']))
+        self.params['facetsinlane']=facets_inlane
+        self.params['lanewidth']=lanewidth
         print("The lanewidth is {:.2f} mm".format(lanewidth))
         print("The facets in lane are {}".format(facets_inlane))
         # single facet
@@ -265,15 +273,15 @@ class Interpolator:
             return fypos(x, params, y)
         vfxpos = np.vectorize(fxpos2, otypes=[np.int16])
         vfypos = np.vectorize(fypos2, otypes=[np.int16])
-        xstart = abs(fxpos2(int(params['BITSINSCANLINE'])-1)
+        xstart = abs(fxpos2(int(params['bitsinscanline'])-1)
                      * params['samplegridsize'])
-        xpos_facet = vfxpos(range(0, int(params['BITSINSCANLINE'])), xstart)
+        xpos_facet = vfxpos(range(0, int(params['bitsinscanline'])), xstart)
         # TODO: you still don't account for ystart
         # (you are moving in the y, so if you start
         #  at the edge you miss something)
-        ypos_forwardfacet = vfypos(range(0, int(params['BITSINSCANLINE'])),
+        ypos_forwardfacet = vfypos(range(0, int(params['bitsinscanline'])),
                                    True)
-        ypos_backwardfacet = vfypos(range(0, int(params['BITSINSCANLINE'])),
+        ypos_backwardfacet = vfypos(range(0, int(params['bitsinscanline'])),
                                     False)
         # single lane
         xpos_lane = np.tile(xpos_facet, facets_inlane)
@@ -281,8 +289,8 @@ class Interpolator:
 
         @jit(nopython=True, parallel=False)
         def loop0(params):
-            forward = np.zeros((facets_inlane, int(params['BITSINSCANLINE'])))
-            backward = np.zeros((facets_inlane, int(params['BITSINSCANLINE'])))
+            forward = np.zeros((facets_inlane, int(params['bitsinscanline'])))
+            backward = np.zeros((facets_inlane, int(params['bitsinscanline'])))
             for facet in range(0, facets_inlane):
                 ypos_forwardtemp = ypos_forwardfacet + round(
                     (facet*params['stagespeed']) /
@@ -306,7 +314,7 @@ class Interpolator:
             xpos = np.zeros((lanes, len(xpos_lane)), dtype=np.int16)
             ypos = np.zeros((lanes, len(ypos_forwardlane)), dtype=np.int16)
             xwidthlane = (fxpos(0, params) -
-                          fxpos(params['BITSINSCANLINE']-1, params))
+                          fxpos(params['bitsinscanline']-1, params))
             for lane in range(0, lanes):
                 # TODO: why is this force needed?
                 xoffset = int(round(lane * xwidthlane))
@@ -409,25 +417,25 @@ class Interpolator:
         img.save(os.path.join(self.debug_folder, filename + '.png'))
         return img
 
-    def readbin(self, name='test.bin'):
-        '''reads a binary file
+    def readbin(self, name='test.parquet'):
+        '''reads a parquet data file
 
         name  -- name of binary file with laser information
         '''
-        pat = np.fromfile(os.path.join(self.debug_folder, name),
-                          dtype=np.uint8)
-        return pat
+        df = pd.read_parquet(os.path.join(self.debug_folder, name))
+        return df
 
-    def writebin(self, pixeldata, filename='test.bin'):
-        '''writes pixeldata to a binary file
+    def writebin(self, pixeldata, filename='test.parquet'):
+        '''writes pixeldata with parameters to parquet file
 
         pixeldata  -- must have uneven length
         filename   -- name of binary file to write laserinformation to
         '''
-        pixeldata = pixeldata.astype(np.uint8)
+        df = pd.DataFrame(data=pixeldata, columns=['data'])
+        df = df.join(pd.DataFrame([dict(self.params)]))
         if not os.path.exists(self.debug_folder):
             os.makedirs(self.debug_folder)
-        pixeldata.tofile(os.path.join(self.debug_folder, filename))
+        df.to_parquet(os.path.join(self.debug_folder, filename))
 
 
 if __name__ == "__main__":
@@ -443,9 +451,10 @@ if __name__ == "__main__":
     interpolator = Interpolator(stepsperline=0.5)
     dir_path = os.path.dirname(os.path.realpath(__file__))
     # hexastorm.png pixelsize 0.035
-    url = os.path.join(dir_path, 'test-patterns', 'line-resolution-test.ps')
+    url = os.path.join(dir_path, 'test-patterns', 'front.svg')
     ptrn = interpolator.patternfile(url)
-    interpolator.writebin(ptrn, "test.bin")
-    pat = interpolator.readbin("test.bin")
-    print(f"The shape of the pattern is {pat.shape}")
-    interpolator.plotptrn(ptrn=pat, step=1)
+    interpolator.writebin(ptrn, "test.parquet")
+    df = interpolator.readbin("test.parquet")
+    print(df['data'].shape)
+    print(f"The shape of the pattern is {df['data'].shape}")
+    interpolator.plotptrn(ptrn=df['data'], step=1)
