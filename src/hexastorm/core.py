@@ -654,21 +654,28 @@ class TestDispatcher(SPIGatewareTestCase):
                 cnt)
 
     @sync_test_case
-    def test_writeline(self, numblines=3):
+    def test_writeline(self, numblines=10, stepsperline=0.5, direction=0):
         'write line and see it is processed accordingly'
         host = self.host
         for _ in range(numblines):
-            yield from self.host.writeline([1] *
-                                           host.laser_params['BITSINSCANLINE'])
+            yield from host.writeline([1] * host.laser_params['BITSINSCANLINE'], 
+                                           stepsperline, direction)
         yield from host.writeline([])
-        self.assertEqual((yield from self.host.get_state())['synchronized'],
+        self.assertEqual((yield from host.get_state())['synchronized'],
                          True)
-        yield from self.host.enable_comp(synchronize=False)
+        yield from host.enable_comp(synchronize=False)
         while (yield self.dut.parser.empty) == 0:
             yield
-        self.assertEqual((yield from self.host.get_state())['synchronized'],
+        self.assertEqual((yield from host.get_state())['synchronized'],
                          False)
-        self.assertEqual((yield from self.host.get_state())['error'], False)
+        self.assertEqual((yield from host.get_state())['error'], False)
+        plat = host.platform
+        dist = numblines*stepsperline/plat.stepspermm[plat.laser_axis]
+        dist = dist if direction else -dist
+        idx = list(plat.stepspermm.keys()).index(plat.laser_axis)
+        # TODO: the x position changes as well!?
+        self.assertEqual(dist, (yield from host.position)[idx])
+                         
 
 
 if __name__ == "__main__":
