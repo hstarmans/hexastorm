@@ -654,21 +654,24 @@ class TestDispatcher(SPIGatewareTestCase):
                 cnt)
 
     @sync_test_case
-    def test_writeline(self, numblines=300, stepsperline=1):
+    def test_writeline(self, numblines=3, stepsperline=1.3):
         'write line and see it is processed accordingly'
         host = self.host
         for _ in range(numblines):
             yield from host.writeline([1] * host.laser_params['BITSINSCANLINE'], 
                                            stepsperline, 0)
+        yield from host.writeline([])
         self.assertEqual((yield from host.get_state())['synchronized'],
                          True)
         while (yield self.dut.parser.empty) == 0:
             yield
         plat = host.platform
-        dist = numblines*stepsperline/plat.stepspermm[plat.laser_axis]
+        stepspermm = plat.stepspermm[plat.laser_axis]
+        decimals = np.log(stepspermm)//np.log(10)
+        dist = numblines*stepsperline/stepspermm
         idx = list(plat.stepspermm.keys()).index(plat.laser_axis)
         # TODO: the x position changes as well!?
-        self.assertEqual(-dist, (yield from host.position)[idx])
+        assert_array_almost_equal(-dist, (yield from host.position)[idx], decimal=decimals)
         for _ in range(numblines):
             yield from host.writeline([1] * host.laser_params['BITSINSCANLINE'], 
                                       stepsperline, 1)

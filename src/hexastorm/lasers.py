@@ -145,6 +145,9 @@ class Laserhead(Elaboratable):
             with m.Else():
                 m.d.sync += [stepcnt.eq(0),
                              self.step.eq(~self.step)]
+        with m.Elif(self.expose_finished):
+            m.d.sync += [stepcnt.eq(0),
+                         self.step.eq(0)]
 
         # pwm is always created but can be deactivated
         with m.If(pwmcnt == 0):
