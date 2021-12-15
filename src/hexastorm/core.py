@@ -267,16 +267,21 @@ class Dispatcher(Elaboratable):
                 step = (polynomal.step[idx] &
                         ((stepper.limit == 0) | stepper.dir))
                 direction = polynomal.dir[idx]
+                m.d.comb += [stepper.step.eq(step),
+                             stepper.dir.eq(direction),
+                             parser.pinstate[idx].eq(stepper.limit)]
             # connect the motor in which the laserhead moves to laser core
             else:
-                step = ((polynomal.step[idx] & polynomal.busy) |
-                        (laserhead.process_lines & laserhead.step)
-                        & ((stepper.limit == 0) | stepper.dir))
-                direction = ((polynomal.dir[idx] & polynomal.busy)
-                             | (laserhead.dir & laserhead.process_lines))
-            m.d.comb += [stepper.step.eq(step),
-                         stepper.dir.eq(direction),
-                         parser.pinstate[idx].eq(stepper.limit)]
+                m.d.comb += parser.pinstate[idx].eq(stepper.limit)
+                with m.If(~laserhead.process_lines):
+                    m.d.comb += [
+                     stepper.step.eq(polynomal.step[idx] &
+                                     ((stepper.limit == 0) | stepper.dir)),
+                     stepper.dir.eq(polynomal.dir[idx])]
+                with m.Else():
+                    m.d.comb += [
+                    stepper.step.eq(laserhead.step),
+                    stepper.dir.eq(laserhead.dir)]
         m.d.comb += (parser.pinstate[len(steppers):].
                      eq(Cat(laserhead.photodiode_t, laserhead.synchronized)))
         # update position
