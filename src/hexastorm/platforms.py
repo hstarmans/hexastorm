@@ -22,7 +22,7 @@ class TestPlatform:
     laser_axis = 'y'
     laser_var = {'RPM': 2000,
                  'FACETS': 4, 'SINGLE_LINE': False, 'TICKSINFACET': 18,
-                 'BITSINSCANLINE': 2, 'LASERTICKS': 4,
+                 'BITSINSCANLINE': 3, 'LASERTICKS': 4,
                  'SINGLE_FACET': False, 'DIRECTION': 0}
     motors = len(stepspermm.keys())
     steppers = [StepperRecord()]*motors

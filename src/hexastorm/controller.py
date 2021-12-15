@@ -470,8 +470,10 @@ class Host:
         # the motor
         # watch out for python "banker's rounding"
         # sometimes target might not be equal to steps
-        halfperiod = round((self.laser_params['TICKSINFACET']-1)
-                           / (stepsperline*2))
+        bits = self.laser_params['BITSINSCANLINE']
+        halfperiod = int((bits-1) // (stepsperline*2))
+        if (halfperiod<1):
+           raise Exception("Steps per line cannot be achieved")
         # TODO: is this still an issue?
         # you could check as follows
         # steps = self.laser_params['TICKSINFACET']/(halfperiod*2)

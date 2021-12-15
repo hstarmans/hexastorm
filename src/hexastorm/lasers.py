@@ -136,18 +136,8 @@ class Laserhead(Elaboratable):
                          triggered.eq(0)]
 
         # step generator
-        move = Signal()
-        stepcnt = Signal(56)
-        stephalfperiod = Signal(55)
-        with m.If(move):
-            with m.If(stepcnt < stephalfperiod-1):
-                m.d.sync += stepcnt.eq(stepcnt+1)
-            with m.Else():
-                m.d.sync += [stepcnt.eq(0),
-                             self.step.eq(~self.step)]
-        with m.Elif(self.expose_finished):
-            m.d.sync += [stepcnt.eq(0),
-                         self.step.eq(0)]
+        stephalfperiod = Signal(dct['BITSINSCANLINE'].bit_length())
+        stepcnt = Signal.like(stephalfperiod)
 
         # pwm is always created but can be deactivated
         with m.If(pwmcnt == 0):
@@ -254,7 +244,7 @@ class Laserhead(Elaboratable):
                 with m.Else():
                     m.d.sync += tickcounter.eq(tickcounter+1)
             with m.State('NO_INSTRUCTION'):
-                m.d.sync += [move.eq(0), tickcounter.eq(tickcounter+1)]
+                m.d.sync += [tickcounter.eq(tickcounter+1)]
                 m.next = 'WAIT_END'
             with m.State('READ_INSTRUCTION'):
                 m.d.sync += [self.read_en.eq(0), tickcounter.eq(tickcounter+1)]
@@ -263,14 +253,12 @@ class Laserhead(Elaboratable):
                         m.d.sync += scanlinenumber.eq(scanlinenumber+1)
                     with m.Else():
                         m.d.sync += scanlinenumber.eq(0)
-                    m.d.sync += [move.eq(1),
-                                 write_data_2.eq(scanlinenumber),
+                    m.d.sync += [write_data_2.eq(scanlinenumber),
                                  self.dir.eq(read_data[8]),
                                  stephalfperiod.eq(read_data[9:])]
                     m.next = 'WAIT_FOR_DATA_RUN'
                 with m.Elif(read_data == INSTRUCTIONS.LASTSCANLINE):
                     m.d.sync += [self.expose_finished.eq(1),
-                                 move.eq(0),
                                  self.read_commit.eq(1),
                                  self.process_lines.eq(0)]
                     m.next = 'WAIT_END'
@@ -294,13 +282,18 @@ class Laserhead(Elaboratable):
                 #      scanbit current byte position in scanline
                 #      lasercnt used to pulse laser at certain freq
                 with m.If(lasercnt == 0):
+                    with m.If(stepcnt >= stephalfperiod):
+                        m.d.sync += [self.step.eq(~self.step),
+                                        stepcnt.eq(0)]
+                    with m.Else():
+                        m.d.sync += stepcnt.eq(stepcnt+1)
                     with m.If(scanbit >= dct['BITSINSCANLINE']):
-                        m.d.sync += self.write_commit_2.eq(1)
+                        m.d.sync += [self.write_commit_2.eq(1),
+                                     self.lasers.eq(0)]
                         with m.If(dct['SINGLE_LINE'] & self.empty):
                             m.d.sync += self.read_discard.eq(1)
                         with m.Else():
                             m.d.sync += self.read_commit.eq(1)
-                        m.d.sync += self.lasers.eq(0)
                         m.next = 'WAIT_END'
                     with m.Else():
                         m.d.sync += [lasercnt.eq(dct['LASERTICKS']-1),
@@ -450,12 +443,11 @@ class BaseTest(LunaGatewareTestCase):
 
     def count_steps(self, single=False):
         '''counts steps while accounting for direction
-
         single -- in single line mode dut.empty is not
                   a good measure
-
         Very similar to the function in movement.py
         '''
+        # TODO: replace with logic from movement.py and process lines
         count = 0
         dut = self.dut
         ticks = 0
@@ -504,7 +496,7 @@ class BaseTest(LunaGatewareTestCase):
         # TODO: doesn'twork
         if len(bitlst) != 0:
             self.assertEqual((yield dut.stephalfperiod),
-                             stepsperline*round((dut.dct['TICKSINFACET']-1)/2))
+                             stepsperline*(dut.dct['BITSINSCANLINE']-1)//2)
         self.assertEqual((yield dut.error), False)
         if len(bitlst) == 0:
             self.assertEqual((yield dut.error), False)
@@ -635,7 +627,7 @@ class SinglelineTest(BaseTest):
             yield from self.checkline(line)
         self.assertEqual((yield dut.synchronized), True)
         # 2 other lines
-        lines = [[1, 0], []]
+        lines = [[randint(0,1) for _ in range(dut.dct['BITSINSCANLINE'])], []]
         self.assertEqual((yield dut.expose_finished), 0)
         for line in lines:
             yield from self.write_line(line)
@@ -686,10 +678,11 @@ class SinglelinesinglefacetTest(BaseTest):
     def test_move(self):
         dut = self.dut
         lines = [[1]*dut.dct['BITSINSCANLINE']]
-        stepsperline = 3
+        stepsperline = 1
         for line in lines:
             yield from self.write_line(line, stepsperline=stepsperline,
                                        direction=1)
+        yield from self.write_line([], stepsperline)
         yield dut.synchronize.eq(1)
         yield from self.pulse(dut.expose_start)
         steps = (yield from self.count_steps(single=True))
