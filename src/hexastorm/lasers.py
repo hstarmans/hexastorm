@@ -284,7 +284,7 @@ class Laserhead(Elaboratable):
                 with m.If(lasercnt == 0):
                     with m.If(stepcnt >= stephalfperiod):
                         m.d.sync += [self.step.eq(~self.step),
-                                        stepcnt.eq(0)]
+                                     stepcnt.eq(0)]
                     with m.Else():
                         m.d.sync += stepcnt.eq(stepcnt+1)
                     with m.If(scanbit >= dct['BITSINSCANLINE']):
@@ -627,7 +627,8 @@ class SinglelineTest(BaseTest):
             yield from self.checkline(line)
         self.assertEqual((yield dut.synchronized), True)
         # 2 other lines
-        lines = [[randint(0,1) for _ in range(dut.dct['BITSINSCANLINE'])], []]
+        lines = [[randint(0, 1) for _ in range(dut.dct['BITSINSCANLINE'])],
+                 []]
         self.assertEqual((yield dut.expose_finished), 0)
         for line in lines:
             yield from self.write_line(line)

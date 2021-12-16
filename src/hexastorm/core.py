@@ -262,28 +262,28 @@ class Dispatcher(Elaboratable):
         ]
         # connect motors
         for idx, stepper in enumerate(steppers):
+            step = (polynomal.step[idx] &
+                    ((stepper.limit == 0) | stepper.dir))
             if idx != (list(platform.stepspermm.keys())
                        .index(platform.laser_axis)):
-                step = (polynomal.step[idx] &
-                        ((stepper.limit == 0) | stepper.dir))
                 direction = polynomal.dir[idx]
                 m.d.comb += [stepper.step.eq(step),
                              stepper.dir.eq(direction),
                              parser.pinstate[idx].eq(stepper.limit)]
             # connect the motor in which the laserhead moves to laser core
             else:
-                m.d.comb += parser.pinstate[idx].eq(stepper.limit)
-                with m.If(~laserhead.process_lines):
-                    m.d.comb += [
-                     stepper.step.eq(polynomal.step[idx] &
-                                     ((stepper.limit == 0) | stepper.dir)),
-                     stepper.dir.eq(polynomal.dir[idx])]
-                with m.Else():
-                    m.d.comb += [
-                    stepper.step.eq(laserhead.step),
-                    stepper.dir.eq(laserhead.dir)]
+                m.d.comb += [
+                    parser.pinstate[idx].eq(stepper.limit),
+                    stepper.step.eq((step & (~laserhead.process_lines)) |
+                                    (laserhead.step &
+                                     (laserhead.process_lines))),
+                    stepper.dir.eq((polynomal.dir[idx] &
+                                   (~laserhead.process_lines)) |
+                                   (laserhead.dir & (laserhead.process_lines))
+                                   )]
         m.d.comb += (parser.pinstate[len(steppers):].
                      eq(Cat(laserhead.photodiode_t, laserhead.synchronized)))
+
         # update position
         stepper_d = Array(Signal() for _ in range(len(steppers)))
         for idx, stepper in enumerate(steppers):
@@ -663,8 +663,8 @@ class TestDispatcher(SPIGatewareTestCase):
         'write line and see it is processed accordingly'
         host = self.host
         for _ in range(numblines):
-            yield from host.writeline([1] * host.laser_params['BITSINSCANLINE'], 
-                                           stepsperline, 0)
+            yield from host.writeline([1]*host.laser_params['BITSINSCANLINE'],
+                                      stepsperline, 0)
         yield from host.writeline([])
         self.assertEqual((yield from host.get_state())['synchronized'],
                          True)
@@ -676,21 +676,21 @@ class TestDispatcher(SPIGatewareTestCase):
         dist = numblines*stepsperline/stepspermm
         idx = list(plat.stepspermm.keys()).index(plat.laser_axis)
         # TODO: the x position changes as well!?
-        assert_array_almost_equal(-dist, (yield from host.position)[idx], decimal=decimals)
+        assert_array_almost_equal(-dist, (yield from host.position)[idx],
+                                  decimal=decimals)
         for _ in range(numblines):
-            yield from host.writeline([1] * host.laser_params['BITSINSCANLINE'], 
+            yield from host.writeline([1]*host.laser_params['BITSINSCANLINE'],
                                       stepsperline, 1)
         yield from host.writeline([])
         yield from host.enable_comp(synchronize=False)
         while (yield self.dut.parser.empty) == 0:
             yield
         # TODO: the engine should return to same position
-        assert_array_almost_equal(0, (yield from host.position)[idx], decimal=decimals)
+        assert_array_almost_equal(0, (yield from host.position)[idx],
+                                  decimal=decimals)
         self.assertEqual((yield from host.get_state())['synchronized'],
                          False)
         self.assertEqual((yield from host.get_state())['error'], False)
-
-                         
 
 
 if __name__ == "__main__":
