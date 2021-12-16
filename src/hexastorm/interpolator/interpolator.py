@@ -141,7 +141,7 @@ class Interpolator:
             # height/width of the sample gridth [mm]
             'samplegridsize': 0.015,
             'stepsperline': stepsperline,
-            'facetsperlane': 0, # set when file is parsed
+            'facetsinlane': 0,  # set when file is parsed
             # mm/s
             'stagespeed': ((stepsperline /
                             platform.stepspermm[platform.laser_axis])
@@ -158,8 +158,8 @@ class Interpolator:
         for k, v in dct2.items():
             dct[k] = v
         dct['lanewidth'] = ((fxpos(0, dct) -
-                fxpos(dct['bitsinscanline']-1, dct))
-                * dct['samplegridsize'])
+                            fxpos(dct['bitsinscanline']-1, dct))
+                            * dct['samplegridsize'])
         return dct
 
     def downsample(self, params):
@@ -175,17 +175,17 @@ class Interpolator:
                 params[item] = round(params[item])
         return params
 
-
     def svgtopil(self, svg):
         '''converts SVG snippets to a PIL Image
         '''
         tree = xml.etree.ElementTree.parse(svg)
         root = tree.getroot()
         dpi = 25.4/self.params['samplegridsize']
-        bytestring = BytesIO(PNGSurface.convert(bytestring=xml.etree.ElementTree.tostring(root), dpi=dpi))
+        bytestring = BytesIO(PNGSurface.convert(
+            bytestring=xml.etree.ElementTree.tostring(root), dpi=dpi))
         img = Image.open(bytestring)
         # convert PIL Image to 8 bit black and white PIL Image
-        img = img.convert('L') # PIL doesn't support 2 bit images
+        img = img.convert('L')  # PIL doesn't support 2 bit images
         return img
 
     def pstopil(self, url, pixelsize=0.3527777778):
@@ -201,7 +201,7 @@ class Interpolator:
 
     def imgtopil(self, url, pixelsize):
         '''converts image to a PIL image
-        
+
         url       --  path to PIL image, e.g. PNG or BMP
         '''
         img = Image.open(url)
@@ -223,11 +223,13 @@ class Interpolator:
         # clip image
         nonzero_col = np.argwhere(img_array.sum(axis=0)).squeeze()
         nonzero_row = np.argwhere(img_array.sum(axis=1)).squeeze()
-        img_array = img_array[nonzero_row[0]:nonzero_row[-1], 
-                              nonzero_col[0]:nonzero_col[-1]]   
+        img_array = img_array[nonzero_row[0]:nonzero_row[-1],
+                              nonzero_col[0]:nonzero_col[-1]]
         # update settings
-        x_size, y_size = [i*self.params['samplegridsize'] for i in img_array.shape]
-        if x_size > self.params['pltfxsize'] or y_size > self.params['pltfysize']:
+        x_size, y_size = [i*self.params['samplegridsize']
+                          for i in img_array.shape]
+        if((x_size > self.params['pltfxsize']) or
+           (y_size > self.params['pltfysize'])):
             raise Exception('Object does not fit on platform')
         print(f"Sample size is {x_size:.2f} mm by {y_size:.2f} mm")
         # NOTE: this is only a crude approximation
@@ -260,8 +262,8 @@ class Interpolator:
         facets_inlane = math.ceil(params['rotationfrequency']
                                   * params['FACETS'] *
                                   (params['sampleysize']/params['stagespeed']))
-        self.params['facetsinlane']=facets_inlane
-        self.params['lanewidth']=lanewidth
+        self.params['facetsinlane'] = facets_inlane
+        self.params['lanewidth'] = lanewidth
         print("The lanewidth is {:.2f} mm".format(lanewidth))
         print("The facets in lane are {}".format(facets_inlane))
         # single facet
@@ -333,7 +335,7 @@ class Interpolator:
         return ids
 
     def patternfile(self, url, pixelsize=0.3527777778, test=False,
-                    positiveresist=True):
+                    positiveresist=False):
         '''returns the pattern file as numpy array
 
         Converts image at URL to pattern for laser scanner
@@ -384,8 +386,8 @@ class Interpolator:
 
     def plotptrn(self, ptrn_df, step, filename='plot'):
         '''function can be used to plot a dataframe with laser data
-        
-        The settings are retrieved from the dataframe 
+
+        The settings are retrieved from the dataframe
         and the plotted as an image.
         The result is returned as numpy array and stored
         in script folder under filename.
@@ -455,7 +457,7 @@ if __name__ == "__main__":
     # camera)
     # PCB stepsperline 0.5, single channel, current 130
     # photholithopaper stepsperline 0.5, single channel, current 130
-    interpolator = Interpolator(stepsperline=0.5)
+    interpolator = Interpolator(stepsperline=0.25)
     dir_path = os.path.dirname(os.path.realpath(__file__))
     # hexastorm.png pixelsize 0.035
     url = os.path.join(dir_path, 'test-patterns', 'front.svg')

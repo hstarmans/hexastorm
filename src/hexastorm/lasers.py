@@ -135,8 +135,8 @@ class Laserhead(Elaboratable):
                          photodiodecnt.eq(0),
                          triggered.eq(0)]
 
-        # step generator
-        stephalfperiod = Signal(dct['BITSINSCANLINE'].bit_length())
+        # step generator, i.e. slowest speed is 1/(2^4-1)
+        stephalfperiod = Signal(dct['BITSINSCANLINE'].bit_length()+4)
         stepcnt = Signal.like(stephalfperiod)
 
         # pwm is always created but can be deactivated
