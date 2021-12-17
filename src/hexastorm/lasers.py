@@ -218,9 +218,7 @@ class Laserhead(Elaboratable):
                     m.d.sync += [tickcounter.eq(0),
                                  lasers.eq(0)]
                     with m.If((tickcounter > (dct['TICKSINFACET']-1)
-                              - dct['JITTERTICKS']) &
-                              (tickcounter < (dct['TICKSINFACET']-1)
-                              + dct['JITTERTICKS'])):
+                              - dct['JITTERTICKS'])):
                         m.d.sync += [self.synchronized.eq(1),
                                      tickcounter.eq(0)]
                         with m.If(facetcnt == dct['FACETS']-1):
@@ -341,6 +339,9 @@ class Laserhead(Elaboratable):
                           - dct['JITTERTICKS']-2)):
                     m.d.sync += lasers.eq(int('11', 2))
                     m.next = 'WAIT_STABLE'
+                # if user disables synhcronization exit
+                with m.If(~self.synchronize):
+                    m.next = 'STOP'
         if self.platform.name == 'Test':
             self.laserfsm = laserfsm
         return m
@@ -629,7 +630,7 @@ class SinglelineTest(BaseTest):
         # TODO: this code is half-way microscopy commit
         # for _ in range(2):
         #    print((yield from self.read_line(dut.dct['BITSINSCANLINE'])))
-        yield from self.waituntilState('WAIT_STABLE')
+        yield from self.waituntilState('STOP')
         self.assertEqual((yield dut.error), False)
 
 
@@ -742,7 +743,7 @@ class MultilineTest(BaseTest):
         yield from self.pulse(dut.expose_start)
         self.assertEqual((yield dut.empty), 0)
         yield from self.waituntilState('SPINUP')
-        yield dut.synchronize.eq(0)
+        yield dut.synchronize.eq(1)
         yield from self.checkline(line)
         self.assertEqual((yield dut.expose_finished), True)
         # to ensure it stays finished
