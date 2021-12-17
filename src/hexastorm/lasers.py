@@ -228,9 +228,9 @@ class Laserhead(Elaboratable):
                         with m.Else():
                             m.d.sync += facetcnt.eq(facetcnt+1)
                         with m.If(dct['SINGLE_FACET'] & (facetcnt > 0)):
-                            m.next = 'NO_INSTRUCTION'
+                            m.next = 'WAIT_END'
                         with m.Elif(self.empty | ~self.process_lines):
-                            m.next = 'NO_INSTRUCTION'
+                            m.next = 'WAIT_END'
                         with m.Else():
                             # TODO: 10 is too high, should be lower
                             thresh = min(round(10.1*dct['TICKSINFACET']),
@@ -240,12 +240,9 @@ class Laserhead(Elaboratable):
                             m.next = 'READ_INSTRUCTION'
                     with m.Else():
                         m.d.sync += self.synchronized.eq(0)
-                        m.next = 'NO_INSTRUCTION'
+                        m.next = 'WAIT_END'
                 with m.Else():
                     m.d.sync += tickcounter.eq(tickcounter+1)
-            with m.State('NO_INSTRUCTION'):
-                m.d.sync += [tickcounter.eq(tickcounter+1)]
-                m.next = 'WAIT_END'
             with m.State('READ_INSTRUCTION'):
                 m.d.sync += [self.read_en.eq(0), tickcounter.eq(tickcounter+1)]
                 with m.If(read_data[0:8] == INSTRUCTIONS.SCANLINE):
@@ -344,8 +341,6 @@ class Laserhead(Elaboratable):
                           - dct['JITTERTICKS']-2)):
                     m.d.sync += lasers.eq(int('11', 2))
                     m.next = 'WAIT_STABLE'
-                with m.Elif(~self.synchronize):
-                    m.next = 'STOP'
         if self.platform.name == 'Test':
             self.laserfsm = laserfsm
         return m
@@ -493,15 +488,10 @@ class BaseTest(LunaGatewareTestCase):
         yield from self.waituntilState('READ_INSTRUCTION')
         yield
         self.assertEqual((yield dut.dir), direction)
-        # TODO: doesn'twork
-        if len(bitlst) != 0:
+        self.assertEqual((yield dut.error), False)
+        if len(bitlst):
             self.assertEqual((yield dut.stephalfperiod),
                              stepsperline*(dut.dct['BITSINSCANLINE']-1)//2)
-        self.assertEqual((yield dut.error), False)
-        if len(bitlst) == 0:
-            self.assertEqual((yield dut.error), False)
-            self.assertEqual((yield dut.expose_finished), True)
-        else:
             yield from self.waituntilState('DATA_RUN')
             yield
             for idx, bit in enumerate(bitlst):
@@ -510,10 +500,9 @@ class BaseTest(LunaGatewareTestCase):
                 for _ in range(dut.dct['LASERTICKS']):
                     assert (yield dut.lasers[0]) == bit
                     yield
-        if (len(bitlst) == 0) & ((yield dut.synchronize) == 0):
-            yield from self.waituntilState('STOP')
         else:
-            yield from self.waituntilState('WAIT_END')
+            self.assertEqual((yield dut.expose_finished), True)
+        yield from self.waituntilState('WAIT_END')
         self.assertEqual((yield self.dut.error), False)
         self.assertEqual((yield dut.synchronized), True)
 
@@ -640,7 +629,7 @@ class SinglelineTest(BaseTest):
         # TODO: this code is half-way microscopy commit
         # for _ in range(2):
         #    print((yield from self.read_line(dut.dct['BITSINSCANLINE'])))
-        yield from self.waituntilState('STOP')
+        yield from self.waituntilState('WAIT_STABLE')
         self.assertEqual((yield dut.error), False)
 
 
