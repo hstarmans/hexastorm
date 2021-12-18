@@ -13,6 +13,8 @@ The code took most inspiration from [LDGraphy](https://github.com/hzeller/ldgrap
 Making a PCB with scanner is shown in the video;  
 [![video in action not showing](https://img.youtube.com/vi/dR09Tev0cPk/0.jpg)](http://www.youtube.com/watch?v=dR09Tev0cPk "Making PCB with Laser Direct Imaging").
 
+The LDgraphy accuracy test;  
+<img src="https://cdn.hackaday.io/images/2585871639832759144.jpeg" align="center" height="300"/> 
 
 The alignment procedure is shown in the following video.
 
