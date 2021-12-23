@@ -21,12 +21,10 @@ class TestPlatform:
     laser_bits = 1
     laser_axis = 'y'
     laser_var = {'RPM': 2000, 'FACETS': 4, 'SINGLE_LINE': False, 
+                 'CRYSTAL_HZ': 1000,
                  'TICKSINFACET': 20, 'BITSINSCANLINE': 3, 'LASERTICKS': 4,
                  'SINGLE_FACET': False, 'DIRECTION': 0}
     bldc = BLDCRecord()
-    
-    def __init__(self):
-        self.memdepth = wordsinmove(self)*2+1
 
 
 class Firestarter(LatticeICE40Platform):

@@ -92,19 +92,19 @@ def BLDCResource(*args, uL, uH, vL, vH, wL, wH, sensor,
         I:        -- enable pin
     """
     io = []
-    io.append(Subsignal("uL", Pins(uL, dir="i",
+    io.append(Subsignal("uL", Pins(uL, dir="o",
               conn=conn, assert_width=1)))
-    io.append(Subsignal("uH", Pins(uH, dir="i",
+    io.append(Subsignal("uH", Pins(uH, dir="o",
               conn=conn, assert_width=1)))
-    io.append(Subsignal("vL", Pins(vL, dir="i",
+    io.append(Subsignal("vL", Pins(vL, dir="o",
               conn=conn, assert_width=1)))
-    io.append(Subsignal("vH", Pins(vH, dir="i",
+    io.append(Subsignal("vH", Pins(vH, dir="o",
               conn=conn, assert_width=1)))
-    io.append(Subsignal("wL", Pins(wL, dir="i",
+    io.append(Subsignal("wL", Pins(wL, dir="o",
               conn=conn, assert_width=1)))
-    io.append(Subsignal("wH", Pins(wH, dir="i",
+    io.append(Subsignal("wH", Pins(wH, dir="o",
               conn=conn, assert_width=1)))
-    io.append(Subsignal("sensor", Pins(sensor, dir="o",
+    io.append(Subsignal("sensor", Pins(sensor, dir="i",
               conn=conn, assert_width=1)))
     if attrs is not None:
         io.append(attrs)
