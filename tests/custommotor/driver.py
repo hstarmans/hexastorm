@@ -25,25 +25,22 @@ class Driver(Elaboratable):
         self.platform = platform
         self.frequency = frequency
         self.on = Signal()
-        self.sensor = Signal()
         self.top = top
 
     def elaborate(self, platform):
         m = Module()
         if platform and self.top:
             board_spi = platform.request("debug_spi")
-            # connect to signal out
-            m.d.comb += [self.sensor.eq(board_spi.sdo),
-                         self.on.eq(board_spi.sdi)]
             bldc = platform.request("bldc")
+            # connect to signal out
+            m.d.comb += [board_spi.sdo.eq(bldc.sensor),
+                         self.on.eq(board_spi.sdi)]
         else:
             platform = self.platform
             bldc = platform.bldc
         # coil can have 3 states; north, south or not active
         maxcnt = int(platform.laser_var['CRYSTAL_HZ']/self.frequency)
         timer = Signal(maxcnt.bit_length()+1)
-        # connect sensor to SPI sdo
-        m.d.comb += self.sensor.eq(bldc.sensor)
         # motor has 3 states 
         state = Signal(range(3))
         with m.FSM(reset='INIT', name='algo'):
