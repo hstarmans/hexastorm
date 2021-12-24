@@ -184,8 +184,11 @@ class Interpolator:
         bytestring = BytesIO(PNGSurface.convert(
             bytestring=xml.etree.ElementTree.tostring(root), dpi=dpi))
         img = Image.open(bytestring)
-        # convert PIL Image to 8 bit black and white PIL Image
-        img = img.convert('L')  # PIL doesn't support 2 bit images
+        # following is done to fix issue with transparent backgrounds
+        img = img.convert('RGBA')  # PIL doesn't support 2 bit images
+        new_image = Image.new("RGBA", img.size, "WHITE")
+        img.paste(new_image, mask=img)
+        # img.save('test.png')
         return img
 
     def pstopil(self, url, pixelsize=0.3527777778):
