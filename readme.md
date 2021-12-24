@@ -10,9 +10,8 @@ The FreeCAD design is shared [here](https://github.com/hstarmans/hexastorm_desig
 and PCB designs are found [here](https://github.com/hstarmans/firestarter).
 A blog can be found on [Hackaday](https://hackaday.io/project/21933-open-hardware-fast-high-resolution-laser).
 The code took most inspiration from [LDGraphy](https://github.com/hzeller/ldgraphy).  
-A video of the scanhead exposing is seen below;  
-[![video in action not showing](https://img.youtube.com/vi/KQgnZkochu4/0.jpg)](http://www.youtube.com/watch?v=KQgnZkochu4 "Moving laserhead").
-
+Making a PCB with scanner is shown in the video;  
+[![video in action not showing](https://img.youtube.com/vi/dR09Tev0cPk/0.jpg)](http://www.youtube.com/watch?v=dR09Tev0cPk "Making PCB with Laser Direct Imaging").
 
 The alignment procedure is shown in the following video.
 

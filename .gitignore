@@ -3,6 +3,7 @@
 *.bin
 *.blif
 *.vcd
+*.svg
 build*
 
 
