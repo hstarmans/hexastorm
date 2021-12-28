@@ -72,7 +72,7 @@ class Firestarter(LatticeICE40Platform):
                         Subsignal("cs", PinsN("13", dir="i")),
                         Attrs(IO_STANDARD="SB_LVCMOS")),
                # BLDC driver
-               BLDCResource(number=0, uL="25", uH="23", vL="27", vH="26", wL="38",
+               BLDCResource(number=0, uL="23", uH="25", vL="27", vH="26", wL="38",
                             wH="31", sensor="9", 
                             attrs=Attrs(IO_STANDARD="SB_LVCMOS")),
                ]
