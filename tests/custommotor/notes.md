@@ -1,0 +1,10 @@
+star configuration
+stator should consist out of four or eight magnets;
+ result comes from https://things-in-motion.blogspot.com/2019/01/selecting-best-pole-and-slot.html
+ 8 pole has higher torque but is able to achiever lower RPM
+carl uses custom angular magnets from PCBway
+3 hall sensors guarantee that you lead at 90 degrees
+
+order new magnets
+don't fixate to prism --> carl also uses ordinary glue
+
