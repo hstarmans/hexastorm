@@ -22,6 +22,9 @@ class Base(unittest.TestCase):
             print("Not programming board")
 
     def test_sensor(self):
+        # je kunt de SDO pin veranderen vanuit FPGA
+        # je leest verschil met multimeter op pin
+        # je kunt ook de sensor pin veranderen van uit fpga
         print('Reading sensor')
         while True:
             sleep(1)
