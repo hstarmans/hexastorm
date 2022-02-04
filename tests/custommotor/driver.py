@@ -18,15 +18,27 @@ class Driver(Elaboratable):
         frequency in Hz, rotation frequency of BLDC motor
         state of the motor, wether motor is turned on
     '''
-    def __init__(self, platform, frequency=0.5, top=False):
+    def __init__(self, platform, 
+                 frequency=6, states=6, 
+                 dutycyclefreq=100000,
+                 dutycyclestart=0.8,
+                 dutycyclelong=0.01,
+                 top=False):
         """
         platform  -- pass test platform
         frequency -- motor frequency in Hz
+        dutycycle frequency -- frequency of duty cycle modulation in Hz
+        states    -- number of states, typically 6
+        dutycycle -- fraction active, number between 0 and 1
         top       -- True if top module
         """
         self.platform = platform
         self.frequency = frequency
+        self.dutycyclefleq = dutycyclefreq
+        self.states = states
         self.on = Signal()
+        self.dutycyclestart = dutycyclestart
+        self.dutycyclelong = dutycyclelong
         self.top = top
 
     def elaborate(self, platform):
@@ -53,30 +65,55 @@ class Driver(Elaboratable):
         else:
             platform = self.platform
             bldc = platform.bldc
-        # coil can have 3 states; north, south or not active
-        maxcnt = int(platform.laser_var['CRYSTAL_HZ']/self.frequency)
+        
+        maxcnt = int(platform.laser_var['CRYSTAL_HZ']/(self.frequency*self.states))
+        maxrotations = 30*self.states*self.frequency
         timer = Signal(maxcnt.bit_length()+1)
-        # motor has 6 states 
-        state = Signal(range(6))
+        rotations = Signal(range(maxrotations))
+        
+        state = Signal(range(self.states))
         with m.FSM(reset='INIT', name='algo'):
             with m.State('INIT'):
+                m.d.sync += rotations.eq(0)
                 # with m.If(self.on):
                 m.next = 'ROTATION'
             with m.State('ROTATION'):
+                # state
                 with m.If(timer == maxcnt):
                     m.d.sync += timer.eq(0)
                     # m.d.sync += state.eq(0)
-                    with m.If(state==5):
+                    with m.If(state==self.states-1):
                         m.d.sync += state.eq(0)
                     with m.Else():
                         m.d.sync += state.eq(state+1)
                 with m.Else():
                     m.d.sync += timer.eq(timer+1) 
+                # duty cycle
+                with m.If(rotations == maxrotations):
+                    m.d.sync += rotations.eq(maxrotations)
+                with m.Else():
+                    m.d.sync += rotations.eq(rotations+1)
                 # with m.If(~self.on):
                 #     m.next = 'INIT'
+        
+        thresh = Signal.like(timer)
 
-        # coded by hand, for quick test
-        with m.If(state == 0):
+        # with m.If(rotations<(10*self.states*self.frequency)):
+        m.d.comb += thresh.eq(int(maxcnt*self.dutycyclestart))
+        # with m.If(rotations<(10*self.states*self.frequency)):
+        #     m.d.comb += thresh.eq(int(maxcnt*self.dutycyclestart))
+        # with m.Else():
+        #     m.d.comb += thresh.eq(int(maxcnt*self.dutycyclelong))
+
+        # six states and one off state
+        with m.If(timer>thresh):
+            m.d.comb += [bldc.uL.eq(0),
+                         bldc.uH.eq(0),
+                         bldc.vL.eq(0),
+                         bldc.vH.eq(0),
+                         bldc.wL.eq(0),
+                         bldc.wH.eq(0)]
+        with m.Elif(state == 0):
             m.d.comb += [bldc.uL.eq(0),
                          bldc.uH.eq(0),
                          bldc.vL.eq(0),
@@ -111,7 +148,7 @@ class Driver(Elaboratable):
                          bldc.vH.eq(0),
                          bldc.wL.eq(0),
                          bldc.wH.eq(0)]
-        with m.Else():
+        with m.Elif(state==5):
             m.d.comb += [bldc.uL.eq(0),
                          bldc.uH.eq(1),
                          bldc.vL.eq(0),

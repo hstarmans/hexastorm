@@ -19,6 +19,10 @@ class Base(unittest.TestCase):
             platform.build(Driver(Firestarter(), top=True),
                     do_program=True, verbose=True)
         else:
+            cls.reset_pin.off()
+            sleep(1)
+            cls.reset_pin.on()
+            sleep(1)
             print("Not programming board")
 
     def test_sensor(self):
