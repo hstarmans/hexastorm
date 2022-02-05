@@ -4,7 +4,7 @@ Code has no real meaning but it should trigger DSP synthesis.
 You can check ICESTORM_DSP 1/8 == 12 percent
 """
 import os
-from nmigen import Elaboratable, Module, Signal, signed
+from amaranth import Elaboratable, Module, Signal, signed
 from hexastorm.platforms import Firestarter
 
 

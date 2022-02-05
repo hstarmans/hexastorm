@@ -3,9 +3,9 @@ from random import randint
 
 import numpy as np
 from numpy.testing import assert_array_equal, assert_array_almost_equal
-from nmigen import Signal, Elaboratable, signed, Cat
-from nmigen import Module
-from nmigen.hdl.mem import Array
+from amaranth import Signal, Elaboratable, signed, Cat
+from amaranth import Module
+from amaranth.hdl.mem import Array
 from luna.gateware.utils.cdc import synchronize
 from luna.gateware.interface.spi import SPICommandInterface, SPIBus
 from luna.gateware.memory import TransactionalizedFIFO

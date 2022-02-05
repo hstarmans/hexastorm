@@ -3,8 +3,8 @@ from struct import unpack
 from copy import deepcopy
 from random import randint
 
-from nmigen import Signal, Elaboratable
-from nmigen import Module
+from amaranth import Signal, Elaboratable
+from amaranth import Module
 from luna.gateware.test import LunaGatewareTestCase, sync_test_case
 from luna.gateware.memory import TransactionalizedFIFO
 

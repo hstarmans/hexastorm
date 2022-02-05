@@ -4,7 +4,7 @@ Only got it working for older version of luna
 git checkout f54de01c9dc13aeca5d20734a9c103227cb9603f
 upstream has been notified https://github.com/greatscottgadgets/luna/issues/101
 """
-from nmigen import Elaboratable, Module
+from amaranth import Elaboratable, Module
 
 from hexastorm.platforms import Firestarter
 

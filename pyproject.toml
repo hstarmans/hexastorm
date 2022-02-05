@@ -1,22 +1,21 @@
 [tool.poetry]
 name = "hexastorm"
 version = "0.1.0"
-description = "nMigen framework for writing to and reading from a substrate with a laser"
+description = "amaranth framework for writing to and reading from a substrate with a laser"
 authors = ["Rik Starmans <hstarmans@hexastorm.com>"]
+license = "GPLV3"
 
 [tool.poetry.dependencies]
-python = ">=3.7,<3.10"
-numba = "^0.54.1"
-nmigen = {git = "https://github.com/nmigen/nmigen.git"}
-nmigen-boards = {git = "https://github.com/nmigen/nmigen-boards.git"}
-luna = {git = "https://github.com/greatscottgadgets/luna.git", rev = "main"}
-opencv-python = "4.4.0.46"
-apio = "^0.7.6"
+python = ">=3.8,<3.11"
+numba = "^0.55.1"
+opencv-python = "^4.5.5"
+apio = "^0.8.0"
 gpiozero = "^1.6.2"
 spidev = "^3.5"
 smbus2 = "^0.4.1"
-scipy = "^1.7.2"
-Pillow = "^8.4.0"
+scipy = "^1.7.3"
+Pillow = "^9.0.1"
+luna = {git = "https://git@github.com/greatscottgadgets/luna.git", rev = "main"}
 
 [tool.poetry.dev-dependencies]
 

@@ -1,7 +1,7 @@
 """ Sketch of Bezier algorithm on FPGA
 """
 import os
-from nmigen import Elaboratable, Module, Signal, signed, Array
+from amaranth import Elaboratable, Module, Signal, signed, Array
 from hexastorm.platforms import Firestarter
 
 

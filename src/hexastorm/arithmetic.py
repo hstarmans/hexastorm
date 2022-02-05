@@ -1,7 +1,7 @@
 import unittest
 import random
 
-from nmigen import Signal, Elaboratable, Cat, Module, Const, signed
+from amaranth import Signal, Elaboratable, Cat, Module, Const, signed
 from luna.gateware.test import LunaGatewareTestCase, sync_test_case
 
 

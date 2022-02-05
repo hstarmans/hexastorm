@@ -7,8 +7,8 @@ import unittest
 from sys import platform
 from luna.gateware.utils.cdc import synchronize
 from luna.gateware.test import LunaGatewareTestCase, sync_test_case
-from nmigen import Elaboratable, Module, Signal
-from nmigen.build import ResourceError
+from amaranth import Elaboratable, Module, Signal
+from amaranth.build import ResourceError
 from platforms import TestPlatform
 
 

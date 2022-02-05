@@ -1,7 +1,7 @@
 import unittest
 
-from nmigen import (Signal, Elaboratable, signed, Module)
-from nmigen.hdl.mem import Array
+from amaranth import (Signal, Elaboratable, signed, Module)
+from amaranth.hdl.mem import Array
 from luna.gateware.test import LunaGatewareTestCase, sync_test_case
 
 from hexastorm.resources import get_all_resources

@@ -1,11 +1,11 @@
 import os
 import subprocess
 
-from nmigen.build import (Resource, Attrs, Pins, PinsN, Clock,
+from amaranth.build import (Resource, Attrs, Pins, PinsN, Clock,
                           Subsignal)
-from nmigen.vendor.lattice_ice40 import LatticeICE40Platform
-from nmigen_boards.resources import LEDResources
-from nmigen_boards.test.blinky import Blinky
+from amaranth.vendor.lattice_ice40 import LatticeICE40Platform
+from amaranth_boards.resources import LEDResources
+from amaranth_boards.test.blinky import Blinky
 
 from hexastorm.constants import wordsinmove
 from hexastorm.resources import (StepperResource, StepperRecord,

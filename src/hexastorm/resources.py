@@ -1,9 +1,9 @@
 import itertools
 
-from nmigen import Record
-from nmigen.hdl.ast import unsigned
-from nmigen.build import Subsignal, Resource, Pins, PinsN, ResourceError
-from nmigen.hdl.rec import Layout
+from amaranth import Record
+from amaranth.hdl.ast import unsigned
+from amaranth.build import Subsignal, Resource, Pins, PinsN, ResourceError
+from amaranth.hdl.rec import Layout
 
 
 __all__ = [
