@@ -41,8 +41,8 @@ If you want to interact with the stepper motors and flash the fpga.
 ./install.sh
 ```
 ## Micropython
-The file controller.py can also be called from Micropython.
-Code is tested on an ESP32.
+The file controller.py can be called from Micropython.
+Code is tested on ESP32.
 
 ## Raspberry pi
 The following lines need to be in the /boot/config.txt;
