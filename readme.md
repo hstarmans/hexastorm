@@ -42,7 +42,7 @@ If you want to interact with the stepper motors and flash the fpga.
 ```
 ## Micropython
 The file controller.py can also be called from Micropython.
-The laser scanner can be controller from the ESP32 as well.
+Code is tested on an ESP32.
 
 ## Raspberry pi
 The following lines need to be in the /boot/config.txt;
