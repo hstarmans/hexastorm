@@ -7,7 +7,7 @@ from amaranth.vendor.lattice_ice40 import LatticeICE40Platform
 from amaranth_boards.resources import LEDResources
 from amaranth_boards.test.blinky import Blinky
 
-from hexastorm.constants import wordsinmove
+from hexastorm.constants import wordsinmove, platform
 from hexastorm.resources import (StepperResource, StepperRecord,
                                  LaserscannerResource, LaserscannerRecord)
 
@@ -31,22 +31,11 @@ class TestPlatform:
         self.memdepth = wordsinmove(self)*2+1
 
 
-class Firestarter(LatticeICE40Platform):
+class Firestarter(LatticeICE40Platform, platform):
     '''Kicad board available at
        https://github.com/hstarmans/firestarter/
     '''
     name = "firestarter"
-    ic_dev_nr = 1      # spi connection
-    ic_address = 0x28  # spi address
-    enable_pin = 17    # enable pin for stepper motors
-    reset_pin = 26     # can be used to reset FPGA
-    laser_bits = 1     # enables adding pwm to laser (not widely tested)
-    poldegree = 2      # degree of polynomal to execute move, see movement.py
-    stepspermm = {'x': 76.2,
-                  'y': 76.2,
-                  'z': 1600}
-    laser_axis = 'y'
-    motors = len(stepspermm.keys())
     memdepth = 256
     device = 'iCE40UP5K'
     package = 'SG48'

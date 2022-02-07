@@ -1,15 +1,21 @@
+try:
+    from micropython import const
+    upython = True
+except ImportError:
+    upython = False
+
+from curses import baudrate
 from struct import unpack
 from time import sleep
-from copy import deepcopy
 
-import numpy as np
+if upython:
+    from ulab import numpy as np
+else:
+    import numpy as np
 
-import hexastorm.lasers as lasers
 from hexastorm.constants import (INSTRUCTIONS, COMMANDS, MOTORFREQ, STATE,
                                  MOVE_TICKS, WORD_BYTES, bit_shift,
-                                 COMMAND_BYTES)
-from hexastorm.platforms import Firestarter
-import hexastorm.core as core
+                                 COMMAND_BYTES, platform, params)
 
 
 def executor(func):
@@ -42,31 +48,49 @@ class Host:
                           as each test here has a slightly
                           different TestPlatform
         '''
+        # case raspberry
         if platform is None:
+            self.test = False
             from gpiozero import LED
             import spidev
             from smbus2 import SMBus
-            self.platform = Firestarter()
+            self.platform = platform()
             # IC bus used to set power laser
             self.bus = SMBus(self.platform.ic_dev_nr)
             # SPI to sent data to scanner
             self.spi = spidev.SpiDev()
-            self.spi.open(0, 0)
+            self.spi.open(*self.platform.spi_dev)
             self.spi.mode = 1
             self.spi.max_speed_hz = round(1E6)
-            self.chip_select = LED(8)
+            self.chip_select = LED(self.platform.chip_select)
             # programs TMC2130
             self.init_steppers()
             # stepper motor enable pin
             self.enable = LED(self.platform.enable_pin)
+        # case micropython:
+        elif upython:
             self.test = False
+            import machine
+            self.platform = platform()
+            # IC bus
+            self.bus = machine.I2C(self.platform.ic_dev_nr)
+            self.bus.init(machine.I2C.CONTROLLER, adr=self.platform.ic_addr)
+            # SPI
+            # spi port is hispi
+            self.spi  = machine.SPI(self.spi_dev, baudrate=round(1E6))
+            self.chip_select = machine.Pin(self.platform.chip_select)
+            # program TMC2130
+            # TODO: add TMC2130 library to micropython
+            # self.init_steppers()
+            # stepper motor enable pin
+            self.enable = machine.Pin(self.platform.enable_pin)
         else:
             self.platform = platform
             self.test = True
         # maximum number of times tried to write to FIFO
         # if memoery is full
         self.maxtrials = 10 if self.test else 1E5
-        self.laser_params = lasers.params(self.platform)
+        self.laser_params = params(self.platform)
         self._position = np.array([0]*self.platform.motors, dtype='float64')
 
     def init_steppers(self):
@@ -97,18 +121,27 @@ class Host:
                           resets aftwards
            verbose     -- prints output of Yosys, Nextpnr and icepack
         '''
-        self.platform = Firestarter()
-        self.platform.laser_var = self.laser_params
-        self.platform.build(core.Dispatcher(self.platform),
-                            do_program=do_program,
-                            verbose=verbose)
+        if upython:
+            print("Micropython cannot update binary, using stored one")
+        else:
+            import hexastorm.core as core
+            from platforms import Firestarter
+            self.platform = Firestarter()
+            self.platform.laser_var = self.laser_params
+            self.platform.build(core.Dispatcher(self.platform),
+                                do_program=do_program,
+                                verbose=verbose)
         if do_program:
             self.reset()
 
     def reset(self):
         'restart the FPGA by flipping the reset pin'
-        from gpiozero import LED
-        reset_pin = LED(self.platform.reset_pin)
+        if upython:
+            import machine
+            reset_pin = machine.Pin(self.platform.reset_pin)
+        else:
+            from gpiozero import LED
+            reset_pin = LED(self.platform.reset_pin)
         reset_pin.off()
         sleep(1)
         reset_pin.on()
@@ -181,8 +214,7 @@ class Host:
         Enabled stepper motor do not move if the FPGA is
         not parsing instructions from FIFO.
         '''
-        from gpiozero import LED
-        return not LED(self.platform.enable_pin).value
+        return not self.enable.value
 
     @enable_steppers.setter
     def enable_steppers(self, val):
@@ -206,7 +238,13 @@ class Host:
         integer ranges from 0 to 255 where
         0 no current and 255 full driver current
         '''
-        return self.bus.read_byte_data(self.platform.ic_address, 0)
+        if upython:
+            data = bytearray(1)
+            self.bus.recv(data)
+        else:
+            data = self.bus.read_byte_data(self.platform.ic_address, 
+                                           0)
+        return data
 
     @laser_current.setter
     def laser_current(self, val):
@@ -221,7 +259,10 @@ class Host:
         if val < 0 or val > 150:
             # 255 kills laser at single channel
             raise Exception('Invalid or too high laser current')
-        self.bus.write_byte_data(self.platform.ic_address, 0, val)
+        if upython:
+            self.bus.mem_write(val, self.platform.ic_address)
+        else:
+            self.bus.write_byte_data(self.platform.ic_address, 0, val)
 
     def set_parsing(self, value):
         '''enables or disables parsing of FIFO by FPGA
@@ -431,8 +472,13 @@ class Host:
         assert len(data) == (COMMAND_BYTES + WORD_BYTES)
         self.chip_select.off()
         # spidev changes values passed to it
-        datachanged = deepcopy(data)
-        response = bytearray(self.spi.xfer2(datachanged))
+        if not upython:
+            from copy import deepcopy
+            datachanged = deepcopy(data)
+            response = bytearray(self.spi.xfer2(datachanged))
+        else:
+            response = bytearray(data)
+            self.spi.write_readinto(data, response)
         self.chip_select.on()
         return response
 
