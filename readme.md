@@ -40,6 +40,9 @@ If you want to interact with the stepper motors and flash the fpga.
 ```console
 ./install.sh
 ```
+## Micropython
+The file controller.py can also be called from Micropython.
+The laser scanner can be controller from the ESP32 as well.
 
 ## Raspberry pi
 The following lines need to be in the /boot/config.txt;
