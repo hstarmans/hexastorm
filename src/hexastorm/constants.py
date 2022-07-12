@@ -28,11 +28,11 @@ class platform:
     def __init__(self, micropython=False):
         self.laser_bits = 1     # enables adding pwm to laser (not widely tested)
         self.poldegree = 2      # degree of polynomal to execute move, see movement.py
-        stepspermm = {'x': 76.2,
+        self.stepspermm = {'x': 76.2,
                     'y': 76.2,
                     'z': 1600}
         self.laser_axis = 'y'
-        self.motors = len(stepspermm.keys())
+        self.motors = len(self.stepspermm.keys())
         self.ic_address = 0x28  # spi address
         if micropython:
             self.ic_dev_nr = 0      # digipot connection

@@ -86,6 +86,10 @@ class Firestarter(LatticeICE40Platform, platform):
                                attrs=Attrs(IO_STANDARD="SB_LVCMOS"))
                ]
     connectors = []
+    
+    def __init__(self, micropython=False):
+        LatticeICE40Platform.__init__(self)
+        platform.__init__(self, micropython)
 
     def build(self, *args, **kwargs):
         apio = True

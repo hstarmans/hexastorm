@@ -30,6 +30,7 @@ def get_all_resources(platform, name):
 
 class StepperLayout(Layout):
     """ Layout to test stepper motor """
+
     def __init__(self):
         super().__init__([
             ("step", unsigned(8)),
@@ -40,6 +41,7 @@ class StepperLayout(Layout):
 
 class StepperRecord(Record):
     """ Record to test stepper motor """
+
     def __init__(self):
         super().__init__(StepperLayout())
 
@@ -64,8 +66,10 @@ def StepperResource(*args, step, direction, limit, number=None,
         io.append(attrs)
     return Resource.family(*args, number, default_name="stepper", ios=io)
 
+
 class BLDCLayout(Layout):
     """ Layout for BLDC motor """
+
     def __init__(self):
         super().__init__([
             ("uL", 1),
@@ -77,19 +81,23 @@ class BLDCLayout(Layout):
             ("sensor", 1)
         ])
 
+
 class BLDCRecord(Record):
     """ Record for BLDC motor """
+
     def __init__(self):
         super().__init__(BLDCLayout())
 
 
-def BLDCResource(*args, uL, uH, vL, vH, wL, wH, sensor, 
-                 number=None, conn=None, attrs=None):
+def BLDCResource(*args, uL, uH, vL, vH, wL, wH, sensor0, 
+                 sensor1, sensor2, number=None,
+                 conn=None, attrs=None):
     """ BLDC driver resource
 
     I/O signals:
-        I: *L *H  -- low or high impedance input of BLDC motor
-        I:        -- enable pin
+        I: *L *H   -- low or high impedance input 
+                      of BLDC motor
+        O: sensor* -- Hall sensors
     """
     io = []
     io.append(Subsignal("uL", Pins(uL, dir="o",
@@ -104,14 +112,20 @@ def BLDCResource(*args, uL, uH, vL, vH, wL, wH, sensor,
               conn=conn, assert_width=1)))
     io.append(Subsignal("wH", Pins(wH, dir="o",
               conn=conn, assert_width=1)))
-    io.append(Subsignal("sensor", Pins(sensor, dir="i",
+    io.append(Subsignal("sensor0", Pins(sensor0, dir="i",
+              conn=conn, assert_width=1)))
+    io.append(Subsignal("sensor1", Pins(sensor1, dir="i",
+              conn=conn, assert_width=1)))
+    io.append(Subsignal("sensor2", Pins(sensor2, dir="i",
               conn=conn, assert_width=1)))
     if attrs is not None:
         io.append(attrs)
     return Resource.family(*args, number, default_name="bldc", ios=io)
 
+
 class LaserScannerLayout(Layout):
     """ Layout for laser scanner """
+
     def __init__(self):
         super().__init__([
             ("laser0", 1),
@@ -124,6 +138,7 @@ class LaserScannerLayout(Layout):
 
 class LaserscannerRecord(Record):
     """ Record to test stepper motor """
+
     def __init__(self):
         super().__init__(LaserScannerLayout())
 

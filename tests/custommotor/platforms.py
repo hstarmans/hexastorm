@@ -8,7 +8,7 @@ from amaranth.vendor.lattice_ice40 import LatticeICE40Platform
 from amaranth_boards.resources import LEDResources
 from amaranth_boards.test.blinky import Blinky
 
-from hexastorm.constants import wordsinmove
+from hexastorm.constants import wordsinmove, platform
 from hexastorm.resources import (BLDCResource, BLDCRecord)
 
 
@@ -27,10 +27,11 @@ class TestPlatform:
     bldc = BLDCRecord()
 
 
-class Firestarter(LatticeICE40Platform):
+class Firestarter(LatticeICE40Platform, platform):
     '''Kicad board available at
        https://github.com/hstarmans/firestarter/
     '''
+    
     name = "firestarter"
     ic_dev_nr = 1      # spi connection
     ic_address = 0x28  # spi address
@@ -61,6 +62,7 @@ class Firestarter(LatticeICE40Platform):
                         Clock(13.56e6),
                         Attrs(GLOBAL=True, IO_STANDARD="SB_LVCMOS")),
                # TODO: replace with RGB led resource
+               # added fix for pins
                *LEDResources(pins='39 40 41', invert=True,
                              attrs=Attrs(IO_STANDARD="SB_LVCMOS")),
                # NOTE: there is a proper resource in nmigen_boards
@@ -72,11 +74,15 @@ class Firestarter(LatticeICE40Platform):
                         Subsignal("cs", PinsN("13", dir="i")),
                         Attrs(IO_STANDARD="SB_LVCMOS")),
                # BLDC driver
-               BLDCResource(number=0, uL="23", uH="25", vL="27", vH="26", wL="38",
-                            wH="31", sensor="9", 
+               BLDCResource(number=0, uL="25", uH="26", vL="9", vH="23", wL="27",
+                            wH="32", sensor0="34", sensor1="36", sensor2="37",
                             attrs=Attrs(IO_STANDARD="SB_LVCMOS")),
                ]
     connectors = []
+
+    def __init__(self):
+        super().__init__()
+        platform.__init__(self)
 
     def build(self, *args, **kwargs):
         apio = True

@@ -9,13 +9,16 @@ from struct import unpack
 from time import sleep
 
 if upython:
+    from hexastorm.constants import platform as platformmicro
     from ulab import numpy as np
 else:
+    from hexastorm.platforms import Firestarter
     import numpy as np
 
 from hexastorm.constants import (INSTRUCTIONS, COMMANDS, MOTORFREQ, STATE,
                                  MOVE_TICKS, WORD_BYTES, bit_shift,
-                                 COMMAND_BYTES, platform, params)
+                                 COMMAND_BYTES, params)
+
 
 
 def executor(func):
@@ -54,7 +57,7 @@ class Host:
             from gpiozero import LED
             import spidev
             from smbus2 import SMBus
-            self.platform = platform()
+            self.platform = Firestarter(micropython=False)
             # IC bus used to set power laser
             self.bus = SMBus(self.platform.ic_dev_nr)
             # SPI to sent data to scanner
@@ -71,7 +74,7 @@ class Host:
         elif upython:
             self.test = False
             import machine
-            self.platform = platform()
+            self.platform = platformmicro(micropython=True)
             # IC bus
             self.bus = machine.I2C(self.platform.ic_dev_nr)
             self.bus.init(machine.I2C.CONTROLLER, adr=self.platform.ic_addr)
@@ -125,7 +128,6 @@ class Host:
             print("Micropython cannot update binary, using stored one")
         else:
             import hexastorm.core as core
-            from platforms import Firestarter
             self.platform = Firestarter()
             self.platform.laser_var = self.laser_params
             self.platform.build(core.Dispatcher(self.platform),

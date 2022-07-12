@@ -4,45 +4,34 @@
 import itertools
 import unittest
 
-from sys import platform
 from luna.gateware.utils.cdc import synchronize
 from luna.gateware.test import LunaGatewareTestCase, sync_test_case
-from amaranth import Elaboratable, Module, Signal
+from amaranth import Elaboratable, Module, Signal, Cat
 from amaranth.build import ResourceError
 from platforms import TestPlatform
+from luna.gateware.interface.spi import SPICommandInterface, SPIBus
 
 
 class Driver(Elaboratable):
-    ''' Drives 3 pole BLDC motor
+    '''Drives 3 pole BLDC motor
 
-        frequency in Hz, rotation frequency of BLDC motor
-        state of the motor, wether motor is turned on
+       frequency in Hz, rotation frequency of BLDC motor
+       state of the motor, wether motor is turned on
     '''
-    def __init__(self, platform, 
-                 frequency=6, states=6, 
-                 dutycyclefreq=100000,
-                 dutycyclestart=0.8,
-                 dutycyclelong=0.01,
+
+    def __init__(self, platform,
                  top=False):
         """
         platform  -- pass test platform
-        frequency -- motor frequency in Hz
-        dutycycle frequency -- frequency of duty cycle modulation in Hz
-        states    -- number of states, typically 6
-        dutycycle -- fraction active, number between 0 and 1
         top       -- True if top module
         """
         self.platform = platform
-        self.frequency = frequency
-        self.dutycyclefleq = dutycyclefreq
-        self.states = states
-        self.on = Signal()
-        self.dutycyclestart = dutycyclestart
-        self.dutycyclelong = dutycyclelong
         self.top = top
+        self.spi = SPIBus()
 
     def elaborate(self, platform):
         m = Module()
+        state = Signal(3)
 
         def get_all_resources(name):
             resources = []
@@ -55,107 +44,130 @@ class Driver(Elaboratable):
 
         if platform and self.top:
             board_spi = platform.request("debug_spi")
-            leds     = [res.o for res in get_all_resources("led")]
+            spi2 = synchronize(m, board_spi)
+
+            leds = [res.o for res in get_all_resources("led")]
             bldc = platform.request("bldc")
-            # connect to signal out
-            # ALS ie 0 is lees je hoog, als ie laag is lees je hoog
-            m.d.comb  += [leds[0].eq(bldc.sensor),
-                          board_spi.sdo.eq(bldc.sensor),
-                          self.on.eq(board_spi.sdi)]
+            m.d.comb += self.spi.connect(spi2)
+
+            m.d.comb += [leds[0].eq(bldc.sensor0),
+                         leds[1].eq(bldc.sensor1),
+                         leds[2].eq(bldc.sensor2)]
+            m.d.sync += state.eq(Cat(bldc.sensor0,
+                                     bldc.sensor1,
+                                     bldc.sensor2))
         else:
             platform = self.platform
             bldc = platform.bldc
-        
-        maxcnt = int(platform.laser_var['CRYSTAL_HZ']/(self.frequency*self.states))
-        maxrotations = 30*self.states*self.frequency
-        timer = Signal(maxcnt.bit_length()+1)
-        rotations = Signal(range(maxrotations))
-        
-        state = Signal(range(self.states))
-        with m.FSM(reset='INIT', name='algo'):
-            with m.State('INIT'):
-                m.d.sync += rotations.eq(0)
-                # with m.If(self.on):
-                m.next = 'ROTATION'
-            with m.State('ROTATION'):
-                # state
-                with m.If(timer == maxcnt):
-                    m.d.sync += timer.eq(0)
-                    # m.d.sync += state.eq(0)
-                    with m.If(state==self.states-1):
-                        m.d.sync += state.eq(0)
-                    with m.Else():
-                        m.d.sync += state.eq(state+1)
-                with m.Else():
-                    m.d.sync += timer.eq(timer+1) 
-                # duty cycle
-                with m.If(rotations == maxrotations):
-                    m.d.sync += rotations.eq(maxrotations)
-                with m.Else():
-                    m.d.sync += rotations.eq(rotations+1)
-                # with m.If(~self.on):
-                #     m.next = 'INIT'
-        
-        thresh = Signal.like(timer)
 
-        # with m.If(rotations<(10*self.states*self.frequency)):
-        m.d.comb += thresh.eq(int(maxcnt*self.dutycyclestart))
-        # with m.If(rotations<(10*self.states*self.frequency)):
-        #     m.d.comb += thresh.eq(int(maxcnt*self.dutycyclestart))
-        # with m.Else():
-        #     m.d.comb += thresh.eq(int(maxcnt*self.dutycyclelong))
+        word = Signal(32)
+        timer = Signal(32)
+        delay = Signal(range(200000))
+        timerstate = Signal(32)
+        statefilter = Signal(3)
+        stateold = Signal(3)
+        
+        with m.If((state>=1) & (state<=6)):
+            m.d.sync += statefilter.eq(state)
+        
+        m.d.sync += stateold.eq(statefilter)
 
-        # six states and one off state
-        with m.If(timer>thresh):
+        
+        ## STATE TIMER
+        
+        target = 50000
+        
+        with m.If(timerstate >= int(10E6)):
+            m.d.sync += timerstate.eq(0)
+        with m.Elif(statefilter != stateold):
+            m.d.sync += timerstate.eq(0)
+            with m.If(timerstate<target):
+                m.d.sync += delay.eq(target-timerstate)
+            with m.Else():
+                m.d.sync += delay.eq(0)
+        with m.Else():
+            m.d.sync += timerstate.eq(timerstate+1)
+            
+            
+
+        ## PERIOD TIMER
+        
+        with m.If(timer == pow(2, 32)-1):
+            m.d.sync += timer.eq(0)
+        # rotational freq cannot be greater than 36000 RPM
+        #  (this is unfeasible)
+        with m.Elif((statefilter == 1) & (stateold != 1)):
+            m.d.sync += [word.eq(timer),
+                         timer.eq(0)]
+        with m.Else():
+            m.d.sync += timer.eq(timer+1)
+
+        spi = self.spi
+        interf = SPICommandInterface(command_size=1*8,
+                                     word_size=4*8)
+        m.d.comb += interf.spi.connect(spi)
+        m.submodules.interf = interf
+        m.d.sync += interf.word_to_send.eq(word)  # word
+
+        # https://www.mathworks.com/help/mcb/ref/sixstepcommutation.html
+        with m.If(timerstate < delay):
             m.d.comb += [bldc.uL.eq(0),
                          bldc.uH.eq(0),
                          bldc.vL.eq(0),
                          bldc.vH.eq(0),
                          bldc.wL.eq(0),
                          bldc.wH.eq(0)]
-        with m.Elif(state == 0):
+        with m.Elif(statefilter == 1):  # V --> W, 001
             m.d.comb += [bldc.uL.eq(0),
                          bldc.uH.eq(0),
                          bldc.vL.eq(0),
                          bldc.vH.eq(1),
                          bldc.wL.eq(1),
                          bldc.wH.eq(0)]
-        with m.Elif(state==1):
+        with m.Elif(statefilter == 3):  # V --> U, 011
             m.d.comb += [bldc.uL.eq(1),
                          bldc.uH.eq(0),
                          bldc.vL.eq(0),
                          bldc.vH.eq(1),
                          bldc.wL.eq(0),
                          bldc.wH.eq(0)]
-        with m.Elif(state==2):
+        with m.Elif(statefilter == 2):  # W --> U, 010
             m.d.comb += [bldc.uL.eq(1),
                          bldc.uH.eq(0),
                          bldc.vL.eq(0),
                          bldc.vH.eq(0),
                          bldc.wL.eq(0),
                          bldc.wH.eq(1)]
-        with m.Elif(state==3):
+        with m.Elif(statefilter == 6):  # W --> V, 110
             m.d.comb += [bldc.uL.eq(0),
                          bldc.uH.eq(0),
                          bldc.vL.eq(1),
                          bldc.vH.eq(0),
                          bldc.wL.eq(0),
                          bldc.wH.eq(1)]
-        with m.Elif(state==4):
+        with m.Elif(statefilter == 4):  # U --> V, 100
             m.d.comb += [bldc.uL.eq(0),
                          bldc.uH.eq(1),
                          bldc.vL.eq(1),
                          bldc.vH.eq(0),
                          bldc.wL.eq(0),
                          bldc.wH.eq(0)]
-        with m.Elif(state==5):
+        with m.Elif(statefilter == 5):  # U --> W, 101
             m.d.comb += [bldc.uL.eq(0),
                          bldc.uH.eq(1),
                          bldc.vL.eq(0),
                          bldc.vH.eq(0),
                          bldc.wL.eq(1),
                          bldc.wH.eq(0)]
+        # with m.Else():         # disabled
+        #     m.d.comb += [bldc.uL.eq(0),
+        #                  bldc.uH.eq(0),
+        #                  bldc.vL.eq(0),
+        #                  bldc.vH.eq(0),
+        #                  bldc.wL.eq(0),
+        #                  bldc.wH.eq(0)]
         return m
+
 
 class TestBLDC(LunaGatewareTestCase):
     platform = TestPlatform()
@@ -172,6 +184,7 @@ class TestBLDC(LunaGatewareTestCase):
         (yield dut.platform.bldc.sensor.eq(1))
         yield
         self.assertEqual((yield dut.sensor), 1)
-    
+
+
 if __name__ == "__main__":
     unittest.main()
