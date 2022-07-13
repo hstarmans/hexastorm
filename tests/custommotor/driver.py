@@ -53,6 +53,7 @@ class Driver(Elaboratable):
             m.d.comb += [leds[0].eq(bldc.sensor0),
                          leds[1].eq(bldc.sensor1),
                          leds[2].eq(bldc.sensor2)]
+            # tested by trying out all possibilities
             m.d.sync += state.eq(Cat(bldc.sensor0,
                                      bldc.sensor1,
                                      bldc.sensor2))
@@ -60,44 +61,36 @@ class Driver(Elaboratable):
             platform = self.platform
             bldc = platform.bldc
 
-        word = Signal(32)
-        timer = Signal(32)
-        delay = Signal(range(200000))
-        timerstate = Signal(32)
+        target = 200000
+        max_measurement = target*10
+        measurement = Signal(range(max_measurement))
+        timer = Signal().like(measurement)
         statefilter = Signal(3)
         stateold = Signal(3)
-        
-        with m.If((state>=1) & (state<=6)):
+        max_delay = 1000
+        delay = Signal(range(max_delay))
+
+        # Statefilter
+        with m.If((state >= 1) & (state <= 6)):
             m.d.sync += statefilter.eq(state)
-        
+
         m.d.sync += stateold.eq(statefilter)
 
-        
-        ## STATE TIMER
-        
-        target = 50000
-        
-        with m.If(timerstate >= int(10E6)):
-            m.d.sync += timerstate.eq(0)
-        with m.Elif(statefilter != stateold):
-            m.d.sync += timerstate.eq(0)
-            with m.If(timerstate<target):
-                m.d.sync += delay.eq(target-timerstate)
-            with m.Else():
-                m.d.sync += delay.eq(0)
+        # PID controller
+        step = max_delay//100
+        with m.If((measurement > target) & (delay >= step)):
+            m.d.sync += delay.eq(delay - step)
+        with m.Elif((measurement < target) & (delay < (max_delay-step))):
+            m.d.sync += delay.eq(delay+step)
         with m.Else():
-            m.d.sync += timerstate.eq(timerstate+1)
-            
-            
+            m.d.sync += delay.eq(0)
 
-        ## PERIOD TIMER
-        
-        with m.If(timer == pow(2, 32)-1):
-            m.d.sync += timer.eq(0)
-        # rotational freq cannot be greater than 36000 RPM
-        #  (this is unfeasible)
+        # Measure Cycle
+        with m.If(timer >= max_measurement-1):
+            m.d.sync += [timer.eq(0),
+                         measurement.eq(timer)]
         with m.Elif((statefilter == 1) & (stateold != 1)):
-            m.d.sync += [word.eq(timer),
+            m.d.sync += [measurement.eq(timer),
                          timer.eq(0)]
         with m.Else():
             m.d.sync += timer.eq(timer+1)
@@ -107,10 +100,25 @@ class Driver(Elaboratable):
                                      word_size=4*8)
         m.d.comb += interf.spi.connect(spi)
         m.submodules.interf = interf
-        m.d.sync += interf.word_to_send.eq(word)  # word
+        m.d.sync += interf.word_to_send.eq(measurement)
+
+        off = Signal()
+        duty = Signal(range(max_delay))
+
+        # Duty timer
+        with m.If(duty < max_delay):
+            m.d.sync += duty.eq(0)
+        with m.Else():
+            m.d.sync += duty.eq(duty+1)
+
+        # Motor On / Off
+        with m.If(duty < delay):
+            m.d.sync += off.eq(1)
+        with m.Else():
+            m.d.sync += off.eq(0)
 
         # https://www.mathworks.com/help/mcb/ref/sixstepcommutation.html
-        with m.If(timerstate < delay):
+        with m.If(off):
             m.d.comb += [bldc.uL.eq(0),
                          bldc.uH.eq(0),
                          bldc.vL.eq(0),
