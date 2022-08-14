@@ -1,15 +1,19 @@
 import os
 import subprocess
+import platform as pltf
 
 from amaranth.build import (Resource, Attrs, Pins, PinsN, Clock,
-                          Subsignal)
+                            Subsignal)
+from amaranth import Signal
+from amaranth.hdl.mem import Array
 from amaranth.vendor.lattice_ice40 import LatticeICE40Platform
 from amaranth_boards.resources import LEDResources
 from amaranth_boards.test.blinky import Blinky
 
-from hexastorm.constants import wordsinmove, platform
-from hexastorm.resources import (StepperResource, StepperRecord,
-                                 LaserscannerResource, LaserscannerRecord)
+from .constants import wordsinmove, platform
+from .resources import (StepperResource, StepperRecord, BLDCRecord,
+                        LaserscannerResource, LaserscannerRecord,
+                        BLDCResource)
 
 
 class TestPlatform:
@@ -26,6 +30,8 @@ class TestPlatform:
     motors = len(stepspermm.keys())
     steppers = [StepperRecord()]*motors
     laserhead = LaserscannerRecord()
+    bldc = BLDCRecord()
+    leds = Array(Signal() for _ in range(3))
 
     def __init__(self):
         self.memdepth = wordsinmove(self)*2+1
@@ -68,10 +74,14 @@ class Firestarter(LatticeICE40Platform, platform):
                         Subsignal("cs", PinsN("13", dir="i")),
                         Attrs(IO_STANDARD="SB_LVCMOS")),
                # Laserscanner resource
-               LaserscannerResource(number=0, laser0='32', laser1='31',
-                                    photodiode='28',
-                                    pwm='26', enable='23',
+               LaserscannerResource(number=0, laser0='31', laser1='28',
+                                    photodiode='38',
                                     attrs=Attrs(IO_STANDARD="SB_LVCMOS")),
+               # BLDC driver
+               BLDCResource(number=0, uL="25", uH="26", vL="9", vH="23",
+                            wL="27", wH="32", sensor0="34", sensor1="36",
+                            sensor2="37", attrs=Attrs(IO_STANDARD="SB_LVCMOS")
+                            ),
                # x-stepper
                StepperResource(number=0, step="6", direction="4",
                                limit="3",
@@ -86,19 +96,19 @@ class Firestarter(LatticeICE40Platform, platform):
                                attrs=Attrs(IO_STANDARD="SB_LVCMOS"))
                ]
     connectors = []
-    
+
     def __init__(self, micropython=False):
         LatticeICE40Platform.__init__(self)
         platform.__init__(self, micropython)
 
     def build(self, *args, **kwargs):
-        apio = True
-        if apio:
-            base = 'apio raw "which '
-            end = '"'
+        # still preferred on 32 bits systems
+        if pltf.system() == 'Windows':
+            search_command = 'where'
         else:
-            base = 'which yowasp-'
-            end = ''
+            search_command = 'which'
+        base = f'{search_command} yowasp-'
+        end = ''
         os.environ['YOSYS'] = subprocess.getoutput(base+'yosys'+end)
         os.environ['NEXTPNR_ICE40'] = \
             subprocess.getoutput(base+'nextpnr-ice40'+end)

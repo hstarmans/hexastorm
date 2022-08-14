@@ -4,10 +4,10 @@ from amaranth import (Signal, Elaboratable, signed, Module)
 from amaranth.hdl.mem import Array
 from luna.gateware.test import LunaGatewareTestCase, sync_test_case
 
-from hexastorm.resources import get_all_resources
-from hexastorm.constants import MOVE_TICKS, bit_shift
-from hexastorm.controller import Host
-from hexastorm.platforms import TestPlatform
+from .resources import get_all_resources
+from .constants import MOVE_TICKS, bit_shift
+from .controller import Host
+from .platforms import TestPlatform
 
 
 class Polynomal(Elaboratable):

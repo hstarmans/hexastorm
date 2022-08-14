@@ -2,13 +2,14 @@ import itertools
 
 from amaranth import Record
 from amaranth.hdl.ast import unsigned
-from amaranth.build import Subsignal, Resource, Pins, PinsN, ResourceError
+from amaranth.build import Subsignal, Resource, Pins, ResourceError
 from amaranth.hdl.rec import Layout
 
 
 __all__ = [
     "StepperResource",
-    "LaserscannerResource"
+    "LaserscannerResource",
+    "BLDCResource"
 ]
 
 
@@ -78,7 +79,9 @@ class BLDCLayout(Layout):
             ("vH", 1),
             ("wL", 1),
             ("wH", 1),
-            ("sensor", 1)
+            ("sensor0", 1),
+            ("sensor1", 1),
+            ("sensor2", 1)
         ])
 
 
@@ -130,9 +133,7 @@ class LaserScannerLayout(Layout):
         super().__init__([
             ("laser0", 1),
             ("laser1", 1),
-            ("photodiode", 1),
-            ("pwm", 1),
-            ("en", 1),
+            ("photodiode", 1)
         ])
 
 
@@ -144,7 +145,7 @@ class LaserscannerRecord(Record):
 
 
 def LaserscannerResource(*args, laser0, laser1,
-                         photodiode, pwm, enable,
+                         photodiode,
                          number=None,
                          conn=None, attrs=None):
     """ Resource for laser scanner
@@ -155,8 +156,6 @@ def LaserscannerResource(*args, laser0, laser1,
         O: laser0         -- laser channel 0
         O: laser1         -- laser channel 1
         I: photodiode     -- photodiode used to measure position of laser
-        O: pwm            -- polygon is rotated with pwm
-        O: en             -- on low polygon motor is enabled (depends on type)
     """
     io = []
     io.append(Subsignal("laser0", Pins(laser0, dir="o",
@@ -165,9 +164,6 @@ def LaserscannerResource(*args, laser0, laser1,
               conn=conn, assert_width=1)))
     io.append(Subsignal("photodiode",
               Pins(photodiode, dir="i", conn=conn, assert_width=1)))
-    io.append(Subsignal("pwm", Pins(pwm, dir="o", conn=conn, assert_width=1)))
-    io.append(Subsignal("en", PinsN(enable, dir="o",
-                        conn=conn, assert_width=1)))
     if attrs is not None:
         io.append(attrs)
     return Resource.family(*args, number, default_name="laserscanner", ios=io)

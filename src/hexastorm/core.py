@@ -12,14 +12,15 @@ from luna.gateware.memory import TransactionalizedFIFO
 from luna.gateware.test.utils import sync_test_case
 from luna.gateware.interface.spi import SPIGatewareTestCase
 
-from hexastorm.controller import Host, Memfull
-from hexastorm.movement import Polynomal
-from hexastorm.platforms import TestPlatform
-from hexastorm.resources import get_all_resources
-from hexastorm.lasers import Laserhead, DiodeSimulator, params
-from hexastorm.constants import (COMMAND_BYTES, WORD_BYTES, STATE,
-                                 INSTRUCTIONS, MEMWIDTH, COMMANDS,
-                                 MOTORFREQ, wordsinscanline, wordsinmove)
+from .controller import Host, Memfull
+from .movement import Polynomal
+from .motor import Driver
+from .platforms import TestPlatform
+from .resources import get_all_resources
+from .lasers import Laserhead, DiodeSimulator, params
+from .constants import (COMMAND_BYTES, WORD_BYTES, STATE,
+                        INSTRUCTIONS, MEMWIDTH, COMMANDS,
+                        MOTORFREQ, wordsinscanline, wordsinmove)
 
 
 class SPIParser(Elaboratable):
@@ -210,6 +211,8 @@ class Dispatcher(Elaboratable):
             spi = synchronize(m, board_spi)
             laserheadpins = platform.request("laserscanner")
             steppers = [res for res in get_all_resources(platform, "stepper")]
+            bldc = platform.request("bldc")
+            leds = [res.o for res in get_all_resources(platform, "led")]
             assert len(steppers) != 0
         else:
             platform = self.platform
@@ -220,7 +223,9 @@ class Dispatcher(Elaboratable):
             self.laserheadpins = platform.laserhead
             self.steppers = steppers = platform.steppers
             self.busy = busy
-            laserheadpins = self.platform.laserhead
+            laserheadpins = platform.laserhead
+            bldc = platform.bldc
+            leds = platform.leds
         # Local laser signal clones
         enable_prism = Signal()
         lasers = Signal(2)
@@ -243,10 +248,28 @@ class Dispatcher(Elaboratable):
             self.laserhead = laserhead
         # polynomal iterates over count
         coeffcnt = Signal(range(len(polynomal.coeff)+1))
+        # Prism motor
+        prism_driver = Driver(platform)
+        m.submodules.prism_driver = prism_driver
+        # connect prism motor
+        for idx in range(len(leds)):
+            m.d.comb += leds[idx].eq(prism_driver.leds[idx])
+
+        m.d.comb += prism_driver.enable_prism.eq(enable_prism)
+        m.d.comb += [bldc.uL.eq(prism_driver.uL),
+                     bldc.uH.eq(prism_driver.uH),
+                     bldc.vL.eq(prism_driver.vL),
+                     bldc.vH.eq(prism_driver.vH),
+                     bldc.wL.eq(prism_driver.wL),
+                     bldc.wH.eq(prism_driver.wH)]
+        m.d.comb += [prism_driver.hall[0].eq(bldc.sensor0),
+                     prism_driver.hall[1].eq(bldc.sensor1),
+                     prism_driver.hall[2].eq(bldc.sensor2)]
         # connect laserhead
         m.d.comb += [
-            laserheadpins.pwm.eq(laserhead.pwm),
-            laserheadpins.en.eq(laserhead.enable_prism | enable_prism),
+            # TODO: fix removal
+            # laserheadpins.pwm.eq(laserhead.pwm),
+            # laserheadpins.en.eq(laserhead.enable_prism | enable_prism),
             laserheadpins.laser0.eq(laserhead.lasers[0] | lasers[0]),
             laserheadpins.laser1.eq(laserhead.lasers[1] | lasers[1]),
         ]
@@ -565,7 +588,9 @@ class TestDispatcher(SPIGatewareTestCase):
         self.assertEqual((yield from self.host.get_state())['error'], False)
         self.assertEqual((yield self.dut.laserheadpins.laser0), 1)
         self.assertEqual((yield self.dut.laserheadpins.laser1), 0)
-        self.assertEqual((yield self.dut.laserheadpins.en), 0)
+        # TODO: the enable pin is no longer on the laser head but
+        #       the prism motor
+        #self.assertEqual((yield self.dut.laserheadpins.en), 0)
 
     @sync_test_case
     def test_home(self):

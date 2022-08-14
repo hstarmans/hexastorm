@@ -8,9 +8,9 @@ from amaranth import Module
 from luna.gateware.test import LunaGatewareTestCase, sync_test_case
 from luna.gateware.memory import TransactionalizedFIFO
 
-import hexastorm.controller as controller
-from hexastorm.constants import (MEMWIDTH, WORD_BYTES, INSTRUCTIONS, params)
-from hexastorm.platforms import TestPlatform
+from . import controller
+from .constants import (MEMWIDTH, WORD_BYTES, INSTRUCTIONS, params)
+from .platforms import TestPlatform
 
 
 class Laserhead(Elaboratable):
@@ -36,7 +36,6 @@ class Laserhead(Elaboratable):
     """
     def __init__(self, platform):
         '''
-        top        -- trigger synthesis of module
         platform   -- pass test platform
         '''
         self.platform = platform

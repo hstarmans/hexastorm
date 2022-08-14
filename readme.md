@@ -22,27 +22,40 @@ Code is tested on a Raspberry Pi 3B and 4B. The SD-card should be at least 8 GB,
 Both Raspbian and Ubuntu can be used. Raspbian is not yet available at 64 bit.
 The ArduCam, a camera used for alignment, does not have a driver for 64 bit.
 
+# Overall note
+Development is done on the main or master branch.
+Look through to commit history to find the right working version which was used in the video.
+
 # Install
-Install poetry and python
+Install poetry and python.
 ```console
 sudo apt install python3 python3-pip
 curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py | python3 -
 ```
-Use poetry to install the dependencies in pyproject.toml
+Use poetry to install the dependencies in pyproject.toml.
+Poetry creates a virtual environment for you. 
+So only using ```poetry run python``` enables you to access the packages.
 ```console
 poetry install
 ```
-The above allows you to test the code. 
+Depending on your operating system you also need to install certain extras.
+Look into the pyproject.toml file for the possibilities.
+Compiling firmware can be done by installing the python packages for yosys.
 ```console
-poetry run python3 src/hexastorm/movement.py
+poetry install --extras "64bit"
+```
+If this doesn't work try [oss-cad-suite](https://github.com/YosysHQ/oss-cad-suite-build).
+You can test code as follows. 
+```console
+poetry run python3 -m hexastorm.movement
 ```
 If you want to interact with the stepper motors and flash the fpga.
 ```console
 ./install.sh
 ```
 ## Micropython
-The file controller.py can be called from Micropython.
-Code is tested on ESP32.
+An idea, I am working on is to call controller.py from Micropython.
+Most dependencies can be moved to ESP32.
 
 ## Raspberry pi
 The following lines need to be in the /boot/config.txt;

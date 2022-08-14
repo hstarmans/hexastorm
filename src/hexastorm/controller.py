@@ -4,21 +4,19 @@ try:
 except ImportError:
     upython = False
 
-from curses import baudrate
 from struct import unpack
 from time import sleep
 
 if upython:
-    from hexastorm.constants import platform as platformmicro
+    from .constants import platform as platformmicro
     from ulab import numpy as np
 else:
-    from hexastorm.platforms import Firestarter
+    from .platforms import Firestarter
     import numpy as np
 
-from hexastorm.constants import (INSTRUCTIONS, COMMANDS, MOTORFREQ, STATE,
-                                 MOVE_TICKS, WORD_BYTES, bit_shift,
-                                 COMMAND_BYTES, params)
-
+from .constants import (INSTRUCTIONS, COMMANDS, MOTORFREQ, STATE,
+                        MOVE_TICKS, WORD_BYTES, bit_shift,
+                        COMMAND_BYTES, params)
 
 
 def executor(func):
@@ -80,7 +78,7 @@ class Host:
             self.bus.init(machine.I2C.CONTROLLER, adr=self.platform.ic_addr)
             # SPI
             # spi port is hispi
-            self.spi  = machine.SPI(self.spi_dev, baudrate=round(1E6))
+            self.spi = machine.SPI(self.spi_dev, baudrate=round(1E6))
             self.chip_select = machine.Pin(self.platform.chip_select)
             # program TMC2130
             # TODO: add TMC2130 library to micropython
