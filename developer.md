@@ -10,8 +10,7 @@ sudo apt install libatlas3-base
 ```
 Install [luna](https://github.com/greatscottgadgets/luna) and checkout at f54de01.
 So after git cloning, run ```git checkout f54de01```.
-Code after this date has not been tested.
-An alternative is yowasp but this is not supported.
+Priop to yowasp apio was used but this result in a suboptimal binary.
 ```console
 pip3 install yowasp-yosys
 pip3 install yowasp-nextpnr-ice40-all
@@ -26,7 +25,8 @@ export ICEPACK="yowasp-icepack"
 export NEXTPNR_ICE40="yowasp-nextpnr-ice40"
 ```
 Run  ```source ~/.bashrc``` afterwards.
-You can enable wifi using [link](https://github.com/sraodev/Raspberry-Pi-Headless-Setup-via-Network-Manager)
+You can enable wifi using [link](https://github.com/sraodev/Raspberry-Pi-Headless-Setup-via-Network-Manager).
+Using the raspberry pi installer you can automatically fix wifi and it will copy password.
 
 If the behaviour of the FPGA is simulated, signal traces for [GTKWave](http://gtkwave.sourceforge.net/) are generated if the following flag is set.
 ```console
@@ -58,6 +58,9 @@ The images of the cameras are analyzed with [OpenCV](https://opencv.org/).
 sudo apt install -y libopenjp2-7 libilmbase-dev libopenexr-dev libgstreamer1.0-dev ffmpeg
 pip3 install opencv-python
 ```
+Camera must be enabled via raspi-config. Raspi-config states that this will no longer be supported in future versions and denotes camera as legacy.
+I had toleave 'i2c-dev' in '/etc/modules-load.d/modules.conf' for i2c to load.
+
 #### uEye camera
 Disadvantages; uEye is more expensive, drivers require an account and there is no good Python driver.  
 Advantages; product is more mature.  
