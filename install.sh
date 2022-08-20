@@ -1,6 +1,3 @@
-# tools to create instructions for fpga
-poetry run apio install yosys
-poetry run apio install ice40
 # recommended for opencv
 sudo apt install -y libopenjp2-7 libilmbase-dev libopenexr-dev libgstreamer1.0-dev ffmpeg
 # required to build library stepper motor

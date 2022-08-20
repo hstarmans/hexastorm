@@ -102,14 +102,14 @@ class Firestarter(LatticeICE40Platform, platform):
         platform.__init__(self, micropython)
 
     def build(self, *args, **kwargs):
-        # still preferred on 32 bits systems
         if pltf.system() == 'Windows':
             search_command = 'where'
         else:
             search_command = 'which'
         base = f'{search_command} yowasp-'
         end = ''
-        os.environ['YOSYS'] = subprocess.getoutput(base+'yosys'+end)
+        # yowasp-yosys doesn't work
+        # os.environ['YOSYS'] = subprocess.getoutput(base+'yosys'+end)
         os.environ['NEXTPNR_ICE40'] = \
             subprocess.getoutput(base+'nextpnr-ice40'+end)
         os.environ['ICEPACK'] = subprocess.getoutput(base+'icepack'+end)

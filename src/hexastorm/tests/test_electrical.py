@@ -8,15 +8,15 @@ import numpy as np
 from numpy.testing import assert_array_almost_equal
 
 from hexastorm import interpolator
-from hexastorm.controller import Host, Memfull, executor
-from hexastorm.platforms import Firestarter
-from hexastorm.constants import (WORD_BYTES, COMMANDS, MOVE_TICKS,
-                                 wordsinmove)
+from ..controller import Host, Memfull, executor
+from ..platforms import Firestarter
+from ..constants import (WORD_BYTES, COMMANDS, MOVE_TICKS,
+                         wordsinmove)
 
 
 class Base(unittest.TestCase):
     @classmethod
-    def setUpClass(cls, flash=False):
+    def setUpClass(cls, flash=True):
         cls.host = Host()
         if flash:
             cls.host.build()

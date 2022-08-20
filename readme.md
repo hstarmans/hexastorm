@@ -18,9 +18,8 @@ The alignment procedure is shown in the following video.
 [![Alignment procedure image not showing](http://img.youtube.com/vi/Ri6DAneEzw4/0.jpg)](http://www.youtube.com/watch?v=Ri6DAneEzw4 "Alignment procedure")
 
 ## Requirements
-Code is tested on a Raspberry Pi 3B and 4B. The SD-card should be at least 8 GB, ideally 16 GB.
-Both Raspbian and Ubuntu can be used. Raspbian is not yet available at 64 bit.
-The ArduCam, a camera used for alignment, does not have a driver for 64 bit.
+Code is tested on a Raspberry Pi 3B and 4B. The SD-card should be at least 8 GB, ideally 16 GB.  
+Both 32 bit and 64 bit are tested, with camera.
 
 # Overall note
 Development is done on the main or master branch.
@@ -40,11 +39,12 @@ poetry install
 ```
 Depending on your operating system you also need to install certain extras.
 Look into the pyproject.toml file for the possibilities.
-Compiling firmware can be done by installing the python packages for yosys.
+Yosys must be compiled or installed via [oss-cad-suite](https://github.com/YosysHQ/oss-cad-suite-build).
+An alternative is to install python packages which use wasm but these are experimental.
 ```console
 poetry install --extras "64bit"
 ```
-If this doesn't work try [oss-cad-suite](https://github.com/YosysHQ/oss-cad-suite-build).
+If this doesn't work try 
 You can test code as follows. 
 ```console
 poetry run python3 -m hexastorm.movement
@@ -61,7 +61,7 @@ Most dependencies can be moved to ESP32.
 The following lines need to be in the /boot/config.txt;
 ```
 # I2C for laserdriver and camera
-i2c_arm=on
+dtparam=i2c_arm=on
 dtparam=i2c_vc=on
 # SPI
 dtoverlay=spi0-1cs,cs0_pin=18

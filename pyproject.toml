@@ -15,11 +15,9 @@ luna = {git = "https://git@github.com/greatscottgadgets/luna.git", rev = "main"}
 gpiozero = { version = "^1.6.2", optional = true }
 spidev = { version = "^3.5", optional = true }
 smbus2 = { version = "^0.4.1", optional = true }
-apio = { version = "^0.8.0", optional = true}
 yowasp-nextpnr-ice40 = { version = "^0.3.post31.dev324", optional = true}
 pandas = "^1.4.3"
 CairoSVG = "^2.5.2"
-yowasp-yosys = "^0.17.post67.dev359"
 
 [tool.poetry.dev-dependencies]
 jupyterlab = "^3.4.4"
@@ -35,8 +33,7 @@ yapf = "^0.32.0"
 pylint = "^2.14.5"
 
 [tool.poetry.extras]
-32bit = ["apio"]
-64bit = ["yowasp-nextpnr-ice40", "yowasp-yosys"]
+64bit = ["yowasp-nextpnr-ice40"]
 raspberry = ["gpiozero", "spidev", "smbus2"]
 
 [build-system]
