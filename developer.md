@@ -2,6 +2,18 @@
 
 The following notes where removed from readme.md for brevity.
 
+
+## Jupyter lab
+
+Jupyter lab only works with git extension if key is added to ssh agent.
+```ssh-ad id_ed25519```
+You can use the following script to launch jupyter lab.
+```
+#!/bin/bash
+
+env -C ~/projects/hexastorm/ poetry run jupyter lab --no-browser --ip "*"
+```
+
 ## Notes removed from installation
 On Raspbian, install libatlas so latest Numpy, etc. can be installed via pip.
 ```console

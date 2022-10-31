@@ -85,14 +85,14 @@ class Firestarter(LatticeICE40Platform, platform):
         platform.__init__(self)
 
     def build(self, *args, **kwargs):
-        apio = True
+        apio = False
         if apio:
             base = 'apio raw "which '
             end = '"'
         else:
             base = 'which yowasp-'
             end = ''
-        os.environ['YOSYS'] = subprocess.getoutput(base+'yosys'+end)
+        # os.environ['YOSYS'] = subprocess.getoutput(base+'yosys'+end)
         os.environ['NEXTPNR_ICE40'] = \
             subprocess.getoutput(base+'nextpnr-ice40'+end)
         os.environ['ICEPACK'] = subprocess.getoutput(base+'icepack'+end)
