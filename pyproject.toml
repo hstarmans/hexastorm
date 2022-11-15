@@ -10,7 +10,7 @@ python = ">=3.8,<3.11"
 numba = "^0.55.1"
 opencv-python = "^4.5.5"
 scipy = "^1.7.3"
-Pillow = "^9.0.1"
+Pillow = "^9.3.0"
 luna = {git = "https://git@github.com/greatscottgadgets/luna.git", rev = "main"}
 gpiozero = { version = "^1.6.2", optional = true }
 spidev = { version = "^3.5", optional = true }
