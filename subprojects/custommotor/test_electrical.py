@@ -7,6 +7,7 @@ import subprocess
 
 from gpiozero import LED
 import numpy as np
+import pandas as pd
 
 from platforms import Firestarter
 from driver import Driver
@@ -32,8 +33,10 @@ class Base(unittest.TestCase):
         cls.spi.max_speed_hz = round(1E6)
         if build:
             print("Building and programming board")
-            cls.platform.build(Driver(Firestarter(), top=True),
-                               do_program=True, verbose=True)
+            cls.platform.build(Driver(Firestarter(),
+                                      top=True),
+                               do_program=True,
+                               verbose=True)
         else:
             cls.reset_pin.off()
             sleep(1)
@@ -42,60 +45,66 @@ class Base(unittest.TestCase):
             print("Not programming board")
 
     def read_freq(self):
-        '''reads rotor frequency in ticks via SPI''' 
+        '''reads rotor frequency in ticks via SPI'''
         data = [1]*5  # random bytes
         self.chip_select.off()
         # spidev changes values passed to it
         datachanged = deepcopy(data)
         response = bytearray(self.spi.xfer(datachanged))
         self.chip_select.on()
-        ticks = unpack(">I", bytearray(response[1:]))[0]
-        if ticks != 0:
-            freq = (13.56E6/ticks)
-        else:
-            freq = None
-        return freq
+        #state = int.from_bytes(response[1:2], "big")
+        #ticks = int.from_bytes(response[2:], "big")
+        state = int.from_bytes(response, "big")
+        return state
 
-    def test_readfreq(self, delay=1):
+    def test_readfreq(self, delay=0):
         '''turns on the motor board and retrieves the rotor frequency
 
         Method runs for ever, can be interrupted with keyboard interrupt.
         '''
-        with open(str(int(time()))+'.csv', 'w') as csvfile:
-            lst = []
-            try:
-                cntr = 0
-                while True:
-                    cntr += 1
-                    if cntr == 120:
-                        print("Starting measurement")
-                    if cntr == 180:
-                        print("Measurement finished")
-                        break
-                    freq = self.read_freq()
-                    if cntr > 120:
-                        if freq:
-                            lst.append(freq)
-                    writer = csv.writer(csvfile)
-                    writer.writerow([time_ns(), freq])
-                    if freq:
-                        print(f"Freq is {freq:.2f} and RPM is {freq*60:.2f}")
-                    else:
-                        print(f"Invalid measured 0")
-                    sleep(delay)
-            except KeyboardInterrupt:
-                pass
-            finally:
-                self.reset_pin.off()
-                self.reset_pin.close()
-                # gpiozero cleans up pins
-                # this ensures pin is kept off
-                command = subprocess.run(["raspi-gpio", "set",
-                                          str(self.platform.reset_pin),
-                                          "op", "dl"])
-                ar = np.asarray(lst)
-                print(f'Mean {np.mean(ar):.4f} and std {np.std(ar):.4f}')
-                print('Interrupted, exiting')
+        lst = []
+        start = time()
+        starttime = 10
+        totaltime = 60
+        output = pd.DataFrame(columns=['time',
+                                       'state'])
+        print(f'Waiting {starttime} seconds to start measurement.')
+        sleep(starttime)
+        print("Starting measurement")
+        try:
+            while True:
+                if (time()-start) >= totaltime:
+                    print("Measurement finished")
+                    output.to_csv('measurement.csv')
+                    output = output[output['state'] != 0]
+                    # six states cover 180 degrees
+                    print((output.rename(columns={'time':'degrees'})
+                                 .groupby(['state'])
+                                 .count()/len(output)*180)
+                          .assign(cumsum = lambda df: df['degrees'].cumsum())
+                          .round())
+                    break
+                state = self.read_freq()
+                #state = int(str(ticks)[:1])
+                try:
+                    dct = {'time': [time_ns()],
+                           'state': [state]}
+                    frame1 = pd.DataFrame(dct)
+                    output = pd.concat([output, frame1],
+                                       ignore_index=True)
+                except ValueError as e:
+                    print(e)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            self.reset_pin.off()
+            self.reset_pin.close()
+            # gpiozero cleans up pins
+            # this ensures pin is kept off
+            command = subprocess.run(["raspi-gpio", "set",
+                                      str(self.platform.reset_pin),
+                                      "op", "dl"])
+            print('Interrupted, exiting')
 
 
 if __name__ == "__main__":
