@@ -8,6 +8,7 @@ import subprocess
 from gpiozero import LED
 import numpy as np
 import pandas as pd
+import plotext as plt
 
 from platforms import Firestarter
 from driver import Driver
@@ -16,7 +17,7 @@ from struct import unpack
 
 class Base(unittest.TestCase):
     @classmethod
-    def setUpClass(cls, build=False):
+    def setUpClass(cls, word='hallfilter', build=True):
         '''programs board
 
         if build is False FPGA is only reset
@@ -31,9 +32,13 @@ class Base(unittest.TestCase):
         cls.spi.open(*cls.platform.spi_dev)
         cls.spi.mode = 1
         cls.spi.max_speed_hz = round(1E6)
+        cls.word = word
+        cls.divider = 800
         if build:
             print("Building and programming board")
             cls.platform.build(Driver(Firestarter(),
+                                      word=word,
+                                      divider=cls.divider,
                                       top=True),
                                do_program=True,
                                verbose=True)
@@ -54,8 +59,38 @@ class Base(unittest.TestCase):
         self.chip_select.on()
         #state = int.from_bytes(response[1:2], "big")
         #ticks = int.from_bytes(response[2:], "big")
-        state = int.from_bytes(response, "big")
-        return state
+        response = int.from_bytes(response, "big")
+        if (self.word == 'cycletime') & (response != 0):
+            # you measure 180 degrees
+            response = round((12E6/(response*2)*60))
+        return response
+
+    def finish(self, output):
+        print("Measurement finished")
+        output.to_csv('measurement.csv')
+        if self.word == 'hallfilter':
+            output = output[output['word'] != 0]
+            # six states cover 180 degrees
+            print((output.rename(columns={'time':'degrees'})
+                         .groupby(['word'])
+                         .count()/len(output)*180)
+                  .assign(cumsum = lambda df: df['degrees'].cumsum())
+                  .round())
+        elif self.word == 'cycletime':
+            print(output[['word']].describe())
+        elif self.word == 'angle':
+            #print(output[['word']].describe())
+            #print(output['word'].unique())
+            bins = [0, 30, 60, 90, 120, 150, 180]
+            labels = ['0', '30', '60', '90', '120', '150']
+            output['hall'] = pd.cut(x=output['word'],
+                                    bins=bins,
+                                    labels=labels,
+                                    include_lowest=True)
+            print(output.hall.sort_values().value_counts()/len(output))
+            #plt.hist(output['word'].tolist(), 6, label = "distribution")
+            #plt.title("Histogram Plot")
+            #plt.show()
 
     def test_readfreq(self, delay=0):
         '''turns on the motor board and retrieves the rotor frequency
@@ -65,36 +100,34 @@ class Base(unittest.TestCase):
         lst = []
         start = time()
         starttime = 10
-        totaltime = 60
+        totaltime = 120
         output = pd.DataFrame(columns=['time',
-                                       'state'])
+                                       'word'])
         print(f'Waiting {starttime} seconds to start measurement.')
         sleep(starttime)
         print("Starting measurement")
         try:
             while True:
                 if (time()-start) >= totaltime:
-                    print("Measurement finished")
-                    output.to_csv('measurement.csv')
-                    output = output[output['state'] != 0]
-                    # six states cover 180 degrees
-                    print((output.rename(columns={'time':'degrees'})
-                                 .groupby(['state'])
-                                 .count()/len(output)*180)
-                          .assign(cumsum = lambda df: df['degrees'].cumsum())
-                          .round())
+                    self.finish(output)
                     break
-                state = self.read_freq()
+                word = self.read_freq()
                 #state = int(str(ticks)[:1])
                 try:
                     dct = {'time': [time_ns()],
-                           'state': [state]}
+                           'word': [word]}
                     frame1 = pd.DataFrame(dct)
                     output = pd.concat([output, frame1],
                                        ignore_index=True)
+                    if (self.word in ['cycletime',
+                                      'statecounter',
+                                      'anglecounter']):
+                        print(word)
+                        sleep(1)
                 except ValueError as e:
                     print(e)
         except KeyboardInterrupt:
+            self.finish(output)
             pass
         finally:
             self.reset_pin.off()
