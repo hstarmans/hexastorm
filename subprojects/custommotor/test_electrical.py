@@ -17,7 +17,10 @@ from struct import unpack
 
 class Base(unittest.TestCase):
     @classmethod
-    def setUpClass(cls, word='hallfilter', build=True):
+    def setUpClass(cls,
+                   word='PIcontrol',
+                   PIcontrol=True,
+                   build=True):
         '''programs board
 
         if build is False FPGA is only reset
@@ -39,6 +42,7 @@ class Base(unittest.TestCase):
             cls.platform.build(Driver(Firestarter(),
                                       word=word,
                                       divider=cls.divider,
+                                      PIcontrol=PIcontrol,
                                       top=True),
                                do_program=True,
                                verbose=True)
@@ -49,41 +53,61 @@ class Base(unittest.TestCase):
             sleep(1)
             print("Not programming board")
 
-    def read_freq(self):
-        '''reads rotor frequency in ticks via SPI'''
+    def read_word(self):
+        '''reads word sent over via SPI'''
         data = [1]*5  # random bytes
         self.chip_select.off()
         # spidev changes values passed to it
         datachanged = deepcopy(data)
-        response = bytearray(self.spi.xfer(datachanged))
+        # first byte back is commmand
+        response = bytearray(self.spi.xfer(datachanged))[1:]
         self.chip_select.on()
-        #state = int.from_bytes(response[1:2], "big")
-        #ticks = int.from_bytes(response[2:], "big")
-        response = int.from_bytes(response, "big")
+        clock = int(self.platform.clks[self.platform.hfosc_div]*1E6)
         if (self.word == 'cycletime') & (response != 0):
+            response = int.from_bytes(response, "big")
             # you measure 180 degrees
-            response = round((12E6/(response*2)*60))
-        return response
+            response = round((clock/(response*2)*60))
+        elif (self.word == 'PIcontrol'):
+            degreecnt = int.from_bytes(response[2:], "big", signed=False)
+            if degreecnt != 0:
+                speed = (clock/(degreecnt*180*2)*60)
+            else:
+                speed = 0
+            delay = int.from_bytes(response[:2], "big", signed=True)
+            response = [degreecnt, delay]
+        elif (self.word == 'anglecounter'):
+            degreecnt = int.from_bytes(response, "big")
+            if degreecnt != 0:
+                response = (clock/(degreecnt*180*2)*60)
+            else:
+                response = 0
+        else:
+            response = int.from_bytes(response, "big")
+        if not isinstance(response,
+                          list):
+            return [response]
+        else:
+            return response
 
     def finish(self, output):
-        print("Measurement finished")
+        print(f"Measurement finished in mode {self.word}")
         output.to_csv('measurement.csv')
         if self.word == 'hallfilter':
             output = output[output['word'] != 0]
             # six states cover 180 degrees
             print((output.rename(columns={'time':'degrees'})
-                         .groupby(['word'])
+                         .groupby(['word_0'])
                          .count()/len(output)*180)
                   .assign(cumsum = lambda df: df['degrees'].cumsum())
                   .round())
         elif self.word == 'cycletime':
-            print(output[['word']].describe())
+            print(output[['word_0']].describe())
         elif self.word == 'angle':
             #print(output[['word']].describe())
             #print(output['word'].unique())
             bins = [0, 30, 60, 90, 120, 150, 180]
             labels = ['0', '30', '60', '90', '120', '150']
-            output['hall'] = pd.cut(x=output['word'],
+            output['hall'] = pd.cut(x=output['word_0'],
                                     bins=bins,
                                     labels=labels,
                                     include_lowest=True)
@@ -97,10 +121,9 @@ class Base(unittest.TestCase):
 
         Method runs for ever, can be interrupted with keyboard interrupt.
         '''
-        lst = []
         start = time()
         starttime = 10
-        totaltime = 120
+        totaltime = 60
         output = pd.DataFrame(columns=['time',
                                        'word'])
         print(f'Waiting {starttime} seconds to start measurement.')
@@ -111,18 +134,21 @@ class Base(unittest.TestCase):
                 if (time()-start) >= totaltime:
                     self.finish(output)
                     break
-                word = self.read_freq()
+                words = self.read_word()
                 #state = int(str(ticks)[:1])
                 try:
-                    dct = {'time': [time_ns()],
-                           'word': [word]}
+                    dct = {'time': [time_ns()]}
+                    for idx, word in enumerate(words):
+                        dct[f'word_{idx}'] = word
                     frame1 = pd.DataFrame(dct)
                     output = pd.concat([output, frame1],
                                        ignore_index=True)
                     if (self.word in ['cycletime',
                                       'statecounter',
+                                      'PIcontrol',
                                       'anglecounter']):
-                        print(word)
+                        for word in words:
+                            print(word)
                         sleep(1)
                 except ValueError as e:
                     print(e)

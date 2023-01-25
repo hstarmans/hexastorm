@@ -1,14 +1,12 @@
-""" BLDC board provided on separate board see,
-    https://hackaday.io/project/21933-prism-laser-scanner/log/201104-prism-motor-bugeja-style
-"""
 import itertools
 import unittest
 
 from luna.gateware.utils.cdc import synchronize
 from luna.gateware.test import LunaGatewareTestCase, sync_test_case
 from luna.gateware.interface.spi import SPICommandInterface, SPIBus
-from amaranth import Elaboratable, Module, Signal, Cat
+from amaranth import Elaboratable, Module, Signal, Cat, signed
 from amaranth.build import ResourceError
+import numpy as np
 
 from platforms import TestPlatform
 
@@ -17,28 +15,37 @@ class Driver(Elaboratable):
     '''Drives 3 pole BLDC motor
     '''
 
-    def __init__(self, platform, word='cycletime', divider=800,
+    def __init__(self,
+                 platform,
+                 word='cycletime',
+                 divider=800,
+                 PIcontrol=False,
                  top=False):
         """
         platform  -- pass test platform
         top       -- True if top module
-        mode      -- defines what is sent back
+        word      -- defines what word is sent back via SPI
+        divider   -- clock is downsampled to retrieve Hall
+        PIControl -- enabled Position Integral control
         """
         self.platform = platform
         self.top = top
         self.spi = SPIBus()
         self.word = word
         self.divider = divider
+        self.PIcontrol = PIcontrol
 
     def elaborate(self, platform):
         m = Module()
         motorstate = Signal(8)
         hallstate = Signal().like(motorstate)
         hallfilter = Signal().like(hallstate)
-        # total number of states in cycle
+        # total number of states in 360 degrees
         states_fullcycle = 12
-        # clock is downscaled to filter out
-        # noise coming to the hall sensors
+        angle = Signal(range(180))
+        # angle counter limits
+        lowerlimit = 500
+        upperlimit = 3000
 
         def get_all_resources(name):
             resources = []
@@ -55,13 +62,13 @@ class Driver(Elaboratable):
 
             leds = [res.o for res in get_all_resources("led")]
             bldc = platform.request("bldc")
-            m.d.comb += self.spi.connect(spi2)
-            m.d.comb += hallstate.eq(Cat(~bldc.sensor0,
-                                         ~bldc.sensor1,
-                                         ~bldc.sensor2))
-            m.d.comb += leds[0].eq(hallstate[0])
-            m.d.comb += leds[1].eq(hallstate[1])
-            m.d.comb += leds[2].eq(hallstate[2])
+            m.d.comb += [self.spi.connect(spi2),
+                         hallstate.eq(Cat(~bldc.sensor0,
+                                          ~bldc.sensor1,
+                                          ~bldc.sensor2)),
+                         leds[0].eq(hallstate[0]),
+                         leds[1].eq(hallstate[1]),
+                         leds[2].eq(hallstate[2])]
         else:
             platform = self.platform
             bldc = platform.bldc
@@ -71,20 +78,22 @@ class Driver(Elaboratable):
             return int((platform.laser_var['CRYSTAL_HZ'])/
                        (frequency*states_fullcycle))
 
-        #slow = ClockDomain("slow")
-        #m.domains += slow
+        # add a clock as follows
+        # slow = ClockDomain("slow")
+        # m.domains += slow
+        # drive this from m.d.sync
+        # slow.clk.eq(~slow.clk)
         divider_cnt = Signal(range(self.divider//2))
 
-        # hall filter
+        # clock is downscaled to filter out
+        # noise coming to the hall sensors
+        # this creates hall filter
         with m.If(divider_cnt == self.divider//2-1):
             m.d.sync += [divider_cnt.eq(0),
-                         # noise filter
                          hallfilter.eq(hallstate)]
-                         #slow.clk.eq(~slow.clk)]
         with m.Else():
             m.d.sync += divider_cnt.eq(divider_cnt+1)
 
-        # You need to test this first with flashing a led
         start_freq = 2  # Hz
         start_statetime = get_statetime(start_freq)
         # range(int(start_statetime*transitions_cycle))
@@ -92,6 +101,8 @@ class Driver(Elaboratable):
         hallcntr = Signal.like(rotationtime)
         cycletime = Signal.like(rotationtime)
         mtrpulsecntr = Signal(range(int((start_statetime+1))))
+        #countsperdegree = Signal.like(cycletime)
+        countsperdegree = Signal(16)
         rotating = Signal()
 
         with m.FSM(reset='ROTATION', name='algo'):
@@ -123,10 +134,34 @@ class Driver(Elaboratable):
                 # i.e. cases 0 en 7
                 with m.If(rotating == 0):
                     m.next = 'ROTATION'
+                with m.Elif((countsperdegree > lowerlimit)
+                            & (countsperdegree < upperlimit)
+                            & (self.word != 'hallfilter')):
+                    m.next = 'IMPHALL'
+            with m.State('IMPHALL'):
+                with m.If(angle < 30):
+                    m.d.sync += motorstate.eq(1)
+                with m.Elif(angle < 60):
+                    m.d.sync += motorstate.eq(2)
+                with m.Elif(angle < 90):
+                    m.d.sync += motorstate.eq(3)
+                with m.Elif(angle < 120):
+                    m.d.sync += motorstate.eq(4)
+                with m.Elif(angle < 150):
+                    m.d.sync += motorstate.eq(5)
+                with m.Elif(angle < 181):
+                    m.d.sync += motorstate.eq(6)
+                with m.If(rotating == 0):
+                    m.next = 'ROTATION'
 
         statecounter = Signal(range(states_fullcycle//2))
         stateold = Signal.like(hallstate)
-        countsperdegree = Signal.like(cycletime)
+
+        clock = int(platform.clks[platform.hfosc_div]*1E6)
+        # RPM = platform.laser_var['RPM']
+        RPM = 2000
+        # ticks required for 6 states
+        setpoint = int(round((clock/(2*RPM/60)))/180)
 
         # Cycle time measurement
         with m.If((hallfilter != stateold) &
@@ -137,20 +172,20 @@ class Driver(Elaboratable):
                 # TODO: add filter to remove invalid cycle times, which are too small
                 m.d.sync += [statecounter.eq(0),
                              hallcntr.eq(0),
-                             countsperdegree.eq((hallcntr>>8)+(hallcntr>>10)+(hallcntr>>11)+(hallcntr>>13)+(hallcntr>>14)),]
-                             #cycletime.eq(cycletime-(cycletime>>2)+(hallcntr>>2))]
-                             #cycletime.eq(hallcntr)]
+                             countsperdegree.eq((hallcntr >> 8) + (hallcntr >> 10) + (hallcntr >> 11)
+                                                + (hallcntr >> 13) + (hallcntr >> 14)),
+                             cycletime.eq(hallcntr)]
                 # store measurerement
                 # only if the measurement is reasonable
                 # if there are too few ticks --> not reasonable
-                with m.If(hallcntr < (get_statetime(start_freq)*states_fullcycle)):
+                with m.If(hallcntr < (get_statetime(start_freq)
+                                      * states_fullcycle)):
                     # rotating so use hall sensors
                     m.d.sync += rotating.eq(1)
             with m.Else():
                 m.d.sync += statecounter.eq(statecounter+1)
         # counter is overflowing, implying there is no rotation
         with m.Elif(hallcntr == int(start_statetime*states_fullcycle)):
-            #m.d.sync += leds[1].eq(~leds[1])
             m.d.sync += [hallcntr.eq(0),
                          rotating.eq(0),
                          rotationtime.eq(0)]
@@ -159,18 +194,21 @@ class Driver(Elaboratable):
 
         # degree counter
         degree_cnt = Signal().like(countsperdegree)
-        angle = Signal(range(180))
-        with m.If((countsperdegree > 500) & (countsperdegree < 5000)):
+
+        # beta probably negative due to
+        # motor response time, likely speed dependent
+        beta = -15
+        hall_degs = (np.array([0, 33, 63, 100, 108, 162])+beta+180) % 180
+        # combination
+        hall_degs = hall_degs.tolist()
+
+        # in the end an angle is produced which should better approximate
+        # the actual position of the rotor
+        with m.If((countsperdegree > lowerlimit)
+                  & (countsperdegree < upperlimit)):
             # Assumption 1:
-            #         - just running a counter should be uniform
-            #               seems to be the case --> really gets to it after two minutes
-            #                with m.If((hallfilter == 3) & (stateold == 1)):
-            #                m.d.sync += angle.eq(0)
-            #         - run a counter after each cycle
-            #               (hallfilter == 3) & (stateold == 1)
-            #               does work
-            #         - run a counter using the hall triger
-            #              you made a mistake, states are ordered differently
+            # - when to switch from hall feedback --> control algo
+            # - alter between beta's
             with m.If((hallfilter != stateold) &
                       (hallfilter > 0) &
                       (hallfilter < 7)):
@@ -179,20 +217,19 @@ class Driver(Elaboratable):
                 #           and hallfilter is not
                 #           trivial
                 with m.If(hallfilter == 1):
-                    m.d.sync += angle.eq(0)
+                    m.d.sync += angle.eq(hall_degs[0])
                 with m.Elif(hallfilter == 3):
-                    m.d.sync += angle.eq(33)
+                    m.d.sync += angle.eq(hall_degs[1])
                 with m.Elif(hallfilter == 2):
-                    m.d.sync += angle.eq(63)
+                    m.d.sync += angle.eq(hall_degs[2])
                 with m.Elif(hallfilter == 6):
-                    m.d.sync += angle.eq(100)
+                    m.d.sync += angle.eq(hall_degs[3])
                 with m.Elif(hallfilter == 4):
-                    m.d.sync += angle.eq(108)
+                    m.d.sync += angle.eq(hall_degs[4])
                 with m.Elif(hallfilter == 5):
-                    m.d.sync += angle.eq(162)
+                    m.d.sync += angle.eq(hall_degs[5])
             # countsperdegree varies, so I do not use
             #  degree_cnt == countsperdegree-1
-
             with m.Elif((degree_cnt+2) > countsperdegree):
                 m.d.sync += degree_cnt.eq(0)
                 with m.If(angle == 180-1):
@@ -202,64 +239,45 @@ class Driver(Elaboratable):
             with m.Else():
                 m.d.sync += degree_cnt.eq(degree_cnt+1)
 
+        # Current controlled via duty cycle
+        max_delay = 1000
+        #max_delaylimit = -(setpoint-upperlimit) >> 2
+        #min_delaylimit = -(setpoint-lowerlimit) >> 2
+        #delay = Signal(range(min_delaylimit,
+        #                     max_delaylimit))
+        delay = Signal(signed(16))
 
-        spi = self.spi
-        interf = SPICommandInterface(command_size=1*8,
-                                     word_size=4*8)
-        m.d.comb += interf.spi.connect(spi)
-        m.submodules.interf = interf
-        with m.If(motorstate != 0):
-            if self.word == 'hallfilter':
-                m.d.sync += interf.word_to_send.eq(hallfilter)
-            elif self.word == 'cycletime':
-                m.d.sync += interf.word_to_send.eq(cycletime)
-            elif self.word == 'statecounter':
-                m.d.sync += interf.word_to_send.eq(statecounter)
-            elif self.word == 'anglecounter':
-                m.d.sync += interf.word_to_send.eq(countsperdegree)
-            elif self.word == 'angle':
-                m.d.sync += interf.word_to_send.eq(angle)
-            else:
-                raise Exception(f"{motorstate} not supported")
-        with m.Else():
-            m.d.sync += interf.word_to_send.eq(7)
+        # P controller
+        assert ((upperlimit > lowerlimit) &
+                (setpoint > 0) &
+                (lowerlimit > 0))
+        err = Signal(range(setpoint-upperlimit,
+                           setpoint-lowerlimit))
 
-        # PID controller
-        # Ideal is controlling both voltage and current
-        # Speed
+        with m.If(rotating == 0):
+            m.d.sync += delay.eq(max_delay)
+        with m.If((countsperdegree > lowerlimit)
+                  & (countsperdegree < upperlimit)):
+            m.d.sync += [err.eq(setpoint-countsperdegree),
+                         delay.eq(-err >> 2)]
+
         off = Signal()
-        # # RPM --> ticks
-        # target = int(round(13.56E6/(2000/60)))
-        # max_delay = 1000
-        # duty_step = max_delay//100
-        # # specifies current delay (counter)
-        # delay = Signal(range(max_delay))
-        # # specificies where you are in duty cycle (counter)
-        # duty = Signal(range(max_delay))
-        # step = 1 #max_delay//100
-        # with m.If(rotating == 0):
-        #     m.d.sync += delay.eq(0)
-        # # CASE: rotating too slow
-        # with m.Elif((rotationtime > target) & (delay >= step)):
-        #     m.d.sync += delay.eq(delay - step)
-        # # CASE: rotating too fast
-        # with m.Elif((rotationtime < target) & (delay < (max_delay-step)) & (delay<int(0.95*max_delay))):
-        #     m.d.sync += delay.eq(delay+step)
+        duty = Signal(range(max_delay))
 
-#         # Duty timer
-#         with m.If(duty < max_delay):
-#             m.d.sync += duty.eq(0)
-#         with m.Else():
-#             m.d.sync += duty.eq(duty+1)
+        # Duty timer
+        with m.If(duty < max_delay):
+            m.d.sync += duty.eq(0)
+        with m.Else():
+            m.d.sync += duty.eq(duty+1)
 
-#         # Motor On / Off
-#         with m.If(duty < delay):
-#             m.d.sync += off.eq(1)
-#         with m.Else():
-#             m.d.sync += off.eq(0)
+        # Motor On / Off
+        with m.If(duty < delay):
+            m.d.sync += off.eq(0)
+        with m.Else():
+            m.d.sync += off.eq(1)
 
         # https://www.mathworks.com/help/mcb/ref/sixstepcommutation.html
-        with m.If(off & (~rotating)):
+        with m.If((off & self.PIcontrol) & rotating):
             m.d.comb += [bldc.uL.eq(0),
                          bldc.uH.eq(0),
                          bldc.vL.eq(0),
@@ -308,10 +326,37 @@ class Driver(Elaboratable):
                          bldc.vH.eq(0),
                          bldc.wL.eq(1),
                          bldc.wH.eq(0)]
+
+        # depending on mode, a certain word is sent back
+        spi = self.spi
+        interf = SPICommandInterface(command_size=1*8,
+                                     word_size=4*8)
+        m.d.comb += interf.spi.connect(spi)
+        m.submodules.interf = interf
+
+        if self.word == 'hallfilter':
+            m.d.sync += interf.word_to_send.eq(hallfilter)
+        elif self.word == 'cycletime':
+            m.d.sync += interf.word_to_send.eq(cycletime)
+        elif self.word == 'statecounter':
+            m.d.sync += interf.word_to_send.eq(statecounter)
+        elif self.word == 'anglecounter':
+            m.d.sync += interf.word_to_send.eq(countsperdegree)
+        elif self.word == 'angle':
+            m.d.sync += interf.word_to_send.eq(angle)
+        elif self.word == 'PIcontrol':
+            m.d.sync += interf.word_to_send.eq(Cat(countsperdegree,
+                                                   delay))
+        else:
+            raise Exception(f"{motorstate} not supported")
+
         return m
 
 
 class TestBLDC(LunaGatewareTestCase):
+    '''place holder for tests...
+       there are no tests at the moment!
+    '''
     platform = TestPlatform()
     FRAGMENT_UNDER_TEST = Driver
     FRAGMENT_ARGUMENTS = {'frequency': 3,
