@@ -66,9 +66,12 @@ class Base(unittest.TestCase):
         if (self.word == 'cycletime') & (response != 0):
             response = int.from_bytes(response, "big")
             # you measure 180 degrees
-            response = round((clock/(response*2)*60))
+            if response != 0:
+                response = round((clock/(response*2)*60))
         elif (self.word == 'PIcontrol'):
-            degreecnt = int.from_bytes(response[2:], "big", signed=False)
+            degreecnt = int.from_bytes(response[2:],
+                                       "big",
+                                       signed=False)
             if degreecnt != 0:
                 speed = (clock/(degreecnt*180*2)*60)
             else:
@@ -129,27 +132,50 @@ class Base(unittest.TestCase):
         print(f'Waiting {starttime} seconds to start measurement.')
         sleep(starttime)
         print("Starting measurement")
+
+        plt.title("Streaming Data")
+        # plt.clc()
         try:
             while True:
                 if (time()-start) >= totaltime:
                     self.finish(output)
                     break
                 words = self.read_word()
-                #state = int(str(ticks)[:1])
                 try:
-                    dct = {'time': [time_ns()]}
+                    dct = {'time': [time()-start]}
                     for idx, word in enumerate(words):
-                        dct[f'word_{idx}'] = word
+                        dct[f'word_{idx}'] = [word]
                     frame1 = pd.DataFrame(dct)
                     output = pd.concat([output, frame1],
                                        ignore_index=True)
                     if (self.word in ['cycletime',
-                                      'statecounter',
-                                      'PIcontrol',
-                                      'anglecounter']):
-                        for word in words:
-                            print(word)
-                        sleep(1)
+                                      #'statecounter',
+                                      #'anglecounter',
+                                      'PIcontrol',]):
+                        plt.clt() # to clear the terminal
+                        plt.cld() # to clear the data only
+                        plt.xlim(0, totaltime)
+                        if self.word == 'cycletime':
+                            plt.ylim(0, 4000)
+                            plt.title("Speed in RPM")
+                            plt.xlabel("Time [seconds]")
+                            plt.ylabel("Speed [RPM]")
+                            plt.scatter(output['time'],
+                                        output['word_0'],
+                                        label='speed')
+                        elif self.word == 'PIcontrol':
+                            plt.ylim(0, 2000)
+                            plt.title("PI controller")
+                            plt.xlabel("Time [seconds]")
+                            plt.ylabel("Counter")
+                            plt.scatter(output['time'],
+                                        output['word_0'],
+                                        label='speed')
+                            plt.scatter(output['time'],
+                                        output['word_1'],
+                                        label='control')
+                        plt.sleep(0.1) # to add 
+                        plt.show()
                 except ValueError as e:
                     print(e)
         except KeyboardInterrupt:
