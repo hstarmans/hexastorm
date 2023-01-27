@@ -247,19 +247,39 @@ class Driver(Elaboratable):
         #                     max_delaylimit))
         delay = Signal(signed(16))
 
-        # P controller
+        # PID controller
         assert ((upperlimit > lowerlimit) &
                 (setpoint > 0) &
                 (lowerlimit > 0))
-        err = Signal(range(setpoint-upperlimit,
-                           setpoint-lowerlimit))
+        lower_l = setpoint-upperlimit
+        upper_l = setpoint-lowerlimit
+        int_lower_l = lower_l*1000
+        int_upper_l = upper_l*1000
+        err = Signal(range(lower_l,
+                           upper_l))
+        assert ((upper_l > 0) & (lower_l < 0))
+        der = Signal(range(lower_l-upper_l,
+                           upper_l-lower_l))
+        intg = Signal(range(int_lower_l,
+                            int_upper_l))
+        
 
         with m.If(rotating == 0):
-            m.d.sync += delay.eq(max_delay)
-        with m.If((countsperdegree > lowerlimit)
+            m.d.sync += [delay.eq(max_delay),
+                         err.eq(0),
+                         intg.eq(0)]
+        with m.Elif((countsperdegree > lowerlimit)
                   & (countsperdegree < upperlimit)):
-            m.d.sync += [err.eq(setpoint-countsperdegree),
-                         delay.eq(-err >> 2)]
+            # ugly use state machine!
+            with m.If(hallcntr == 0):
+                m.d.sync += [err.eq(setpoint-countsperdegree),
+                             der.eq(err-setpoint+countsperdegree),
+                             # it is assumed the integral "does not blow up"
+                             # you can monitor it via SPI
+                             intg.eq(intg+err)]
+            with m.Else():
+                # bitshifts used to avoid multiplications
+                m.d.sync += delay.eq(-(err >> 3)- (intg >> 10))
 
         off = Signal()
         duty = Signal(range(max_delay))
