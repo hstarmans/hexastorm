@@ -1,13 +1,15 @@
 import unittest
-from time import sleep
+from time import sleep, time
 from copy import deepcopy
 import os
 from pathlib import Path
 
+import pandas as pd
 import numpy as np
 from numpy.testing import assert_array_almost_equal
+import plotext as plt
 
-from hexastorm import interpolator
+from .. import interpolator
 from ..controller import Host, Memfull, executor
 from ..platforms import Firestarter
 from ..constants import (WORD_BYTES, COMMANDS, MOVE_TICKS,
@@ -16,7 +18,7 @@ from ..constants import (WORD_BYTES, COMMANDS, MOVE_TICKS,
 
 class Base(unittest.TestCase):
     @classmethod
-    def setUpClass(cls, flash=True):
+    def setUpClass(cls, flash=False):
         cls.host = Host()
         if flash:
             cls.host.build()
@@ -90,7 +92,7 @@ class LaserheadTest(Base):
                          False)
 
     @executor
-    def lasertest(self, timeout=3):
+    def lasertest(self, timeout=30):
         'enable laser for timeout seconds'
         host = self.host
         yield from host.enable_comp(laser1=True, laser0=False)
@@ -176,6 +178,110 @@ class LaserheadTest(Base):
         self.assertEqual((yield from host.get_state())['error'],
                          False)
         yield from host.enable_comp(synchronize=False)
+        
+        
+class MotorTest(Base):
+    '''Test BLDC motor
+    
+    There are not virtual tests for the prism motor.
+    The device is debugged by communication a debug word via SPI.
+    '''
+    def finish(self, output):
+        print(f"Measurement finished in mode {self.host.laser_params['MOTORDEBUG']}")
+        output.to_csv('measurement.csv')
+        mode = self.host.laser_params['MOTORDEBUG']
+        if mode == 'hallfilter':
+            output = output[output['word'] != 0]
+            # six states cover 180 degrees
+            print((output.rename(columns={'time':'degrees'})
+                         .groupby(['word_0'])
+                         .count()/len(output)*180)
+                  .assign(cumsum = lambda df: df['degrees'].cumsum())
+                  .round())
+        elif mode == 'cycletime':
+            print(output[['word_0']].describe())
+        elif mode == 'angle':
+            # print(output[['word']].describe())
+            # print(output['word'].unique())
+            bins = [0, 30, 60, 90, 120, 150, 180]
+            labels = ['0', '30', '60', '90', '120', '150']
+            output['hall'] = pd.cut(x=output['word_0'],
+                                    bins=bins,
+                                    labels=labels,
+                                    include_lowest=True)
+            print(output.hall.sort_values().value_counts()/len(output))
+            # plt.hist(output['word'].tolist(), 6, label = "distribution")
+            # plt.title("Histogram Plot")
+            # plt.show()
+    
+    @executor
+    def readfreq(self, delay=0):
+        '''turns on the motor board and retrieves the rotor frequency
+
+        Method runs for ever, can be interrupted with keyboard interrupt.
+        '''
+        host = self.host
+        start = time()
+        starttime = 10
+        totaltime = 60
+        output = pd.DataFrame(columns=['time',
+                                       'word'])
+        print(f'Waiting {starttime} seconds to start measurement.')
+        sleep(starttime)
+        print("Starting measurement")
+        mode = host.laser_params['MOTORDEBUG']
+        yield from host.enable_comp(polygon=True)
+        plt.title("Streaming Data")
+        # plt.clc()
+        try:
+            while True:
+                if (time()-start) >= totaltime:
+                    self.finish(output)
+                    break
+                words = (yield from host.get_motordebug())
+                try:
+                    dct = {'time': [time()-start]}
+                    for idx, word in enumerate(words):
+                        dct[f'word_{idx}'] = [word]
+                    frame1 = pd.DataFrame(dct)
+                    output = pd.concat([output, frame1],
+                                       ignore_index=True)
+                    if (mode in ['cycletime',
+                                 #'statecounter',
+                                 #'anglecounter',
+                                 'PIcontrol',]):
+                        plt.clt() # to clear the terminal
+                        plt.cld() # to clear the data only
+                        plt.xlim(0, totaltime)
+                        if mode == 'cycletime':
+                            plt.ylim(0, 4000)
+                            plt.title("Speed in RPM")
+                            plt.xlabel("Time [seconds]")
+                            plt.ylabel("Speed [RPM]")
+                            plt.scatter(output['time'],
+                                        output['word_0'],
+                                        label='speed')
+                        elif mode == 'PIcontrol':
+                            plt.ylim(0, 2000)
+                            plt.title("PI controller")
+                            plt.xlabel("Time [seconds]")
+                            plt.ylabel("Counter")
+                            plt.scatter(output['time'],
+                                        output['word_0'],
+                                        label='speed')
+                            plt.scatter(output['time'],
+                                        output['word_1'],
+                                        label='control')
+                        plt.sleep(0.1) # to add 
+                        plt.show()
+                except ValueError as e:
+                    print(e)
+        except KeyboardInterrupt:
+            self.finish(output)
+            pass
+        finally:
+            yield from host.enable_comp(polygon=False)
+            print('Interrupted, exiting')
 
 
 class MoveTest(Base):

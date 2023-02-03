@@ -40,6 +40,7 @@ class SPIParser(Elaboratable):
         I: read_en        -- enable read transactionalizedfifo
         I: read_discard   -- read discard of transactionalizedfifo
         I: dispatcherror  -- error while processing stored command from spi
+        I: word_to_send   -- word_send if debug command is triggered
         O: execute        -- start processing gcode
         O: read_data      -- read data from transactionalizedfifo
         O: empty          -- transactionalizedfifo is empty
@@ -60,9 +61,11 @@ class SPIParser(Elaboratable):
         self.read_en = Signal()
         self.read_discard = Signal()
         self.dispatcherror = Signal()
+        self.word_to_send = Signal(WORD_BYTES*8)
         self.parse = Signal()
         self.read_data = Signal(MEMWIDTH)
         self.empty = Signal()
+        
 
     def elaborate(self, platform):
         m = Module()
@@ -123,6 +126,9 @@ class SPIParser(Elaboratable):
                             m.next = 'WAIT_COMMAND'
                     with m.Elif(interf.command == COMMANDS.READ):
                         m.d.sync += interf.word_to_send.eq(word)
+                        m.next = 'WAIT_COMMAND'
+                    with m.Elif(interf.command == COMMANDS.DEBUG):
+                        m.d.sync += interf.word_to_send.eq(self.word_to_send)
                         m.next = 'WAIT_COMMAND'
                     with m.Elif(interf.command == COMMANDS.POSITION):
                         # position is requested multiple times for multiple
@@ -255,7 +261,8 @@ class Dispatcher(Elaboratable):
         for idx in range(len(leds)):
             m.d.comb += leds[idx].eq(prism_driver.leds[idx])
 
-        m.d.comb += prism_driver.enable_prism.eq(enable_prism)
+        m.d.comb += [prism_driver.enable_prism.eq(enable_prism),
+                     parser.word_to_send.eq(prism_driver.debugword)]
         m.d.comb += [bldc.uL.eq(prism_driver.uL),
                      bldc.uH.eq(prism_driver.uH),
                      bldc.vL.eq(prism_driver.vL),

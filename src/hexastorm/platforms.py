@@ -25,6 +25,7 @@ class TestPlatform:
     laser_bits = 1
     laser_axis = 'y'
     laser_var = {'RPM': 2000, 'FACETS': 4, 'SINGLE_LINE': False, 
+                 'MOTORDEBUG': 'PIcontrol',
                  'TICKSINFACET': 20, 'BITSINSCANLINE': 3, 'LASERTICKS': 4,
                  'SINGLE_FACET': False, 'DIRECTION': 0}
     motors = len(stepspermm.keys())
@@ -52,6 +53,7 @@ class Firestarter(LatticeICE40Platform, platform):
     hfosc_div = 2
     laser_var = {'RPM': 2000, 'SPINUP_TIME': 1.5, 'STABLE_TIME': 1.125,
                  'FACETS': 4, 'CRYSTAL_HZ': clks[hfosc_div]*1E6,
+                 'MOTORDEBUG': 'PIcontrol',
                  'LASER_HZ': 100E3, 'END%': 0.7, 'START%': 0.35,
                  'SINGLE_LINE': False, 'SINGLE_FACET': False,
                  'DIRECTION': 0}

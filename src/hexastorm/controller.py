@@ -151,6 +151,47 @@ class Host:
         # on HX4K this was not needed
         # is required for the UP5K
         self.spi_exchange_data([0]*(WORD_BYTES+COMMAND_BYTES))
+        
+    
+    def get_motordebug(self):
+        '''retrieves the motor debug word
+         
+           This is used to debug the PI controller and
+           set the correct setting for the Hall interpolation
+        '''
+        command = [COMMANDS.DEBUG] + WORD_BYTES*[0]
+        response = (yield from self.send_command(command))
+        
+        clock = int(self.platform.clks[self.platform.hfosc_div]*1E6)
+        mode = self.platform.laser_var['MOTORDEBUG']
+        if (mode == 'cycletime') & (response != 0):
+            response = int.from_bytes(response, "big")
+            # you measure 180 degrees
+            if response != 0:
+                response = round((clock/(response*2)*60))
+        elif (mode == 'PIcontrol'):
+            degreecnt = int.from_bytes(response[2:],
+                                       "big",
+                                       signed=False)
+            if degreecnt != 0:
+                speed = (clock/(degreecnt*180*2)*60)
+            else:
+                speed = 0
+            delay = int.from_bytes(response[:2], "big", signed=True)
+            response = [degreecnt, delay]
+        elif (mode == 'anglecounter'):
+            degreecnt = int.from_bytes(response, "big")
+            if degreecnt != 0:
+                response = (clock/(degreecnt*180*2)*60)
+            else:
+                response = 0
+        else:
+            response = int.from_bytes(response, "big")
+        if not isinstance(response,
+                          list):
+            return [response]
+        else:
+            return response
 
     def get_state(self, data=None):
         '''retrieves the state of the FPGA as dictionary
@@ -242,7 +283,7 @@ class Host:
             data = bytearray(1)
             self.bus.recv(data)
         else:
-            data = self.bus.read_byte_data(self.platform.ic_address, 
+            data = self.bus.read_byte_data(self.platform.ic_address,
                                            0)
         return data
 

@@ -6,9 +6,9 @@ Constants are more related to the actual implementation on the FPGA.
 from collections import namedtuple
 from math import ceil
 
-COMMANDS = namedtuple('COMMANDS', ['EMPTY', 'WRITE', 'READ', 'POSITION',
+COMMANDS = namedtuple('COMMANDS', ['EMPTY', 'WRITE', 'READ', 'DEBUG', 'POSITION',
                                    'START', 'STOP'],
-                      defaults=range(6))()
+                      defaults=range(7))()
 INSTRUCTIONS = namedtuple('INSTRUCTIONS', ['MOVE', 'WRITEPIN', 'SCANLINE',
                           'LASTSCANLINE'],
                           defaults=range(1, 5))()
