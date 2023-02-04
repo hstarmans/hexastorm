@@ -178,25 +178,28 @@ class LaserheadTest(Base):
         self.assertEqual((yield from host.get_state())['error'],
                          False)
         yield from host.enable_comp(synchronize=False)
-        
-        
+
+
 class MotorTest(Base):
     '''Test BLDC motor
-    
-    There are not virtual tests for the prism motor.
-    The device is debugged by communication a debug word via SPI.
+
+    There are no virtual tests for the prism motor.
+    The device is debugged by communicating a debug word via SPI.
+    The debug mode is set via MOTORDEBUG, in platforms.py.
+    This program can then be used to analyze the results.
     '''
     def finish(self, output):
-        print(f"Measurement finished in mode {self.host.laser_params['MOTORDEBUG']}")
+        print("Measurement finished in mode " +
+              f"{self.host.laser_params['MOTORDEBUG']}")
         output.to_csv('measurement.csv')
         mode = self.host.laser_params['MOTORDEBUG']
         if mode == 'hallfilter':
             output = output[output['word'] != 0]
             # six states cover 180 degrees
-            print((output.rename(columns={'time':'degrees'})
+            print((output.rename(columns={'time': 'degrees'})
                          .groupby(['word_0'])
                          .count()/len(output)*180)
-                  .assign(cumsum = lambda df: df['degrees'].cumsum())
+                  .assign(cumsum=lambda df: df['degrees'].cumsum())
                   .round())
         elif mode == 'cycletime':
             print(output[['word_0']].describe())
@@ -213,7 +216,7 @@ class MotorTest(Base):
             # plt.hist(output['word'].tolist(), 6, label = "distribution")
             # plt.title("Histogram Plot")
             # plt.show()
-    
+
     @executor
     def readfreq(self, delay=0):
         '''turns on the motor board and retrieves the rotor frequency
@@ -224,13 +227,12 @@ class MotorTest(Base):
         start = time()
         starttime = 10
         totaltime = 60
-        output = pd.DataFrame(columns=['time',
-                                       'word'])
+        output = pd.DataFrame(columns=['time'])
         print(f'Waiting {starttime} seconds to start measurement.')
+        yield from host.enable_comp(polygon=True)
         sleep(starttime)
         print("Starting measurement")
         mode = host.laser_params['MOTORDEBUG']
-        yield from host.enable_comp(polygon=True)
         plt.title("Streaming Data")
         # plt.clc()
         try:
@@ -246,12 +248,13 @@ class MotorTest(Base):
                     frame1 = pd.DataFrame(dct)
                     output = pd.concat([output, frame1],
                                        ignore_index=True)
+
                     if (mode in ['cycletime',
-                                 #'statecounter',
-                                 #'anglecounter',
-                                 'PIcontrol',]):
-                        plt.clt() # to clear the terminal
-                        plt.cld() # to clear the data only
+                                 # 'statecounter',
+                                 # 'anglecounter',
+                                 'PIcontrol']):
+                        plt.clt()  # to clear the terminal
+                        plt.cld()  # to clear the data only
                         plt.xlim(0, totaltime)
                         if mode == 'cycletime':
                             plt.ylim(0, 4000)
@@ -267,12 +270,16 @@ class MotorTest(Base):
                             plt.xlabel("Time [seconds]")
                             plt.ylabel("Counter")
                             plt.scatter(output['time'],
-                                        output['word_0'],
-                                        label='speed')
+                                        output['word_0'])
+                            # --> no seems issue on your side!!
+                            #     measurements differ
+                            # TODO: seems library issue, keyword label
+                            #       results in crash, used to work?
+                            #           label='speed')
                             plt.scatter(output['time'],
-                                        output['word_1'],
-                                        label='control')
-                        plt.sleep(0.1) # to add 
+                                        output['word_1'])
+                            #           label='control')
+                        plt.sleep(0.1)  # to add
                         plt.show()
                 except ValueError as e:
                     print(e)

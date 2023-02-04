@@ -151,17 +151,16 @@ class Host:
         # on HX4K this was not needed
         # is required for the UP5K
         self.spi_exchange_data([0]*(WORD_BYTES+COMMAND_BYTES))
-        
-    
+
     def get_motordebug(self):
         '''retrieves the motor debug word
-         
+
            This is used to debug the PI controller and
            set the correct setting for the Hall interpolation
         '''
         command = [COMMANDS.DEBUG] + WORD_BYTES*[0]
         response = (yield from self.send_command(command))
-        
+
         clock = int(self.platform.clks[self.platform.hfosc_div]*1E6)
         mode = self.platform.laser_var['MOTORDEBUG']
         if (mode == 'cycletime') & (response != 0):
@@ -187,6 +186,7 @@ class Host:
                 response = 0
         else:
             response = int.from_bytes(response, "big")
+
         if not isinstance(response,
                           list):
             return [response]
