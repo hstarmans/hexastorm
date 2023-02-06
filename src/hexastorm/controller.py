@@ -159,7 +159,7 @@ class Host:
            set the correct setting for the Hall interpolation
         '''
         command = [COMMANDS.DEBUG] + WORD_BYTES*[0]
-        response = (yield from self.send_command(command))
+        response = (yield from self.send_command(command))[1:]
 
         clock = int(self.platform.clks[self.platform.hfosc_div]*1E6)
         mode = self.platform.laser_var['MOTORDEBUG']
@@ -169,14 +169,16 @@ class Host:
             if response != 0:
                 response = round((clock/(response*2)*60))
         elif (mode == 'PIcontrol'):
-            degreecnt = int.from_bytes(response[2:],
+            degreecnt = int.from_bytes(response[(WORD_BYTES-2):],
                                        "big",
                                        signed=False)
             if degreecnt != 0:
                 speed = (clock/(degreecnt*180*2)*60)
             else:
                 speed = 0
-            delay = int.from_bytes(response[:2], "big", signed=True)
+            delay = int.from_bytes(response[:(WORD_BYTES-2)],
+                                   "big",
+                                   signed=True)
             response = [degreecnt, delay]
         elif (mode == 'anglecounter'):
             degreecnt = int.from_bytes(response, "big")

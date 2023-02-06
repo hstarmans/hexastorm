@@ -270,17 +270,22 @@ class MotorTest(Base):
                             plt.xlabel("Time [seconds]")
                             plt.ylabel("Counter")
                             plt.scatter(output['time'],
-                                        output['word_0'])
-                            # --> no seems issue on your side!!
-                            #     measurements differ
-                            # TODO: seems library issue, keyword label
-                            #       results in crash, used to work?
-                            #           label='speed')
+                                        output['word_0'],
+                                        label='speed')
                             plt.scatter(output['time'],
-                                        output['word_1'])
-                            #           label='control')
-                        plt.sleep(0.1)  # to add
-                        plt.show()
+                                        output['word_1'],
+                                        label='control')
+                        plt.sleep(0.1)
+                        # TODO:
+                        # if you plot a point outside the limits
+                        # library seems to fail, this is a workaround
+                        # another option is to remove the labels,
+                        # in plt.scatter
+                        try:
+                            plt.show()
+                        except IndexError:
+                            pass
+                        print(f"speed: {words[0]} control: {words[1]}")
                 except ValueError as e:
                     print(e)
         except KeyboardInterrupt:

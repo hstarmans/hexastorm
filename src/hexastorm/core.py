@@ -65,7 +65,6 @@ class SPIParser(Elaboratable):
         self.parse = Signal()
         self.read_data = Signal(MEMWIDTH)
         self.empty = Signal()
-        
 
     def elaborate(self, platform):
         m = Module()
@@ -597,7 +596,7 @@ class TestDispatcher(SPIGatewareTestCase):
         self.assertEqual((yield self.dut.laserheadpins.laser1), 0)
         # TODO: the enable pin is no longer on the laser head but
         #       the prism motor
-        #self.assertEqual((yield self.dut.laserheadpins.en), 0)
+        # self.assertEqual((yield self.dut.laserheadpins.en), 0)
 
     @sync_test_case
     def test_home(self):
