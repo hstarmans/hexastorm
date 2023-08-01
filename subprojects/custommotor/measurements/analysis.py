@@ -13,14 +13,17 @@
 # ---
 
 import pandas as pd
-df = pd.read_csv('nocontroller.csv', names=['timestamp', 'ticks'])
-df['timestamp'] = pd.to_datetime(df['timestamp'])
-df['freq'] = (12E6/(df['ticks']))*60
-df = df[df['freq'] < 30000]
+
+df = pd.read_csv("nocontroller.csv", names=["timestamp", "ticks"])
+df["timestamp"] = pd.to_datetime(df["timestamp"])
+df["freq"] = (12e6 / (df["ticks"])) * 60
+df = df[df["freq"] < 30000]
 
 df.head()
 
-df.plot(x='timestamp', y='freq',
-        xlabel='Time [day, hours, minutes]',
-        ylabel='Frequency [rpm]')
-
+df.plot(
+    x="timestamp",
+    y="freq",
+    xlabel="Time [day, hours, minutes]",
+    ylabel="Frequency [rpm]",
+)

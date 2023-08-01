@@ -47,4 +47,3 @@ op dit moment heb je een kinetische wrijving van 0.4 (aclrylaat op acrylaat)
 dit gaat naar 0.03
 
 magneten zijn nu 2 mm dik
-

@@ -4,7 +4,9 @@ Code has no real meaning but it should trigger DSP synthesis.
 You can check ICESTORM_DSP 1/8 == 12 percent
 """
 import os
+
 from amaranth import Elaboratable, Module, Signal, signed
+
 from hexastorm.platforms import Firestarter
 
 
@@ -19,7 +21,7 @@ class Multest(Elaboratable):
         led0 = platform.request("led", 0)
 
         with m.If(self.c > 10):
-            m.d.sync += self.a.eq(self.a+1)
+            m.d.sync += self.a.eq(self.a + 1)
         with m.Else():
             m.d.sync += self.a.eq(1)
 
@@ -34,7 +36,7 @@ class Multest(Elaboratable):
 
 if __name__ == "__main__":
     # Force yosys to use DSP slices.
-    os.environ['NMIGEN_synth_opts'] = '-dsp'
+    os.environ["NMIGEN_synth_opts"] = "-dsp"
     platform = Firestarter()
     # needs to be less than 30 Mhz
     # BEGINT MET INFO
@@ -44,7 +46,7 @@ if __name__ == "__main__":
     # look at *.tim
     platform.build(Multest(), do_program=True, verbose=False)
 
-# 16 bit 
+# 16 bit
 # Info: Device utilisation:
 # Info: 	         ICESTORM_LC:   112/ 5280     2%
 # Info: 	        ICESTORM_RAM:     0/   30     0%
@@ -61,7 +63,6 @@ if __name__ == "__main__":
 # Info: 	         SB_LEDDA_IP:     0/    1     0%
 # Info: 	         SB_RGBA_DRV:     0/    1     0%
 # Info: 	      ICESTORM_SPRAM:     0/    4     0%
-
 
 
 # 32 bit

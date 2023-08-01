@@ -5,20 +5,17 @@ git checkout f54de01c9dc13aeca5d20734a9c103227cb9603f
 upstream has been notified https://github.com/greatscottgadgets/luna/issues/101
 """
 from amaranth import Elaboratable, Module
+from luna.gateware.interface.spi import SPIDeviceInterface
+from luna.gateware.utils.cdc import synchronize
 
 from hexastorm.platforms import Firestarter
 
-from luna import top_level_cli
-from luna.gateware.utils.cdc import synchronize
-from luna.gateware.interface.spi import SPIDeviceInterface
-
 
 class DebugSPIExample(Elaboratable):
-    """ Hardware meant to demonstrate use of
-        the Debug Controller's SPI interface copied from Luna """
+    """Hardware meant to demonstrate use of
+    the Debug Controller's SPI interface copied from Luna"""
 
     def __init__(self):
-
         # Base ourselves around an SPI command interface.
         self.interface = SPIDeviceInterface(clock_phase=1)
 
@@ -34,7 +31,7 @@ class DebugSPIExample(Elaboratable):
         m.d.comb += self.interface.spi.connect(spi)
 
         # Turn on a single LED, to show something's running.
-        led = platform.request('led', 0)
+        led = platform.request("led", 0)
         m.d.comb += led.eq(1)
 
         # Echo back the last received data.

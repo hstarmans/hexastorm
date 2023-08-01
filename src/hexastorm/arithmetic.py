@@ -1,7 +1,7 @@
-import unittest
 import random
+import unittest
 
-from amaranth import Signal, Elaboratable, Cat, Module, Const, signed
+from amaranth import Cat, Const, Elaboratable, Module, Signal, signed
 from luna.gateware.test import LunaGatewareTestCase, sync_test_case
 
 
@@ -13,14 +13,12 @@ class Multiplication(Elaboratable):
 
     def elaborate(self, platform):
         m = Module()
-        m.d.sync += [
-            self.c.eq(self.a * self.b)
-        ]
+        m.d.sync += [self.c.eq(self.a * self.b)]
         return m
 
 
 class Divisor(Elaboratable):
-    """ Euclidean division with a remainder
+    """Euclidean division with a remainder
 
     X = Y*Q + R
     dividend X by divisor Y you get quotient Q and remainder R
@@ -37,6 +35,7 @@ class Divisor(Elaboratable):
         O: q             -- quotients
         O: r             -- remainder
     """
+
     def __init__(self, width=4):
         self.width = width
         self.start = Signal()
@@ -50,7 +49,7 @@ class Divisor(Elaboratable):
 
     def elaborate(self, platform):
         m = Module()
-        ac = Signal(self.width+1)
+        ac = Signal(self.width + 1)
         ac_next = Signal.like(ac)
         temp = Signal.like(ac)
         q1 = Signal(self.width)
@@ -58,33 +57,36 @@ class Divisor(Elaboratable):
         i = Signal(range(self.width))
         # combinatorial
         with m.If(ac >= self.y):
-            m.d.comb += [temp.eq(ac-self.y),
-                         Cat(q1_next, ac_next).eq(
-                         Cat(1, q1, temp[0:self.width-1]))]
+            m.d.comb += [
+                temp.eq(ac - self.y),
+                Cat(q1_next, ac_next).eq(Cat(1, q1, temp[0 : self.width - 1])),
+            ]
         with m.Else():
             m.d.comb += [Cat(q1_next, ac_next).eq(Cat(q1, ac) << 1)]
         # synchronized
         with m.If(self.start):
             m.d.sync += [self.valid.eq(0), i.eq(0)]
             with m.If(self.y == 0):
-                m.d.sync += [self.busy.eq(0),
-                             self.dbz.eq(1)]
+                m.d.sync += [self.busy.eq(0), self.dbz.eq(1)]
             with m.Else():
-                m.d.sync += [self.busy.eq(1),
-                             self.dbz.eq(0),
-                             Cat(q1, ac).eq(Cat(Const(0, 1),
-                                            self.x, Const(0, self.width)))]
+                m.d.sync += [
+                    self.busy.eq(1),
+                    self.dbz.eq(0),
+                    Cat(q1, ac).eq(
+                        Cat(Const(0, 1), self.x, Const(0, self.width))
+                    ),
+                ]
         with m.Elif(self.busy):
-            with m.If(i == self.width-1):
-                m.d.sync += [self.busy.eq(0),
-                             self.valid.eq(1),
-                             i.eq(0),
-                             self.q.eq(q1_next),
-                             self.r.eq(ac_next >> 1)]
+            with m.If(i == self.width - 1):
+                m.d.sync += [
+                    self.busy.eq(0),
+                    self.valid.eq(1),
+                    i.eq(0),
+                    self.q.eq(q1_next),
+                    self.r.eq(ac_next >> 1),
+                ]
             with m.Else():
-                m.d.sync += [i.eq(i+1),
-                             ac.eq(ac_next),
-                             q1.eq(q1_next)]
+                m.d.sync += [i.eq(i + 1), ac.eq(ac_next), q1.eq(q1_next)]
         return m
 
 
@@ -99,15 +101,15 @@ class MultiplicationTest(LunaGatewareTestCase):
         yield self.dut.b.eq(b)
         yield
         yield
-        self.assertEqual((yield self.dut.c), a*b)
+        self.assertEqual((yield self.dut.c), a * b)
 
 
 class DivisorTest(LunaGatewareTestCase):
     FRAGMENT_UNDER_TEST = Divisor
-    FRAGMENT_ARGUMENTS = {'width': 6}
+    FRAGMENT_ARGUMENTS = {"width": 6}
 
     def do_devision(self, x, y):
-        bits = self.FRAGMENT_ARGUMENTS['width']
+        bits = self.FRAGMENT_ARGUMENTS["width"]
         assert x.bit_length() <= bits
         assert y.bit_length() <= bits
         yield self.dut.x.eq(x)
@@ -116,11 +118,10 @@ class DivisorTest(LunaGatewareTestCase):
         yield
         yield self.dut.start.eq(0)
         yield
-        while ((yield self.dut.valid) == 0 |
-               (yield self.dut.dbz) == 0):
+        while (yield self.dut.valid) == 0 | (yield self.dut.dbz) == 0:
             yield
         if (yield self.dut.valid):
-            self.assertEqual((yield self.dut.q), x//y)
+            self.assertEqual((yield self.dut.q), x // y)
             self.assertEqual((yield self.dut.r), x % y)
         else:
             self.assertEqual(y, 0)
@@ -137,7 +138,7 @@ class DivisorTest(LunaGatewareTestCase):
 
     @sync_test_case
     def test_random(self):
-        maxint = int('1'*self.FRAGMENT_ARGUMENTS['width'], 2)
+        maxint = int("1" * self.FRAGMENT_ARGUMENTS["width"], 2)
         x = random.randint(0, maxint)
         y = random.randint(0, maxint)
         for _ in range(100):

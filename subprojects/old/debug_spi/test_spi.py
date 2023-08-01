@@ -11,7 +11,6 @@ You should make a deepcopy
 import spidev
 from gpiozero import LED, MCP3008
 
-
 PIZERO = False
 clock_pin = 11
 mosi_pin = 10
@@ -19,18 +18,20 @@ miso_pin = 9
 select_pin = 8
 
 if PIZERO:
-    dev = MCP3008(channel=0,
-                  mosi_pin=mosi_pin,
-                  miso_pin=miso_pin,
-                  select_pin=select_pin,
-                  clock_pin=clock_pin)
+    dev = MCP3008(
+        channel=0,
+        mosi_pin=mosi_pin,
+        miso_pin=miso_pin,
+        select_pin=select_pin,
+        clock_pin=clock_pin,
+    )
 else:
     spi = spidev.SpiDev()
     spi.open(0, 0)
     spi.mode = 1
     chip_select = LED(select_pin)
     chip_select.on()
-    spi.max_speed_hz = round(1E6)
+    spi.max_speed_hz = round(1e6)
 bts = [210, 222, 230]
 previous_byte = None
 for idx, byte in enumerate(bts):

@@ -29,14 +29,16 @@ Look through to commit history to find the right working version which was used 
 Install poetry and python.
 ```console
 sudo apt install python3 python3-pip
-curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py | python3 -
+curl -sSL https://install.python-poetry.org | python3 -
 ```
 Use poetry to install the dependencies in pyproject.toml.
-Poetry creates a virtual environment for you. 
-So only using ```poetry run python``` enables you to access the packages.
+The virtual environment needs to be installed in project for VSCode to detect it.
 ```console
-poetry install
+poetry config virtualenvs.in-project true
+poetry install --without raspberry,64bit
 ```
+Poetry creates a virtual environment for you. 
+ ```poetry run python``` gives you access to the packages installed.
 Depending on your operating system you also need to install certain extras.
 Look into the pyproject.toml file for the possibilities.
 Yosys must be compiled or installed via [oss-cad-suite](https://github.com/YosysHQ/oss-cad-suite-build).
