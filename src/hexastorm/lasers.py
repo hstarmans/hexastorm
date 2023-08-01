@@ -91,6 +91,7 @@ class Laserhead(Elaboratable):
         stephalfperiod = Signal(dct['BITSINSCANLINE'].bit_length()+4)
         stepcnt = Signal.like(stephalfperiod)
 
+        # TODO: this can be removed with the new driver!
         # pwm is always created but can be deactivated
         with m.If(pwmcnt == 0):
             m.d.sync += [self.pwm.eq(~self.pwm),

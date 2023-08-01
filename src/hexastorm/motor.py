@@ -69,7 +69,7 @@ class Driver(Elaboratable):
         angle = Signal(range(180))
         # angle counter limits
         lowerlimit = 500
-        upperlimit = 3000
+        upperlimit = 5000
         mode = self.mode
 
         uL, uH, vL, vH, wL, wH = (self.uL, self.uH, self.vL, self.vH,

@@ -152,6 +152,7 @@ class Base(unittest.TestCase):
                                       #'statecounter',
                                       #'anglecounter',
                                       'PIcontrol',]):
+                        plt.clf()
                         plt.clt() # to clear the terminal
                         plt.cld() # to clear the data only
                         plt.xlim(0, totaltime)

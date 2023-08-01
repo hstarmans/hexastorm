@@ -81,7 +81,7 @@ class LaserheadTest(Base):
         # it should produce a matrix with -- and one value with 28.
 
     @executor
-    def spinprism(self, timeout=3):
+    def spinprism(self, timeout=15):
         'spin for timeout seconds'
         host = self.host
         yield from host.enable_comp(polygon=True)
@@ -117,7 +117,7 @@ class LaserheadTest(Base):
                          False)
 
     @executor
-    def test_stable(self, timeout=3):
+    def test_stable(self, timeout=1):
         host = self.host
         yield from host.enable_comp(synchronize=True)
         print(f'Wait for synchronization, {timeout} seconds')

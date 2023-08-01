@@ -101,7 +101,7 @@ class Driver(Elaboratable):
         hallcntr = Signal.like(rotationtime)
         cycletime = Signal.like(rotationtime)
         mtrpulsecntr = Signal(range(int((start_statetime+1))))
-        #countsperdegree = Signal.like(cycletime)
+        # countsperdegree = Signal.like(cycletime)
         countsperdegree = Signal(16)
         rotating = Signal()
 
@@ -158,8 +158,7 @@ class Driver(Elaboratable):
         stateold = Signal.like(hallstate)
 
         clock = int(platform.clks[platform.hfosc_div]*1E6)
-        # RPM = platform.laser_var['RPM']
-        RPM = 2000
+        RPM = platform.laser_var['RPM']
         # ticks required for 6 states
         setpoint = int(round((clock/(2*RPM/60)))/180)
 
@@ -169,11 +168,15 @@ class Driver(Elaboratable):
                   (hallfilter < 7)):
             m.d.sync += stateold.eq(hallfilter)
             with m.If(statecounter == states_fullcycle//2-1):
-                # TODO: add filter to remove invalid cycle times, which are too small
+                # there used to be filter which removed invalid times
+                # measurements seems good enough for no filter
                 m.d.sync += [statecounter.eq(0),
                              hallcntr.eq(0),
-                             countsperdegree.eq((hallcntr >> 8) + (hallcntr >> 10) + (hallcntr >> 11)
-                                                + (hallcntr >> 13) + (hallcntr >> 14)),
+                             countsperdegree.eq((hallcntr >> 8) + 
+                                                (hallcntr >> 10) +
+                                                (hallcntr >> 11) + 
+                                                (hallcntr >> 13) +
+                                                (hallcntr >> 14)),
                              cycletime.eq(hallcntr)]
                 # store measurerement
                 # only if the measurement is reasonable

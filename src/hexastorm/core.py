@@ -260,7 +260,7 @@ class Dispatcher(Elaboratable):
         for idx in range(len(leds)):
             m.d.comb += leds[idx].eq(prism_driver.leds[idx])
 
-        m.d.comb += [prism_driver.enable_prism.eq(enable_prism),
+        m.d.comb += [prism_driver.enable_prism.eq(enable_prism | laserhead.enable_prism),
                      parser.word_to_send.eq(prism_driver.debugword)]
         m.d.comb += [bldc.uL.eq(prism_driver.uL),
                      bldc.uH.eq(prism_driver.uH),

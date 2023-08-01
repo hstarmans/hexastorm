@@ -4,6 +4,8 @@
 *.blif
 *.vcd
 *.svg
+*.csv
+*.jpg
 build*
 
 

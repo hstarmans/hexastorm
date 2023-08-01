@@ -87,13 +87,13 @@ class Tests(unittest.TestCase):
         a final image is taken.
         '''
         yield from self.host.enable_comp(laser1=True, polygon=True)
-        self.host.laser_current = 120
-        self.cam.set_exposure(36000)
+        self.host.laser_current = 80
+        self.cam.set_exposure(7000)
         print("This will open up a window")
         print("Press escape to quit live view")
         self.cam.live_view(0.6)
         img = self.takepicture()
-        print(feature.cross_scan_error(img))
+        #print(feature.cross_scan_error(img))
         yield from self.host.enable_comp(laser1=False, polygon=False)
 
     @executor
@@ -104,7 +104,7 @@ class Tests(unittest.TestCase):
         '''
         # NOTE: all ND filters and a single channel is used
         self.host.laser_current = laserpower
-        self.cam.set_exposure(1499)
+        self.cam.set_exposure(1300)
         yield from self.host.enable_comp(laser1=True)
         print("Calibrate the camera with live view \
                and press escape to confirm spot in vision")
@@ -112,6 +112,35 @@ class Tests(unittest.TestCase):
         img = self.takepicture()
         print(feature.spotsize(img))
         yield from self.host.enable_comp(laser1=False)
+
+    @executor
+    def ortherror(self, laserpower=80):
+        '''
+        eight pictures are taken to compute cross scan error
+        that is the error orthogonal to scan line
+        '''
+        # NOTE: all ND filters and a single channel is used
+        self.host.laser_current = laserpower
+        self.cam.set_exposure(1300)
+        yield from self.host.enable_comp(laser1=True)
+        for i in range(8):
+            print(f"Taking picture {i}.")
+            self.cam.live_view(scale=0.6)
+            img = self.cam.capture()
+            grey_img = cv.cvtColor(img,
+                                   cv.COLOR_BGR2GRAY)
+            if i == 0:
+                result = grey_img
+            else:
+                result += grey_img
+        prismcode = input("Enter prism code:")
+        print(f"Writing to {Path(IMG_DIR, prismcode+'_crosscan.jpg')}")
+        if not os.path.exists(IMG_DIR):
+            os.makedirs(IMG_DIR)
+        cv.imwrite(str(Path(IMG_DIR, prismcode+'_crosscan.jpg')),
+                   result)
+        yield from self.host.enable_comp(laser1=False)
+
 
     def writepattern(self, pattern):
         '''repeats a pattern so a line is formed and writes to head
@@ -124,25 +153,27 @@ class Tests(unittest.TestCase):
         yield from self.host.writeline(line)
 
     @executor
-    def searchcamera(self, timeout=30, build=False):
+    def searchcamera(self, timeout=3, build=False):
         '''laser is synced with photodiode and a line is projected
 
         This is done for various line patterns and is
         used to detect the edges of the camera
         '''
-        self.host.laser_params['SINGLE_LINE'] = True
-        self.host.laser_params['SINGLE_FACET'] = False
+        #self.host.laser_params['SINGLE_LINE'] = True
+        #self.host.laser_params['SINGLE_FACET'] = False
         if build:
             self.host.build()
         self.host.laser_current = 120
-        self.cam.set_exposure(36000)
-        yield from self.writepattern([0]*8+[1]*8)
+        #self.cam.set_exposure(36000)
+        #yield from self.writepattern([0]*8+[1]*8)
+        yield from self.host.enable_comp(laser1=True, polygon=False)
         self.cam.live_view(scale=0.6)
         # TODO: it doesn't catch the stopline
-        yield from self.host.writeline([])
+        #yield from self.host.writeline([])
         print(f'Wait for stopline to execute, {timeout} seconds')
-        time.sleep(timeout)
-        yield from self.host.enable_comp(synchronize=False)
+        yield from self.host.enable_comp(laser1=False, polygon=False)
+        #time.sleep(timeout)
+        #yield from self.host.enable_comp(synchronize=False)
 
     def takepicture(self):
         'takes picture and store it with timestamp to this folder'

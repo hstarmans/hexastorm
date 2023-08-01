@@ -30,8 +30,7 @@ class TestPlatform:
 class Firestarter(LatticeICE40Platform, platform):
     '''Kicad board available at
        https://github.com/hstarmans/firestarter/
-    '''
-    
+    ''' 
     name = "firestarter"
     ic_dev_nr = 1      # spi connection
     ic_address = 0x28  # spi address

@@ -24,7 +24,7 @@ class TestPlatform:
     poldegree = 2   # degree of polynomal
     laser_bits = 1
     laser_axis = 'y'
-    laser_var = {'RPM': 2000, 'FACETS': 4, 'SINGLE_LINE': False, 
+    laser_var = {'RPM': 1000, 'FACETS': 4, 'SINGLE_LINE': False, 
                  'MOTORDEBUG': 'PIcontrol',
                  'TICKSINFACET': 20, 'BITSINSCANLINE': 3, 'LASERTICKS': 4,
                  'SINGLE_FACET': False, 'DIRECTION': 0}
@@ -51,7 +51,7 @@ class Firestarter(LatticeICE40Platform, platform):
     # 0: 48MHz, 1: 24MHz, 2: 12MHz, 3: 6MHz.
     clks = {0: 48, 1: 24, 2: 12, 3: 6}
     hfosc_div = 2
-    laser_var = {'RPM': 2000, 'SPINUP_TIME': 1.5, 'STABLE_TIME': 1.125,
+    laser_var = {'RPM': 2000, 'SPINUP_TIME': 15, 'STABLE_TIME': 1.125,
                  'FACETS': 4, 'CRYSTAL_HZ': clks[hfosc_div]*1E6,
                  'MOTORDEBUG': 'PIcontrol',
                  'LASER_HZ': 100E3, 'END%': 0.7, 'START%': 0.35,
