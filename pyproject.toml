@@ -11,7 +11,7 @@ python = ">=3.9,<3.13"
 numba = "^0.57.1"
 opencv-python = "^4.8.0.74"
 scipy = "^1.11.1"
-pillow = "^10.0.0"
+pillow = "^10.0.1"
 pandas = "^2.0.3"
 cairosvg = "^2.7.0"
 amaranth = {git = "https://github.com/amaranth-lang/amaranth.git"}
