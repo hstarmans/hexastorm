@@ -18,6 +18,8 @@ amaranth = {git = "https://github.com/amaranth-lang/amaranth.git"}
 amaranth-boards = {git = "https://github.com/amaranth-lang/amaranth-boards.git"}
 amaranth-soc = {git = "https://github.com/amaranth-lang/amaranth-soc.git"}
 luna = {git = "https://github.com/hstarmans/luna"}
+fastparquet = "^2023.8.0"
+plotext = "^5.2.8"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.0.281"

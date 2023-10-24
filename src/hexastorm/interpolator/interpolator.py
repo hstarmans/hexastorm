@@ -15,7 +15,7 @@ from hexastorm.platforms import Firestarter
 
 
 # numba.jit decorated functions cannot be defined with self
-@jit
+@jit(nopython=True)
 def displacement(pixel, params):
     """returns the displacement for a given pixel
 
@@ -48,7 +48,7 @@ def displacement(pixel, params):
     return disp
 
 
-@jit
+@jit(nopython=True)
 def fxpos(pixel, params, xstart=0):
     """returns the laserdiode x-position in pixels
 
@@ -65,7 +65,7 @@ def fxpos(pixel, params, xstart=0):
     return xpos / params["samplegridsize"]
 
 
-@jit
+@jit(nopython=True)
 def fypos(pixel, params, direction, ystart=0):
     """
     returns the laserdiode y-position in pixels
@@ -510,7 +510,7 @@ if __name__ == "__main__":
     interpolator = Interpolator(stepsperline=0.25)
     dir_path = os.path.dirname(os.path.realpath(__file__))
     # hexastorm.png pixelsize 0.035
-    url = os.path.join(dir_path, "test-patterns", "front.svg")
+    url = os.path.join(dir_path, "test-patterns", "line-resolution-test.ps")
     ptrn = interpolator.patternfile(url)
     interpolator.writebin(ptrn, "test.parquet")
     df = interpolator.readbin("test.parquet")
