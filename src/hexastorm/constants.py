@@ -9,14 +9,12 @@ from math import ceil
 COMMANDS = namedtuple(
     "COMMANDS",
     ["EMPTY", "WRITE", "READ", "DEBUG", "POSITION", "START", "STOP"],
-    defaults=range(7),
-)()
+)(*range(7))
 INSTRUCTIONS = namedtuple(
     "INSTRUCTIONS",
     ["MOVE", "WRITEPIN", "SCANLINE", "LASTSCANLINE"],
-    defaults=range(1, 5),
-)()
-STATE = namedtuple("STATE", ["FULL", "PARSING", "ERROR"], defaults=range(3))()
+)(*range(1, 5))
+STATE = namedtuple("STATE", ["FULL", "PARSING", "ERROR"])(*range(3))
 
 COMMAND_BYTES = 1
 WORD_BYTES = 8
