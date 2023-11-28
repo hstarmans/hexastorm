@@ -17,7 +17,7 @@ class Driver(Elaboratable):
 
     def __init__(self,
                  platform,
-                 word='cycletime',
+                 word='PIcontrol',
                  divider=800,
                  PIcontrol=False,
                  top=False):
@@ -37,16 +37,14 @@ class Driver(Elaboratable):
 
     def elaborate(self, platform):
         m = Module()
-        motorstate = Signal(8)
+        motorstate = Signal(range(8))
         hallstate = Signal().like(motorstate)
         hallfilter = Signal().like(hallstate)
         # total number of states in 360 degrees
-        states_fullcycle = 12
+        # state 3 does not propagate!!, so not 12
+        states_fullcycle = 10
         angle = Signal(range(180))
-        # angle counter limits
-        lowerlimit = 500
-        upperlimit = 3000
-
+        
         def get_all_resources(name):
             resources = []
             for number in itertools.count():
@@ -78,6 +76,10 @@ class Driver(Elaboratable):
             return int((platform.laser_var['CRYSTAL_HZ'])/
                        (frequency*states_fullcycle))
 
+        # angle counter limits
+        lowerlimit = int((get_statetime(100)*states_fullcycle/360))
+        upperlimit = int((get_statetime(10)*states_fullcycle/360))
+
         # add a clock as follows
         # slow = ClockDomain("slow")
         # m.domains += slow
@@ -93,7 +95,7 @@ class Driver(Elaboratable):
                          hallfilter.eq(hallstate)]
         with m.Else():
             m.d.sync += divider_cnt.eq(divider_cnt+1)
-
+        
         start_freq = 2  # Hz
         start_statetime = get_statetime(start_freq)
         # range(int(start_statetime*transitions_cycle))
@@ -104,19 +106,22 @@ class Driver(Elaboratable):
         # countsperdegree = Signal.like(cycletime)
         countsperdegree = Signal(16)
         rotating = Signal()
-
         with m.FSM(reset='ROTATION', name='algo'):
+            # rotation is clock wise
             with m.State('ROTATION'):
                 with m.If(mtrpulsecntr == start_statetime):
                     m.d.sync += mtrpulsecntr.eq(0)
-                    with m.If(motorstate == 6):
+                    with m.If(motorstate == 1):
+                        m.d.sync += motorstate.eq(6)
+                    with m.Elif(motorstate == 0):
                         m.d.sync += motorstate.eq(1)
                     with m.Else():
-                        m.d.sync += motorstate.eq(motorstate+1)
+                        m.d.sync += motorstate.eq(motorstate-1)
                 with m.Else():
                     m.d.sync += mtrpulsecntr.eq(mtrpulsecntr+1)
                 with m.If(rotating == 1):
                     m.next = 'HALL'
+            # rotation is clockwise
             with m.State('HALL'):
                 with m.If(hallfilter == 1):
                     m.d.sync += motorstate.eq(1)
@@ -164,6 +169,7 @@ class Driver(Elaboratable):
 
         # Cycle time measurement
         with m.If((hallfilter != stateold) &
+                  (hallfilter != 3) &  # due to sensor issue 3 is barely triggered
                   (hallfilter > 0) &
                   (hallfilter < 7)):
             m.d.sync += stateold.eq(hallfilter)
@@ -200,55 +206,52 @@ class Driver(Elaboratable):
 
         # beta probably negative due to
         # motor response time, likely speed dependent
-        beta = -15
-        hall_degs = (np.array([0, 33, 63, 100, 108, 162])+beta+180) % 180
+        beta = 0 
+        hall_degs = (np.array([0, 42, 42, 91, 118, 142])+beta+180) % 180
         # combination
         hall_degs = hall_degs.tolist()
 
-        # in the end an angle is produced which should better approximate
-        # the actual position of the rotor
-        with m.If((countsperdegree > lowerlimit)
-                  & (countsperdegree < upperlimit)):
-            # Assumption 1:
-            # - when to switch from hall feedback --> control algo
-            # - alter between beta's
-            with m.If((hallfilter != stateold) &
-                      (hallfilter > 0) &
-                      (hallfilter < 7)):
-                m.d.sync += degree_cnt.eq(0)
-                # mapping!! between motorstate
-                #           and hallfilter is not
-                #           trivial
-                with m.If(hallfilter == 1):
-                    m.d.sync += angle.eq(hall_degs[0])
-                with m.Elif(hallfilter == 3):
-                    m.d.sync += angle.eq(hall_degs[1])
-                with m.Elif(hallfilter == 2):
-                    m.d.sync += angle.eq(hall_degs[2])
-                with m.Elif(hallfilter == 6):
-                    m.d.sync += angle.eq(hall_degs[3])
-                with m.Elif(hallfilter == 4):
-                    m.d.sync += angle.eq(hall_degs[4])
-                with m.Elif(hallfilter == 5):
-                    m.d.sync += angle.eq(hall_degs[5])
-            # countsperdegree varies, so I do not use
-            #  degree_cnt == countsperdegree-1
-            with m.Elif((degree_cnt+2) > countsperdegree):
-                m.d.sync += degree_cnt.eq(0)
-                with m.If(angle == 180-1):
-                    m.d.sync += angle.eq(0)
-                with m.Else():
-                    m.d.sync += angle.eq(angle+1)
+        # Assumption 1:
+        # - when to switch from hall feedback --> control algo
+        # - alter between beta's
+        with m.If((hallfilter != stateold) &
+                  (hallfilter != 3) &
+                  (hallfilter > 0) &
+                  (hallfilter < 7)):
+            m.d.sync += degree_cnt.eq(0)
+            # mapping!! between motorstate
+            #           and hallfilter is not
+            #           trivial
+            with m.If(hallfilter == 1):
+                m.d.sync += angle.eq(hall_degs[0])
+            with m.Elif(hallfilter == 3):
+                m.d.sync += angle.eq(hall_degs[1])
+            with m.Elif(hallfilter == 2):
+                m.d.sync += angle.eq(hall_degs[2])
+            with m.Elif(hallfilter == 6):
+                m.d.sync += angle.eq(hall_degs[3])
+            with m.Elif(hallfilter == 4):
+                m.d.sync += angle.eq(hall_degs[4])
+            with m.Elif(hallfilter == 5):
+                m.d.sync += angle.eq(hall_degs[5])
+        # countsperdegree varies, so I do not use
+        #  degree_cnt == countsperdegree-1
+        with m.Elif((degree_cnt+2) > countsperdegree):
+            m.d.sync += degree_cnt.eq(0)
+            with m.If(angle == 180-1):
+                m.d.sync += angle.eq(0)
             with m.Else():
-                m.d.sync += degree_cnt.eq(degree_cnt+1)
+                m.d.sync += angle.eq(angle+1)
+        with m.Else():
+            m.d.sync += degree_cnt.eq(degree_cnt+1)
 
         # Current controlled via duty cycle
-        max_delay = 1000
+        max_delay = 100_000
         #max_delaylimit = -(setpoint-upperlimit) >> 2
         #min_delaylimit = -(setpoint-lowerlimit) >> 2
         #delay = Signal(range(min_delaylimit,
         #                     max_delaylimit))
-        delay = Signal(signed(16))
+        delay = Signal(signed(32))
 
         # PID controller
         assert ((upperlimit > lowerlimit) &
@@ -282,7 +285,7 @@ class Driver(Elaboratable):
                              intg.eq(intg+err)]
             with m.Else():
                 # bitshifts used to avoid multiplications
-                m.d.sync += delay.eq(-(err >> 3)- (intg >> 10))
+                m.d.sync += delay.eq(-(err >> 5)- (intg >> 11))
 
         off = Signal()
         duty = Signal(range(max_delay))
@@ -307,42 +310,42 @@ class Driver(Elaboratable):
                          bldc.vH.eq(0),
                          bldc.wL.eq(0),
                          bldc.wH.eq(0)]
-        with m.Elif(motorstate == 1):  # V --> W, 001
+        with m.Elif(motorstate == 2):  # V --> W, 001
             m.d.comb += [bldc.uL.eq(0),
                          bldc.uH.eq(0),
                          bldc.vL.eq(0),
                          bldc.vH.eq(1),
                          bldc.wL.eq(1),
                          bldc.wH.eq(0)]
-        with m.Elif(motorstate == 2):  # V --> U, 011
+        with m.Elif(motorstate == 3):  # V --> U, 011
             m.d.comb += [bldc.uL.eq(1),
                          bldc.uH.eq(0),
                          bldc.vL.eq(0),
                          bldc.vH.eq(1),
                          bldc.wL.eq(0),
                          bldc.wH.eq(0)]
-        with m.Elif(motorstate == 3):  # W --> U, 010
+        with m.Elif(motorstate == 4):  # W --> U, 010
             m.d.comb += [bldc.uL.eq(1),
                          bldc.uH.eq(0),
                          bldc.vL.eq(0),
                          bldc.vH.eq(0),
                          bldc.wL.eq(0),
                          bldc.wH.eq(1)]
-        with m.Elif(motorstate == 4):  # W --> V, 110
+        with m.Elif(motorstate == 5):  # W --> V, 110
             m.d.comb += [bldc.uL.eq(0),
                          bldc.uH.eq(0),
                          bldc.vL.eq(1),
                          bldc.vH.eq(0),
                          bldc.wL.eq(0),
                          bldc.wH.eq(1)]
-        with m.Elif(motorstate == 5):  # U --> V, 100
+        with m.Elif(motorstate == 6):  # U --> V, 100
             m.d.comb += [bldc.uL.eq(0),
                          bldc.uH.eq(1),
                          bldc.vL.eq(1),
                          bldc.vH.eq(0),
                          bldc.wL.eq(0),
                          bldc.wH.eq(0)]
-        with m.Elif(motorstate == 6):  # U --> W, 101
+        with m.Elif(motorstate == 1):  # U --> W, 101
             m.d.comb += [bldc.uL.eq(0),
                          bldc.uH.eq(1),
                          bldc.vL.eq(0),

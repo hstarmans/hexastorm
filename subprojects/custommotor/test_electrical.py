@@ -36,6 +36,9 @@ class Base(unittest.TestCase):
         cls.spi.mode = 1
         cls.spi.max_speed_hz = round(1E6)
         cls.word = word
+        assert word in ['hallfilter', 'cycletime', 
+                'statecounter' , 'anglecounter', 
+                'angle', 'PIcontrol'] 
         cls.divider = 800
         if build:
             print("Building and programming board")
@@ -77,7 +80,7 @@ class Base(unittest.TestCase):
             else:
                 speed = 0
             delay = int.from_bytes(response[:2], "big", signed=True)
-            response = [degreecnt, delay]
+            response = [speed, delay]
         elif (self.word == 'anglecounter'):
             degreecnt = int.from_bytes(response, "big")
             if degreecnt != 0:
@@ -96,7 +99,9 @@ class Base(unittest.TestCase):
         print(f"Measurement finished in mode {self.word}")
         output.to_csv('measurement.csv')
         if self.word == 'hallfilter':
-            output = output[output['word'] != 0]
+            output = output[output['word_0'] != 0]
+            output = output.replace({'word_0': {1:1, 2:3, 3:2, 
+                4:5, 5:6, 6:4}})
             # six states cover 180 degrees
             print((output.rename(columns={'time':'degrees'})
                          .groupby(['word_0'])
@@ -119,16 +124,23 @@ class Base(unittest.TestCase):
             #plt.title("Histogram Plot")
             #plt.show()
 
-    def test_readfreq(self, delay=0):
+    def test_readfreq(self, delay=0, debug=True):
         '''turns on the motor board and retrieves the rotor frequency
 
         Method runs for ever, can be interrupted with keyboard interrupt.
         '''
         start = time()
-        starttime = 10
-        totaltime = 60
+        if self.word == 'hallfilter':
+            starttime = 10
+            totaltime = 120
+        elif self.word == 'PIcontrol':
+            starttime = 5
+            totaltime = 300
+        else:
+            starttime = 15 
+            totaltime = 60
         output = pd.DataFrame(columns=['time',
-                                       'word'])
+                                       'word_0'])
         print(f'Waiting {starttime} seconds to start measurement.')
         sleep(starttime)
         print("Starting measurement")
@@ -145,6 +157,12 @@ class Base(unittest.TestCase):
                     dct = {'time': [time()-start]}
                     for idx, word in enumerate(words):
                         dct[f'word_{idx}'] = [word]
+                        if word == 3 and (self.word == 'hallfilter'):
+                            print('found a 3')
+                    if debug:
+                        print(dct)
+                        if word != 'PIcontrol':
+                            sleep(0.1)
                     frame1 = pd.DataFrame(dct)
                     output = pd.concat([output, frame1],
                                        ignore_index=True)
@@ -165,10 +183,10 @@ class Base(unittest.TestCase):
                                         output['word_0'],
                                         label='speed')
                         elif self.word == 'PIcontrol':
-                            plt.ylim(0, 2000)
+                            plt.ylim(0, 4000)
                             plt.title("PI controller")
                             plt.xlabel("Time [seconds]")
-                            plt.ylabel("Counter")
+                            plt.ylabel("Counter"),
                             plt.scatter(output['time'],
                                         output['word_0'],
                                         label='speed')
