@@ -3,6 +3,22 @@
 The following notes where removed from readme.md for brevity.
 
 
+## Poetry
+
+Poetry gives warning when adding amaranth.
+This can be mitigated by running the following commands
+
+```
+poetry add git+"https://github.com/amaranth-lang/amaranth.git"
+poetry add git+"https://github.com/amaranth-lang/amaranth-boards.git"
+poetry add git+"https://github.com/amaranth-lang/amaranth-soc.git"
+poetry add git+"https://github.com/hstarmans/luna"
+```
+
+## Precommit
+Install Git pre-commit hooks based on the .pre-commit-config.yaml file.
+```pre-commit install```
+
 ## Jupyter lab
 
 Jupyter lab only works with git extension if key is added to ssh agent.
@@ -89,13 +105,13 @@ The instructions are parsed from the the SRAM if execution is enabled.
 
 ## Commands
 The following commands are possible;
-| command | reply |
-|---|---|
-| POSITION | get position of all motors |
-| READ | get state of the peripheral and settings of certain pins |
-| START | enable execution of instructions stored in SRAM |
-| STOP | halt execution of instructions stored in SRAM |
-| WRITE | sent over an instruction and store it in SRAM |
+| command  | reply                                                    |
+| -------- | -------------------------------------------------------- |
+| POSITION | get position of all motors                               |
+| READ     | get state of the peripheral and settings of certain pins |
+| START    | enable execution of instructions stored in SRAM          |
+| STOP     | halt execution of instructions stored in SRAM            |
+| WRITE    | sent over an instruction and store it in SRAM            |
 
 
 ## Write
@@ -109,17 +125,17 @@ each instruction
 
 ## Parameters
 The following parameters describe the system.  
-| parameter | description |
-|---|---|
-| RPM | revolutions per minute of the rotor |
-| Start% | fraction of period where scanline starts |
-| End% | fraction of period where scanline stops |
-| SPINUP_TIME | seconds system waits for the rotor to stabilize speed |
-| STABLE_TIME | seconds system tries to determine position laser with photodiode |
-| FACETS | number of polygon facets|
-| DIRECTION | exposure direction, i.e. forward or backward |
-| SINGLE_LINE | system exposes fixed pattern, i.e. line|
-| SINGLE_FACET | only one of the facets is used|
+| parameter    | description                                                      |
+| ------------ | ---------------------------------------------------------------- |
+| RPM          | revolutions per minute of the rotor                              |
+| Start%       | fraction of period where scanline starts                         |
+| End%         | fraction of period where scanline stops                          |
+| SPINUP_TIME  | seconds system waits for the rotor to stabilize speed            |
+| STABLE_TIME  | seconds system tries to determine position laser with photodiode |
+| FACETS       | number of polygon facets                                         |
+| DIRECTION    | exposure direction, i.e. forward or backward                     |
+| SINGLE_LINE  | system exposes fixed pattern, i.e. line                          |
+| SINGLE_FACET | only one of the facets is used                                   |
   
 Using the above, the code determines the number of bits in a scanline. Via a serial port interface the user can push data to the scanner.
 A line is preceded with a command which can be SCAN or STOP. The data is stored on the chip in block ram. 
@@ -136,13 +152,13 @@ Most programs like Cura and slicer store the final instructions as [G-code](http
 There is no link between g-code and my interpretation yet.
 
 ### Splines
-| data | number of bytes | description
-|---|---|---|
-| INSTRUCTION | 1 | type of instructions, here move instruction
-| TICKS | 7 | number of ticks in a move, cannot be larger than TICKS_MOVE, i.e. 10_000
-| C00 | 8 | motor 0, coeff 0
-| C01 | 8 | motor 0, coeff 1
-| C02 | 8 | motor 0, coeff 2
+| data        | number of bytes | description                                                              |
+| ----------- | --------------- | ------------------------------------------------------------------------ |
+| INSTRUCTION | 1               | type of instructions, here move instruction                              |
+| TICKS       | 7               | number of ticks in a move, cannot be larger than TICKS_MOVE, i.e. 10_000 |
+| C00         | 8               | motor 0, coeff 0                                                         |
+| C01         | 8               | motor 0, coeff 1                                                         |
+| C02         | 8               | motor 0, coeff 2                                                         |
 
 The motor follows the path, C00 * t + C01 * t^2 + C02 * t^3. The default motor sampling frequency is 1 MHz.
 The coefficients can be interpreted as; velocity, acceleration and jerk. These are slightly different.
@@ -159,21 +175,21 @@ max speed is 3.125 m/s with an oscillator frequency of 1 MHz.
 I made a sketch for an implementation in test/old/dsp/casteljau.py
 
 ### Pin instruction
-| data | number of bytes | description
-|---|---|---|
-| INSTRUCTION | 1 | type of instructions, here set pin instruction
-| PINS | 7 | Last byte set pins. The last bits set polygon, laser0, laser1
+| data        | number of bytes | description                                                   |
+| ----------- | --------------- | ------------------------------------------------------------- |
+| INSTRUCTION | 1               | type of instructions, here set pin instruction                |
+| PINS        | 7               | Last byte set pins. The last bits set polygon, laser0, laser1 |
 
 A user can read but not write directly to pins. This ensures that the host
 can establish precedence between instructions.
 
 ### Laserline instruction
-| data | number of bits | description
-|---|---|---|
-| INSTRUCTION | 8 | type of instructions, here start or stop scanline
-| DIRECTION | 1 | scanning direction
-| TICKSPERSTEP | 55 | ticks per half period step
-| DATA | 64 | information for lasers in chunks of 8 bytes
+| data         | number of bits | description                                       |
+| ------------ | -------------- | ------------------------------------------------- |
+| INSTRUCTION  | 8              | type of instructions, here start or stop scanline |
+| DIRECTION    | 1              | scanning direction                                |
+| TICKSPERSTEP | 55             | ticks per half period step                        |
+| DATA         | 64             | information for lasers in chunks of 8 bytes       |
 
 A user can read but not write directly to pins. This ensures that the host
 can establish precedence between instructions.
