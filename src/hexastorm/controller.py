@@ -189,6 +189,14 @@ class Host:
 
         clock = int(self.platform.clks[self.platform.hfosc_div] * 1e6)
         mode = self.platform.laser_var["MOTORDEBUG"]
+        
+        def degreecnv(degreecnt):
+            if degreecnt != 0:
+                speed = clock / (degreecnt * 180 * 2) * 60
+            else:
+                speed = 0
+            return speed
+
         if (mode == "cycletime") & (response != 0):
             response = int.from_bytes(response, "big")
             # you measure 180 degrees
@@ -198,21 +206,21 @@ class Host:
             degreecnt = int.from_bytes(
                 response[(WORD_BYTES - 2) :], "big", signed=False
             )
-            # TODO: this code is not used
-            # if degreecnt != 0:
-            #     speed = clock / (degreecnt * 180 * 2) * 60
-            # else:
-            #     speed = 0
+            speed = degreecnv(degreecnt)
             delay = int.from_bytes(
                 response[: (WORD_BYTES - 2)], "big", signed=True
             )
-            response = [degreecnt, delay]
-        elif mode == "anglecounter":
-            degreecnt = int.from_bytes(response, "big")
-            if degreecnt != 0:
-                response = clock / (degreecnt * 180 * 2) * 60
-            else:
-                response = 0
+            response = [speed, delay]
+        elif mode == "ticksinfacet":
+            degreecnt = int.from_bytes(
+                response[(WORD_BYTES - 2) :], "big", signed=False
+            )
+            speed = degreecnv(degreecnt)
+            degreecntdiode = int.from_bytes(
+                response[: (WORD_BYTES - 2)], "big", signed=False
+            )
+            speedd = degreecnv(degreecntdiode)
+            response = [speed, speedd]
         else:
             response = int.from_bytes(response, "big")
 

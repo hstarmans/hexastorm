@@ -69,7 +69,7 @@ class Firestarter(LatticeICE40Platform, platform):
         "STABLE_TIME": 1.125,
         "FACETS": 4,
         "CRYSTAL_HZ": clks[hfosc_div] * 1e6,
-        "MOTORDEBUG": "PIcontrol",
+        "MOTORDEBUG": "ticksinfacet",
         "LASER_HZ": 100e3,
         "END%": 0.7,
         "START%": 0.35,

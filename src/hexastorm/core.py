@@ -306,6 +306,11 @@ class Dispatcher(Elaboratable):
             prism_driver.hall[1].eq(bldc.sensor1),
             prism_driver.hall[2].eq(bldc.sensor2),
         ]
+        # connect laser module to prism motor
+        m.d.comb += [
+            prism_driver.ticksinfacet.eq(laserhead.ticksinfacet),
+            prism_driver.synchronized.eq(laserhead.synchronized)]
+
         # connect laserhead
         m.d.comb += [
             # TODO: fix removal

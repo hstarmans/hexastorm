@@ -112,7 +112,7 @@ class LaserheadTest(Base):
         self.assertEqual((yield from host.get_state())["error"], False)
 
     @executor
-    def test_stable(self, timeout=1):
+    def test_stable(self, timeout=60):
         host = self.host
         yield from host.enable_comp(synchronize=True)
         print(f"Wait for synchronization, {timeout} seconds")
@@ -224,22 +224,34 @@ class MotorTest(Base):
             # plt.show()
 
     @executor
-    def readfreq(self, delay=0):
+    def readfreq(self, delay=0, debug=True):
         """turns on the motor board and retrieves the rotor frequency
 
         Method runs for ever, can be interrupted with keyboard interrupt.
         """
         host = self.host
+        mode = host.laser_params["MOTORDEBUG"]
         start = time()
-        starttime = 10
-        totaltime = 60
+        if mode == 'hallfilter':
+            starttime = 10
+            totaltime = 120
+        elif mode == 'PIcontrol':
+            starttime = 5
+            totaltime = 300
+        else:
+            starttime = 15 
+            totaltime = 60
         output = pd.DataFrame(columns=["time"])
         print(f"Waiting {starttime} seconds to start measurement.")
-        yield from host.enable_comp(polygon=True)
+        if mode == 'ticksinfacet':
+            yield from host.enable_comp(synchronize=True)
+        else:
+            yield from host.enable_comp(polygon=True)
+
         sleep(starttime)
         print("Starting measurement")
-        mode = host.laser_params["MOTORDEBUG"]
-        plt.title("Streaming Data")
+       
+        plt.title(f"Streaming Data in {mode}")
         # plt.clc()
         try:
             while True:
@@ -251,15 +263,17 @@ class MotorTest(Base):
                     dct = {"time": [time() - start]}
                     for idx, word in enumerate(words):
                         dct[f"word_{idx}"] = [word]
+                    if debug:
+                        print(dct)
+                        sleep(0.1)
                     frame1 = pd.DataFrame(dct)
                     output = pd.concat([output, frame1], ignore_index=True)
-
                     if mode in [
                         "cycletime",
-                        # 'statecounter',
-                        # 'anglecounter',
+                        "ticksinfacet",
                         "PIcontrol",
                     ]:
+                        plt.clf()
                         plt.clt()  # to clear the terminal
                         plt.cld()  # to clear the data only
                         plt.xlim(0, totaltime)
@@ -272,7 +286,7 @@ class MotorTest(Base):
                                 output["time"], output["word_0"], label="speed"
                             )
                         elif mode == "PIcontrol":
-                            plt.ylim(0, 2000)
+                            plt.ylim(0, 4000)
                             plt.title("PI controller")
                             plt.xlabel("Time [seconds]")
                             plt.ylabel("Counter")
@@ -284,17 +298,33 @@ class MotorTest(Base):
                                 output["word_1"],
                                 label="control",
                             )
+                            # A PRINT COMMAND will make the plot fail
+                        elif mode == "ticksinfacet":
+                            plt.ylim(0, 4000)
+                            plt.title("Ticksinfacet")
+                            plt.xlabel("Time [seconds]")
+                            plt.ylabel("Counter")
+                            plt.scatter(
+                                output["time"], output["word_0"], label="speed hall"
+                            )
+                            plt.scatter(
+                                output["time"],
+                                output["word_1"],
+                                label="speed diode",
+                            )
                         plt.sleep(0.1)
+                        plt.show()
                         # TODO:
                         # if you plot a point outside the limits
                         # library seems to fail, this is a workaround
                         # another option is to remove the labels,
                         # in plt.scatter
-                        try:
-                            plt.show()
-                        except IndexError:
-                            pass
-                        print(f"speed: {words[0]} control: {words[1]}")
+                        # try:
+                        #     plt.show()
+                        # except IndexError:
+                        #     pass
+                        #    # plt.clc()
+                        
                 except ValueError as e:
                     print(e)
         except KeyboardInterrupt:

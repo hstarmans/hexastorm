@@ -26,6 +26,7 @@ class Laserhead(Elaboratable):
     O: enable_prism   -- enable pin scanner motor
     I: photodiode     -- trigger for photodiode
     O: photodiode_t   -- high if photodiode triggered in this cycle
+    O: photodiode_2   -- an attemp to add laser microscopy (not tested)
     O: read_commit    -- finalize read transactionalizedfifo
     O: read_en        -- enable read transactionalizedfifo
     I: read_data      -- read data from transactionalizedfifo, AKA busy
@@ -39,6 +40,7 @@ class Laserhead(Elaboratable):
         platform   -- pass test platform
         """
         self.platform = platform
+        self.dct = params(platform)
         self.status = Signal()
         self.lasers = Signal(2)
         self.pwm = Signal()
@@ -46,6 +48,7 @@ class Laserhead(Elaboratable):
         self.synchronize = Signal()
         self.synchronized = Signal()
         self.error = Signal()
+        self.ticksinfacet = Signal(range(self.dct["TICKSINFACET"] * 2))
         self.photodiode = Signal()
         self.photodiode_t = Signal()
         self.photodiode_2 = Signal()
@@ -66,7 +69,7 @@ class Laserhead(Elaboratable):
         self.expose_start = Signal()
         self.step = Signal()
         self.dir = Signal()
-        self.dct = params(platform)
+        
         self.process_lines = Signal()
 
     def elaborate(self, platform):
@@ -76,18 +79,19 @@ class Laserhead(Elaboratable):
         # Pulse generator for prism motor
         pwmcnt = Signal(range(dct["POLYPERIOD"]))
         # photodiode_triggered
-        photodiodecnt = Signal(range(dct["TICKSINFACET"] * 2))
-        triggered = Signal()
-        with m.If(photodiodecnt < (dct["TICKSINFACET"] * 2 - 1)):
-            with m.If(~self.photodiode):
-                m.d.sync += triggered.eq(1)
-            m.d.sync += photodiodecnt.eq(photodiodecnt + 1)
-        with m.Else():
-            m.d.sync += [
-                self.photodiode_t.eq(triggered),
-                photodiodecnt.eq(0),
-                triggered.eq(0),
-            ]
+        # This block does not have any usage
+        # photodiodecnt = Signal(range(dct["TICKSINFACET"] * 2))
+        # triggered = Signal()
+        # with m.If(photodiodecnt < (dct["TICKSINFACET"] * 2 - 1)):
+        #     with m.If(~self.photodiode):
+        #         m.d.sync += triggered.eq(1)
+        #     m.d.sync += photodiodecnt.eq(photodiodecnt + 1)
+        # with m.Else():
+        #     m.d.sync += [
+        #         self.photodiode_t.eq(triggered),
+        #         photodiodecnt.eq(0),
+        #         triggered.eq(0),
+        #     ]
 
         # step generator, i.e. slowest speed is 1/(2^4-1)
         stephalfperiod = Signal(dct["BITSINSCANLINE"].bit_length() + 4)
@@ -175,7 +179,7 @@ class Laserhead(Elaboratable):
                     m.d.sync += self.error.eq(1)
                     m.next = "STOP"
                 with m.Elif(~photodiode & ~photodiode_d):
-                    m.d.sync += [tickcounter.eq(0), lasers.eq(0)]
+                    m.d.sync += [tickcounter.eq(0), lasers.eq(0), self.ticksinfacet.eq(tickcounter)]
                     with m.If(
                         (
                             tickcounter
