@@ -1,16 +1,16 @@
 import unittest
 
-import numpy as np
 from amaranth import Cat, Elaboratable, Module, Signal
 from amaranth.hdl.mem import Array
 from luna.gateware.interface.spi import SPICommandInterface
+from luna.gateware.utils.cdc import synchronize
 
-from .constants import WORD_BYTES, params
+from .constants import WORD_BYTES, COMMAND_BYTES, params
 from .resources import get_all_resources
 
 
 class Driver(Elaboratable):
-    """Drives 3 pole BLDC motor
+    """Drives three poles BLDC motor
 
     Motor is is driven via a six step commutation cycle.
     Driver starts in a forced mode. It then starts to rely
@@ -94,6 +94,8 @@ class Driver(Elaboratable):
             for idx in range(len(self.leds)):
                 m.d.comb += self.leds[idx].eq(leds[idx])
             bldc = platform.request("bldc")
+            board_spi = platform.request("debug_spi")
+            spi = synchronize(m, board_spi)
             m.d.comb += self.enable_prism.eq(1)
             m.d.comb += [
                 bldc.uL.eq(uL),
@@ -103,13 +105,13 @@ class Driver(Elaboratable):
                 bldc.wL.eq(wL),
                 bldc.wH.eq(wH),
             ]
-            m.d.comb += [
-                hallstate.eq(Cat(~bldc.sensor0, ~bldc.sensor1, ~bldc.sensor2))
-            ]
+            m.d.comb += [self.hall[0].eq(bldc.sensor0),
+                         self.hall[1].eq(bldc.sensor1),
+                         self.hall[2].eq(bldc.sensor2)]
 
-            spi = self.spi
-            interf = SPICommandInterface(command_size=1 * 8, word_size=4 * 8)
-            m.d.comb += interf.spi.connect(spi)
+            interf = SPICommandInterface(command_size=COMMAND_BYTES * 8, word_size=WORD_BYTES * 8)
+            m.d.comb += [interf.spi.connect(spi),
+                         interf.word_to_send.eq(self.debugword)]
             m.submodules.interf = interf
 
         # displays measurement hall sesnsors on LED
@@ -117,7 +119,7 @@ class Driver(Elaboratable):
             m.d.comb += self.leds[idx].eq(self.hall[idx])
 
         # tested by trying out all possibilities
-        m.d.sync += hallstate.eq(
+        m.d.comb += hallstate.eq(
             Cat(~self.hall[0], ~self.hall[1], ~self.hall[2])
         )
 
@@ -206,48 +208,24 @@ class Driver(Elaboratable):
                 # i.e. cases 0 en 7
                 with m.If(rotating == 0):
                     m.next = "ROTATION"
-                with m.Elif(
-                    (countsperdegree > lowerlimit)
-                    & (countsperdegree < upperlimit)
-                    & (mode != "hallfilter")
-                ):
-                    m.next = "IMPHALL"
-            with m.State("IMPHALL"):
-                with m.If(angle < 30):
-                    m.d.sync += motorstate.eq(1)
-                with m.Elif(angle < 60):
-                    m.d.sync += motorstate.eq(2)
-                with m.Elif(angle < 90):
-                    m.d.sync += motorstate.eq(3)
-                with m.Elif(angle < 120):
-                    m.d.sync += motorstate.eq(4)
-                with m.Elif(angle < 150):
-                    m.d.sync += motorstate.eq(5)
-                with m.Elif(angle < 181):
-                    m.d.sync += motorstate.eq(6)
-                with m.If(rotating == 0):
-                    m.next = "ROTATION"
-
 
         max_rotationtime = int(start_statetime * states_fullcycle)
-        hallcntr = Signal.like(range(max_rotationtime))
-        # degree counter
-        degree_cnt = Signal().like(countsperdegree)
+        hallcntr = Signal(range(max_rotationtime))
 
         # invalid hall measurements are filtered out
         # in addition focus is on changes
-        statecounter = Signal(range(states_fullcycle // 2))
-        stateold = Signal.like(hallstate)
-        startangle = 0
-
+        statecounter = Signal(range(1000))
+        stateold = Signal.like(hallstate) 
+    
         # counts per degree measurement
-        # note that we require half a rotation for a update
+        #  update requires 180 degrees
         with m.If(
             (hallfilter != stateold) & (hallfilter > 0) & (hallfilter != 3) &
              (hallfilter < 7)
         ):
             m.d.sync += stateold.eq(hallfilter)
-            with m.If(statecounter == states_fullcycle // 2 - 1):
+
+            with m.If((statecounter == states_fullcycle // 2 - 1)):
                 # TODO: add filter to remove invalid cycle times,
                 #       which are too small
                 m.d.sync += [
@@ -260,11 +238,13 @@ class Driver(Elaboratable):
                         + (hallcntr >> 11)
                         + (hallcntr >> 13)
                         + (hallcntr >> 14)
-                    ),
-                    degree_cnt.eq(0),
-                    angle.eq(startangle),
+                    ),]
                     # rotating so use hall sensors
-                    rotating.eq(1)]
+                with m.If(
+                    hallcntr < (get_statetime(start_freq) * states_fullcycle)
+                ):
+                    # rotating so use hall sensors
+                    m.d.sync += rotating.eq(1)
             with m.Else():
                 m.d.sync += statecounter.eq(statecounter + 1)
         # counter is overflowing, implying there is no rotation
@@ -272,16 +252,6 @@ class Driver(Elaboratable):
             m.d.sync += [hallcntr.eq(0), rotating.eq(0)]
         with m.Else():
             m.d.sync += hallcntr.eq(hallcntr + 1)
-            # ideally we would also rotate counter in other blocks
-            # of if else ladder but error assumed minimal
-            with m.If((degree_cnt + 1) > countsperdegree):
-                m.d.sync += degree_cnt.eq(0)
-                with m.If(angle == 180-1):
-                    m.d.sync += angle.eq(0)
-                with m.Else():
-                    m.d.sync += angle.eq(angle + 1)
-            with m.Else():
-                m.d.sync += degree_cnt.eq(degree_cnt + 1)
 
         # PID controller
         #
@@ -302,36 +272,34 @@ class Driver(Elaboratable):
 
         # desire 50 samples per cycle
         max_pid_cycle_time = int(180 / 50 * setpoint_degree)
-
         duty = Signal(range(max_pid_cycle_time))
 
         # limits are caclulated to prevent overflow, i.e. integral blow up
-        # TODO: seem excessive and suboptimal
+
         assert (upperlimit > lowerlimit) & (setpoint_degree > 0) & (lowerlimit > 0)
-        lower_l = setpoint_degree - upperlimit
-        upper_l = setpoint_degree - lowerlimit
-        # TODO: this is excessive
-        int_lower_l = lower_l * 1000
-        int_upper_l = upper_l * 1000
+        lower_l = lowerlimit - setpoint_degree
+        upper_l = upperlimit - setpoint_degree
         err = Signal(range(lower_l, upper_l))
-        assert (upper_l > 0) & (lower_l < 0)
+        duty = Signal(range(lower_l, upper_l))
+        # assert (upper_l > 0) & (lower_l < 0)
+        int_lower_l = lower_l * 100
+        int_upper_l = upper_l * 100
+   
         # der = Signal(range(lower_l - upper_l, upper_l - lower_l))
         intg = Signal(range(int_lower_l, int_upper_l))
 
         with m.If(rotating == 0):
             m.d.sync += [duty.eq(max_pid_cycle_time-1), err.eq(0), intg.eq(0)]
+        with m.Elif(hallcntr == 0):
+            m.d.sync += [
+                err.eq(countsperdegree - setpoint_degree),
+            ]
+            with m.If((intg + err > int_lower_l) & (intg + err < int_upper_l)):
+                m.d.sync += intg.eq(intg + err)
         with m.Else():
-            # ugly use state machine!
-            with m.If(hallcntr == 0):
-                m.d.sync += [
-                    err.eq(setpoint_degree - countsperdegree),
-                    # der.eq(err - setpoint + countsperdegree),
-                    intg.eq(intg + err),
-                ]
-            with m.Elif(hallcntr  == 1):
-                # normally you multiply by constants but 
-                # we use bit shift to avoid multiplications
-                m.d.sync += duty.eq(-(err >> 3) - (intg >> 10))
+            m.d.sync += [
+                duty.eq((err >> 6) + (intg >> 10)),
+            ]
 
         off = Signal()
         pid_cycle_time = Signal(range(max_pid_cycle_time))

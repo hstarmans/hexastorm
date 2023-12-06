@@ -136,8 +136,8 @@ class Host:
             motor.en_pwm_mode(True)
         steppers.bcm2835_close()
 
-    def build(self, do_program=True, verbose=True):
-        """builds the FPGA code using nMigen, Yosys, Nextpnr and icepack
+    def build(self, do_program=True, verbose=True, mod='all'):
+        """builds the FPGA code using amaranth HDL, Yosys, Nextpnr and icepack
 
         do_program  -- flashes the FPGA chip using fomu-flash,
                        resets aftwards
@@ -146,12 +146,19 @@ class Host:
         if upython:
             print("Micropython cannot update binary, using stored one")
         else:
-            import hexastorm.core as core
-
+            from .core import Dispatcher
+            from .motor import Driver
+            if mod == 'all':
+                module = Dispatcher(self.platform)
+            elif mod == 'motor':
+                module = Driver(self.platform,
+                                top=True)
+            else:
+                raise Exception(f"Print building {mod} is not supported.")
             self.platform = Firestarter()
             self.platform.laser_var = self.laser_params
             self.platform.build(
-                core.Dispatcher(self.platform),
+                module,
                 do_program=do_program,
                 verbose=verbose,
             )
@@ -178,14 +185,17 @@ class Host:
         # is required for the UP5K
         self.spi_exchange_data([0] * (WORD_BYTES + COMMAND_BYTES))
 
-    def get_motordebug(self):
+    def get_motordebug(self, blocking=False):
         """retrieves the motor debug word
 
         This is used to debug the PI controller and
         set the correct setting for the Hall interpolation
+
+        blocking   -- checks if memory is full, only needed for
+                      a build with all modules
         """
         command = [COMMANDS.DEBUG] + WORD_BYTES * [0]
-        response = (yield from self.send_command(command))[1:]
+        response = (yield from self.send_command(command, blocking=blocking))[1:]
 
         clock = int(self.platform.clks[self.platform.hfosc_div] * 1e6)
         mode = self.platform.laser_var["MOTORDEBUG"]
@@ -220,6 +230,7 @@ class Host:
                 response[: (WORD_BYTES - 2)], "big", signed=False
             )
             speedd = degreecnv(degreecntdiode)
+            print(f"Degree counter {degreecnt} and {degreecntdiode}")
             response = [speed, speedd]
         else:
             response = int.from_bytes(response, "big")

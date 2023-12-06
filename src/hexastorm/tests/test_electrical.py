@@ -3,24 +3,31 @@ import unittest
 from copy import deepcopy
 from pathlib import Path
 from time import sleep, time
+import subprocess
 
 import numpy as np
 import pandas as pd
 import plotext as plt
 from numpy.testing import assert_array_almost_equal
+from gpiozero import LED
 
 from .. import interpolator
 from ..constants import COMMANDS, MOVE_TICKS, WORD_BYTES, wordsinmove
 from ..controller import Host, Memfull, executor
 from ..platforms import Firestarter
 
-
 class Base(unittest.TestCase):
     @classmethod
-    def setUpClass(cls, flash=False):
+    def setUpClass(cls, flash=True, mod='motor'):
+        """builds the FPGA code using Amaranth HDL, Yosys, Nextpnr and icepack
+
+        flash  -- flash FPGA and build 
+        mod    -- module to build
+        """
         cls.host = Host()
+        cls.mod = mod
         if flash:
-            cls.host.build()
+            cls.host.build(mod=mod)
         else:
             print("Resetting the machine")
             cls.host.reset()
@@ -183,7 +190,6 @@ class MotorTest(Base):
     The debug mode is set via MOTORDEBUG, in platforms.py.
     This program can then be used to analyze the results.
     """
-
     def finish(self, output):
         print(
             "Measurement finished in mode "
@@ -192,7 +198,9 @@ class MotorTest(Base):
         output.to_csv("measurement.csv")
         mode = self.host.laser_params["MOTORDEBUG"]
         if mode == "hallfilter":
-            output = output[output["word"] != 0]
+            output = output[output['word_0'] != 0]
+            output = output.replace({'word_0': {1:1, 2:3, 3:2, 
+                4:5, 5:6, 6:4}})
             # six states cover 180 degrees
             print(
                 (
@@ -222,14 +230,20 @@ class MotorTest(Base):
             # plt.hist(output['word'].tolist(), 6, label = "distribution")
             # plt.title("Histogram Plot")
             # plt.show()
+        elif mode == 'PIcontrol':
+            print(output[["word_0"]].describe())
+
 
     @executor
-    def readfreq(self, delay=0, debug=True):
+    def test_main(self, delay=0, debug=True):
         """turns on the motor board and retrieves the rotor frequency
 
         Method runs for ever, can be interrupted with keyboard interrupt.
         """
         host = self.host
+        if self.mod == 'motor':
+            blocking = False
+
         mode = host.laser_params["MOTORDEBUG"]
         start = time()
         if mode == 'hallfilter':
@@ -237,28 +251,28 @@ class MotorTest(Base):
             totaltime = 120
         elif mode == 'PIcontrol':
             starttime = 5
-            totaltime = 300
+            totaltime = 60
         else:
             starttime = 15 
             totaltime = 60
         output = pd.DataFrame(columns=["time"])
         print(f"Waiting {starttime} seconds to start measurement.")
-        if mode == 'ticksinfacet':
-            yield from host.enable_comp(synchronize=True)
-        else:
-            yield from host.enable_comp(polygon=True)
+        if self.mod == 'all':
+            if mode == 'ticksinfacet':
+                yield from host.enable_comp(synchronize=True)
+            else:
+                yield from host.enable_comp(polygon=True)
 
-        sleep(starttime)
         print("Starting measurement")
-       
         plt.title(f"Streaming Data in {mode}")
         # plt.clc()
         try:
+            sleep(starttime)
             while True:
                 if (time() - start) >= totaltime:
                     self.finish(output)
                     break
-                words = yield from host.get_motordebug()
+                words = yield from host.get_motordebug(blocking=blocking)
                 try:
                     dct = {"time": [time() - start]}
                     for idx, word in enumerate(words):
@@ -313,17 +327,15 @@ class MotorTest(Base):
                                 label="speed diode",
                             )
                         plt.sleep(0.1)
-                        plt.show()
-                        # TODO:
-                        # if you plot a point outside the limits
-                        # library seems to fail, this is a workaround
-                        # another option is to remove the labels,
-                        # in plt.scatter
-                        # try:
-                        #     plt.show()
-                        # except IndexError:
-                        #     pass
-                        #    # plt.clc()
+                        # open issue; only happens after reboot
+                        #             if script is run succesful once
+                        #             it is fixed
+                        # https://github.com/piccolomo/plotext/issues/185
+                        try:
+                            plt.show()
+                        except IndexError:
+                            print("Aborting due to strange plotext bug, try restart.")
+                            break
                         
                 except ValueError as e:
                     print(e)
@@ -331,7 +343,17 @@ class MotorTest(Base):
             self.finish(output)
             pass
         finally:
-            yield from host.enable_comp(polygon=False)
+            if self.mod == "motor":
+                reset_pin = LED(self.host.platform.reset_pin)
+                reset_pin.off()
+                reset_pin.close()
+                # gpiozero cleans up pins
+                # this ensures pin is kept off
+                subprocess.run(
+                    ["raspi-gpio", "set", str(self.host.platform.reset_pin), "op", "dl"]
+                )
+            else:
+                yield from host.enable_comp(polygon=False)
             print("Interrupted, exiting")
 
 
