@@ -69,14 +69,13 @@ class Driver(Elaboratable):
         # total number of states in 360 degrees
         # Record how a rotation takes place; e.g. red (1), cyan (5), 
         # darkblue (4), lightblue (6), green (2), yellow (3)
-        # map this to the motor state; 1-->1, 5-->2, 4-->3, 6-->4, 
-        # 2-->5, 3-->6, see HALL mode in the statemachine
+        # map this to the motor state; 1 --> 1, 5 --> 2, 4 --> 3, 6 --> 4, 
+        # 2 --> 5, 3 --> 6, see HALL mode in the statemachine
         # optionally rotate the mapping for alignment
         # yellow, i.e. state 3 does not propagate
         # due to hardware error
         # so not 12 but 10 in total
         states_fullcycle = 10
-        angle = Signal(range(180))
         # angle counter limits
         mode = self.mode
 
@@ -132,12 +131,6 @@ class Driver(Elaboratable):
 
         start_freq = 2  # Hz
 
-        # angle counter limits
-        #    it is calculated how much time 1 degree takes
-        #    it assumed speed must be between 100 and 10 hertz
-        lowerlimit = int((get_statetime(100)*states_fullcycle/360))
-        upperlimit = int((get_statetime(start_freq)*states_fullcycle/360))
-
         # clock is downscaled to filter out
         # noise coming to the hall sensors
         # this creates hall filter
@@ -147,25 +140,10 @@ class Driver(Elaboratable):
         with m.Else():
             m.d.sync += divider_cnt.eq(divider_cnt + 1)
 
-
-        # counts per degree enables you
-        # to calculate the motor angle
-        # two bytes are used so we can read it out via SPI
-        # assumption 16 bit >> (max_halfrotationtime/360)
-        countsperdegree = Signal(16)
-        countsperdegreediode = Signal.like(countsperdegree)
-
         # counts per degree of the hall sensors should equal
         # equal the facet time retrieved by laser
         # TODO: number do not allign 
         ticksinfacet = self.ticksinfacet
-        m.d.sync += countsperdegreediode.eq(
-                        (ticksinfacet >> 7)
-                        + (ticksinfacet >> 9)
-                        + (ticksinfacet >> 10)
-                        + (ticksinfacet >> 12)
-                        + (ticksinfacet >> 13)
-                    )
 
         # counter used in state ROTATION
         start_statetime = get_statetime(start_freq)
@@ -209,46 +187,39 @@ class Driver(Elaboratable):
                 with m.If(rotating == 0):
                     m.next = "ROTATION"
 
-        max_rotationtime = int(start_statetime * states_fullcycle)
-        hallcntr = Signal(range(max_rotationtime))
+        hallcntr = Signal(range(start_statetime))
+        hall_counters = Array(Signal.like(hallcntr) for _ in range(6))
+        # must be multiple of 8 to read out
+        assert int(start_statetime * (states_fullcycle / 2)) < pow(2, 24)
+        ticks_half_rotation = Signal(24)
+        ticks_half_rotation_diode = Signal.like(ticks_half_rotation)
+     
+        m.d.sync += [ticks_half_rotation_diode.eq(ticksinfacet << 2),
+                     ticks_half_rotation.eq(sum(hall_counters))]
 
-        # invalid hall measurements are filtered out
         # in addition focus is on changes
-        statecounter = Signal(range(1000))
         stateold = Signal.like(hallstate) 
-    
-        # counts per degree measurement
-        #  update requires 180 degrees
         with m.If(
             (hallfilter != stateold) & (hallfilter > 0) & (hallfilter != 3) &
              (hallfilter < 7)
         ):
-            m.d.sync += stateold.eq(hallfilter)
-
-            with m.If((statecounter == states_fullcycle // 2 - 1)):
-                # TODO: add filter to remove invalid cycle times,
-                #       which are too small
-                m.d.sync += [
-                    statecounter.eq(0),
-                    hallcntr.eq(0),
-                    # division by 180 via bitshifts
-                    countsperdegree.eq(
-                        (hallcntr >> 8)
-                        + (hallcntr >> 10)
-                        + (hallcntr >> 11)
-                        + (hallcntr >> 13)
-                        + (hallcntr >> 14)
-                    ),]
-                    # rotating so use hall sensors
-                with m.If(
-                    hallcntr < (get_statetime(start_freq) * states_fullcycle)
-                ):
-                    # rotating so use hall sensors
-                    m.d.sync += rotating.eq(1)
-            with m.Else():
-                m.d.sync += statecounter.eq(statecounter + 1)
+            m.d.sync += [hallcntr.eq(0), stateold.eq(hallfilter)]
+            with m.If(hallfilter == 1):
+                m.d.sync += hall_counters[0].eq(hallcntr)
+            with m.Elif(hallfilter == 2):
+                m.d.sync += hall_counters[1].eq(hallcntr)
+            with m.Elif(hallfilter == 3):
+                m.d.sync += hall_counters[2].eq(hallcntr)
+            with m.Elif(hallfilter == 4):
+                m.d.sync += hall_counters[3].eq(hallcntr)
+            with m.Elif(hallfilter == 5):
+                m.d.sync += hall_counters[4].eq(hallcntr)
+            with m.Elif(hallfilter == 6):
+                m.d.sync += hall_counters[5].eq(hallcntr)
+            with m.If(ticks_half_rotation < int(start_statetime * (states_fullcycle / 2))):
+                m.d.sync += rotating.eq(1)
         # counter is overflowing, implying there is no rotation
-        with m.Elif(hallcntr == int(start_statetime * states_fullcycle)):
+        with m.Elif(hallcntr == start_statetime-1):
             m.d.sync += [hallcntr.eq(0), rotating.eq(0)]
         with m.Else():
             m.d.sync += hallcntr.eq(hallcntr + 1)
@@ -258,47 +229,59 @@ class Driver(Elaboratable):
         # Target is rotation speed. Power motor is reduced
         # by temporarily placing it in on mode during the
         # duty time. The cycle time is the PID cycle time.
-        # A new measurement is obtained after 180 degrees
-        # It then traverses 6 states, one state is 30 degrees.
+        # Speed is measured after a hall filter change.
+        # Six state comprise a half rotation.
         # Duty time is typically very small as compared to
         # PID cycle time. We want multiple
         # cycles per 180 degrees to ensure it is position 
         # independent.
+        # Experimentally, a higher drive voltage reduces
+        # noise.
 
         # target speed
         clock = int(platform.clks[platform.hfosc_div] * 1e6)
         RPM = platform.laser_var["RPM"]
-        setpoint_degree = int(round((clock / (2 * RPM / 60))) / 180)
+        setpoint_ticks = int(round((clock / (2 * RPM / 60))))
 
-        # desire 50 samples per cycle
-        max_pid_cycle_time = int(180 / 50 * setpoint_degree)
+        # desire 10 samples per half rotation
+        max_pid_cycle_time = setpoint_ticks // 6
         duty = Signal(range(max_pid_cycle_time))
 
         # limits are caclulated to prevent overflow, i.e. integral blow up
 
-        assert (upperlimit > lowerlimit) & (setpoint_degree > 0) & (lowerlimit > 0)
-        lower_l = lowerlimit - setpoint_degree
-        upper_l = upperlimit - setpoint_degree
+        # half rotation counter limits
+        #    it assumed speed must be between 100 and 10 hertz
+        lowerlimit = get_statetime(100)*states_fullcycle
+        upperlimit = get_statetime(start_freq)*states_fullcycle
+
+
+        assert (upperlimit > lowerlimit) & (setpoint_ticks > 0) & (lowerlimit > 0)
+        lower_l = - setpoint_ticks
+        upper_l = upperlimit - setpoint_ticks
+        assert lower_l < 0
         err = Signal(range(lower_l, upper_l))
         duty = Signal(range(lower_l, upper_l))
-        # assert (upper_l > 0) & (lower_l < 0)
-        int_lower_l = lower_l * 100
-        int_upper_l = upper_l * 100
+
    
-        # der = Signal(range(lower_l - upper_l, upper_l - lower_l))
+        int_lower_l = lower_l*10
+        int_upper_l = upper_l*10
         intg = Signal(range(int_lower_l, int_upper_l))
+
+        K_p = 13  # proportionallity constant
+        K_i = 22  # integration add
+        assert K_i > K_p
 
         with m.If(rotating == 0):
             m.d.sync += [duty.eq(max_pid_cycle_time-1), err.eq(0), intg.eq(0)]
         with m.Elif(hallcntr == 0):
             m.d.sync += [
-                err.eq(countsperdegree - setpoint_degree),
+                err.eq(ticks_half_rotation - setpoint_ticks),
             ]
-            with m.If((intg + err > int_lower_l) & (intg + err < int_upper_l)):
-                m.d.sync += intg.eq(intg + err)
+            with m.If(((intg + (err >> K_p)) > int_lower_l) & ((intg + (err >> K_p)) < int_upper_l)):
+                m.d.sync += intg.eq(intg + (err >> K_p))
         with m.Else():
             m.d.sync += [
-                duty.eq((err >> 6) + (intg >> 10)),
+                duty.eq((err >> K_p) + (intg >> (K_i-K_p)))
             ]
 
         off = Signal()
@@ -386,14 +369,10 @@ class Driver(Elaboratable):
 
         if mode == "hallfilter":
             m.d.sync += self.debugword.eq(hallfilter)
-        elif mode == "statecounter":
-            m.d.sync += self.debugword.eq(statecounter)
         elif mode == "ticksinfacet":
-            m.d.sync += self.debugword.eq(Cat(countsperdegree, countsperdegreediode))
-        elif mode == "angle":
-            m.d.sync += self.debugword.eq(angle)
+            m.d.sync += self.debugword.eq(Cat(ticks_half_rotation, ticks_half_rotation_diode))
         elif mode == "PIcontrol":
-            m.d.sync += self.debugword.eq(Cat(countsperdegree, duty))
+            m.d.sync += self.debugword.eq(Cat(ticks_half_rotation, duty))
         else:
             raise Exception(f"{motorstate} not supported")
 

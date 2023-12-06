@@ -200,9 +200,9 @@ class Host:
         clock = int(self.platform.clks[self.platform.hfosc_div] * 1e6)
         mode = self.platform.laser_var["MOTORDEBUG"]
         
-        def degreecnv(degreecnt):
-            if degreecnt != 0:
-                speed = clock / (degreecnt * 180 * 2) * 60
+        def cntcnv(cnt):
+            if cnt != 0:
+                speed = clock / (cnt * 2) * 60
             else:
                 speed = 0
             return speed
@@ -213,24 +213,23 @@ class Host:
             if response != 0:
                 response = round((clock / (response * 2) * 60))
         elif mode == "PIcontrol":
-            degreecnt = int.from_bytes(
-                response[(WORD_BYTES - 2) :], "big", signed=False
+            cnt = int.from_bytes(
+                response[(WORD_BYTES - 3) :], "big", signed=False
             )
-            speed = degreecnv(degreecnt)
-            delay = int.from_bytes(
-                response[: (WORD_BYTES - 2)], "big", signed=True
+            speed = cntcnv(cnt)
+            duty = int.from_bytes(
+                response[: (WORD_BYTES - 3)], "big", signed=True
             )
-            response = [speed, delay]
+            response = [speed, duty]
         elif mode == "ticksinfacet":
-            degreecnt = int.from_bytes(
+            cnt = int.from_bytes(
                 response[(WORD_BYTES - 2) :], "big", signed=False
             )
-            speed = degreecnv(degreecnt)
-            degreecntdiode = int.from_bytes(
+            speed = cntcnv(cnt)
+            cntdiode = int.from_bytes(
                 response[: (WORD_BYTES - 2)], "big", signed=False
             )
-            speedd = degreecnv(degreecntdiode)
-            print(f"Degree counter {degreecnt} and {degreecntdiode}")
+            speedd = cntcnv(cntdiode)
             response = [speed, speedd]
         else:
             response = int.from_bytes(response, "big")
