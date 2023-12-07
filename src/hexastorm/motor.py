@@ -1,6 +1,6 @@
 import unittest
 
-from amaranth import Cat, Elaboratable, Module, Signal
+from amaranth import Cat, Elaboratable, Module, Signal, ClockDomain
 from amaranth.hdl.mem import Array
 from luna.gateware.interface.spi import SPICommandInterface
 from luna.gateware.utils.cdc import synchronize
@@ -12,13 +12,15 @@ from .resources import get_all_resources
 class Driver(Elaboratable):
     """Drives three poles BLDC motor
 
-    Motor is is driven via a six step commutation cycle.
-    Driver starts in a forced mode. It then starts to rely
-    on the hall sensors and speeds up. It calculates the speed
-    and uses an interpolation table to improve the triggering
-    of the motor windings.
-    Finally, position integral control is used to stabilize
-    the rotor speed.
+    Motor driven via six step commutation cycle.
+    Driver starts rotation without using hall sensors and
+    simply steps through the motor drive loop.
+    Once rotating, it starts to rely on the hall sensors 
+    and speeds up. 
+    The speed is calculated via the Hall sensors.
+    A positional integral derivative (PID) controller
+    in combination with PWM (Pulse Width Modulation)
+    is used to stabilize the rotor speed.
 
     I: enable_prism   -- enable pin scanner motor
     I: Hall (3)       -- hall sensor measure state motor
@@ -29,14 +31,11 @@ class Driver(Elaboratable):
     I: ticksinfacet   -- number of ticks in facet
     """
 
-    def __init__(self, platform, top=False, divider=800, PIcontrol=True):
+    def __init__(self, platform, top=False, speedfix=True):
         """
         platform  -- pass test platform
         top       -- True if top module
-        divider   -- Hall sensors are sampled at lower rate to
-                     remove noise
-        PIControl -- enabled Position Integral control
-                     RPM set via laser_var on platform
+        speedfix  -- speed is stabilized
         """
         self.platform = platform
         self.top = top
@@ -58,14 +57,14 @@ class Driver(Elaboratable):
 
         # depending on mode, a certain word is sent back
         self.mode = platform.laser_var["MOTORDEBUG"]
-        self.divider = divider
-        self.PIcontrol = PIcontrol
+        self.divider = platform.laser_var["MOTORDIVIDER"]
+        self.PIcontrol = speedfix
 
     def elaborate(self, platform):
         m = Module()
         motorstate = Signal(range(8))
         hallstate = Signal().like(motorstate)
-        hallfilter = Signal().like(hallstate)
+
         # total number of states in 360 degrees
         # Record how a rotation takes place; e.g. red (1), cyan (5), 
         # darkblue (4), lightblue (6), green (2), yellow (3)
@@ -73,9 +72,8 @@ class Driver(Elaboratable):
         # 2 --> 5, 3 --> 6, see HALL mode in the statemachine
         # optionally rotate the mapping for alignment
         # yellow, i.e. state 3 does not propagate
-        # due to hardware error
-        # so not 12 but 10 in total
-        states_fullcycle = 10
+        valid_states = [1, 2, 4, 5, 6]
+        states_fullcycle = len(valid_states) * 2
         # angle counter limits
         mode = self.mode
 
@@ -113,11 +111,10 @@ class Driver(Elaboratable):
                          interf.word_to_send.eq(self.debugword)]
             m.submodules.interf = interf
 
-        # displays measurement hall sesnsors on LED
+        # color LED displays hall state
         for idx in range(len(self.leds)):
             m.d.comb += self.leds[idx].eq(self.hall[idx])
 
-        # tested by trying out all possibilities
         m.d.comb += hallstate.eq(
             Cat(~self.hall[0], ~self.hall[1], ~self.hall[2])
         )
@@ -126,17 +123,19 @@ class Driver(Elaboratable):
             """time needed for one state"""
             return int(
                 (platform.laser_var["CRYSTAL_HZ"])
-                / (frequency * states_fullcycle)
+                / (frequency * states_fullcycle* self.divider)
             )
 
         start_freq = 2  # Hz
 
         # clock is downscaled to filter out
-        # noise coming to the hall sensors
-        # this creates hall filter
+        # noise coming to hall sensors
+        slow = ClockDomain("slow")
+        m.domains += slow
+
         divider_cnt = Signal(range(self.divider // 2))
         with m.If(divider_cnt == self.divider // 2 - 1):
-            m.d.sync += [divider_cnt.eq(0), hallfilter.eq(hallstate)]
+            m.d.sync += [divider_cnt.eq(0), slow.clk.eq(~slow.clk)]
         with m.Else():
             m.d.sync += divider_cnt.eq(divider_cnt + 1)
 
@@ -156,13 +155,13 @@ class Driver(Elaboratable):
         with m.FSM(reset="ROTATION", name="algo"):
             with m.State("ROTATION"):
                 with m.If(mtrpulsecntr == start_statetime):
-                    m.d.sync += mtrpulsecntr.eq(0)
+                    m.d.slow += mtrpulsecntr.eq(0)
                     with m.If(motorstate == 6):
-                        m.d.sync += motorstate.eq(1)
+                        m.d.slow += motorstate.eq(1)
                     with m.Else():
-                        m.d.sync += motorstate.eq(motorstate + 1)
+                        m.d.slow += motorstate.eq(motorstate + 1)
                 with m.Else():
-                    m.d.sync += mtrpulsecntr.eq(mtrpulsecntr + 1)
+                    m.d.slow += mtrpulsecntr.eq(mtrpulsecntr + 1)
                 with m.If(rotating == 1):
                     m.next = "HALL"
         # Hall feedback mode is not optimal as the measurements
@@ -170,18 +169,18 @@ class Driver(Elaboratable):
         # sensor limitation
         # PID controller does not work with this mode
             with m.State("HALL"):
-                with m.If(hallfilter == 1):
-                    m.d.sync += motorstate.eq(1)
-                with m.Elif(hallfilter == 2):
-                    m.d.sync += motorstate.eq(3)
-                with m.Elif(hallfilter == 3):
-                    m.d.sync += motorstate.eq(2)
-                with m.Elif(hallfilter == 4):
-                    m.d.sync += motorstate.eq(5)
-                with m.Elif(hallfilter == 5):
-                    m.d.sync += motorstate.eq(6)
-                with m.Elif(hallfilter == 6):
-                    m.d.sync += motorstate.eq(4)
+                with m.If(hallstate == 1):
+                    m.d.slow += motorstate.eq(1)
+                with m.Elif(hallstate == 2):
+                    m.d.slow += motorstate.eq(3)
+                with m.Elif(hallstate == 3):
+                    m.d.slow += motorstate.eq(2)
+                with m.Elif(hallstate == 4):
+                    m.d.slow += motorstate.eq(5)
+                with m.Elif(hallstate == 5):
+                    m.d.slow += motorstate.eq(6)
+                with m.Elif(hallstate == 6):
+                    m.d.slow += motorstate.eq(4)
                 # hall off and all hall on are filtered
                 # i.e. cases 0 en 7
                 with m.If(rotating == 0):
@@ -190,8 +189,9 @@ class Driver(Elaboratable):
         hallcntr = Signal(range(start_statetime))
         hall_counters = Array(Signal.like(hallcntr) for _ in range(6))
         # must be multiple of 8 to read out
-        assert int(start_statetime * (states_fullcycle / 2)) < pow(2, 24)
-        ticks_half_rotation = Signal(24)
+        # TODO: fix
+        assert int(start_statetime * (states_fullcycle / 2)) < pow(2, 16)
+        ticks_half_rotation = Signal(16)
         ticks_half_rotation_diode = Signal.like(ticks_half_rotation)
      
         m.d.sync += [ticks_half_rotation_diode.eq(ticksinfacet << 2),
@@ -200,51 +200,45 @@ class Driver(Elaboratable):
         # in addition focus is on changes
         stateold = Signal.like(hallstate) 
         with m.If(
-            (hallfilter != stateold) & (hallfilter > 0) & (hallfilter != 3) &
-             (hallfilter < 7)
+            (hallstate != stateold) & (hallstate > 0) & (hallstate != 3) &
+             (hallstate < 7)
         ):
-            m.d.sync += [hallcntr.eq(0), stateold.eq(hallfilter)]
-            with m.If(hallfilter == 1):
-                m.d.sync += hall_counters[0].eq(hallcntr)
-            with m.Elif(hallfilter == 2):
-                m.d.sync += hall_counters[1].eq(hallcntr)
-            with m.Elif(hallfilter == 3):
-                m.d.sync += hall_counters[2].eq(hallcntr)
-            with m.Elif(hallfilter == 4):
-                m.d.sync += hall_counters[3].eq(hallcntr)
-            with m.Elif(hallfilter == 5):
-                m.d.sync += hall_counters[4].eq(hallcntr)
-            with m.Elif(hallfilter == 6):
-                m.d.sync += hall_counters[5].eq(hallcntr)
+            m.d.slow += [hallcntr.eq(0), stateold.eq(hallstate)]
+            with m.If(hallstate == 1):
+                m.d.slow += hall_counters[0].eq(hallcntr)
+            with m.Elif(hallstate == 2):
+                m.d.slow += hall_counters[1].eq(hallcntr)
+            with m.Elif(hallstate == 3):
+                m.d.slow += hall_counters[2].eq(hallcntr)
+            with m.Elif(hallstate == 4):
+                m.d.slow += hall_counters[3].eq(hallcntr)
+            with m.Elif(hallstate == 5):
+                m.d.slow += hall_counters[4].eq(hallcntr)
+            with m.Elif(hallstate == 6):
+                m.d.slow += hall_counters[5].eq(hallcntr)
             with m.If(ticks_half_rotation < int(start_statetime * (states_fullcycle / 2))):
-                m.d.sync += rotating.eq(1)
+                m.d.slow += rotating.eq(1)
         # counter is overflowing, implying there is no rotation
         with m.Elif(hallcntr == start_statetime-1):
-            m.d.sync += [hallcntr.eq(0), rotating.eq(0)]
+            m.d.slow += [hallcntr.eq(0), rotating.eq(0)]
         with m.Else():
-            m.d.sync += hallcntr.eq(hallcntr + 1)
+            m.d.slow += hallcntr.eq(hallcntr + 1)
 
-        # PID controller
+        # Speed control via PID and PWM.
         #
         # Target is rotation speed. Power motor is reduced
         # by temporarily placing it in on mode during the
-        # duty time. The cycle time is the PID cycle time.
-        # Speed is measured after a hall filter change.
-        # Six state comprise a half rotation.
-        # Duty time is typically very small as compared to
-        # PID cycle time. We want multiple
-        # cycles per 180 degrees to ensure it is position 
-        # independent.
-        # Experimentally, a higher drive voltage reduces
-        # noise.
+        # duty time, i.e. via pulse width modulation (PWM).
+        # The duty time is determined via PID controller.
+        # Tuning a controller is hard, try a wide range.
 
         # target speed
         clock = int(platform.clks[platform.hfosc_div] * 1e6)
         RPM = platform.laser_var["RPM"]
-        setpoint_ticks = int(round((clock / (2 * RPM / 60))))
+        setpoint_ticks = int(round((clock / (self.divider * 2 * RPM / 60))))
 
         # desire 10 samples per half rotation
-        max_pid_cycle_time = setpoint_ticks // 6
+        max_pid_cycle_time = (setpoint_ticks*self.divider) // 6
         duty = Signal(range(max_pid_cycle_time))
 
         # limits are caclulated to prevent overflow, i.e. integral blow up
@@ -262,26 +256,27 @@ class Driver(Elaboratable):
         err = Signal(range(lower_l, upper_l))
         duty = Signal(range(lower_l, upper_l))
 
-   
-        int_lower_l = lower_l*10
-        int_upper_l = upper_l*10
+        # integration time, assumed less than 10 seconds
+        integration_ticks = (RPM // 60) * states_fullcycle * 10
+        int_lower_l = lower_l * integration_ticks
+        int_upper_l = upper_l * integration_ticks
         intg = Signal(range(int_lower_l, int_upper_l))
 
-        K_p = 13  # proportionallity constant
-        K_i = 22  # integration add
-        assert K_i > K_p
+        K_p = 6   # proportionallity constant
+        K_i = 10  # integration constant
 
         with m.If(rotating == 0):
-            m.d.sync += [duty.eq(max_pid_cycle_time-1), err.eq(0), intg.eq(0)]
+            m.d.slow += [duty.eq(max_pid_cycle_time-1), err.eq(0), intg.eq(0)]
         with m.Elif(hallcntr == 0):
-            m.d.sync += [
+            m.d.slow += [
                 err.eq(ticks_half_rotation - setpoint_ticks),
             ]
-            with m.If(((intg + (err >> K_p)) > int_lower_l) & ((intg + (err >> K_p)) < int_upper_l)):
-                m.d.sync += intg.eq(intg + (err >> K_p))
+        with m.Elif(hallcntr == 1):
+            with m.If(((intg + err) > int_lower_l) & ((intg + err ) < int_upper_l)):
+                m.d.slow += intg.eq(intg + err)
         with m.Else():
-            m.d.sync += [
-                duty.eq((err >> K_p) + (intg >> (K_i-K_p)))
+            m.d.slow += [
+                duty.eq((err >> K_p) + (intg >> K_i))
             ]
 
         off = Signal()
@@ -368,7 +363,7 @@ class Driver(Elaboratable):
             ]
 
         if mode == "hallfilter":
-            m.d.sync += self.debugword.eq(hallfilter)
+            m.d.sync += self.debugword.eq(hallstate)
         elif mode == "ticksinfacet":
             m.d.sync += self.debugword.eq(Cat(ticks_half_rotation, ticks_half_rotation_diode))
         elif mode == "PIcontrol":

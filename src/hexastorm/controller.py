@@ -202,7 +202,7 @@ class Host:
         
         def cntcnv(cnt):
             if cnt != 0:
-                speed = clock / (cnt * 2) * 60
+                speed = clock / (cnt * 2 * self.platform.laser_var["MOTORDIVIDER"]) * 60
             else:
                 speed = 0
             return speed
@@ -214,11 +214,11 @@ class Host:
                 response = round((clock / (response * 2) * 60))
         elif mode == "PIcontrol":
             cnt = int.from_bytes(
-                response[(WORD_BYTES - 3) :], "big", signed=False
+                response[(WORD_BYTES - 2) :], "big", signed=False
             )
             speed = cntcnv(cnt)
             duty = int.from_bytes(
-                response[: (WORD_BYTES - 3)], "big", signed=True
+                response[: (WORD_BYTES - 2)], "big", signed=True
             )
             response = [speed, duty]
         elif mode == "ticksinfacet":
@@ -310,7 +310,7 @@ class Host:
 
         val -- boolean, True enables steppers
         """
-        assert type(val) == bool
+        assert isinstance(val, bool)
         if val:
             self.enable.off()
             self.spi_exchange_data([COMMANDS.START] + WORD_BYTES * [0])
@@ -357,7 +357,7 @@ class Host:
         val -- True   FPGA parses FIFO
                False  FPGA does not parse FIFO
         """
-        assert type(value) == bool
+        assert isinstance(value, bool)
         if value:
             command = [COMMANDS.START]
         else:

@@ -247,15 +247,19 @@ class MotorTest(Base):
         mode = host.laser_params["MOTORDEBUG"]
         start = time()
         if mode == 'hallfilter':
-            starttime = 10
+            starttime = 5
+            measurementtime = 15
             totaltime = 120
         elif mode == 'PIcontrol':
             starttime = 5
+            measurementtime = 15
             totaltime = 60
         else:
-            starttime = 15 
+            starttime = 15
+            measurementtime = 15
             totaltime = 60
         output = pd.DataFrame(columns=["time"])
+        measurement = pd.DataFrame(columns=["time"])
         print(f"Waiting {starttime} seconds to start measurement.")
         if self.mod == 'all':
             if mode == 'ticksinfacet':
@@ -270,7 +274,7 @@ class MotorTest(Base):
             sleep(starttime)
             while True:
                 if (time() - start) >= totaltime:
-                    self.finish(output)
+                    self.finish(measurement)
                     break
                 words = yield from host.get_motordebug(blocking=blocking)
                 try:
@@ -282,6 +286,8 @@ class MotorTest(Base):
                         sleep(0.1)
                     frame1 = pd.DataFrame(dct)
                     output = pd.concat([output, frame1], ignore_index=True)
+                    if time() - start > measurementtime:
+                        measurement = pd.concat([measurement, frame1], ignore_index=True)
                     if mode in [
                         "cycletime",
                         "ticksinfacet",
@@ -335,12 +341,12 @@ class MotorTest(Base):
                             plt.show()
                         except IndexError:
                             print("Aborting due to strange plotext bug, try restart.")
-                            break
+                            # break
                         
                 except ValueError as e:
                     print(e)
         except KeyboardInterrupt:
-            self.finish(output)
+            self.finish(measurement)
             pass
         finally:
             if self.mod == "motor":
