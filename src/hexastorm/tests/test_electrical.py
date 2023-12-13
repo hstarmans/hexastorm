@@ -18,11 +18,11 @@ from ..platforms import Firestarter
 
 class Base(unittest.TestCase):
     @classmethod
-    def setUpClass(cls, flash=True, mod='motor'):
+    def setUpClass(cls, flash=True, mod='all'):
         """builds the FPGA code using Amaranth HDL, Yosys, Nextpnr and icepack
 
         flash  -- flash FPGA and build 
-        mod    -- module to build
+        mod    -- module to build; all or motor
         """
         cls.host = Host()
         cls.mod = mod
@@ -96,11 +96,14 @@ class LaserheadTest(Base):
         self.assertEqual((yield from host.get_state())["error"], False)
 
     @executor
-    def lasertest(self, timeout=30):
-        "enable laser for timeout seconds"
+    def lasertest(self):
+        "enable and disable laser by pressing enter"
         host = self.host
+        print("Press enter to turn laser on")
+        input()
         yield from host.enable_comp(laser1=True, laser0=False)
-        sleep(timeout)
+        print("Press enter to turn laser off")
+        input()
         yield from host.enable_comp(laser1=False)
         self.assertEqual((yield from host.get_state())["error"], False)
 
@@ -197,45 +200,25 @@ class MotorTest(Base):
         )
         output.to_csv("measurement.csv")
         mode = self.host.laser_params["MOTORDEBUG"]
-        if mode == "hallfilter":
+        if mode == "hallstate":
             output = output[output['word_0'] != 0]
             output = output.replace({'word_0': {1:1, 2:3, 3:2, 
                 4:5, 5:6, 6:4}})
-            # six states cover 180 degrees
+            # compute fraction
+            # ideally should be 1/6
             print(
                 (
-                    output.rename(columns={"time": "degrees"})
+                    output.rename(columns={"time": "fraction"})
                     .groupby(["word_0"])
-                    .count()
-                    / len(output)
-                    * 180
-                )
-                .assign(cumsum=lambda df: df["degrees"].cumsum())
-                .round()
+                    .count().transform(lambda x: x / x.sum()))
             )
-        elif mode == "cycletime":
-            print(output[["word_0"]].describe())
-        elif mode == "angle":
-            # print(output[['word']].describe())
-            # print(output['word'].unique())
-            bins = [0, 30, 60, 90, 120, 150, 180]
-            labels = ["0", "30", "60", "90", "120", "150"]
-            output["hall"] = pd.cut(
-                x=output["word_0"],
-                bins=bins,
-                labels=labels,
-                include_lowest=True,
-            )
-            print(output.hall.sort_values().value_counts() / len(output))
-            # plt.hist(output['word'].tolist(), 6, label = "distribution")
-            # plt.title("Histogram Plot")
-            # plt.show()
         elif mode == 'PIcontrol':
             print(output[["word_0"]].describe())
-
+        elif mode == 'ticksinfacet':
+            print(output[["word_0", 'word_1']].describe())
 
     @executor
-    def test_main(self, delay=0, debug=True):
+    def test_main(self, debug=False):
         """turns on the motor board and retrieves the rotor frequency
 
         Method runs for ever, can be interrupted with keyboard interrupt.
@@ -243,6 +226,8 @@ class MotorTest(Base):
         host = self.host
         if self.mod == 'motor':
             blocking = False
+        else:
+            blocking = True
 
         mode = host.laser_params["MOTORDEBUG"]
         start = time()
@@ -251,6 +236,10 @@ class MotorTest(Base):
             measurementtime = 15
             totaltime = 120
         elif mode == 'PIcontrol':
+            starttime = 5
+            measurementtime = 15
+            totaltime = 60
+        elif mode == 'ticksinfacet':
             starttime = 5
             measurementtime = 15
             totaltime = 60
@@ -276,7 +265,8 @@ class MotorTest(Base):
                 if (time() - start) >= totaltime:
                     self.finish(measurement)
                     break
-                words = yield from host.get_motordebug(blocking=blocking)
+                # TODO: why does true not work
+                words = yield from host.get_motordebug(blocking=False)
                 try:
                     dct = {"time": [time() - start]}
                     for idx, word in enumerate(words):

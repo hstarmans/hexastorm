@@ -1,4 +1,5 @@
 import unittest
+import math
 
 from amaranth import Cat, Elaboratable, Module, Signal, ClockDomain
 from amaranth.hdl.mem import Array
@@ -54,10 +55,10 @@ class Driver(Elaboratable):
         self.synchronized = Signal()
         self.dct = params(platform)
         self.ticksinfacet = Signal(range(self.dct["TICKSINFACET"] * 2))
-
         # depending on mode, a certain word is sent back
         self.mode = platform.laser_var["MOTORDEBUG"]
         self.divider = platform.laser_var["MOTORDIVIDER"]
+        self.spinuptimme = platform.laser_var["SPINUP_TIME"]
         self.PIcontrol = speedfix
 
     def elaborate(self, platform):
@@ -139,11 +140,6 @@ class Driver(Elaboratable):
         with m.Else():
             m.d.sync += divider_cnt.eq(divider_cnt + 1)
 
-        # counts per degree of the hall sensors should equal
-        # equal the facet time retrieved by laser
-        # TODO: number do not allign 
-        ticksinfacet = self.ticksinfacet
-
         # counter used in state ROTATION
         start_statetime = get_statetime(start_freq)
         mtrpulsecntr = Signal(range(int((start_statetime + 1))))
@@ -193,11 +189,16 @@ class Driver(Elaboratable):
         assert int(start_statetime * (states_fullcycle / 2)) < pow(2, 16)
         ticks_half_rotation = Signal(16)
         ticks_half_rotation_diode = Signal.like(ticks_half_rotation)
-     
-        m.d.sync += [ticks_half_rotation_diode.eq(ticksinfacet << 2),
+        diode_shift = int(math.log(self.divider)/ math.log(2) - 1)
+        m.d.sync += [ticks_half_rotation_diode.eq(self.ticksinfacet >> diode_shift),
                      ticks_half_rotation.eq(sum(hall_counters))]
 
-        # in addition focus is on changes
+        # a functional PI controller requires speed changes to 
+        # propagate as fast as possible.
+        # Speed is updated after each measuremement.
+        # Hall states are not equally distributed some take longer than others
+        # to mitigate this I look at the sum of all hall states.
+
         stateold = Signal.like(hallstate) 
         with m.If(
             (hallstate != stateold) & (hallstate > 0) & (hallstate != 3) &
@@ -257,13 +258,13 @@ class Driver(Elaboratable):
         duty = Signal(range(lower_l, upper_l))
 
         # integration time, assumed less than 10 seconds
-        integration_ticks = (RPM // 60) * states_fullcycle * 10
+        integration_ticks = (RPM // 60) * states_fullcycle * self.spinuptimme
         int_lower_l = lower_l * integration_ticks
         int_upper_l = upper_l * integration_ticks
         intg = Signal(range(int_lower_l, int_upper_l))
 
         K_p = 6   # proportionallity constant
-        K_i = 10  # integration constant
+        K_i = 11  # integration constant
 
         with m.If(rotating == 0):
             m.d.slow += [duty.eq(max_pid_cycle_time-1), err.eq(0), intg.eq(0)]
@@ -362,7 +363,7 @@ class Driver(Elaboratable):
                 wH.eq(0),
             ]
 
-        if mode == "hallfilter":
+        if mode == "hallstate":
             m.d.sync += self.debugword.eq(hallstate)
         elif mode == "ticksinfacet":
             m.d.sync += self.debugword.eq(Cat(ticks_half_rotation, ticks_half_rotation_diode))

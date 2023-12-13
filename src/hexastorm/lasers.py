@@ -79,19 +79,19 @@ class Laserhead(Elaboratable):
         # Pulse generator for prism motor
         pwmcnt = Signal(range(dct["POLYPERIOD"]))
         # photodiode_triggered
-        # This block does not have any usage
-        # photodiodecnt = Signal(range(dct["TICKSINFACET"] * 2))
-        # triggered = Signal()
-        # with m.If(photodiodecnt < (dct["TICKSINFACET"] * 2 - 1)):
-        #     with m.If(~self.photodiode):
-        #         m.d.sync += triggered.eq(1)
-        #     m.d.sync += photodiodecnt.eq(photodiodecnt + 1)
-        # with m.Else():
-        #     m.d.sync += [
-        #         self.photodiode_t.eq(triggered),
-        #         photodiodecnt.eq(0),
-        #         triggered.eq(0),
-        #     ]
+        # TODO: not added to tests
+        photodiodecnt = Signal(range(dct["TICKSINFACET"] * 2))
+        triggered = Signal()
+        with m.If(photodiodecnt < (dct["TICKSINFACET"] * 2 - 1)):
+            with m.If(~self.photodiode):
+                m.d.sync += triggered.eq(1)
+            m.d.sync += photodiodecnt.eq(photodiodecnt + 1)
+        with m.Else():
+            m.d.sync += [
+                self.photodiode_t.eq(triggered),
+                photodiodecnt.eq(0),
+                triggered.eq(0),
+            ]
 
         # step generator, i.e. slowest speed is 1/(2^4-1)
         stephalfperiod = Signal(dct["BITSINSCANLINE"].bit_length() + 4)
@@ -141,7 +141,7 @@ class Laserhead(Elaboratable):
 
         with m.FSM(reset="RESET") as laserfsm:
             with m.State("RESET"):
-                m.d.sync += self.error.eq(0)
+                m.d.sync += [self.error.eq(0), self.ticksinfacet.eq(0)]
                 m.next = "STOP"
             with m.State("STOP"):
                 m.d.sync += [
@@ -179,7 +179,7 @@ class Laserhead(Elaboratable):
                     m.d.sync += self.error.eq(1)
                     m.next = "STOP"
                 with m.Elif(~photodiode & ~photodiode_d):
-                    m.d.sync += [tickcounter.eq(0), lasers.eq(0), self.ticksinfacet.eq(tickcounter)]
+                    m.d.sync += [tickcounter.eq(0), lasers.eq(0)]
                     with m.If(
                         (
                             tickcounter
@@ -190,6 +190,9 @@ class Laserhead(Elaboratable):
                             self.synchronized.eq(1),
                             tickcounter.eq(0),
                         ]
+                        # TODO: to prevent overflow
+                        with m.If(tickcounter < (dct["TICKSINFACET"] + 1) + dct["JITTERTICKS"]):
+                            m.d.sync += self.ticksinfacet.eq(tickcounter)
                         with m.If(facetcnt == dct["FACETS"] - 1):
                             m.d.sync += facetcnt.eq(0)
                         with m.Else():
