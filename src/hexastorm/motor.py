@@ -13,6 +13,7 @@ from .resources import get_all_resources
 class Driver(Elaboratable):
     """Drives three poles BLDC motor
 
+    Motor rotates clockwise.
     Motor driven via six step commutation cycle.
     Driver starts rotation without using hall sensors and
     simply steps through the motor drive loop.
@@ -152,10 +153,10 @@ class Driver(Elaboratable):
             with m.State("ROTATION"):
                 with m.If(mtrpulsecntr == start_statetime):
                     m.d.slow += mtrpulsecntr.eq(0)
-                    with m.If(motorstate == 6):
-                        m.d.slow += motorstate.eq(1)
+                    with m.If(motorstate == 1):
+                        m.d.slow += motorstate.eq(6)
                     with m.Else():
-                        m.d.slow += motorstate.eq(motorstate + 1)
+                        m.d.slow += motorstate.eq(motorstate - 1)
                 with m.Else():
                     m.d.slow += mtrpulsecntr.eq(mtrpulsecntr + 1)
                 with m.If(rotating == 1):
@@ -190,8 +191,15 @@ class Driver(Elaboratable):
         ticks_half_rotation = Signal(16)
         ticks_half_rotation_diode = Signal.like(ticks_half_rotation)
         diode_shift = int(math.log(self.divider)/ math.log(2) - 1)
+
+        # CHALLENGE:
+        #   half rotation diode about 1.1 half rotation
+        #   we need an ugly fix to allign the numbers
+        clock = int(self.platform.clks[self.platform.hfosc_div] * 1e6)
+        offset = int(0.06 * clock / (self.platform.laser_var["RPM"] * 
+        2 * self.platform.laser_var["MOTORDIVIDER"]) * 60)
         m.d.sync += [ticks_half_rotation_diode.eq(self.ticksinfacet >> diode_shift),
-                     ticks_half_rotation.eq(sum(hall_counters))]
+                     ticks_half_rotation.eq(sum(hall_counters) + offset)]
 
         # a functional PI controller requires speed changes to 
         # propagate as fast as possible.
@@ -264,11 +272,16 @@ class Driver(Elaboratable):
         intg = Signal(range(int_lower_l, int_upper_l))
 
         K_p = 6   # proportionallity constant
-        K_i = 11  # integration constant
+        K_i = 15  # integration constant
 
         with m.If(rotating == 0):
             m.d.slow += [duty.eq(max_pid_cycle_time-1), err.eq(0), intg.eq(0)]
         with m.Elif(hallcntr == 0):
+            # with m.If(self.synchronized):
+            #     m.d.slow += [
+            #         err.eq(ticks_half_rotation_diode - setpoint_ticks),
+            #     ]
+            # with m.Else():
             m.d.slow += [
                 err.eq(ticks_half_rotation - setpoint_ticks),
             ]

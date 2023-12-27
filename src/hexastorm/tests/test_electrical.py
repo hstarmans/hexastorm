@@ -18,7 +18,7 @@ from ..platforms import Firestarter
 
 class Base(unittest.TestCase):
     @classmethod
-    def setUpClass(cls, flash=True, mod='all'):
+    def setUpClass(cls, flash=False, mod='all'):
         """builds the FPGA code using Amaranth HDL, Yosys, Nextpnr and icepack
 
         flash  -- flash FPGA and build 
@@ -31,6 +31,13 @@ class Base(unittest.TestCase):
         else:
             print("Resetting the machine")
             cls.host.reset()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.host.enable.close()
+        subprocess.run(
+            ["raspi-gpio", "set", str(cls.host.platform.enable_pin), "op", "dh"]
+        )
 
 
 class StaticTest(Base):
@@ -231,7 +238,7 @@ class MotorTest(Base):
 
         mode = host.laser_params["MOTORDEBUG"]
         start = time()
-        if mode == 'hallfilter':
+        if mode == 'hallstate':
             starttime = 5
             measurementtime = 15
             totaltime = 120
@@ -364,10 +371,13 @@ class MoveTest(Base):
         in the cavity of the optical switch.
         """
         self.host.enable_steppers = False
-        while True:
-            dct = yield from self.host.get_state()
-            print(f"[x, y, z] is [{dct['x']}, " + f"{dct['y']}, {dct['z']}]")
-            sleep(1)
+        try:
+            while True:
+                dct = yield from self.host.get_state()
+                print(f"[x, y, z] is [{dct['x']}, " + f"{dct['y']}, {dct['z']}]")
+                sleep(1)
+        except KeyboardInterrupt:
+            pass
 
     @executor
     def motorenable(self):
@@ -377,6 +387,8 @@ class MoveTest(Base):
         print("Check manually if axes are blocked and require force to move.")
         input()
         self.host.enable_steppers = False
+        # needs to be iteratable
+        yield
 
     @executor
     def multiplemove(self, decimals=1):
@@ -384,7 +396,7 @@ class MoveTest(Base):
 
         decimals -- number of decimals
         """
-        motors = Firestarter.motors
+        motors = Firestarter().motors
         dist = np.array([1, 1, 1])
         from copy import deepcopy
 
@@ -418,6 +430,7 @@ class PrintTest(Base):
         lines=10,
         thickness=100,
         stepsperline=None,
+        orthogonal=False,
     ):
         """prints lines with thickness in microns for a range of stagespeeds
            in steps per line
@@ -428,6 +441,7 @@ class PrintTest(Base):
         number of lines -- number of lines made per dosage
         thickness       -- line thickness in number of scanlines
         stepsperline    -- stagespeed of optical head in steps per line
+        orthogonal      -- orthogonal
         """
         if stepsperline is None:
             stepsperline = [0.25, 0.5, 1]
@@ -454,8 +468,23 @@ class PrintTest(Base):
         print("Move to start")
         yield from host.gotopoint([70, 8, 0], absolute=False)
         bitsinline = host.laser_params["BITSINSCANLINE"]
-        laser_on = [1] * bitsinline
-        laser_off = [0] * bitsinline
+
+        if orthogonal:
+            laser_on = [1] * bitsinline
+            laser_off = [0] * bitsinline
+        else:
+            times = 6
+            print(f'splitting lines {times}')
+            remainder = bitsinline % times
+            bitlst = []
+            for i in range(times):
+                if i % 2:
+                    bitlst += [1] * (bitsinline // times)
+                else:
+                    bitlst += [0] * (bitsinline // times)
+            bitlst += remainder * [0]
+            laser_on = laser_off = bitlst
+
         for lane, steps in enumerate(stepsperline):
             if lane > 0:
                 print("Moving in x-direction for next lane")
@@ -540,10 +569,12 @@ class PrintTest(Base):
         yield from self.host.enable_comp(synchronize=False)
         self.host.enable_steppers = False
         print("Finished exposure")
-
+    
+    # TODO: code clone of the above!!
     @executor
     def test_lineoffset(
-        self, offset_lines=None, stepsperline=1, thickness=600
+        self, offset_lines=None, stepsperline=1, thickness=600,
+        orthogonal=True,
     ):
         """prints lanes with different offset in lines
 
@@ -564,6 +595,7 @@ class PrintTest(Base):
         bitsinline = host.laser_params["BITSINSCANLINE"]
         laser_on = [1] * bitsinline
         laser_off = [0] * bitsinline
+
         # first offset zero by definition
         offset_lines += [0] + offset_lines
         offset = 5.4

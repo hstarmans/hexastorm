@@ -68,6 +68,10 @@ class Tests(unittest.TestCase):
     def tearDownClass(cls):
         if cls.cam:
             cls.cam.close()
+        cls.host.enable.close()
+        subprocess.run(
+            ["raspi-gpio", "set", str(cls.host.platform.enable_pin), "op", "dh"]
+        )
 
     @executor
     def alignlaser(self):

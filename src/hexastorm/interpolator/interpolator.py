@@ -21,7 +21,8 @@ def displacement(pixel, params):
 
     The x-axis is parallel to the scanline if the stage does not move.
     It is assumed, the laser bundle traverses
-    in the negative direction if the polygon rotates.
+    in the negative direction if the prism motor 
+    rotates counterclockwise.
 
     pixel  --  the pixelnumber, in range [0, self.pixelsfacet]
     """
@@ -453,8 +454,13 @@ class Interpolator:
         #        reality as the laser spot is larger
         ids = self.createcoordinates()
 
-        for k in self.params.keys():
-            self.params[k] = ptrn_df[k][0]
+        # TODO: either use parquet or numpy
+        # in case of parquet I store additional information
+        try:
+            for k in self.params.keys():
+                self.params[k] = ptrn_df[k][0]
+        except IndexError:
+            pass
 
         ids = np.repeat(ids, self.params["downsamplefactor"], axis=1)
         # repeat adden
@@ -467,7 +473,11 @@ class Interpolator:
             print("YCOR negative, weird!")
             ycor += abs(ycor.min())
         arr = np.zeros((xcor.max() + 1, ycor.max() + 1), dtype=np.uint8)
-        ptrn = np.unpackbits(ptrn_df["data"])
+        # TODO: either use parquet or numpy
+        try:
+            ptrn = np.unpackbits(ptrn_df["data"])
+        except IndexError:
+            ptrn = np.unpackbits(ptrn_df)
         # TODO: this is strange, added as quick fix on may 9 2021
         ptrn = ptrn[: len(xcor)]
         arr[xcor[:], ycor[:]] = ptrn[0 : len(ptrn) : step]
@@ -476,13 +486,18 @@ class Interpolator:
         img.save(os.path.join(self.debug_folder, filename + ".png"))
         return img
 
-    def readbin(self, name="test.parquet"):
+    def readbin(self, filename="test.parquet"):
         """reads a parquet data file
 
         name  -- name of binary file with laser information
         """
-        df = pd.read_parquet(os.path.join(self.debug_folder, name))
-        return df
+        file_path = os.path.join(self.debug_folder, filename)
+        if 'parquet' in filename:
+            res = pd.read_parquet(file_path)
+        else:
+            res = np.fromfile(file_path,
+                              dtype=np.uint8)
+        return res
 
     def writebin(self, pixeldata, filename="test.parquet"):
         """writes pixeldata with parameters to parquet file
@@ -490,11 +505,16 @@ class Interpolator:
         pixeldata  -- must have uneven length
         filename   -- name of binary file to write laserinformation to
         """
-        df = pd.DataFrame(data=pixeldata, columns=["data"])
-        df = df.join(pd.DataFrame([dict(self.params)]))
         if not os.path.exists(self.debug_folder):
             os.makedirs(self.debug_folder)
-        df.to_parquet(os.path.join(self.debug_folder, filename))
+        # parquet is more efficient, not supported by micropython
+        if 'parquet' in filename:
+            df = pd.DataFrame(data=pixeldata, columns=["data"])
+            df = df.join(pd.DataFrame([dict(self.params)]))
+            df.to_parquet(os.path.join(self.debug_folder, filename))
+        else:
+            pixeldata = pixeldata.astype(np.uint8)
+            pixeldata.tofile(os.path.join(self.debug_folder, filename))
 
 
 if __name__ == "__main__":
@@ -507,11 +527,11 @@ if __name__ == "__main__":
     # camera)
     # PCB stepsperline 0.5, single channel, current 130
     # photholithopaper stepsperline 0.5, single channel, current 130
-    interpolator = Interpolator(stepsperline=0.25)
+    interpolator = Interpolator(stepsperline=0.5)
     dir_path = os.path.dirname(os.path.realpath(__file__))
     # hexastorm.png pixelsize 0.035
     url = os.path.join(dir_path, "test-patterns", "line-resolution-test.ps")
     ptrn = interpolator.patternfile(url)
-    interpolator.writebin(ptrn, "test.parquet")
-    df = interpolator.readbin("test.parquet")
+    interpolator.writebin(ptrn, "test.bin")
+    df = interpolator.readbin("test.bin")
     interpolator.plotptrn(df, step=1)

@@ -188,11 +188,9 @@ class Laserhead(Elaboratable):
                     ):
                         m.d.sync += [
                             self.synchronized.eq(1),
+                            self.ticksinfacet.eq(tickcounter),
                             tickcounter.eq(0),
                         ]
-                        # TODO: to prevent overflow
-                        with m.If(tickcounter < (dct["TICKSINFACET"] + 1) + dct["JITTERTICKS"]):
-                            m.d.sync += self.ticksinfacet.eq(tickcounter)
                         with m.If(facetcnt == dct["FACETS"] - 1):
                             m.d.sync += facetcnt.eq(0)
                         with m.Else():

@@ -70,7 +70,7 @@ class Firestarter(LatticeICE40Platform, platform):
         "STABLE_TIME": 1.125,
         "FACETS": 4,
         "CRYSTAL_HZ": clks[hfosc_div] * 1e6,
-        "MOTORDEBUG": "ticksinfacet",
+        "MOTORDEBUG": "hallstate",
         "MOTORDIVIDER": pow(2, 8),
         "LASER_HZ": 100e3,
         "END%": 0.7,
@@ -132,7 +132,7 @@ class Firestarter(LatticeICE40Platform, platform):
             number=0,
             step="6",
             direction="4",
-            limit="3",
+            limit="44",    # x and z are switched
             attrs=Attrs(IO_STANDARD="SB_LVCMOS"),
         ),
         # y-stepper
@@ -148,7 +148,7 @@ class Firestarter(LatticeICE40Platform, platform):
             number=2,
             step="46",
             direction="45",
-            limit="44",
+            limit="3",    # x and z are switched
             attrs=Attrs(IO_STANDARD="SB_LVCMOS"),
         ),
     ]
