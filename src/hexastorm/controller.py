@@ -2,7 +2,6 @@ try:
     # TODO: this was a trial to move to micropython
     #       not used
     from micropython import const
-
     a = const
     upython = True
 except ImportError:
@@ -16,6 +15,8 @@ if upython:
 
     from .constants import platform as platformmicro
 else:
+    from gpiozero import LED
+    import subprocess
     from .platforms import Firestarter
     import numpy as np
 
@@ -81,10 +82,11 @@ class Host:
             self.spi.mode = 1
             self.spi.max_speed_hz = round(1e6)
             self.chip_select = LED(self.platform.chip_select)
-            # programs TMC2130
-            self.init_steppers()
+            # drivers are now in standalone mode
+            # self.init_steppers()
             # stepper motor enable pin
             self.enable = LED(self.platform.enable_pin)
+            self.enable.on()
         # case micropython:
         elif upython:
             self.test = False
@@ -111,6 +113,7 @@ class Host:
         self.maxtrials = 10 if self.test else 1e5
         self.laser_params = params(self.platform)
         self._position = np.array([0] * self.platform.motors, dtype="float64")
+
 
     def init_steppers(self):
         """configure TMC2130 steppers via SPI
