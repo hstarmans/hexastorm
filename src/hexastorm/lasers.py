@@ -189,7 +189,6 @@ class Laserhead(Elaboratable):
                         m.d.sync += [
                             self.synchronized.eq(1),
                             self.ticksinfacet.eq(tickcounter),
-                            tickcounter.eq(0),
                         ]
                         with m.If(facetcnt == dct["FACETS"] - 1):
                             m.d.sync += facetcnt.eq(0)
@@ -329,6 +328,13 @@ class Laserhead(Elaboratable):
                     m.d.sync += self.read_discard.eq(0)
                 with m.Else():
                     m.d.sync += self.read_commit.eq(0)
+                
+                # following lines can be used to test exposure width during
+                # LaserHeadTest.test_stable
+                # start_line = int(dct["START%"] * dct["TICKSINFACET"])
+                # end_line = int(dct["END%"] * dct["TICKSINFACET"]) 
+                # with m.If((tickcounter >= start_line) & (tickcounter <= end_line) & (self.synchronized == 1)):
+                #     m.d.sync += lasers.eq(int("11", 2))
                 # -1 as you count till range-1 in python
                 # -2 as you need 1 tick to process
                 with m.If(
@@ -337,6 +343,8 @@ class Laserhead(Elaboratable):
                 ):
                     m.d.sync += lasers.eq(int("11", 2))
                     m.next = "WAIT_STABLE"
+                with m.Else():
+                    m.d.sync += lasers.eq(int("00", 2))
                 # if user disables synhcronization exit
                 with m.If(~self.synchronize):
                     m.next = "STOP"

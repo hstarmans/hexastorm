@@ -205,7 +205,7 @@ class Host:
         
         def cntcnv(cnt):
             if cnt != 0:
-                speed = clock / (cnt * 2 * self.platform.laser_var["MOTORDIVIDER"]) * 60
+                speed = clock / (cnt * 4 * self.platform.laser_var["MOTORDIVIDER"]) * 60
             else:
                 speed = 0
             return speed

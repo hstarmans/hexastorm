@@ -68,6 +68,7 @@ class Driver(Elaboratable):
         hallstate = Signal().like(motorstate)
 
         # total number of states in 360 degrees
+        #  8 magnets, 3 sensors --> 24 states
         # Record how a rotation takes place; e.g. red (1), cyan (5), 
         # darkblue (4), lightblue (6), green (2), yellow (3)
         # map this to the motor state; 1 --> 1, 5 --> 2, 4 --> 3, 6 --> 4, 
@@ -75,7 +76,7 @@ class Driver(Elaboratable):
         # optionally rotate the mapping for alignment
         # yellow, i.e. state 3 does not propagate
         valid_states = [1, 2, 4, 5, 6]
-        states_fullcycle = len(valid_states) * 2
+        states_fullcycle = len(valid_states) * 4
         # angle counter limits
         mode = self.mode
 
@@ -164,7 +165,6 @@ class Driver(Elaboratable):
         # Hall feedback mode is not optimal as the measurements
         # by the sensors are not equidistant, probably due to
         # sensor limitation
-        # PID controller does not work with this mode
             with m.State("HALL"):
                 with m.If(hallstate == 1):
                     m.d.slow += motorstate.eq(1)
@@ -188,18 +188,20 @@ class Driver(Elaboratable):
         # must be multiple of 8 to read out
         # TODO: fix
         assert int(start_statetime * (states_fullcycle / 2)) < pow(2, 16)
-        ticks_half_rotation = Signal(16)
-        ticks_half_rotation_diode = Signal.like(ticks_half_rotation)
-        diode_shift = int(math.log(self.divider)/ math.log(2) - 1)
+        ticks_facet_hall = Signal(16)
+        ticks_facet_diode = Signal.like(ticks_facet_hall)
+        diode_shift = int(math.log(self.divider) / math.log(2))
 
         # CHALLENGE:
-        #   half rotation diode about 1.1 half rotation
-        #   we need an ugly fix to allign the numbers
+        #  you expect that each state takes 1/6 of time
+        #  this is not true in practice, in addition we don't measure
+        #  state 3.. to align hall and diode I use a constant
         clock = int(self.platform.clks[self.platform.hfosc_div] * 1e6)
-        offset = int(0.06 * clock / (self.platform.laser_var["RPM"] * 
-        2 * self.platform.laser_var["MOTORDIVIDER"]) * 60)
-        m.d.sync += [ticks_half_rotation_diode.eq(self.ticksinfacet >> diode_shift),
-                     ticks_half_rotation.eq(sum(hall_counters) + offset)]
+        #  denk 0.12  vewacht 1/6 --> 0.16, 0.06  1982
+        offset = int(0.065 * clock / (self.platform.laser_var["RPM"] * 
+        4 * self.platform.laser_var["MOTORDIVIDER"]) * 60)
+        m.d.sync += [ticks_facet_diode.eq(self.ticksinfacet >> diode_shift),
+                     ticks_facet_hall.eq(sum(hall_counters) + offset)]
 
         # a functional PI controller requires speed changes to 
         # propagate as fast as possible.
@@ -225,7 +227,7 @@ class Driver(Elaboratable):
                 m.d.slow += hall_counters[4].eq(hallcntr)
             with m.Elif(hallstate == 6):
                 m.d.slow += hall_counters[5].eq(hallcntr)
-            with m.If(ticks_half_rotation < int(start_statetime * (states_fullcycle / 2))):
+            with m.If(ticks_facet_hall < int(start_statetime * (states_fullcycle / 2))):
                 m.d.slow += rotating.eq(1)
         # counter is overflowing, implying there is no rotation
         with m.Elif(hallcntr == start_statetime-1):
@@ -244,7 +246,8 @@ class Driver(Elaboratable):
         # target speed
         clock = int(platform.clks[platform.hfosc_div] * 1e6)
         RPM = platform.laser_var["RPM"]
-        setpoint_ticks = int(round((clock / (self.divider * 2 * RPM / 60))))
+        # ticks in facet --> divide by 4
+        setpoint_ticks = int(round((clock / (self.divider * 4 * RPM / 60))))
 
         # desire 10 samples per half rotation
         max_pid_cycle_time = (setpoint_ticks*self.divider) // 6
@@ -283,7 +286,7 @@ class Driver(Elaboratable):
             #     ]
             # with m.Else():
             m.d.slow += [
-                err.eq(ticks_half_rotation - setpoint_ticks),
+                err.eq(ticks_facet_hall - setpoint_ticks),
             ]
         with m.Elif(hallcntr == 1):
             with m.If(((intg + err) > int_lower_l) & ((intg + err ) < int_upper_l)):
@@ -379,9 +382,9 @@ class Driver(Elaboratable):
         if mode == "hallstate":
             m.d.sync += self.debugword.eq(hallstate)
         elif mode == "ticksinfacet":
-            m.d.sync += self.debugword.eq(Cat(ticks_half_rotation, ticks_half_rotation_diode))
+            m.d.sync += self.debugword.eq(Cat(ticks_facet_hall, ticks_facet_diode))
         elif mode == "PIcontrol":
-            m.d.sync += self.debugword.eq(Cat(ticks_half_rotation, duty))
+            m.d.sync += self.debugword.eq(Cat(ticks_facet_hall, duty))
         else:
             raise Exception(f"{motorstate} not supported")
 
