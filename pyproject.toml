@@ -36,6 +36,7 @@ rpi-gpio = "^0.7.1"
 
 [tool.poetry.group.64bit.dependencies]
 yowasp-nextpnr-ice40 = "^0.6.0.0.post440"
+yowasp-yosys = "^0.40.0.0.post707"
 
 [build-system]
 requires = ["poetry-core"]

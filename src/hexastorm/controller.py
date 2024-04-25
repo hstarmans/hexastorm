@@ -2,6 +2,7 @@ try:
     # TODO: this was a trial to move to micropython
     #       not used
     from micropython import const
+
     a = const
     upython = True
 except ImportError:
@@ -68,52 +69,56 @@ class Host:
         """
         # case raspberry
         if platform is None:
-            self.test = False
-            import spidev
-            from gpiozero import LED
-            from smbus2 import SMBus
+            # case micropython
+            if upython:
+                self.test = False
+                import machine
 
-            self.platform = Firestarter(micropython=False)
-            # IC bus used to set power laser
-            self.bus = SMBus(self.platform.ic_dev_nr)
-            # SPI to sent data to scanner
-            self.spi = spidev.SpiDev()
-            self.spi.open(*self.platform.spi_dev)
-            self.spi.mode = 1
-            self.spi.max_speed_hz = round(1e6)
-            self.chip_select = LED(self.platform.chip_select)
-            # drivers are now in standalone mode
-            # self.init_steppers()
-            # stepper motor enable pin
-            self.enable = LED(self.platform.enable_pin)
-            self.enable.on()
-        # case micropython:
-        elif upython:
-            self.test = False
-            import machine
+                self.platform = platformmicro(micropython=True)
+                # TODO: would this also work with device number
+                self.bus = machine.I2C(
+                    scl=self.platform.scl, sda=self.platform.sda
+                )
+                # SPI
+                # spi port is hispi
+                self.spi = machine.SPI(
+                    self.platform.spi_dev, baudrate=round(1e6)
+                )
+                self.chip_select = machine.Pin(self.platform.chip_select)
+                # program TMC2130
+                # disabled, motor is not in SPI mode
+                # self.init_steppers()
+                # stepper motor enable pin
+                self.enable = machine.Pin(self.platform.enable_pin)
+            # case raspberry
+            else:
+                self.test = False
+                import spidev
+                from gpiozero import LED
+                from smbus2 import SMBus
 
-            self.platform = platformmicro(micropython=True)
-            # IC bus
-            self.bus = machine.I2C(self.platform.ic_dev_nr)
-            self.bus.init(machine.I2C.CONTROLLER, adr=self.platform.ic_addr)
-            # SPI
-            # spi port is hispi
-            self.spi = machine.SPI(self.spi_dev, baudrate=round(1e6))
-            self.chip_select = machine.Pin(self.platform.chip_select)
-            # program TMC2130
-            # TODO: add TMC2130 library to micropython
-            # self.init_steppers()
-            # stepper motor enable pin
-            self.enable = machine.Pin(self.platform.enable_pin)
+                self.platform = Firestarter(micropython=False)
+                # IC bus used to set power laser
+                self.bus = SMBus(self.platform.ic_dev_nr)
+                # SPI to sent data to scanner
+                self.spi = spidev.SpiDev()
+                self.spi.open(*self.platform.spi_dev)
+                self.spi.mode = 1
+                self.spi.max_speed_hz = round(1e6)
+                self.chip_select = LED(self.platform.chip_select)
+                # drivers are now in standalone mode
+                # self.init_steppers()
+                # stepper motor enable pin
+                self.enable = LED(self.platform.enable_pin)
+                self.enable.on()
         else:
             self.platform = platform
             self.test = True
         # maximum number of times tried to write to FIFO
-        # if memoery is full
+        # if memory is full
         self.maxtrials = 10 if self.test else 1e5
         self.laser_params = params(self.platform)
-        self._position = np.array([0] * self.platform.motors, dtype="float64")
-
+        self._position = np.array([0] * self.platform.motors)
 
     def init_steppers(self):
         """configure TMC2130 steppers via SPI
@@ -139,7 +144,7 @@ class Host:
             motor.en_pwm_mode(True)
         steppers.bcm2835_close()
 
-    def build(self, do_program=True, verbose=True, mod='all'):
+    def build(self, do_program=True, verbose=True, mod="all"):
         """builds the FPGA code using amaranth HDL, Yosys, Nextpnr and icepack
 
         do_program  -- flashes the FPGA chip using fomu-flash,
@@ -151,11 +156,11 @@ class Host:
         else:
             from .core import Dispatcher
             from .motor import Driver
-            if mod == 'all':
+
+            if mod == "all":
                 module = Dispatcher(self.platform)
-            elif mod == 'motor':
-                module = Driver(self.platform,
-                                top=True)
+            elif mod == "motor":
+                module = Driver(self.platform, top=True)
             else:
                 raise Exception(f"Print building {mod} is not supported.")
             self.platform = Firestarter()
@@ -174,14 +179,18 @@ class Host:
             import machine
 
             reset_pin = machine.Pin(self.platform.reset_pin)
+            reset_pin.value(0)
+            sleep(1)
+            reset_pin.value(1)
+            sleep(1)
         else:
             from gpiozero import LED
 
             reset_pin = LED(self.platform.reset_pin)
-        reset_pin.off()
-        sleep(1)
-        reset_pin.on()
-        sleep(1)
+            reset_pin.off()
+            sleep(1)
+            reset_pin.on()
+            sleep(1)
         # a blank needs to be send, Statictest succeeds but
         # testlaser fails in test_electrical.py
         # on HX4K this was not needed
@@ -198,14 +207,20 @@ class Host:
                       a build with all modules
         """
         command = [COMMANDS.DEBUG] + WORD_BYTES * [0]
-        response = (yield from self.send_command(command, blocking=blocking))[1:]
+        response = (yield from self.send_command(command, blocking=blocking))[
+            1:
+        ]
 
         clock = int(self.platform.clks[self.platform.hfosc_div] * 1e6)
         mode = self.platform.laser_var["MOTORDEBUG"]
-        
+
         def cntcnv(cnt):
             if cnt != 0:
-                speed = clock / (cnt * 4 * self.platform.laser_var["MOTORDIVIDER"]) * 60
+                speed = (
+                    clock
+                    / (cnt * 4 * self.platform.laser_var["MOTORDIVIDER"])
+                    * 60
+                )
             else:
                 speed = 0
             return speed
@@ -313,12 +328,11 @@ class Host:
 
         val -- boolean, True enables steppers
         """
-        assert isinstance(val, bool)
         if val:
-            self.enable.off()
+            self.enable.off() if not upython else self.enable.value(0)
             self.spi_exchange_data([COMMANDS.START] + WORD_BYTES * [0])
         else:
-            self.enable.on()
+            self.enable.on() if not upython else self.enable.value(1)
             self.spi_exchange_data([COMMANDS.STOP] + WORD_BYTES * [0])
 
     @property
@@ -330,8 +344,7 @@ class Host:
         0 no current and 255 full driver current
         """
         if upython:
-            data = bytearray(1)
-            self.bus.recv(data)
+            data = self.bus.readfrom(self.platform.ic_address, 1)
         else:
             data = self.bus.read_byte_data(self.platform.ic_address, 0)
         return data
@@ -350,7 +363,7 @@ class Host:
             # 255 kills laser at single channel
             raise Exception("Invalid or too high laser current")
         if upython:
-            self.bus.mem_write(val, self.platform.ic_address)
+            self.bus.writeto(self.platform.ic_address, bytes(val))
         else:
             self.bus.write_byte_data(self.platform.ic_address, 0, val)
 
@@ -551,7 +564,11 @@ class Host:
                 else:
                     idx = degree + motor * max_coeff_order
                     coeff = coefficients[idx]
-                data = coeff.to_bytes(8, "big", signed=True)
+                data = (
+                    coeff.to_bytes(8, "big", signed=True)
+                    if not upython
+                    else coeff.to_bytes(8, "big")
+                )
                 commands += [write_byte + data]
         # send commands to FPGA
         for command in commands:
@@ -569,17 +586,20 @@ class Host:
         returns bytearray with length equal to data sent
         """
         assert len(data) == (COMMAND_BYTES + WORD_BYTES)
-        self.chip_select.off()
+
         # spidev changes values passed to it
         if not upython:
             from copy import deepcopy
 
+            self.chip_select.off()
             datachanged = deepcopy(data)
             response = bytearray(self.spi.xfer2(datachanged))
+            self.chip_select.on()
         else:
+            self.chip_select.value(0)
             response = bytearray(data)
             self.spi.write_readinto(data, response)
-        self.chip_select.on()
+            self.chip_select.value(1)
         return response
 
     def writeline(self, bitlst, stepsperline=1, direction=0):

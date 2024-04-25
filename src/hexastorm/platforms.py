@@ -132,7 +132,7 @@ class Firestarter(LatticeICE40Platform, platform):
             number=0,
             step="6",
             direction="4",
-            limit="44",    # x and z are switched
+            limit="44",  # x and z are switched
             attrs=Attrs(IO_STANDARD="SB_LVCMOS"),
         ),
         # y-stepper
@@ -148,7 +148,7 @@ class Firestarter(LatticeICE40Platform, platform):
             number=2,
             step="46",
             direction="45",
-            limit="3",    # x and z are switched
+            limit="3",  # x and z are switched
             attrs=Attrs(IO_STANDARD="SB_LVCMOS"),
         ),
     ]

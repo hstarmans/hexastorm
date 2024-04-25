@@ -3,6 +3,7 @@
 Settings of the implementation are saved in board.by and constants.py.
 Constants are more related to the actual implementation on the FPGA.
 """
+
 from collections import namedtuple
 from math import ceil
 
@@ -26,6 +27,31 @@ MOVE_INSTRUCTION = {"INSTRUCTION": 1, "TICKS": 7}
 
 
 class platform:
+    memdepth = 256
+    name = "firestarter"
+    device = "iCE40UP5K"
+    package = "SG48"
+    default_clk = "SB_HFOSC"
+    # This division setting selects the internal oscillator speed:
+    # 0: 48MHz, 1: 24MHz, 2: 12MHz, 3: 6MHz.
+    clks = {0: 48, 1: 24, 2: 12, 3: 6}
+    hfosc_div = 2
+    laser_var = {
+        "RPM": 2000,
+        "SPINUP_TIME": 10,
+        "STABLE_TIME": 1.125,
+        "FACETS": 4,
+        "CRYSTAL_HZ": clks[hfosc_div] * 1e6,
+        "MOTORDEBUG": "ticksinfacet",
+        "MOTORDIVIDER": pow(2, 8),
+        "LASER_HZ": 100e3,
+        "END%": 0.7,
+        "START%": 0.35,
+        "SINGLE_LINE": False,
+        "SINGLE_FACET": False,
+        "DIRECTION": 0,
+    }
+
     def __init__(self, micropython=False):
         self.laser_bits = 1  # enables adding pwm to laser (not widely tested)
         self.poldegree = (
@@ -33,10 +59,12 @@ class platform:
         )
         self.stepspermm = {"x": 76.2, "y": 76.2, "z": 1600}
         self.laser_axis = "y"
-        self.motors = len(self.stepspermm.keys())
+        self.motors = len(list(self.stepspermm.keys()))
         self.ic_address = 0x28  # spi address
         if micropython:
-            self.ic_dev_nr = 0  # digipot connection
+            self.scl = 22  # scl pin digipot
+            self.sda = 21  # sda pin digipot
+            self.ic_dev_nr = 0  # device  digipot
             self.enable_pin = 3  # enable pin stepper motors
             self.reset_pin = 1  # can be used to reset FPGA
             self.chip_select = 16  # spi chip select

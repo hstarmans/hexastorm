@@ -1,27 +1,34 @@
 import os
 import unittest
-from copy import deepcopy
-from pathlib import Path
+import sys
 from time import sleep, time
-import subprocess
 
-import numpy as np
-import pandas as pd
-import plotext as plt
-from numpy.testing import assert_array_almost_equal
-from gpiozero import LED
+upython = False
+if sys.implementation.name == "cpython":
+    import numpy as np
+    import pandas as pd
+    import plotext as plt
+    from numpy.testing import assert_array_almost_equal
+    from gpiozero import LED
 
-from .. import interpolator
+    from .. import interpolator
+    from ..platforms import Firestarter
+else:
+    from ulab import numpy as np
+
+    upython = True
+
+
 from ..constants import COMMANDS, MOVE_TICKS, WORD_BYTES, wordsinmove
 from ..controller import Host, Memfull, executor
-from ..platforms import Firestarter
+
 
 class Base(unittest.TestCase):
     @classmethod
-    def setUpClass(cls, flash=False, mod='all'):
+    def setUpClass(cls, flash=False, mod="all"):
         """builds the FPGA code using Amaranth HDL, Yosys, Nextpnr and icepack
 
-        flash  -- flash FPGA and build 
+        flash  -- flash FPGA and build
         mod    -- module to build; all or motor
         """
         cls.host = Host()
@@ -34,10 +41,20 @@ class Base(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        cls.host.enable.close()
-        subprocess.run(
-            ["raspi-gpio", "set", str(cls.host.platform.enable_pin), "op", "dh"]
-        )
+        if not upython:
+            import subprocess
+
+            cls.host.enable.close()
+
+            subprocess.run(
+                [
+                    "raspi-gpio",
+                    "set",
+                    str(cls.host.platform.enable_pin),
+                    "op",
+                    "dh",
+                ]
+            )
 
 
 class StaticTest(Base):
@@ -155,7 +172,7 @@ class LaserheadTest(Base):
             * stepsperline
         )
         yield from host.enable_comp(synchronize=True)
-        startpos = deepcopy((yield from host.position))
+        startpos = (yield from host.position).copy()
         host.enable_steppers = True
         print(f"Wait for synchronization, {timeout} seconds")
         sleep(timeout)
@@ -200,6 +217,7 @@ class MotorTest(Base):
     The debug mode is set via MOTORDEBUG, in platforms.py.
     This program can then be used to analyze the results.
     """
+
     def finish(self, output):
         print(
             "Measurement finished in mode "
@@ -208,21 +226,24 @@ class MotorTest(Base):
         output.to_csv("measurement.csv")
         mode = self.host.laser_params["MOTORDEBUG"]
         if mode == "hallstate":
-            output = output[output['word_0'] != 0]
-            output = output.replace({'word_0': {1:1, 2:3, 3:2, 
-                4:5, 5:6, 6:4}})
+            output = output[output["word_0"] != 0]
+            output = output.replace(
+                {"word_0": {1: 1, 2: 3, 3: 2, 4: 5, 5: 6, 6: 4}}
+            )
             # compute fraction
             # ideally should be 1/6
             print(
                 (
                     output.rename(columns={"time": "fraction"})
                     .groupby(["word_0"])
-                    .count().transform(lambda x: x / x.sum()))
+                    .count()
+                    .transform(lambda x: x / x.sum())
+                )
             )
-        elif mode == 'PIcontrol':
+        elif mode == "PIcontrol":
             print(output[["word_0"]].describe())
-        elif mode == 'ticksinfacet':
-            print(output[["word_0", 'word_1']].describe())
+        elif mode == "ticksinfacet":
+            print(output[["word_0", "word_1"]].describe())
 
     @executor
     def test_main(self, debug=False):
@@ -231,22 +252,22 @@ class MotorTest(Base):
         Method runs for ever, can be interrupted with keyboard interrupt.
         """
         host = self.host
-        if self.mod == 'motor':
+        if self.mod == "motor":
             blocking = False
         else:
             blocking = True
 
         mode = host.laser_params["MOTORDEBUG"]
         start = time()
-        if mode == 'hallstate':
+        if mode == "hallstate":
             starttime = 5
             measurementtime = 15
             totaltime = 120
-        elif mode == 'PIcontrol':
+        elif mode == "PIcontrol":
             starttime = 5
             measurementtime = 15
             totaltime = 60
-        elif mode == 'ticksinfacet':
+        elif mode == "ticksinfacet":
             starttime = 5
             measurementtime = 15
             totaltime = 60
@@ -257,8 +278,8 @@ class MotorTest(Base):
         output = pd.DataFrame(columns=["time"])
         measurement = pd.DataFrame(columns=["time"])
         print(f"Waiting {starttime} seconds to start measurement.")
-        if self.mod == 'all':
-            if mode == 'ticksinfacet':
+        if self.mod == "all":
+            if mode == "ticksinfacet":
                 yield from host.enable_comp(synchronize=True)
             else:
                 yield from host.enable_comp(polygon=True)
@@ -284,7 +305,9 @@ class MotorTest(Base):
                     frame1 = pd.DataFrame(dct)
                     output = pd.concat([output, frame1], ignore_index=True)
                     if time() - start > measurementtime:
-                        measurement = pd.concat([measurement, frame1], ignore_index=True)
+                        measurement = pd.concat(
+                            [measurement, frame1], ignore_index=True
+                        )
                     if mode in [
                         "cycletime",
                         "ticksinfacet",
@@ -322,7 +345,9 @@ class MotorTest(Base):
                             plt.xlabel("Time [seconds]")
                             plt.ylabel("Counter")
                             plt.scatter(
-                                output["time"], output["word_0"], label="speed hall"
+                                output["time"],
+                                output["word_0"],
+                                label="speed hall",
                             )
                             plt.scatter(
                                 output["time"],
@@ -337,9 +362,11 @@ class MotorTest(Base):
                         try:
                             plt.show()
                         except IndexError:
-                            print("Aborting due to strange plotext bug, try restart.")
+                            print(
+                                "Aborting due to strange plotext bug, try restart."
+                            )
                             # break
-                        
+
                 except ValueError as e:
                     print(e)
         except KeyboardInterrupt:
@@ -353,7 +380,13 @@ class MotorTest(Base):
                 # gpiozero cleans up pins
                 # this ensures pin is kept off
                 subprocess.run(
-                    ["raspi-gpio", "set", str(self.host.platform.reset_pin), "op", "dl"]
+                    [
+                        "raspi-gpio",
+                        "set",
+                        str(self.host.platform.reset_pin),
+                        "op",
+                        "dl",
+                    ]
                 )
             else:
                 yield from host.enable_comp(polygon=False)
@@ -374,7 +407,9 @@ class MoveTest(Base):
         try:
             while True:
                 dct = yield from self.host.get_state()
-                print(f"[x, y, z] is [{dct['x']}, " + f"{dct['y']}, {dct['z']}]")
+                print(
+                    f"[x, y, z] is [{dct['x']}, " + f"{dct['y']}, {dct['z']}]"
+                )
                 sleep(1)
         except KeyboardInterrupt:
             pass
@@ -474,7 +509,7 @@ class PrintTest(Base):
             laser_off = [0] * bitsinline
         else:
             times = 6
-            print(f'splitting lines {times}')
+            print(f"splitting lines {times}")
             remainder = bitsinline % times
             bitlst = []
             for i in range(times):
@@ -569,11 +604,14 @@ class PrintTest(Base):
         yield from self.host.enable_comp(synchronize=False)
         self.host.enable_steppers = False
         print("Finished exposure")
-    
+
     # TODO: code clone of the above!!
     @executor
     def test_lineoffset(
-        self, offset_lines=None, stepsperline=1, thickness=600,
+        self,
+        offset_lines=None,
+        stepsperline=1,
+        thickness=600,
         orthogonal=True,
     ):
         """prints lanes with different offset in lines
@@ -634,6 +672,8 @@ class PrintTest(Base):
     @executor
     def test_print(self):
         """the LDgraphy test pattern is printed"""
+        from pathlib import Path
+
         host = self.host
         host.enable_steppers = True
         dir_path = os.path.dirname(interpolator.__file__)

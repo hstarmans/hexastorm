@@ -44,7 +44,7 @@ Look into the pyproject.toml file for the possibilities.
 Yosys must be compiled or installed via [oss-cad-suite](https://github.com/YosysHQ/oss-cad-suite-build).
 An alternative is to install python packages which use wasm but these are experimental.
 ```console
-poetry install --extras "64bit"
+poetry install --without raspberry
 ```
 If this doesn't work try 
 You can test code as follows. 

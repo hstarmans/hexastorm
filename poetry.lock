@@ -1605,12 +1605,12 @@ files = [
 
 [[package]]
 name = "yowasp-nextpnr-ice40"
-version = "0.6.0.0.post440"
+version = "0.6.0.0.post445"
 description = "nextpnr-ice40 FPGA place and route tool"
 optional = false
 python-versions = "*"
 files = [
-    {file = "yowasp_nextpnr_ice40-0.6.0.0.post440-py3-none-any.whl", hash = "sha256:a0ce124c254410c7dbd843dcb438d63f30b0427d626e83a39b5f9614688ed900"},
+    {file = "yowasp_nextpnr_ice40-0.6.0.0.post445-py3-none-any.whl", hash = "sha256:0ff37a2d113fb1176202620c727eb59c48eaf774b8871524e4975d4f774e4ed1"},
 ]
 
 [package.dependencies]
@@ -1629,6 +1629,20 @@ files = [
 [package.dependencies]
 appdirs = ">=1.4,<2.0"
 wasmtime = ">=1.0,<12"
+
+[[package]]
+name = "yowasp-yosys"
+version = "0.40.0.0.post707"
+description = "Yosys Open SYnthesis Suite"
+optional = false
+python-versions = "*"
+files = [
+    {file = "yowasp_yosys-0.40.0.0.post707-py3-none-any.whl", hash = "sha256:b65a895d909c742a898f4a0a935b2daf197b79eeb2a46d42ea0bc4f8dededfbe"},
+]
+
+[package.dependencies]
+click = "*"
+yowasp-runtime = ">=1.12,<2.0"
 
 [[package]]
 name = "ziglang"
@@ -1650,4 +1664,4 @@ files = [
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.9,<3.13"
-content-hash = "a554b6a931f2cdc5bd658dd313ea2cbe360fe81cd34fecaa302c7574e119da57"
+content-hash = "fcb2f4e186c30b004ae3b763fd2839c62e011070ace5ba53184414b5c9d493f1"
