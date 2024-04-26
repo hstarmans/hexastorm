@@ -13,7 +13,6 @@ from time import sleep
 
 if upython:
     from ulab import numpy as np
-
     from .constants import platform as platformmicro
 else:
     from gpiozero import LED
@@ -21,6 +20,7 @@ else:
     from .platforms import Firestarter
     import numpy as np
 
+from . import ulabext
 from .constants import (
     COMMAND_BYTES,
     COMMANDS,
@@ -118,7 +118,7 @@ class Host:
         # if memory is full
         self.maxtrials = 10 if self.test else 1e5
         self.laser_params = params(self.platform)
-        self._position = np.array([0] * self.platform.motors)
+        self._position = np.array([0] * self.platform.motors, dtype=np.float)
 
     def init_steppers(self):
         """configure TMC2130 steppers via SPI
@@ -428,7 +428,7 @@ class Host:
             speed = [10] * self.platform.motors
         # conversions to steps / count give rounding errors
         # minimized by setting speed to integer
-        speed = np.absolute(np.array(speed))
+        speed = abs(np.array(speed))
         displacement = np.array(position)
         if absolute:
             # TODO: position machine should be in line with self._position
@@ -446,11 +446,11 @@ class Host:
             ticks_total = (time * MOTORFREQ).round().astype(int)
             # mm -> steps
             steps_per_mm = list(self.platform.stepspermm.values())[idx]
-            speed_steps = int(round(speed[idx] * steps_per_mm * np.sign(disp)))
-            speed_cnts = self.steps_to_count(speed_steps) / MOTORFREQ
-            velocity = np.zeros_like(speed).astype("int64")
-            velocity[idx] = speed_cnts
-
+            speed_steps = int(
+                round(speed[idx] * steps_per_mm * ulabext.sign(disp))
+            )
+            velocity = [0] * len(speed)
+            velocity[idx] = self.steps_to_count(speed_steps) // MOTORFREQ
             if self.test:
                 (yield from self.set_parsing(True))
             else:
@@ -461,12 +461,12 @@ class Host:
                 )
                 # execute move and retrieve if switch is hit
                 switches_hit = yield from self.spline_move(
-                    int(ticks_move), velocity.tolist()
+                    int(ticks_move), velocity
                 )
                 ticks_total -= ticks_move
                 # move is aborted if home switch is hit and
                 # velocity is negative
-                cond = (switches_hit[idx] == 1) & (np.sign(disp) < 0)
+                cond = (switches_hit[idx] == 1) & (ulabext.sign(disp) < 0)
                 if cond:
                     break
         # update internally stored position
@@ -606,7 +606,7 @@ class Host:
         """write bits to FIFO
 
         bit list      bits which are written to substrate
-                      at the moment laser can only be on of off
+                      at the moment laser can only be on or off
                       if bitlst is empty stop command is sent
         stepsperline  stepsperline, should be greater than 0
                       if you don't want to move simply disable motor
@@ -626,7 +626,7 @@ class Host:
         """converts bitlst to bytelst
 
         bit list      bits which are written to substrate
-                      at the moment laser can only be on of off
+                      at the moment laser can only be on or off
                       if bitlst is empty stop command is sent
         stepsperline  stepsperline, should be greater than 0
                       if you don't want to move simply disable motor
@@ -666,10 +666,10 @@ class Host:
             halfperiodbits = [int(i) for i in bin(halfperiod)[2:]]
             halfperiodbits.reverse()
             assert len(halfperiodbits) < 56
-            bytelst += np.packbits(
+            bytelst += ulabext.packbits(
                 direction + halfperiodbits, bitorder=bitorder
             ).tolist()
             bytelst += remainder(bytelst) * [0]
-            bytelst += np.packbits(bitlst, bitorder=bitorder).tolist()
+            bytelst += ulabext.packbits(bitlst, bitorder=bitorder).tolist()
             bytelst += remainder(bytelst) * [0]
         return bytelst
