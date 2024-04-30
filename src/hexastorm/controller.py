@@ -37,12 +37,12 @@ from .constants import (
 def executor(func):
     """executes generator until stop iteration
 
-    nMigen uses generator syntax and this is used
+    amaranth uses generator syntax and this is used
     as hack to execute functions.
     """
 
-    def inner(self):
-        for _ in func(self):
+    def inner(*args, **kwargs):
+        for _ in func(*args, **kwargs):
             pass
 
     return inner
