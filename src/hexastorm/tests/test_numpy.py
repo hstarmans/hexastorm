@@ -35,6 +35,21 @@ class BitPacking(unittest.TestCase):
         b = np.array(ulabext.sign(np.array(lst)), dtype="uint8")
         np.testing.assert_array_equal(a, b)
 
+    def test_assert_array_almost_equal(self):
+        a, b = [1.0, 2.333, np.nan], [1.0, 2.333, np.nan]
+        np.testing.assert_array_almost_equal(a, b)
+        ulabext.assert_array_almost_equal(a, b)
+        a, b = [1.0, 2.33333, np.nan], [1.0, 2.33339, np.nan]
+        with self.assertRaises(AssertionError):
+            np.testing.assert_array_almost_equal(a, b, decimal=5)
+        with self.assertRaises(AssertionError):
+            ulabext.assert_array_almost_equal(a, b, decimal=5)
+        a, b = [1.0, 2.33333, np.nan], [1.0, 2.33333, 5]
+        with self.assertRaises(AssertionError):
+            np.testing.assert_array_almost_equal(a, b, decimal=5)
+        with self.assertRaises(AssertionError):
+            ulabext.assert_array_almost_equal(a, b, decimal=5)
+
 
 if __name__ == "__main__":
     unittest.main()
