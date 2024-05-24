@@ -118,7 +118,7 @@ class Host:
         # if memory is full
         self.maxtrials = 10 if self.test else 1e5
         self.laser_params = params(self.platform)
-        self._position = np.array([0] * self.platform.motors, dtype=np.float)
+        self._position = np.array([0] * self.platform.motors, dtype=float)
 
     def init_steppers(self):
         """configure TMC2130 steppers via SPI
@@ -443,7 +443,7 @@ class Host:
             # Time needed for move
             #    unit oscillator ticks (times motor position is updated)
             time = abs(disp / speed[idx])
-            ticks_total = (time * MOTORFREQ).round().astype(int)
+            ticks_total = round(time * MOTORFREQ)
             # mm -> steps
             steps_per_mm = list(self.platform.stepspermm.values())[idx]
             speed_steps = int(
@@ -565,9 +565,9 @@ class Host:
                     idx = degree + motor * max_coeff_order
                     coeff = coefficients[idx]
                 data = (
-                    coeff.to_bytes(8, "big", signed=True)
+                    int(coeff).to_bytes(8, "big", signed=True)
                     if not upython
-                    else coeff.to_bytes(8, "big")
+                    else int(coeff).to_bytes(8, "big")
                 )
                 commands += [write_byte + data]
         # send commands to FPGA

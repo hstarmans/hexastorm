@@ -3,7 +3,7 @@ from random import randint
 
 import numpy as np
 from amaranth import Cat, Elaboratable, Module, Signal, signed
-from amaranth.hdl.mem import Array
+from amaranth.hdl import Array
 from luna.gateware.interface.spi import (
     SPIBus,
     SPICommandInterface,
@@ -309,7 +309,8 @@ class Dispatcher(Elaboratable):
         # connect laser module to prism motor
         m.d.comb += [
             prism_driver.ticksinfacet.eq(laserhead.ticksinfacet),
-            prism_driver.synchronized.eq(laserhead.synchronized)]
+            prism_driver.synchronized.eq(laserhead.synchronized),
+        ]
 
         # connect laserhead
         m.d.comb += [
@@ -367,7 +368,7 @@ class Dispatcher(Elaboratable):
                 m.d.sync += parser.position[idx].eq(0)
             # assuming position is signed
             # TODO: this might eat LUT, optimize
-            pos_max = pow(2, pos.width - 1) - 2
+            pos_max = pow(2, len(pos) - 1) - 2
             with m.Elif((pos > pos_max) | (pos < -pos_max)):
                 m.d.sync += parser.position[idx].eq(0)
             with m.Elif((stepper.step == 1) & (stepper_d[idx] == 0)):

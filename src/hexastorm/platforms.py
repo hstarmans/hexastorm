@@ -5,7 +5,7 @@ import subprocess
 from amaranth import Signal
 from amaranth.build import Attrs, Clock, Pins, PinsN, Resource, Subsignal
 from amaranth.hdl.mem import Array
-from amaranth.vendor.lattice_ice40 import LatticeICE40Platform
+from amaranth.vendor import SiliconBluePlatform
 from amaranth_boards.resources import LEDResources
 from amaranth_boards.test.blinky import Blinky
 
@@ -50,7 +50,7 @@ class TestPlatform:
         self.memdepth = wordsinmove(self) * 2 + 1
 
 
-class Firestarter(LatticeICE40Platform, platform):
+class Firestarter(SiliconBluePlatform, platform):
     """Kicad board available at
     https://github.com/hstarmans/firestarter/
     """
@@ -155,7 +155,7 @@ class Firestarter(LatticeICE40Platform, platform):
     connectors = []
 
     def __init__(self, micropython=False):
-        LatticeICE40Platform.__init__(self)
+        SiliconBluePlatform.__init__(self)
         platform.__init__(self, micropython)
 
     def build(self, *args, **kwargs):
