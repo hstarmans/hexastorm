@@ -3,6 +3,9 @@ import unittest
 import sys
 from time import sleep, time
 
+from ..constants import COMMANDS, MOVE_TICKS, WORD_BYTES, wordsinmove
+from ..controller import Host, Memfull, executor
+
 upython = False
 if sys.implementation.name == "cpython":
     import numpy as np
@@ -15,12 +18,9 @@ if sys.implementation.name == "cpython":
     from ..platforms import Firestarter
 else:
     from ulab import numpy as np
+    from ..ulabext import assert_array_almost_equal
 
     upython = True
-
-
-from ..constants import COMMANDS, MOVE_TICKS, WORD_BYTES, wordsinmove
-from ..controller import Host, Memfull, executor
 
 
 class Base(unittest.TestCase):
@@ -431,17 +431,15 @@ class MoveTest(Base):
 
         decimals -- number of decimals
         """
-        motors = Firestarter().motors
+        motors = self.host.platform.motors
         dist = np.array([1, 1, 1])
-        from copy import deepcopy
-
-        startpos = deepcopy((yield from self.host.position))
+        startpos = (yield from self.host.position).copy()
         for direction in [-1, 1]:
             self.assertEqual(
                 (yield from self.host.get_state())["error"], False
             )
             self.host.enable_steppers = True
-            current = deepcopy((yield from self.host.position))
+            current = (yield from self.host.position).copy()
             disp = dist * direction
             yield from self.host.gotopoint(
                 position=disp, speed=[1] * motors, absolute=False
@@ -672,19 +670,22 @@ class PrintTest(Base):
     @executor
     def test_print(self):
         """the LDgraphy test pattern is printed"""
-        from pathlib import Path
-
         host = self.host
         host.enable_steppers = True
-        dir_path = os.path.dirname(interpolator.__file__)
-        FILENAME = Path(dir_path, "debug", "test.bin")
+        if not upython:
+            from pathlib import Path
+
+            dir_path = os.path.dirname(interpolator.__file__)
+            FILENAME = Path(dir_path, "debug", "test.bin")
+        else:
+            FILENAME = "sd/fpga/job.bin"
         # it assumed the binary is already created and
         # in the interpolator folder
         if not os.path.isfile(FILENAME):
             raise Exception("File not found")
         FACETS_IN_LANE = 5377
         LANEWIDTH = 5.45
-        bitsinline = host.laser_params["BITSINSCANLINE"]
+        bytesinline = int(host.laser_params["BITSINSCANLINE"] / 8)
         stepsperline = 1
         # z is not homed as it should be already in
         # position so laser is in focus
@@ -696,33 +697,40 @@ class PrintTest(Base):
         # scaning direction offset is needed to prevent lock with home
         yield from host.gotopoint([70, 5, 0], absolute=False)
         print("Reading binary")
-        data = np.fromfile(FILENAME, dtype=np.uint8)
-        bits = np.unpackbits(data)
         # enable scanhead
         yield from self.host.enable_comp(synchronize=True)
-        bits_inlane = FACETS_IN_LANE * bitsinline
-        for lane in range(0, round(len(bits) / bits_inlane)):
-            print(f"Exposing lane {lane}")
-            if lane > 0:
-                print("Moving in x-direction for next lane")
-                yield from host.gotopoint([LANEWIDTH, 0, 0], absolute=False)
-            if lane % 2 == 1:
-                direction = 0
-                print("Start exposing forward lane")
-            else:
-                direction = 1
-                print("Start exposing back lane")
-            for line in range(FACETS_IN_LANE):
-                start = lane * bits_inlane + line * bitsinline
-                end = start + bitsinline
-                line_data = bits[start:end]
-                # reverse, as exposure is inversed
-                line_data = line_data[::-1]
-                yield from host.writeline(
-                    bitlst=line_data,
-                    stepsperline=stepsperline,
-                    direction=direction,
-                )
+        with open(FILENAME, "rb") as f:
+            lane = 0
+            line_data = np.frombuffer(f.read(bytesinline), dtype=np.uint8)
+            while True:
+                if not line_data:
+                    break
+                print(f"Exposing lane {lane}")
+                if lane > 0:
+                    print("Moving in x-direction for next lane")
+                    yield from host.gotopoint(
+                        [LANEWIDTH, 0, 0], absolute=False
+                    )
+                if lane % 2 == 1:
+                    direction = 0
+                    print("Start exposing forward lane")
+                else:
+                    direction = 1
+                    print("Start exposing back lane")
+                for line in range(FACETS_IN_LANE):
+                    # reverse, as exposure is inversed
+                    # line_data = line_data[::-1]
+                    yield from host.writeline(
+                        bitlst=line_data,
+                        stepsperline=stepsperline,
+                        direction=direction,
+                    )
+                    line_data = np.frombuffer(
+                        f.read(bytesinline), dtype=np.uint8
+                    )
+                    if not line_data:
+                        break
+                lane += 1
             # send stopline
             yield from host.writeline([])
         # disable scanhead

@@ -121,6 +121,10 @@ def params(platform):
     )
     if platform.name == "Test":
         assert var["BITSINSCANLINE"] == bitsinscanline
+    # bits are packed and therefore need to be multiple of 8
+    elif (var["BITSINSCANLINE"] % 8) != 0:
+        var["BITSINSCANLINE"] += 8 - var["BITSINSCANLINE"] % 8
+
     if var["BITSINSCANLINE"] <= 0:
         raise Exception("Bits in scanline invalid")
     var["SPINUPTICKS"] = round(var["SPINUP_TIME"] * var["CRYSTAL_HZ"])

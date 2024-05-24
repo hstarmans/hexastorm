@@ -21,7 +21,7 @@ def displacement(pixel, params):
 
     The x-axis is parallel to the scanline if the stage does not move.
     It is assumed, the laser bundle traverses
-    in the negative direction if the prism motor 
+    in the negative direction and the prism motor
     rotates counterclockwise.
 
     pixel  --  the pixelnumber, in range [0, self.pixelsfacet]
@@ -119,10 +119,16 @@ class Interpolator:
         stepsperline -- this parameter is not fixed and can be changed
                         without flashing the board
         """
-        # in new version of numba dictionaries are converted automatically
-        dct = typed.Dict.empty(key_type=types.string, value_type=types.float64)
+
         platform = Firestarter()
         var = paramsfunc(platform)
+        # TODO: slicer should account for direction
+        # bytes are read using little but finally direction is flipped!
+        # as such packing is here in big
+        self.bitorder = "big"
+        # NOTE:  very special dictionary!!
+        # in new version of numba dictionaries are converted automatically
+        dct = typed.Dict.empty(key_type=types.string, value_type=types.float64)
         dct2 = {
             # angle [radians], for a definition see figure 7
             # https://reprap.org/wiki/Open_hardware_fast_high_resolution_LASER
@@ -168,8 +174,7 @@ class Interpolator:
             # this was used on the beaglebone
             "downsamplefactor": 1,
         }
-        for k, v in dct2.items():
-            dct[k] = v
+        dct.update(dct2)
         dct["lanewidth"] = (
             fxpos(0, dct) - fxpos(dct["bitsinscanline"] - 1, dct)
         ) * dct["samplegridsize"]
@@ -432,7 +437,7 @@ class Interpolator:
         if not positiveresist:
             ptrn = np.logical_not(ptrn)
         ptrn = np.repeat(ptrn, self.params["downsamplefactor"])
-        ptrn = np.packbits(ptrn)
+        ptrn = np.packbits(ptrn, bitorder=self.bitorder)
         return ptrn
 
     def plotptrn(self, ptrn_df, step, filename="plot"):
@@ -475,9 +480,9 @@ class Interpolator:
         arr = np.zeros((xcor.max() + 1, ycor.max() + 1), dtype=np.uint8)
         # TODO: either use parquet or numpy
         try:
-            ptrn = np.unpackbits(ptrn_df["data"])
+            ptrn = np.unpackbits(ptrn_df["data"], bitorder=self.bitorder)
         except IndexError:
-            ptrn = np.unpackbits(ptrn_df)
+            ptrn = np.unpackbits(ptrn_df, bitorder=self.bitorder)
         # TODO: this is strange, added as quick fix on may 9 2021
         ptrn = ptrn[: len(xcor)]
         arr[xcor[:], ycor[:]] = ptrn[0 : len(ptrn) : step]
@@ -486,35 +491,46 @@ class Interpolator:
         img.save(os.path.join(self.debug_folder, filename + ".png"))
         return img
 
-    def readbin(self, filename="test.parquet"):
+    def readbin(self, filename="test.parquet", mode="bytes"):
         """reads a parquet data file
 
         name  -- name of binary file with laser information
+        mode  -- parquet, numpy, bytes
         """
         file_path = os.path.join(self.debug_folder, filename)
-        if 'parquet' in filename:
+        if mode == "parquet":
             res = pd.read_parquet(file_path)
+        elif mode == "numpy":
+            res = np.fromfile(file_path, dtype=np.uint8)
         else:
-            res = np.fromfile(file_path,
-                              dtype=np.uint8)
+            with open(filename, "rb") as f:
+                res = np.frombuffer(f.read(), np.uint8)
         return res
 
-    def writebin(self, pixeldata, filename="test.parquet"):
+    def writebin(self, pixeldata, filename="test.parquet", mode="bytes"):
         """writes pixeldata with parameters to parquet file
 
         pixeldata  -- must have uneven length
         filename   -- name of binary file to write laserinformation to
+        mode       --  parquet, numpy, bytes
         """
         if not os.path.exists(self.debug_folder):
             os.makedirs(self.debug_folder)
         # parquet is more efficient, not supported by micropython
-        if 'parquet' in filename:
+        if mode == "parquet":
             df = pd.DataFrame(data=pixeldata, columns=["data"])
             df = df.join(pd.DataFrame([dict(self.params)]))
             df.to_parquet(os.path.join(self.debug_folder, filename))
-        else:
+        # micropython ulab has numpy load and save but cannot
+        # load object partially
+        elif mode == "numpy":
             pixeldata = pixeldata.astype(np.uint8)
             pixeldata.tofile(os.path.join(self.debug_folder, filename))
+        # solution should work for micropython
+        else:
+            pixeldata = pixeldata.astype(np.uint8)
+            with open(filename, "wb") as f:
+                f.write(pixeldata.tobytes())
 
 
 if __name__ == "__main__":

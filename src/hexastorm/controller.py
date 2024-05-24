@@ -659,17 +659,21 @@ class Host:
             bytelst = [INSTRUCTIONS.LASTSCANLINE]
             bytelst += remainder(bytelst) * [0]
         else:
-            assert len(bitlst) == self.laser_params["BITSINSCANLINE"]
-            assert max(bitlst) <= 1
-            assert min(bitlst) >= 0
             bytelst = [INSTRUCTIONS.SCANLINE]
             halfperiodbits = [int(i) for i in bin(halfperiod)[2:]]
             halfperiodbits.reverse()
             assert len(halfperiodbits) < 56
-            bytelst += ulabext.packbits(
-                direction + halfperiodbits, bitorder=bitorder
-            ).tolist()
+            bytelst += list(
+                ulabext.packbits(direction + halfperiodbits, bitorder=bitorder)
+            )
             bytelst += remainder(bytelst) * [0]
-            bytelst += ulabext.packbits(bitlst, bitorder=bitorder).tolist()
+            if len(bitlst) == self.laser_params["BITSINSCANLINE"]:
+                assert max(bitlst) <= 1
+                assert min(bitlst) >= 0
+                bytelst += list(ulabext.packbits(bitlst, bitorder=bitorder))
+            elif len(bitlst) == int(self.laser_params["BITSINSCANLINE"] / 8):
+                bytelst += bitlst
+            else:
+                raise Exception("Invalid line length")
             bytelst += remainder(bytelst) * [0]
         return bytelst
