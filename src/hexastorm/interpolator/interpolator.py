@@ -2,6 +2,7 @@ import math
 import os
 import xml.etree.ElementTree
 from io import BytesIO
+import struct
 
 import numpy as np
 import pandas as pd
@@ -500,15 +501,26 @@ class Interpolator:
         file_path = os.path.join(self.debug_folder, filename)
         if mode == "parquet":
             res = pd.read_parquet(file_path)
-        elif mode == "numpy":
-            res = np.fromfile(file_path, dtype=np.uint8)
         else:
-            with open(filename, "rb") as f:
-                res = np.frombuffer(f.read(), np.uint8)
-        return res
+            if mode == "numpy":
+                res = np.fromfile(file_path, dtype=np.uint8)
+            else:
+                with open(filename, "rb") as f:
+                    res = np.frombuffer(f.read(), np.uint8)
+            steps = round(res[0] * 0.1, 1)
+            lanewidth = (
+                struct.unpack(">I", struct.pack("4B", *res[1:5]))[0] * 1e-3
+            )
+            res = res[5:]
+            return steps, lanewidth, res
 
     def writebin(self, pixeldata, filename="test.parquet", mode="bytes"):
         """writes pixeldata with parameters to parquet file
+
+        Pixeldata is a chain of bytes. The first bytes defines step size
+        as multiple of 0.1. The next four bytes define the linelength
+        in microns
+
 
         pixeldata  -- must have uneven length
         filename   -- name of binary file to write laserinformation to
@@ -521,16 +533,26 @@ class Interpolator:
             df = pd.DataFrame(data=pixeldata, columns=["data"])
             df = df.join(pd.DataFrame([dict(self.params)]))
             df.to_parquet(os.path.join(self.debug_folder, filename))
-        # micropython ulab has numpy load and save but cannot
-        # load object partially
-        elif mode == "numpy":
-            pixeldata = pixeldata.astype(np.uint8)
-            pixeldata.tofile(os.path.join(self.debug_folder, filename))
-        # solution should work for micropython
         else:
-            pixeldata = pixeldata.astype(np.uint8)
-            with open(filename, "wb") as f:
-                f.write(pixeldata.tobytes())
+            # micron to mm and split in 4 bytes
+            step_byte = round(self.params["stepsperline"] / 0.1)
+            assert 0 < step_byte < 255
+            lanewidth_bytes = struct.unpack(
+                "4B", struct.pack(">I", round(self.params["lanewidth"] * 1e3))
+            )
+            pixeldata = np.concatenate(
+                [np.array([step_byte]), np.array(lanewidth_bytes), pixeldata]
+            )
+            # micropython ulab has numpy load and save but cannot
+            # load object partially
+            if mode == "numpy":
+                pixeldata = pixeldata.astype(np.uint8)
+                pixeldata.tofile(os.path.join(self.debug_folder, filename))
+            # solution should work for micropython
+            else:
+                pixeldata = pixeldata.astype(np.uint8)
+                with open(filename, "wb") as f:
+                    f.write(pixeldata.tobytes())
 
 
 if __name__ == "__main__":
@@ -543,11 +565,15 @@ if __name__ == "__main__":
     # camera)
     # PCB stepsperline 0.5, single channel, current 130
     # photholithopaper stepsperline 0.5, single channel, current 130
-    interpolator = Interpolator(stepsperline=0.5)
+    stepsperline = 0.5
+    interpolator = Interpolator(stepsperline=stepsperline)
     dir_path = os.path.dirname(os.path.realpath(__file__))
     # hexastorm.png pixelsize 0.035
     url = os.path.join(dir_path, "test-patterns", "line-resolution-test.ps")
     ptrn = interpolator.patternfile(url)
     interpolator.writebin(ptrn, "test.bin")
-    df = interpolator.readbin("test.bin")
-    interpolator.plotptrn(df, step=1)
+    steps, lanewidth, arr = interpolator.readbin("test.bin", mode="bytes")
+    assert np.allclose(stepsperline, steps, 1e-1)
+    assert np.allclose(interpolator.params["lanewidth"], lanewidth, 1e-3)
+    # TODO: step must be an integer!!
+    interpolator.plotptrn(arr, step=1)
