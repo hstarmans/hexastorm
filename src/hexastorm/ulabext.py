@@ -17,7 +17,7 @@ def sign(array):
         return np.sign(array)
     else:
         singlevalue = False
-        if not isinstance(array, (np.array, list)):
+        if not isinstance(array, (np.ndarray, list)):
             singlevalue = True
             array = [array]
         for idx, val in enumerate(array):

@@ -1,7 +1,7 @@
 import unittest
 
 from amaranth import Elaboratable, Module, Signal, signed
-from amaranth.hdl.mem import Array
+from amaranth.hdl import Array
 from luna.gateware.test import LunaGatewareTestCase, sync_test_case
 
 from .constants import MOVE_TICKS, bit_shift

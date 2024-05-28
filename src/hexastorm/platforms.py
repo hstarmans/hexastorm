@@ -4,7 +4,7 @@ import subprocess
 
 from amaranth import Signal
 from amaranth.build import Attrs, Clock, Pins, PinsN, Resource, Subsignal
-from amaranth.hdl.mem import Array
+from amaranth.hdl import Array
 from amaranth.vendor import SiliconBluePlatform
 from amaranth_boards.resources import LEDResources
 from amaranth_boards.test.blinky import Blinky

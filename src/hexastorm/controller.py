@@ -1,24 +1,12 @@
-try:
-    # TODO: this was a trial to move to micropython
-    #       not used
-    from micropython import const
-
-    a = const
-    upython = True
-except ImportError:
-    upython = False
-
 from struct import unpack
 from time import sleep
+import sys
 
-if upython:
-    from ulab import numpy as np
-    from .constants import platform as platformmicro
-else:
-    from gpiozero import LED
-    import subprocess
-    from .platforms import Firestarter
+try:
     import numpy as np
+except ModuleNotFoundError:
+    from ulab import numpy as np
+
 
 from . import ulabext
 from .constants import (
@@ -60,18 +48,26 @@ class Memfull(Exception):
 class Host:
     """Class to interact with FPGA"""
 
-    def __init__(self, platform=None):
+    def __init__(self, platform=None, micropython=False):
         """platform  -- object which has gateware settings
         only passed to controller if virtual
         test is executed. Needed in lasers.py
         as each test here has a slightly
         different TestPlatform
+        micropython -- if true object uses libraries suited
+        for micropython
         """
+        if sys.implementation.name == "micropython":
+            self.micropython = True
+        else:
+            self.micropython = micropython
+
         # case raspberry
         if platform is None:
+            self.test = False
             # case micropython
-            if upython:
-                self.test = False
+            if self.micropython:
+                from .constants import platform as platformmicro
                 import machine
 
                 self.platform = platformmicro(micropython=True)
@@ -92,9 +88,10 @@ class Host:
                 self.enable = machine.Pin(self.platform.enable_pin)
             # case raspberry
             else:
-                self.test = False
-                import spidev
                 from gpiozero import LED
+                from .platforms import Firestarter
+
+                import spidev
                 from smbus2 import SMBus
 
                 self.platform = Firestarter(micropython=False)
@@ -128,21 +125,24 @@ class Host:
         """
         import steppers
 
-        self.motors = [
-            steppers.TMC2130(link_index=i)
-            for i in range(1, 1 + self.platform.motors)
-        ]
-        steppers.bcm2835_init()
-        for motor in self.motors:
-            motor.begin()
-            motor.toff(5)
-            # ideally should be 0
-            # on working equipment it is always 2
-            assert motor.test_connection() == 2
-            motor.rms_current(600)
-            motor.microsteps(16)
-            motor.en_pwm_mode(True)
-        steppers.bcm2835_close()
+        if self.micropython:
+            steppers.init()
+        else:
+            self.motors = [
+                steppers.TMC2130(link_index=i)
+                for i in range(1, 1 + self.platform.motors)
+            ]
+            steppers.bcm2835_init()
+            for motor in self.motors:
+                motor.begin()
+                motor.toff(5)
+                # ideally should be 0
+                # on working equipment it is always 2
+                assert motor.test_connection() == 2
+                motor.rms_current(600)
+                motor.microsteps(16)
+                motor.en_pwm_mode(True)
+            steppers.bcm2835_close()
 
     def build(self, do_program=True, verbose=True, mod="all"):
         """builds the FPGA code using amaranth HDL, Yosys, Nextpnr and icepack
@@ -151,11 +151,12 @@ class Host:
                        resets aftwards
         verbose     -- prints output of Yosys, Nextpnr and icepack
         """
-        if upython:
+        if self.micropython:
             print("Micropython cannot update binary, using stored one")
         else:
             from .core import Dispatcher
             from .motor import Driver
+            from .platforms import Firestarter
 
             if mod == "all":
                 module = Dispatcher(self.platform)
@@ -175,7 +176,7 @@ class Host:
 
     def reset(self):
         "restart the FPGA by flipping the reset pin"
-        if upython:
+        if self.micropython:
             import machine
 
             reset_pin = machine.Pin(self.platform.reset_pin)
@@ -329,10 +330,10 @@ class Host:
         val -- boolean, True enables steppers
         """
         if val:
-            self.enable.off() if not upython else self.enable.value(0)
+            self.enable.off() if not self.micropython else self.enable.value(0)
             self.spi_exchange_data([COMMANDS.START] + WORD_BYTES * [0])
         else:
-            self.enable.on() if not upython else self.enable.value(1)
+            self.enable.on() if not self.micropython else self.enable.value(1)
             self.spi_exchange_data([COMMANDS.STOP] + WORD_BYTES * [0])
 
     @property
@@ -343,7 +344,7 @@ class Host:
         integer ranges from 0 to 255 where
         0 no current and 255 full driver current
         """
-        if upython:
+        if self.micropython:
             data = self.bus.readfrom(self.platform.ic_address, 1)
         else:
             data = self.bus.read_byte_data(self.platform.ic_address, 0)
@@ -362,7 +363,7 @@ class Host:
         if val < 0 or val > 150:
             # 255 kills laser at single channel
             raise Exception("Invalid or too high laser current")
-        if upython:
+        if self.micropython:
             self.bus.writeto(self.platform.ic_address, bytes(val))
         else:
             self.bus.write_byte_data(self.platform.ic_address, 0, val)
@@ -566,7 +567,7 @@ class Host:
                     coeff = coefficients[idx]
                 data = (
                     int(coeff).to_bytes(8, "big", signed=True)
-                    if not upython
+                    if not self.micropython
                     else int(coeff).to_bytes(8, "big")
                 )
                 commands += [write_byte + data]
@@ -588,7 +589,7 @@ class Host:
         assert len(data) == (COMMAND_BYTES + WORD_BYTES)
 
         # spidev changes values passed to it
-        if not upython:
+        if not self.micropython:
             from copy import deepcopy
 
             self.chip_select.off()

@@ -2,7 +2,7 @@ import unittest
 import math
 
 from amaranth import Cat, Elaboratable, Module, Signal, ClockDomain
-from amaranth.hdl.mem import Array
+from amaranth.hdl import Array
 from luna.gateware.interface.spi import SPICommandInterface
 from luna.gateware.utils.cdc import synchronize
 
