@@ -4,7 +4,7 @@ import sys
 
 try:
     import numpy as np
-except ModuleNotFoundError:
+except ImportError or ModuleNotFoundError:
     from ulab import numpy as np
 
 
@@ -115,7 +115,13 @@ class Host:
         # if memory is full
         self.maxtrials = 10 if self.test else 1e5
         self.laser_params = params(self.platform)
-        self._position = np.array([0] * self.platform.motors, dtype=float)
+        try:
+            self._position = np.array([0] * self.platform.motors, dtype=float)
+        # different syntax in micropython
+        except TypeError:
+            self._position = np.array(
+                [0] * self.platform.motors, dtype=np.float
+            )
 
     def init_steppers(self):
         """configure TMC2130 steppers via SPI

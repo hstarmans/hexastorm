@@ -155,6 +155,8 @@ class Firestarter(SiliconBluePlatform, platform):
     connectors = []
 
     def __init__(self, micropython=False):
+        # port to micropython e.g. /dev/ttyS8
+        self.micropython = micropython
         SiliconBluePlatform.__init__(self)
         platform.__init__(self, micropython)
 
@@ -166,7 +168,7 @@ class Firestarter(SiliconBluePlatform, platform):
         base = f"{search_command} yowasp-"
         end = ""
         # yowasp-yosys doesn't work
-        # os.environ['YOSYS'] = subprocess.getoutput(base+'yosys'+end)
+        os.environ["YOSYS"] = subprocess.getoutput(base + "yosys" + end)
         os.environ["NEXTPNR_ICE40"] = subprocess.getoutput(
             base + "nextpnr-ice40" + end
         )
@@ -175,9 +177,26 @@ class Firestarter(SiliconBluePlatform, platform):
 
     def toolchain_program(self, products, name, **kwargs):
         with products.extract("{}.bin".format(name)) as bitstream_filename:
-            subprocess.check_call(["fomu-flash", "-w", bitstream_filename])
-        subprocess.check_call(["fomu-flash", "-r"])
+            if self.micropython:
+                subprocess.check_call(
+                    [
+                        "mpremote",
+                        "connect",
+                        self.micropython,
+                        "fs",
+                        "cp",
+                        bitstream_filename,
+                        ":sd/fpga/blink.bit",
+                    ]
+                )
+            else:
+                subprocess.check_call(["fomu-flash", "-w", bitstream_filename])
+                subprocess.check_call(["fomu-flash", "-r"])
 
 
 if __name__ == "__main__":
-    Firestarter().build(Blinky(), do_program=True, verbose=True)
+    Firestarter(micropython=False).build(
+        Blinky(),
+        do_program=True,
+        verbose=True,
+    )
