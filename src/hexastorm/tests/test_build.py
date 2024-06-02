@@ -6,10 +6,14 @@ from ..platforms import Firestarter
 
 
 class TestBuild(unittest.TestCase):
-    def test_all(self):
-        platform = Firestarter()
+    """Platform is passed to object which is then built"""
+
+    def test_all(self, micropython=False):
+        platform = Firestarter(micropython)
         platform.build(
-            Dispatcher(Firestarter()), do_program=False, verbose=True
+            Dispatcher(Firestarter()),
+            do_program=False,
+            verbose=True,
         )
 
     def parser(self):

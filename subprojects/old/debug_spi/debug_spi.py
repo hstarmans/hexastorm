@@ -4,6 +4,7 @@ Only got it working for older version of luna
 git checkout f54de01c9dc13aeca5d20734a9c103227cb9603f
 upstream has been notified https://github.com/greatscottgadgets/luna/issues/101
 """
+
 from amaranth import Elaboratable, Module
 from luna.gateware.interface.spi import SPIDeviceInterface
 from luna.gateware.utils.cdc import synchronize
@@ -42,4 +43,4 @@ class DebugSPIExample(Elaboratable):
 
 if __name__ == "__main__":
     platform = Firestarter()
-    platform.build(DebugSPIExample(), do_program=True, verbose=True)
+    platform.build(DebugSPIExample(), do_program=False, verbose=True)

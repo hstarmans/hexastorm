@@ -10,16 +10,16 @@ readme = "README.md"
 python = ">=3.9,<3.13"
 opencv-python = "^4.8.0.74"
 scipy = "^1.11.1"
-pillow = "^10.0.0"
 pandas = "^2.0.3"
 cairosvg = "^2.7.0"
-amaranth = {git = "https://github.com/amaranth-lang/amaranth.git"}
 amaranth-boards = {git = "https://github.com/amaranth-lang/amaranth-boards.git"}
 amaranth-soc = {git = "https://github.com/amaranth-lang/amaranth-soc.git"}
 fastparquet = "^2023.8.0"
 plotext = "^5.2.8"
 luna-usb = {git = "https://github.com/greatscottgadgets/luna.git"}
 numba = "^0.59.1"
+pillow = "^10.3.0"
+amaranth = "0.4.5"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.0.281"
