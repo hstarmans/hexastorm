@@ -16,10 +16,10 @@ amaranth-boards = {git = "https://github.com/amaranth-lang/amaranth-boards.git"}
 amaranth-soc = {git = "https://github.com/amaranth-lang/amaranth-soc.git"}
 fastparquet = "^2023.8.0"
 plotext = "^5.2.8"
-luna-usb = {git = "https://github.com/greatscottgadgets/luna.git"}
 numba = "^0.59.1"
 pillow = "^10.3.0"
 amaranth = "0.4.5"
+luna-usb = {git = "https://github.com/hstarmans/luna.git", branch="patch1"}
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.0.281"

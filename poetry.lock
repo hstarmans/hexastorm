@@ -74,7 +74,7 @@ pyxdg = ">=0.27"
 type = "git"
 url = "https://github.com/greatscottgadgets/apollo.git"
 reference = "HEAD"
-resolved_reference = "26099353d073f9966dce3fbab4dfdb9ad8f6c42d"
+resolved_reference = "0ee9034e2e73ae0c8e63af9edc52c55f109815fd"
 
 [[package]]
 name = "appdirs"
@@ -717,7 +717,7 @@ files = [
 
 [[package]]
 name = "luna-usb"
-version = "0.0.0.post31+git.b8d8bc65"
+version = "0.0.0"
 description = "Amaranth HDL framework for FPGA-based USB solutions"
 optional = false
 python-versions = ">=3.8"
@@ -726,7 +726,7 @@ develop = false
 
 [package.dependencies]
 amaranth = ">=0.4.0,<0.5.0"
-apollo-fpga = {git = "https://github.com/greatscottgadgets/apollo.git"}
+apollo_fpga = {git = "https://github.com/greatscottgadgets/apollo.git"}
 libusb1 = ">1.9.2"
 pyserial = ">=3.5"
 pyusb = ">1.1.1"
@@ -738,9 +738,9 @@ dev = ["prompt-toolkit (>3.0.16)"]
 
 [package.source]
 type = "git"
-url = "https://github.com/greatscottgadgets/luna.git"
-reference = "HEAD"
-resolved_reference = "b8d8bc65b08444399d9844fe81a34c85da9ecf13"
+url = "https://github.com/hstarmans/luna.git"
+reference = "patch1"
+resolved_reference = "782098013e8cc98f147e4516cc56aa15e676683e"
 
 [[package]]
 name = "markupsafe"
@@ -1590,7 +1590,7 @@ construct = ">=2.10,<3.0"
 type = "git"
 url = "https://github.com/usb-tools/python-usb-protocol"
 reference = "HEAD"
-resolved_reference = "5730bc08c5641c7c11fa827d2418dfaf22598004"
+resolved_reference = "8683cb97d7df28f5bdee3236f0338b469d0c64ee"
 
 [[package]]
 name = "wasmtime"
@@ -1676,4 +1676,4 @@ yowasp-runtime = ">=1.12,<2.0"
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.9,<3.13"
-content-hash = "9902eb3f33f757e17595b3fad24e3f9b925b8227340b234e97c4eeab51780d1a"
+content-hash = "434358297224836c0078409b33937d258ff071c2000681e1e0539f302808c082"

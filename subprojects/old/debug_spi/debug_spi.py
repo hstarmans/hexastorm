@@ -1,8 +1,8 @@
 """ debug spi
 
-Only got it working for older version of luna
-git checkout f54de01c9dc13aeca5d20734a9c103227cb9603f
-upstream has been notified https://github.com/greatscottgadgets/luna/issues/101
+Does not work with luna, see https://github.com/greatscottgadgets/luna/issues/101
+Ensure you use the patch
+https://github.com/hstarmans/luna/tree/patch1
 """
 
 from amaranth import Elaboratable, Module
@@ -42,5 +42,5 @@ class DebugSPIExample(Elaboratable):
 
 
 if __name__ == "__main__":
-    platform = Firestarter()
+    platform = Firestarter(micropython=False)
     platform.build(DebugSPIExample(), do_program=False, verbose=True)

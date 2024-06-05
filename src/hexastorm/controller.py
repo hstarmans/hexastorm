@@ -68,24 +68,42 @@ class Host:
             # case micropython
             if self.micropython:
                 from .constants import platform as platformmicro
-                import machine
+                from machine import Pin, SoftSPI, SoftI2C, SPI
 
                 self.platform = platformmicro(micropython=True)
+                self.reset_pin = Pin(self.platform.reset_pin, Pin.OUT)
                 # TODO: would this also work with device number
-                self.bus = machine.I2C(
-                    scl=self.platform.scl, sda=self.platform.sda
+                self.bus = SoftI2C(
+                    scl=Pin(self.platform.scl), sda=Pin(self.platform.sda)
                 )
-                # SPI
+                # spi
+                self.spi = SPI(1, phase=1, baudrate=int(1e6))
+                # software spi is slower
+                # self.spi = SoftSPI(
+                #     baudrate=int(5e5),
+                #     polarity=0,
+                #     phase=1,
+                #     sck=Pin(self.platform.pi_sck, Pin.OUT),
+                #     mosi=Pin(self.platform.pi_mosi, Pin.OUT),
+                #     miso=Pin(self.platform.pi_miso, Pin.IN),
+                # )
                 # spi port is hispi
-                self.spi = machine.SPI(
-                    self.platform.spi_dev, baudrate=round(1e6)
+                self.fpga_spi = SoftSPI(
+                    baudrate=self.platform.fpga_baudrate,
+                    polarity=1,
+                    phase=0,
+                    sck=Pin(self.platform.fpga_sck, Pin.OUT),
+                    mosi=Pin(self.platform.fpga_mosi, Pin.OUT),
+                    miso=Pin(self.platform.fpga_miso, Pin.IN),
                 )
-                self.chip_select = machine.Pin(self.platform.chip_select)
-                # program TMC2130
+                self.fpga_chip_select = Pin(self.platform.fpga_cs, Pin.OUT)
+                self.fpga_chip_select.value(1)
+                self.chip_select = Pin(self.platform.pi_cs, Pin.OUT)
+                # program TMC2130f
                 # disabled, motor is not in SPI mode
                 # self.init_steppers()
                 # stepper motor enable pin
-                self.enable = machine.Pin(self.platform.enable_pin)
+                self.enable = Pin(self.platform.enable_pin, Pin.OUT)
             # case raspberry
             else:
                 from gpiozero import LED
@@ -94,6 +112,7 @@ class Host:
                 import spidev
                 from smbus2 import SMBus
 
+                self.reset_pin = LED(self.platform.reset_pin)
                 self.platform = Firestarter(micropython=False)
                 # IC bus used to set power laser
                 self.bus = SMBus(self.platform.ic_dev_nr)
@@ -150,6 +169,40 @@ class Host:
                 motor.en_pwm_mode(True)
             steppers.bcm2835_close()
 
+    def flash_fpga(self, filename):
+        if not self.micropython:
+            raise Exception("Only supported for micropython.")
+        from winbond import W25QFlash
+
+        self.fpga_chip_select.value(1)
+        sleep(1)
+        f = W25QFlash(
+            spi=self.fpga_spi,
+            cs=self.fpga_chip_select,
+            baud=self.platform.fpga_baudrate,
+            software_reset=True,
+        )
+
+        self.reset_pin.value(0)
+        buffsize = f.BLOCK_SIZE
+        # if dest.endswith("/"):  # minimal way to allow
+        #    dest = "".join((dest, source.split("/")[-1]))  # cp /sd/file /fl_ext/
+
+        with open(filename, "rb") as infile:
+            blocknum = 0
+            while True:
+                buf = infile.read(buffsize)
+                print(f" Writing {blocknum}.")
+                f.writeblocks(blocknum, buf)
+                if len(buf) < buffsize:
+                    print(f"Final block {blocknum}")
+                    break
+                else:
+                    blocknum += 1
+        sleep(1)
+        self.reset_pin.value(1)
+        print("flashed fpga")
+
     def build(self, do_program=True, verbose=True, mod="all"):
         """builds the FPGA code using amaranth HDL, Yosys, Nextpnr and icepack
 
@@ -180,29 +233,26 @@ class Host:
         if do_program:
             self.reset()
 
-    def reset(self):
+    def reset(self, blank=True):
         "restart the FPGA by flipping the reset pin"
         if self.micropython:
-            import machine
-
-            reset_pin = machine.Pin(self.platform.reset_pin)
-            reset_pin.value(0)
+            self.fpga_chip_select.value(1)
             sleep(1)
-            reset_pin.value(1)
+            self.reset_pin.value(0)
+            sleep(1)
+            self.reset_pin.value(1)
             sleep(1)
         else:
-            from gpiozero import LED
-
-            reset_pin = LED(self.platform.reset_pin)
-            reset_pin.off()
+            self.reset_pin.off()
             sleep(1)
-            reset_pin.on()
+            self.reset_pin.on()
             sleep(1)
         # a blank needs to be send, Statictest succeeds but
         # testlaser fails in test_electrical.py
         # on HX4K this was not needed
         # is required for the UP5K
-        self.spi_exchange_data([0] * (WORD_BYTES + COMMAND_BYTES))
+        if blank:
+            self.spi_exchange_data([0] * (WORD_BYTES + COMMAND_BYTES))
 
     def get_motordebug(self, blocking=False):
         """retrieves the motor debug word
@@ -604,7 +654,8 @@ class Host:
             self.chip_select.on()
         else:
             self.chip_select.value(0)
-            response = bytearray(data)
+            response = bytearray(len(data) * [0])
+            data = bytearray(data)
             self.spi.write_readinto(data, response)
             self.chip_select.value(1)
         return response
