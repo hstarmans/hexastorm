@@ -23,8 +23,8 @@ luna-usb = {git = "https://github.com/hstarmans/luna.git", branch="patch1"}
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.0.281"
-black = "^23.7.0"
 nbqa = "^1.7.0"
+black = "^24.4.2"
 
 
 [tool.poetry.group.raspberry.dependencies]
