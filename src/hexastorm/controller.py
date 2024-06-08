@@ -99,7 +99,7 @@ class Host:
                 self.fpga_chip_select = Pin(self.platform.fpga_cs, Pin.OUT)
                 self.fpga_chip_select.value(1)
                 self.chip_select = Pin(self.platform.pi_cs, Pin.OUT)
-                # program TMC2130f
+                # program TMC2130
                 # disabled, motor is not in SPI mode
                 # self.init_steppers()
                 # stepper motor enable pin
@@ -401,7 +401,9 @@ class Host:
         0 no current and 255 full driver current
         """
         if self.micropython:
-            data = self.bus.readfrom(self.platform.ic_address, 1)
+            data = list(self.bus.readfrom_mem(self.platform.ic_address, 0, 1))[
+                0
+            ]
         else:
             data = self.bus.read_byte_data(self.platform.ic_address, 0)
         return data
@@ -420,7 +422,7 @@ class Host:
             # 255 kills laser at single channel
             raise Exception("Invalid or too high laser current")
         if self.micropython:
-            self.bus.writeto(self.platform.ic_address, bytes(val))
+            self.bus.writeto_mem(self.platform.ic_address, 0, bytes([val]))
         else:
             self.bus.write_byte_data(self.platform.ic_address, 0, val)
 
