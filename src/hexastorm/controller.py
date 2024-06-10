@@ -485,7 +485,7 @@ class Host:
             assert len(speed) == self.platform.motors
         else:
             speed = [10] * self.platform.motors
-        # conversions to steps / count give rounding errors
+        # conversions to steps / count gives rounding errors
         # minimized by setting speed to integer
         speed = abs(np.array(speed))
         displacement = np.array(position)
@@ -623,11 +623,7 @@ class Host:
                 else:
                     idx = degree + motor * max_coeff_order
                     coeff = coefficients[idx]
-                data = (
-                    int(coeff).to_bytes(8, "big", signed=True)
-                    if not self.micropython
-                    else int(coeff).to_bytes(8, "big")
-                )
+                data = int(coeff).to_bytes(8, "big", True)
                 commands += [write_byte + data]
         # send commands to FPGA
         for command in commands:

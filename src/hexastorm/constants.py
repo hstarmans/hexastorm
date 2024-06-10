@@ -4,7 +4,7 @@ Settings of the implementation are saved in board.by and constants.py.
 Constants are more related to the actual implementation on the FPGA.
 """
 
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 from math import ceil
 
 COMMANDS = namedtuple(
@@ -57,7 +57,11 @@ class platform:
         self.poldegree = (
             2  # degree of polynomal to execute move, see movement.py
         )
-        self.stepspermm = {"x": 76.2, "y": 76.2, "z": 1600}
+        # micropython changes order very strangely
+        self.stepspermm = OrderedDict()
+        self.stepspermm["x"] = 76.2
+        self.stepspermm["y"] = 76.2
+        self.stepspermm["z"] = 1600
         self.laser_axis = "y"
         self.motors = len(list(self.stepspermm.keys()))
         self.ic_address = 0x28  # spi address

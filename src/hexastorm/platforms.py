@@ -1,6 +1,7 @@
 import os
 import platform as pltf
 import subprocess
+from collections import OrderedDict
 
 from amaranth import Signal
 from amaranth.build import Attrs, Clock, Pins, PinsN, Resource, Subsignal
@@ -22,7 +23,9 @@ from .resources import (
 
 class TestPlatform:
     name = "Test"
-    stepspermm = {"x": 400, "y": 400}
+    stepspermm = OrderedDict()
+    stepspermm["x"] = 400
+    stepspermm["y"] = 400
     clks = {0: 1}  # dictionary to determine clock divider, e.g. movement.py
     hfosc_div = 0  # selects clock speed on UP5K and clk divider
     poldegree = 2  # degree of polynomal
