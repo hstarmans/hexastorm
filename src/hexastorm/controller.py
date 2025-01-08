@@ -67,43 +67,7 @@ class Host:
             self.test = False
             # case micropython
             if self.micropython:
-                from .constants import platform as platformmicro
-                from machine import Pin, SoftSPI, SoftI2C, SPI
-
-                self.platform = platformmicro(micropython=True)
-                self.reset_pin = Pin(self.platform.reset_pin, Pin.OUT)
-                # TODO: would this also work with device number
-                self.bus = SoftI2C(
-                    scl=Pin(self.platform.scl), sda=Pin(self.platform.sda)
-                )
-                # spi
-                self.spi = SPI(1, phase=1, baudrate=int(1e6))
-                # software spi is slower
-                # self.spi = SoftSPI(
-                #     baudrate=int(5e5),
-                #     polarity=0,
-                #     phase=1,
-                #     sck=Pin(self.platform.pi_sck, Pin.OUT),
-                #     mosi=Pin(self.platform.pi_mosi, Pin.OUT),
-                #     miso=Pin(self.platform.pi_miso, Pin.IN),
-                # )
-                # spi port is hispi
-                self.fpga_spi = SoftSPI(
-                    baudrate=self.platform.fpga_baudrate,
-                    polarity=1,
-                    phase=0,
-                    sck=Pin(self.platform.fpga_sck, Pin.OUT),
-                    mosi=Pin(self.platform.fpga_mosi, Pin.OUT),
-                    miso=Pin(self.platform.fpga_miso, Pin.IN),
-                )
-                self.fpga_chip_select = Pin(self.platform.fpga_cs, Pin.OUT)
-                self.fpga_chip_select.value(1)
-                self.chip_select = Pin(self.platform.pi_cs, Pin.OUT)
-                # program TMC2130
-                # disabled, motor is not in SPI mode
-                # self.init_steppers()
-                # stepper motor enable pin
-                self.enable = Pin(self.platform.enable_pin, Pin.OUT)
+                self.init_micropython()
             # case raspberry
             else:
                 from gpiozero import LED
@@ -121,7 +85,7 @@ class Host:
                 self.spi.open(*self.platform.spi_dev)
                 self.spi.mode = 1
                 self.spi.max_speed_hz = round(1e6)
-                self.chip_select = LED(self.platform.chip_select)
+                self.fpga_select = LED(self.platform.chip_select)
                 # drivers are now in standalone mode
                 # self.init_steppers()
                 # stepper motor enable pin
@@ -141,6 +105,30 @@ class Host:
             self._position = np.array(
                 [0] * self.platform.motors, dtype=np.float
             )
+
+    def init_micropython(self):
+        from .constants import platform as platformmicro
+        from machine import Pin, SoftSPI, SoftI2C
+
+        self.platform = platformmicro(micropython=True)
+        self.reset_pin = Pin(self.platform.reset_pin, Pin.OUT)
+        self.reset_pin.value(1)
+        self.bus = SoftI2C(
+            scl=Pin(self.platform.scl), sda=Pin(self.platform.sda)
+        )
+        self.spi = SoftSPI(
+            baudrate=self.platform.baudrate,
+            polarity=1,
+            phase=0,
+            sck=Pin(self.platform.sck, Pin.OUT),
+            mosi=Pin(self.platform.mosi, Pin.OUT),
+            miso=Pin(self.platform.miso, Pin.IN),
+        )
+        self.flash_select = Pin(self.platform.flash_cs, Pin.OUT)
+        self.flash_select.value(1)
+        self.fpga_select = Pin(self.platform.fpga_cs, Pin.OUT)
+        # stepper motor enable pin
+        self.enable = Pin(self.platform.enable_pin, Pin.OUT)
 
     def init_steppers(self):
         """configure TMC2130 steppers via SPI
@@ -174,12 +162,12 @@ class Host:
             raise Exception("Only supported for micropython.")
         from winbond import W25QFlash
 
-        self.fpga_chip_select.value(1)
+        self.flash_select.value(1)
         sleep(1)
         f = W25QFlash(
-            spi=self.fpga_spi,
-            cs=self.fpga_chip_select,
-            baud=self.platform.fpga_baudrate,
+            spi=self.spi,
+            cs=self.flash_select,
+            baud=self.platform.baudrate,
             software_reset=True,
         )
 
@@ -199,8 +187,7 @@ class Host:
                     break
                 else:
                     blocknum += 1
-        sleep(1)
-        self.reset_pin.value(1)
+        self.reset()
         print("flashed fpga")
 
     def build(self, do_program=True, verbose=True, mod="all"):
@@ -236,12 +223,17 @@ class Host:
     def reset(self, blank=True):
         "restart the FPGA by flipping the reset pin"
         if self.micropython:
-            self.fpga_chip_select.value(1)
-            sleep(1)
+            from machine import Pin
+            # free all lines
+            sck = Pin(12, Pin.IN)
+            mosi = Pin(13, Pin.IN)
+            miso = Pin(11, Pin.IN)
+            slct = Pin(10, Pin.IN)
             self.reset_pin.value(0)
             sleep(1)
             self.reset_pin.value(1)
             sleep(1)
+            self.init_micropython()
         else:
             self.reset_pin.off()
             sleep(1)
@@ -646,16 +638,16 @@ class Host:
         if not self.micropython:
             from copy import deepcopy
 
-            self.chip_select.off()
+            self.fpga_select.off()
             datachanged = deepcopy(data)
             response = bytearray(self.spi.xfer2(datachanged))
-            self.chip_select.on()
+            self.fpga_select.on()
         else:
-            self.chip_select.value(0)
+            self.fpga_select.value(0)
             response = bytearray(len(data) * [0])
             data = bytearray(data)
             self.spi.write_readinto(data, response)
-            self.chip_select.value(1)
+            self.fpga_select.value(1)
         return response
 
     def writeline(self, bitlst, stepsperline=1, direction=0):

@@ -245,8 +245,8 @@ class Dispatcher(Elaboratable):
             spi = synchronize(m, board_spi)
             laserheadpins = platform.request("laserscanner")
             steppers = [res for res in get_all_resources(platform, "stepper")]
-            bldc = platform.request("bldc")
-            leds = [res.o for res in get_all_resources(platform, "led")]
+            # bldc = platform.request("bldc")
+            # leds = [res.o for res in get_all_resources(platform, "led")]
             assert len(steppers) != 0
         else:
             platform = self.platform
@@ -258,8 +258,9 @@ class Dispatcher(Elaboratable):
             self.steppers = steppers = platform.steppers
             self.busy = busy
             laserheadpins = platform.laserhead
-            bldc = platform.bldc
-            leds = platform.leds
+            # PCB motor
+            # bldc = platform.bldc
+            # leds = platform.leds
         # Local laser signal clones
         enable_prism = Signal()
         lasers = Signal(2)
@@ -280,43 +281,45 @@ class Dispatcher(Elaboratable):
             self.laserhead = laserhead
         # polynomal iterates over count
         coeffcnt = Signal(range(len(polynomal.coeff) + 1))
-        # Prism motor
-        prism_driver = Driver(platform)
-        m.submodules.prism_driver = prism_driver
-        # connect prism motor
-        for idx in range(len(leds)):
-            m.d.comb += leds[idx].eq(prism_driver.leds[idx])
+        ## PCB motor, disabled
+        # # Prism motor
+        # prism_driver = Driver(platform)
+        # m.submodules.prism_driver = prism_driver
+        # # connect prism motor
+        # for idx in range(len(leds)):
+        #     m.d.comb += leds[idx].eq(prism_driver.leds[idx])
 
-        m.d.comb += [
-            prism_driver.enable_prism.eq(
-                enable_prism | laserhead.enable_prism
-            ),
-            parser.word_to_send.eq(prism_driver.debugword),
-        ]
-        m.d.comb += [
-            bldc.uL.eq(prism_driver.uL),
-            bldc.uH.eq(prism_driver.uH),
-            bldc.vL.eq(prism_driver.vL),
-            bldc.vH.eq(prism_driver.vH),
-            bldc.wL.eq(prism_driver.wL),
-            bldc.wH.eq(prism_driver.wH),
-        ]
-        m.d.comb += [
-            prism_driver.hall[0].eq(bldc.sensor0),
-            prism_driver.hall[1].eq(bldc.sensor1),
-            prism_driver.hall[2].eq(bldc.sensor2),
-        ]
-        # connect laser module to prism motor
-        m.d.comb += [
-            prism_driver.ticksinfacet.eq(laserhead.ticksinfacet),
-            prism_driver.synchronized.eq(laserhead.synchronized),
-        ]
+        # m.d.comb += [
+        #     prism_driver.enable_prism.eq(
+        #         enable_prism | laserhead.enable_prism
+        #     ),
+        #     parser.word_to_send.eq(prism_driver.debugword),
+        # ]
+        # m.d.comb += [
+        #     bldc.uL.eq(prism_driver.uL),
+        #     bldc.uH.eq(prism_driver.uH),
+        #     bldc.vL.eq(prism_driver.vL),
+        #     bldc.vH.eq(prism_driver.vH),
+        #     bldc.wL.eq(prism_driver.wL),
+        #     bldc.wH.eq(prism_driver.wH),
+        # ]
+        # m.d.comb += [
+        #     prism_driver.hall[0].eq(bldc.sensor0),
+        #     prism_driver.hall[1].eq(bldc.sensor1),
+        #     prism_driver.hall[2].eq(bldc.sensor2),
+        # ]
+        # # connect laser module to prism motor
+        # m.d.comb += [
+        #     prism_driver.ticksinfacet.eq(laserhead.ticksinfacet),
+        #     prism_driver.synchronized.eq(laserhead.synchronized),
+        # ]
 
         # connect laserhead
         m.d.comb += [
-            # TODO: fix removal
-            # laserheadpins.pwm.eq(laserhead.pwm),
-            # laserheadpins.en.eq(laserhead.enable_prism | enable_prism),
+            ## Ricoh mirror motor
+            laserheadpins.pwm.eq(laserhead.pwm),
+            laserheadpins.en.eq(laserhead.enable_prism | enable_prism),
+            ## Ricoh mirror motor
             laserheadpins.laser0.eq(laserhead.lasers[0] | lasers[0]),
             laserheadpins.laser1.eq(laserhead.lasers[1] | lasers[1]),
         ]

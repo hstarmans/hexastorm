@@ -1,7 +1,7 @@
 import itertools
 
 from amaranth import Record
-from amaranth.build import Pins, Resource, ResourceError, Subsignal
+from amaranth.build import Pins, PinsN, Resource, ResourceError, Subsignal
 from amaranth.hdl.ast import unsigned
 from amaranth.hdl.rec import Layout
 
@@ -135,11 +135,15 @@ def BLDCResource(
 
 
 class LaserScannerLayout(Layout):
-    """Layout for laser scanner"""
-
+    """Layout for laser scanner """
     def __init__(self):
-        super().__init__([("laser0", 1), ("laser1", 1), ("photodiode", 1)])
-
+        super().__init__([
+            ("laser0", 1),
+            ("laser1", 1),
+            ("photodiode", 1),
+            ("pwm", 1),
+            ("en", 1),
+        ])
 
 class LaserscannerRecord(Record):
     """Record to test stepper motor"""
@@ -149,7 +153,7 @@ class LaserscannerRecord(Record):
 
 
 def LaserscannerResource(
-    *args, laser0, laser1, photodiode, number=None, conn=None, attrs=None
+    *args, laser0, laser1, photodiode, pwm, enable, number=None, conn=None, attrs=None
 ):
     """Resource for laser scanner
 
@@ -167,11 +171,11 @@ def LaserscannerResource(
     io.append(
         Subsignal("laser1", Pins(laser1, dir="o", conn=conn, assert_width=1))
     )
-    io.append(
-        Subsignal(
-            "photodiode", Pins(photodiode, dir="i", conn=conn, assert_width=1)
-        )
-    )
+    io.append(Subsignal("photodiode",
+              Pins(photodiode, dir="i", conn=conn, assert_width=1)))
+    io.append(Subsignal("pwm", Pins(pwm, dir="o", conn=conn, assert_width=1)))
+    io.append(Subsignal("en", PinsN(enable, dir="o",
+                            conn=conn, assert_width=1)))
     if attrs is not None:
         io.append(attrs)
     return Resource.family(*args, number, default_name="laserscanner", ios=io)

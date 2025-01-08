@@ -8,6 +8,7 @@ from ..platforms import Firestarter
 class TestBuild(unittest.TestCase):
     """Platform is passed to object which is then built"""
 
+    # build directory created in folder python is executed
     def test_all(self, micropython=False):
         platform = Firestarter(micropython)
         platform.build(

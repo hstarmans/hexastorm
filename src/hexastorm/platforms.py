@@ -46,8 +46,8 @@ class TestPlatform:
     motors = len(stepspermm.keys())
     steppers = [StepperRecord()] * motors
     laserhead = LaserscannerRecord()
-    bldc = BLDCRecord()
-    leds = Array(Signal() for _ in range(3))
+    # bldc = BLDCRecord()
+    # leds = Array(Signal() for _ in range(3))
 
     def __init__(self):
         self.memdepth = wordsinmove(self) * 2 + 1
@@ -86,72 +86,65 @@ class Firestarter(LatticeICE40Platform, platform):
     # default_clk = "clk13"
     # clock_domain_generator = FirestarterDomainGenerator
     resources = [
-        Resource(
-            "clk13",
-            0,
-            Pins("35", dir="i"),
-            Clock(13.56e6),
-            Attrs(GLOBAL=True, IO_STANDARD="SB_LVCMOS"),
-        ),
-        # TODO: replace with RGB led resource
         *LEDResources(
-            pins="39 40 41", invert=True, attrs=Attrs(IO_STANDARD="SB_LVCMOS")
+            pins="39", invert=True, attrs=Attrs(IO_STANDARD="SB_LVCMOS")
         ),
         # NOTE: there is a proper resource in nmigen_boards
         #       this is used as it is also done by luna
         Resource(
             "debug_spi",
             0,
-            Subsignal("sck", Pins("18", dir="i")),
-            Subsignal("sdi", Pins("21", dir="i")),
-            Subsignal("sdo", Pins("19", dir="o")),
-            Subsignal("cs", PinsN("13", dir="i")),
+            Subsignal("sck", Pins("19", dir="i")),
+            Subsignal("sdi", Pins("13", dir="i")),
+            Subsignal("sdo", Pins("18", dir="o")),
+            Subsignal("cs", PinsN("25", dir="i")),
             Attrs(IO_STANDARD="SB_LVCMOS"),
         ),
         # Laserscanner resource
         LaserscannerResource(
             number=0,
-            laser0="31",
-            laser1="28",
-            photodiode="38",
+            laser0="11",
+            laser1="12",
+            photodiode="46",
+            pwm='6', enable='4',
             attrs=Attrs(IO_STANDARD="SB_LVCMOS"),
         ),
-        # BLDC driver
-        BLDCResource(
-            number=0,
-            uL="25",
-            uH="26",
-            vL="9",
-            vH="23",
-            wL="27",
-            wH="32",
-            sensor0="34",
-            sensor1="36",
-            sensor2="37",
-            attrs=Attrs(IO_STANDARD="SB_LVCMOS"),
-        ),
+        # # BLDC driver
+        # BLDCResource(
+        #     number=0,
+        #     uL="2",
+        #     uH="4",
+        #     vL="3",
+        #     vH="6",
+        #     wL="9",
+        #     wH="10",
+        #     sensor0="45",
+        #     sensor1="47",
+        #     sensor2="48",
+        #     attrs=Attrs(IO_STANDARD="SB_LVCMOS"),
+        # ),
         # x-stepper
         StepperResource(
             number=0,
-            step="6",
-            direction="4",
-            limit="44",  # x and z are switched
+            step="26",
+            direction="20",
+            limit="42",  
             attrs=Attrs(IO_STANDARD="SB_LVCMOS"),
         ),
         # y-stepper
         StepperResource(
             number=1,
-            step="2",
-            direction="48",
-            limit="47",
+            step="37",
+            direction="36",
+            limit="21",
             attrs=Attrs(IO_STANDARD="SB_LVCMOS"),
         ),
         # z-stepper
         StepperResource(
             number=2,
-            step="46",
-            direction="45",
-            limit="3",  # x and z are switched
+            step="35",
+            direction="27",
+            limit="23",  
             attrs=Attrs(IO_STANDARD="SB_LVCMOS"),
         ),
     ]
@@ -184,6 +177,7 @@ class Firestarter(LatticeICE40Platform, platform):
                 subprocess.check_call(
                     [
                         "mpremote",
+                        "resume",
                         "connect",
                         self.micropython,
                         "fs",
@@ -192,13 +186,27 @@ class Firestarter(LatticeICE40Platform, platform):
                         ":sd/fpga/fpga.bit",
                     ]
                 )
+                for str in ['from hexastorm.controller import Host',
+                            'hst = Host(micropython=True)',
+                            'hst.flash_fpga("sd/fpga/fpga.bit")']:
+                    subprocess.check_call(
+                        [
+                            "mpremote",
+                            "resume",
+                            "connect",
+                            self.micropython,
+                            "exec",
+                            str,
+                        ]
+                    )
+
             else:
                 subprocess.check_call(["fomu-flash", "-w", bitstream_filename])
                 subprocess.check_call(["fomu-flash", "-r"])
 
 
 if __name__ == "__main__":
-    Firestarter(micropython=False).build(
+    Firestarter(micropython='/dev/ttyACM0').build(
         Blinky(),
         do_program=True,
         verbose=True,

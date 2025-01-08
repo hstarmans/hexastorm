@@ -66,23 +66,17 @@ class platform:
         self.motors = len(list(self.stepspermm.keys()))
         self.ic_address = 0x28  # spi address
         if micropython:
-            self.scl = 22  # scl pin digipot
-            self.sda = 21  # sda pin digipot
-            self.ic_dev_nr = 0  # device  digipot
-            self.pi_sck = 14
-            self.pi_miso = 12
-            self.pi_mosi = 13
-            self.pi_cs = 15
+            self.scl = 5  # scl pin digipot
+            self.sda = 4  # sda pin digipot
+            self.sck = 12
+            self.miso = 11
+            self.mosi = 13
+            self.flash_cs = 10
 
-            self.fpga_baudrate = int(1e6)
-            self.fpga_cs = 27
-            self.fpga_sck = 32
-            self.fpga_mosi = 25
-            self.fpga_miso = 26
-            self.enable_pin = 3  # enable pin stepper motors
-            self.reset_pin = 1  # can be used to reset FPGA
-            self.chip_select = 16  # spi chip select
-            self.spi_dev = 1
+            self.baudrate = int(1e6)
+            self.fpga_cs = 9
+            self.enable_pin = 38  # enable pin stepper motors
+            self.reset_pin = 47  # can be used to reset FPGA
         # raspberry pi
         else:
             self.ic_dev_nr = 1  # digit pot connection
