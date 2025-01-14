@@ -161,7 +161,7 @@ class Host:
         if not self.micropython:
             raise Exception("Only supported for micropython.")
         from winbond import W25QFlash
-
+        self.reset_pin.value(0)
         self.flash_select.value(1)
         sleep(1)
         f = W25QFlash(

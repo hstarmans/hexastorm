@@ -69,7 +69,7 @@ class Firestarter(LatticeICE40Platform, platform):
     hfosc_div = 2
     laser_var = {
         "RPM": 2000,
-        "SPINUP_TIME": 10,
+        "SPINUP_TIME": 1.5,
         "STABLE_TIME": 1.125,
         "FACETS": 4,
         "CRYSTAL_HZ": clks[hfosc_div] * 1e6,
@@ -106,7 +106,7 @@ class Firestarter(LatticeICE40Platform, platform):
             laser0="11",
             laser1="12",
             photodiode="46",
-            pwm='6', enable='4',
+            pwm="6", enable="4",
             attrs=Attrs(IO_STANDARD="SB_LVCMOS"),
         ),
         # # BLDC driver

@@ -146,7 +146,7 @@ class LaserheadTest(Base):
         self.assertEqual((yield from host.get_state())["error"], False)
 
     @executor
-    def test_stable(self, timeout=60):
+    def test_stable(self, timeout=3):
         host = self.host
         yield from host.enable_comp(synchronize=True)
         print(f"Wait for synchronization, {timeout} seconds")

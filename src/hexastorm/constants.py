@@ -119,8 +119,9 @@ def params(platform):
     # jitter requires 2
     # you also need to enable read pin at count one when you read bits
     assert var["LASERTICKS"] > 2
-    # var['JITTERTICKS'] = round(0.5*var['LASERTICKS'])
-    var["JITTERTICKS"] = round(0.08 * var["TICKSINFACET"])
+    var['JITTERTICKS'] = round(0.5*var['LASERTICKS'])
+    # PCBmotor
+    # var["JITTERTICKS"] = round(0.08 * var["TICKSINFACET"])
     if var["END%"] > round(1 - (var["JITTERTICKS"] + 1) / var["TICKSINFACET"]):
         raise Exception("Invalid settings, END% too high")
     var["BITSINSCANLINE"] = round(
