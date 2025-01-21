@@ -1,51 +1,32 @@
-""" raspberry pi test script
+from machine import Pin, SoftSPI, SPI
+from hexastorm.controller import Host
 
-test script to run on the raspberry pi
+hst = Host(micropython=True)
+hst.reset()
+spi = SPI(2,
+    baudrate=int(3e6),
+    #polarity=1,
+    phase=1,
+    sck=Pin(12),
+    mosi=Pin(13),
+    miso=Pin(11))
+spi.deinit()
+spi.init()
+flash_select = Pin(10, Pin.OUT)
+flash_select.value(1)
+fpga_select = Pin(9, Pin.OUT)
 
-There are problems with SPI. The select pin does not work as expected.
-This is most likely due to spidev library. I remapped the cs pin:
-dtoverlay=spi0-1cs,cs0_pin=18
-Furthermore, xfer "silently" removes items from a list.
-You should make a deepcopy
-"""
-import spidev
-from gpiozero import LED, MCP3008
-
-PIZERO = False
-clock_pin = 11
-mosi_pin = 10
-miso_pin = 9
-select_pin = 8
-
-if PIZERO:
-    dev = MCP3008(
-        channel=0,
-        mosi_pin=mosi_pin,
-        miso_pin=miso_pin,
-        select_pin=select_pin,
-        clock_pin=clock_pin,
-    )
-else:
-    spi = spidev.SpiDev()
-    spi.open(0, 0)
-    spi.mode = 1
-    chip_select = LED(select_pin)
-    chip_select.on()
-    spi.max_speed_hz = round(1e6)
-bts = [210, 222, 230]
+bts = [210, 110, 123, 202, 123, 134, 142, 99, 188, 187, 123, 203]
 previous_byte = None
-for idx, byte in enumerate(bts):
-    if PIZERO:
-        byte_received = dev._spi.transfer([byte])
-    else:
-        chip_select.off()
-        byte_received = spi.xfer([byte])[0]
-        chip_select.on()
-    if idx != 0:
-        try:
-            assert previous_byte == byte_received
-        except AssertionError:
-            print(previous_byte)
-            print(byte_received)
-            raise Exception("Test failed: not equal")
-    previous_byte = byte
+
+for i in range(100_000):
+    response = bytearray([0]*len(bts))
+    data = bytearray(bts)
+    fpga_select.value(0)
+    spi.write_readinto(data, response)
+    fpga_select.value(1)
+    try:
+        assert data[:-2] == response[2:]
+    except AssertionError:
+        print(f"Test failed in loop {i}")
+        break

@@ -116,31 +116,45 @@ class Host:
         self.bus = SoftI2C(
             scl=Pin(self.platform.scl), sda=Pin(self.platform.sda)
         )
+        # hardware SPI works partly, set speed to 3e6
+        # return bytes give issue in retrieving position
         self.spi = SoftSPI(
             baudrate=self.platform.baudrate,
-            polarity=1,
-            phase=0,
+            phase=1,
             sck=Pin(self.platform.sck, Pin.OUT),
             mosi=Pin(self.platform.mosi, Pin.OUT),
             miso=Pin(self.platform.miso, Pin.IN),
         )
+        # keep for hardware SPI
+        self.spi.deinit()
+        self.spi.init()
         self.flash_select = Pin(self.platform.flash_cs, Pin.OUT)
         self.flash_select.value(1)
         self.fpga_select = Pin(self.platform.fpga_cs, Pin.OUT)
         # stepper motor enable pin
         self.enable = Pin(self.platform.enable_pin, Pin.OUT)
+        self.init_steppers()
 
-    def init_steppers(self):
-        """configure TMC2130 steppers via SPI
-
-        Uses teemuatflut CPP library with custom python wrapper
-            https://github.com/hstarmans/TMCStepper
+    def init_steppers(self, current=100):
+        """ steppers are configured for TMC2209
+            current in mA
         """
-        import steppers
-
         if self.micropython:
-            steppers.init()
+            from tmc.TMC_2209_StepperDriver import TMC_2209, MovementAbsRel
+            for mtr_id in [0,1]:
+                tmc = TMC_2209(pin_en=38, mtr_id=mtr_id)
+                tmc.setMovementAbsRel(MovementAbsRel.absolute)
+                tmc.setDirection_reg(False)
+                tmc.setVSense(True)
+                tmc.setCurrent(current)
+                tmc.setIScaleAnalog(True)
+                tmc.setInterpolation(True)
+                tmc.setSpreadCycle(False)
+                tmc.setMicrosteppingResolution(16)
+                tmc.setInternalRSense(False)
+                tmc.setMotorEnabled(False)
         else:
+            import steppers
             self.motors = [
                 steppers.TMC2130(link_index=i)
                 for i in range(1, 1 + self.platform.motors)

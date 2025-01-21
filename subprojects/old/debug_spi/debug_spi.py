@@ -42,5 +42,5 @@ class DebugSPIExample(Elaboratable):
 
 
 if __name__ == "__main__":
-    platform = Firestarter(micropython=False)
+    platform = Firestarter(micropython=True)
     platform.build(DebugSPIExample(), do_program=False, verbose=True)

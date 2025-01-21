@@ -432,7 +432,7 @@ class MoveTest(Base):
         decimals -- number of decimals
         """
         motors = self.host.platform.motors
-        dist = np.array([1, 1, 1])
+        dist = np.array([10, 10, 10])
         startpos = (yield from self.host.position).copy()
         for direction in [-1, 1]:
             self.assertEqual(
@@ -488,7 +488,7 @@ class PrintTest(Base):
 
         stagespeeds = lines_per_second / (stepspermm * np.array(stepsperline))
 
-        print(f"Stagepeeds are {stagespeeds.round(2)} mm/s")
+        print(f"Stagepeeds are {stagespeeds} mm/s")
 
         # laser diameter estimated to be 60 microns
         if max(stepsperline) * (1 / stepspermm) > 0.03:
