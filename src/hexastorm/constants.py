@@ -66,6 +66,7 @@ class platform:
         self.motors = len(list(self.stepspermm.keys()))
         self.ic_address = 0x28  # spi address
         if micropython:
+            self.tmc2209 = {'x': 0, 'y': 1, 'z': 2} # uart ids tmc2209 drivers
             self.scl = 5  # scl pin digipot
             self.sda = 4  # sda pin digipot
             self.sck = 12
@@ -73,10 +74,15 @@ class platform:
             self.mosi = 13
             self.flash_cs = 10
 
-            self.baudrate = int(1e6)
+            # FPGA allows narrow range of baudrates
+            # hardware spi between 2 and 3 MHz
+            # software spi can be 1 MHz
+             
+            self.baudrate = int(3e6)
+            self.phase = 1        # spi phase must be 1
             self.fpga_cs = 9
             self.enable_pin = 38  # enable pin stepper motors
-            self.reset_pin = 47  # can be used to reset FPGA
+            self.reset_pin = 47   # can be used to reset FPGA
         # raspberry pi
         else:
             self.ic_dev_nr = 1  # digit pot connection

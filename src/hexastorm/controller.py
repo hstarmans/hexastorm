@@ -108,7 +108,7 @@ class Host:
 
     def init_micropython(self):
         from .constants import platform as platformmicro
-        from machine import Pin, SoftSPI, SoftI2C
+        from machine import Pin, SPI, SoftI2C
 
         self.platform = platformmicro(micropython=True)
         self.reset_pin = Pin(self.platform.reset_pin, Pin.OUT)
@@ -118,9 +118,10 @@ class Host:
         )
         # hardware SPI works partly, set speed to 3e6
         # return bytes give issue in retrieving position
-        self.spi = SoftSPI(
+        self.spi = SPI(2,
             baudrate=self.platform.baudrate,
-            phase=1,
+            polarity=0,
+            phase=self.platform.phase,
             sck=Pin(self.platform.sck, Pin.OUT),
             mosi=Pin(self.platform.mosi, Pin.OUT),
             miso=Pin(self.platform.miso, Pin.IN),
@@ -140,19 +141,21 @@ class Host:
             current in mA
         """
         if self.micropython:
-            from tmc.TMC_2209_StepperDriver import TMC_2209, MovementAbsRel
-            for mtr_id in [0,1]:
-                tmc = TMC_2209(pin_en=38, mtr_id=mtr_id)
-                tmc.setMovementAbsRel(MovementAbsRel.absolute)
-                tmc.setDirection_reg(False)
-                tmc.setVSense(True)
-                tmc.setCurrent(current)
-                tmc.setIScaleAnalog(True)
-                tmc.setInterpolation(True)
-                tmc.setSpreadCycle(False)
-                tmc.setMicrosteppingResolution(16)
-                tmc.setInternalRSense(False)
-                tmc.setMotorEnabled(False)
+            from tmc.TMC_2209_StepperDriver import TMC_2209
+            for key, value in self.platform.tmc2209.items():
+                try:
+                    tmc = TMC_2209(pin_en=38, mtr_id=value)
+                    tmc.setDirection_reg(False)
+                    tmc.setVSense(True)
+                    tmc.setCurrent(current)
+                    tmc.setIScaleAnalog(True)
+                    tmc.setInterpolation(True)
+                    tmc.setSpreadCycle(False)
+                    tmc.setMicrosteppingResolution(16)
+                    tmc.setInternalRSense(False)
+                    tmc.setMotorEnabled(False)
+                except Exception:
+                    print(f"Cannot connect to stepper motor {key} axis")
         else:
             import steppers
             self.motors = [

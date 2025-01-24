@@ -9,7 +9,7 @@ class TestBuild(unittest.TestCase):
     """Platform is passed to object which is then built"""
 
     # build directory created in folder python is executed
-    def test_all(self, micropython=False):
+    def test_all(self, micropython=True):
         platform = Firestarter(micropython)
         platform.build(
             Dispatcher(Firestarter()),
