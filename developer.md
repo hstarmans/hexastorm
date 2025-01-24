@@ -210,6 +210,27 @@ System is for writing to, i.e. exposing, a substrate. Reading should also be pos
 System has no link for LIDAR measurements, circuit can be found [here](https://hackaday.io/project/163501-open-source-lidar-unruly).    
 The FPGA controls all the stepper motors. At the moment it is not possible to read instruction from a GCODE file.  
 Add maximum-length linear-feedback shift register sequence and CRC check.  
+
+## Raspberry pi
+The following lines need to be in the /boot/config.txt;
+```
+# I2C for laserdriver and camera
+dtparam=i2c_arm=on
+dtparam=i2c_vc=on
+# SPI
+dtoverlay=spi0-1cs,cs0_pin=18
+dtoverlay=spi1-1cs,cs0_pin=7
+# camera
+dtoverlay=vc4-fkms-v3d
+start_x=1
+gpu_mem=300
+```
+There should not be dtparam=spi=on, somewhere. This would enable two chip selects for SPI0 and 
+creates a conflict with the pin select of SPI1. 
+
+## Arducam
+Install my version of the Python libary available at [ArducamPython](https://github.com/hstarmans/Arducampython).
+
 <!-- 
 TODO:
   add docs

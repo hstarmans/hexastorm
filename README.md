@@ -18,12 +18,9 @@ The alignment procedure is shown in the following video.
 [![Alignment procedure image not showing](http://img.youtube.com/vi/Ri6DAneEzw4/0.jpg)](http://www.youtube.com/watch?v=Ri6DAneEzw4 "Alignment procedure")
 
 ## Requirements
-Code is tested on a Raspberry Pi 3B and 4B. The SD-card should be at least 8 GB, ideally 16 GB.  
-Both 32 bit and 64 bit are tested, with camera.
-
-# Overall note
-Development is done on the main or master branch.
-Look through to commit history to find the right working version which was used in the video.
+Code can be deployed on microcontroller ESP32S3 and FPGA UP5K.  
+This requires additional library [esp32_hexastorm](https://github.com/hstarmans/esp32_hexastorm).
+Part of the code can be run on Micropython, rest is Python only. 
 
 # Install
 Install poetry and python.
@@ -55,26 +52,5 @@ If you want to interact with the stepper motors and flash the fpga.
 ```console
 ./install.sh
 ```
-## Micropython
-An idea, I am working on is to call controller.py from Micropython.
-Most dependencies can be moved to ESP32.
 
-## Raspberry pi
-The following lines need to be in the /boot/config.txt;
-```
-# I2C for laserdriver and camera
-dtparam=i2c_arm=on
-dtparam=i2c_vc=on
-# SPI
-dtoverlay=spi0-1cs,cs0_pin=18
-dtoverlay=spi1-1cs,cs0_pin=7
-# camera
-dtoverlay=vc4-fkms-v3d
-start_x=1
-gpu_mem=300
-```
-There should not be dtparam=spi=on, somewhere. This would enable two chip selects for SPI0 and 
-creates a conflict with the pin select of SPI1. 
 
-## Arducam
-Install my version of the Python libary available at [ArducamPython](https://github.com/hstarmans/Arducampython).
