@@ -177,12 +177,22 @@ class Host:
     def flash_fpga(self, filename):
         if not self.micropython:
             raise Exception("Only supported for micropython.")
+        from machine import SoftSPI, Pin
         from winbond import W25QFlash
         self.reset_pin.value(0)
         self.flash_select.value(1)
         sleep(1)
+        # can't get hardware spi working with memory
+        spi = SoftSPI(
+                  polarity=0,
+                  phase =1,
+                  sck=Pin(self.platform.sck),
+                  mosi=Pin(self.platform.mosi),
+                  miso=Pin(self.platform.miso))
+        spi.deinit()
+        spi.init()
         f = W25QFlash(
-            spi=self.spi,
+            spi=spi,
             cs=self.flash_select,
             baud=self.platform.baudrate,
             software_reset=True,
