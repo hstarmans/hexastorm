@@ -271,7 +271,7 @@ class Host:
         # on HX4K this was not needed
         # is required for the UP5K
         if blank:
-            self.spi_exchange_data([0] * (WORD_BYTES + COMMAND_BYTES))
+            self.send_command([0] * (WORD_BYTES + COMMAND_BYTES))
 
     def get_motordebug(self, blocking=False):
         """retrieves the motor debug word
@@ -355,16 +355,18 @@ class Host:
         dct = {}
         # 9 bytes are returned
         # the state is decoded from byte 7 and 8, i.e. -2 and -1
-        bits = "{:08b}".format(data[-1])
-        dct["parsing"] = int(bits[STATE.PARSING])
-        dct["error"] = int(bits[STATE.ERROR])
-        dct["mem_full"] = int(bits[STATE.FULL])
-        bits = "{:08b}".format(data[-2])
+        byte1 = data[-1]  # Last byte
+
+        dct["parsing"] = (byte1 >> (7-STATE.PARSING)) & 1
+        dct["error"] = (byte1 >> (7-STATE.ERROR)) & 1
+        dct["mem_full"] =  (byte1 >> (7-STATE.FULL)) & 1
+
+        byte2 = data[-2]  # Second to last byte
         mapping = list(self.platform.stepspermm.keys())
         for i in range(self.platform.motors):
-            dct[mapping[i]] = int(bits[i])
-        dct["photodiode_trigger"] = int(bits[self.platform.motors])
-        dct["synchronized"] = int(bits[self.platform.motors + 1])
+            dct[mapping[i]] = (byte2 >> (7-i)) & 1
+        dct["photodiode_trigger"] = (byte2 >> (7-self.platform.motors)) & 1
+        dct["synchronized"] = (byte2 >> (7-self.platform.motors - 1)) & 1
         return dct
 
     @property
@@ -406,10 +408,10 @@ class Host:
         """
         if val:
             self.enable.off() if not self.micropython else self.enable.value(0)
-            self.spi_exchange_data([COMMANDS.START] + WORD_BYTES * [0])
+            self.send_command([COMMANDS.START] + WORD_BYTES * [0])
         else:
             self.enable.on() if not self.micropython else self.enable.value(1)
-            self.spi_exchange_data([COMMANDS.STOP] + WORD_BYTES * [0])
+            self.send_command([COMMANDS.STOP] + WORD_BYTES * [0])
 
     @property
     def laser_current(self):
@@ -558,21 +560,27 @@ class Host:
         blocking  --  try again if memory is full
         returns bytearray with length equal to data sent
         """
-
-        def send_command(command):
-            assert len(command) == WORD_BYTES + COMMAND_BYTES
+        assert len(command) == WORD_BYTES + COMMAND_BYTES
+        def send_command(command, response):
+            # caller arguments are bytearrays and mutable
             if self.test:
-                data = yield from self.spi_exchange_data(command)
+                # function is created in Amaranth HDL
+                response[:] = (yield from self.spi_exchange_data(command))
             else:
-                data = self.spi_exchange_data(command)
-            return data
+                self.spi.write_readinto(command, response)
+        
+        command = bytearray(command)
+        response = bytearray(command)
 
+        if not self.test:
+            self.fpga_select.value(0)
+            
         if blocking:
             trials = 0
             while True:
                 trials += 1
-                data = yield from send_command(command)
-                state = yield from self.get_state(data)
+                yield from send_command(command, response)
+                state = yield from self.get_state(response)
                 if state["error"]:
                     raise Exception("Error detected on FPGA")
                 if not state["mem_full"]:
@@ -580,8 +588,10 @@ class Host:
                 if trials > self.maxtrials:
                     raise Memfull(f"Too many trials {trials} needed")
         else:
-            data = yield from send_command(command)
-        return data
+            yield from send_command(command, response)
+        if not self.test:
+            self.fpga_select.value(1)
+        return response
 
     def enable_comp(
         self, laser0=False, laser1=False, polygon=False, synchronize=False
@@ -642,7 +652,10 @@ class Host:
                 else:
                     idx = degree + motor * max_coeff_order
                     coeff = coefficients[idx]
-                data = int(coeff).to_bytes(8, "big", True)
+                if sys.implementation.name == 'micropython':
+                    data = int(coeff).to_bytes(8, "big", True)
+                else:
+                    data = int(coeff).to_bytes(8, "big", signed=True)
                 commands += [write_byte + data]
         # send commands to FPGA
         for command in commands:
@@ -651,31 +664,6 @@ class Host:
         axes_names = list(platform.stepspermm.keys())
         return np.array([state[key] for key in axes_names])
 
-    def spi_exchange_data(self, data):
-        """writes data to peripheral
-
-        data  --  command followed with word
-                     list of multiple bytes
-
-        returns bytearray with length equal to data sent
-        """
-        assert len(data) == (COMMAND_BYTES + WORD_BYTES)
-
-        # spidev changes values passed to it
-        if not self.micropython:
-            from copy import deepcopy
-
-            self.fpga_select.off()
-            datachanged = deepcopy(data)
-            response = bytearray(self.spi.xfer2(datachanged))
-            self.fpga_select.on()
-        else:
-            self.fpga_select.value(0)
-            response = bytearray(len(data) * [0])
-            data = bytearray(data)
-            self.spi.write_readinto(data, response)
-            self.fpga_select.value(1)
-        return response
 
     def writeline(self, bitlst, stepsperline=1, direction=0):
         """write bits to FIFO
@@ -688,12 +676,20 @@ class Host:
         direction     motor direction of scanning axis
         """
         bytelst = self.bittobytelist(bitlst, stepsperline, direction)
+        cmdlst = self.bytetocmdlist(bytelst)
+        for cmd in cmdlst:
+            (yield from self.send_command(cmd, blocking=True))
+
+    def bytetocmdlist(self, bytelst):
+        cmdlist = []
         write_byte = COMMANDS.WRITE.to_bytes(1, "big")
-        for i in range(0, len(bytelst), 8):
+        bytelst_len = len(bytelst)
+        for i in range(0, bytelst_len, 8):
             lst = bytelst[i : i + 8]
             lst.reverse()
             data = write_byte + bytes(lst)
-            (yield from self.send_command(data, blocking=True))
+            cmdlist.append(data)
+        return cmdlist
 
     def bittobytelist(
         self, bitlst, stepsperline=1, direction=0, bitorder="little"
@@ -712,43 +708,43 @@ class Host:
         # the motor
         # watch out for python "banker's rounding"
         # sometimes target might not be equal to steps
-        bits = self.laser_params["BITSINSCANLINE"]
-        halfperiod = int((bits - 1) // (stepsperline * 2))
+        bits_in_scanline = self.laser_params["BITSINSCANLINE"]
+        halfperiod = int((bits_in_scanline - 1) // (stepsperline * 2))
         if halfperiod < 1:
             raise Exception("Steps per line cannot be achieved")
         # TODO: is this still an issue?
         # you could check as follows
         # steps = self.laser_params['TICKSINFACET']/(halfperiod*2)
         #    print(f"{steps} is actual steps per line")
-        direction = [int(bool(direction))]
+        direction_byte = [int(bool(direction))]
 
-        def remainder(bytelst):
-            rem = len(bytelst) % WORD_BYTES
-            if rem > 0:
-                res = WORD_BYTES - rem
-            else:
-                res = 0
-            return res
 
-        if len(bitlst) == 0:
+
+        def pad_with_zeros(bytelst):
+            padding_length = (WORD_BYTES - len(bytelst) % WORD_BYTES) % WORD_BYTES
+            bytelst.extend([0] * padding_length)
+
+        if not len(bitlst):
             bytelst = [INSTRUCTIONS.LASTSCANLINE]
-            bytelst += remainder(bytelst) * [0]
+            pad_with_zeros(bytelst)
+            return bytelst
+
+
+        bytelst = [INSTRUCTIONS.SCANLINE]
+        halfperiodbits = [int(i) for i in bin(halfperiod)[2:]]
+        halfperiodbits.reverse()
+        assert len(halfperiodbits) < 56
+        bytelst.extend(list(
+            ulabext.packbits(direction_byte + halfperiodbits, bitorder=bitorder)
+        ))
+        pad_with_zeros(bytelst)
+
+        bitlst_len = len(bitlst)
+        if bitlst_len == bits_in_scanline:
+            bytelst.extend(ulabext.packbits(bitlst, bitorder=bitorder))
+        elif bitlst_len == bits_in_scanline // 8:
+            bytelst.extend(bitlst)
         else:
-            bytelst = [INSTRUCTIONS.SCANLINE]
-            halfperiodbits = [int(i) for i in bin(halfperiod)[2:]]
-            halfperiodbits.reverse()
-            assert len(halfperiodbits) < 56
-            bytelst += list(
-                ulabext.packbits(direction + halfperiodbits, bitorder=bitorder)
-            )
-            bytelst += remainder(bytelst) * [0]
-            if len(bitlst) == self.laser_params["BITSINSCANLINE"]:
-                assert max(bitlst) <= 1
-                assert min(bitlst) >= 0
-                bytelst += list(ulabext.packbits(bitlst, bitorder=bitorder))
-            elif len(bitlst) == int(self.laser_params["BITSINSCANLINE"] / 8):
-                bytelst += bitlst
-            else:
-                raise Exception("Invalid line length")
-            bytelst += remainder(bytelst) * [0]
+            raise Exception("Invalid line length")
+        pad_with_zeros(bytelst)
         return bytelst

@@ -16,10 +16,9 @@ def sign(array):
     if not micropython:
         return np.sign(array)
     else:
-        singlevalue = False
-        if not isinstance(array, (np.ndarray, list)):
-            singlevalue = True
-            array = [array]
+        if isinstance(array, (int, float)):  # Handle single values directly
+            return -1 if array < 0 else 0 if array == 0 else 1
+
         for idx, val in enumerate(array):
             if val < 0:
                 array[idx] = -1
@@ -27,10 +26,7 @@ def sign(array):
                 array[idx] = 0
             else:
                 array[idx] = 1
-        if singlevalue:
-            return array[0]
-        else:
-            return array
+        return array
 
 
 def packbits(bitlst, bitorder="big"):
@@ -39,27 +35,33 @@ def packbits(bitlst, bitorder="big"):
     if not micropython:
         return np.packbits(bitlst, bitorder=bitorder)
     else:
-        tmp_str = ""
-        byte_lst = np.zeros(math.ceil(len(bitlst) / 8), dtype=np.uint8)
+        bitlst_len = len(bitlst)
+        num_bytes = math.ceil(bitlst_len / 8)
+        byte_arr = bytearray(num_bytes)  # Pre-allocate with correct size
+        byte_index = 0
+        bit_index = 0
 
-        cnt = 0
-        for idx, bit in enumerate(bitlst):
-            tmp_str += str(bit)
-            if len(tmp_str) == 8:
-                if bitorder == "little":
-                    # not supported in micropython
-                    # tmp_str = tmp_str[::-1]
-                    tmp_str = "".join(reversed(tmp_str))
-                byte_lst[cnt] = int(tmp_str, 2)
-                tmp_str = ""
-                cnt += 1
+        if bitorder == "big":
+            while bit_index < bitlst_len:
+                byte_value = 0
+                remaining_bits = min(8, bitlst_len - bit_index) # calculate remaining bits
+                for i in range(remaining_bits):
+                    byte_value = (byte_value << 1) | bitlst[bit_index]
+                    bit_index += 1
+                byte_arr[byte_index] = byte_value << (8 - remaining_bits) # pad with zeros
+                byte_index += 1
 
-        if len(tmp_str) > 0:
-            tmp_str += "0" * (8 - len(tmp_str))
-            if bitorder == "little":
-                tmp_str = "".join(reversed(tmp_str))
-            byte_lst[cnt] = int(tmp_str, 2)
-        return byte_lst
+        else:  # little-endian
+            while bit_index < bitlst_len:
+                byte_value = 0
+                remaining_bits = min(8, bitlst_len - bit_index) # calculate remaining bits
+                for i in range(remaining_bits):
+                    byte_value |= bitlst[bit_index] << i
+                    bit_index += 1
+                byte_arr[byte_index] = byte_value
+                byte_index += 1
+
+        return np.array(byte_arr, dtype=np.uint8)
 
 
 def assert_array_almost_equal(x, y, decimal=6, err_msg="", verbose=True):

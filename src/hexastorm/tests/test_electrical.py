@@ -120,15 +120,15 @@ class LaserheadTest(Base):
         self.assertEqual((yield from host.get_state())["error"], False)
 
     @executor
-    def lasertest(self):
-        "enable and disable laser by pressing enter"
+    def lasertest(self, laser1=True):
+        "enable and disable laser by pressing enter"        
         host = self.host
-        print("Press enter to turn laser on")
+        print(f"Press enter to turn laser {1 if laser1 else 0} on")
         input()
-        yield from host.enable_comp(laser1=True, laser0=False)
+        yield from host.enable_comp(laser1=laser1, laser0=(not laser1))
         print("Press enter to turn laser off")
         input()
-        yield from host.enable_comp(laser1=False)
+        yield from host.enable_comp(laser1=False, laser0=False)
         self.assertEqual((yield from host.get_state())["error"], False)
 
     @executor
