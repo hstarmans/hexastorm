@@ -567,14 +567,13 @@ class Host:
                 # function is created in Amaranth HDL
                 response[:] = (yield from self.spi_exchange_data(command))
             else:
+                self.fpga_select.value(0)
                 self.spi.write_readinto(command, response)
+                self.fpga_select.value(1)
         
         command = bytearray(command)
         response = bytearray(command)
 
-        if not self.test:
-            self.fpga_select.value(0)
-            
         if blocking:
             trials = 0
             while True:
@@ -589,8 +588,7 @@ class Host:
                     raise Memfull(f"Too many trials {trials} needed")
         else:
             yield from send_command(command, response)
-        if not self.test:
-            self.fpga_select.value(1)
+
         return response
 
     def enable_comp(

@@ -3,7 +3,7 @@ import unittest
 import sys
 from time import sleep, time
 
-from ..constants import COMMANDS, MOVE_TICKS, WORD_BYTES, wordsinmove
+from ..constants import COMMANDS, MOVE_TICKS, WORD_BYTES, wordsinmove, platform
 from ..controller import Host, Memfull, executor
 
 upython = False
@@ -197,15 +197,28 @@ class LaserheadTest(Base):
         self.host.enable_steppers = False
 
     @executor
-    def test_scanline(self, timeout=3, numblines=1000):
+    def test_scanline(self, timeout=3, numblines=1_000):
+        from time import ticks_ms
+        from math import isclose
         host = self.host
         line = [1] * host.laser_params["BITSINSCANLINE"]
+        # speed can be further improved by precomputing the commands
+        for _ in range(8):
+            yield from host.writeline(line)
+        print(f"waiting for polygon to stabilize and laserhead to process {numblines} lines")
+        sleep(3)
+        starttime = ticks_ms()  # milliseconds
         for _ in range(numblines):
             yield from host.writeline(line)
+        elapsed = (ticks_ms() - starttime)/1000 # seconds
+        measured_freq = numblines/elapsed # hertz    
         yield from host.writeline([])
-        print(f"Wait for stopline to execute, {timeout} seconds")
-        sleep(timeout)
+        # you achieve 33 hertz which is too low
+        expected_freq = platform.laser_var['RPM']/60*platform.laser_var['FACETS']
+        # measured freq is higher as it still need to clean the buffer
+        self.assertEqual(isclose(measured_freq, expected_freq, rel_tol=0.1), True)
         self.assertEqual((yield from host.get_state())["error"], False)
+        print(f"passed, line rate measured: {measured_freq:.2f},  expected {expected_freq:.2f} in Hertz")
         yield from host.enable_comp(synchronize=False)
 
 

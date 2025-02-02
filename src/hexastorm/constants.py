@@ -68,7 +68,7 @@ class platform:
         if micropython:
             self.tmc2209 = {'x': 0, 'y': 1, 'z': 2} # uart ids tmc2209 drivers
             self.scl = 5  # scl pin digipot
-            self.sda = 4  # sda pin digipot
+            self.sda = 46  # sda pin digipot TODO: should be 4, hotfix to 46
             self.sck = 12
             self.miso = 11
             self.mosi = 13
