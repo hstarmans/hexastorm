@@ -1,26 +1,18 @@
+import sys
+if sys.implementation.name == "cpython":
+    raise Exception("Module should be called from micropython")
+
+
 import os
 import unittest
-import sys
-from time import sleep, time
+from time import sleep, ticks_ms
+from math import isclose
+
+from ulab import numpy as np
 
 from ..constants import COMMANDS, MOVE_TICKS, WORD_BYTES, wordsinmove, platform
 from ..controller import Host, Memfull, executor
-
-upython = False
-if sys.implementation.name == "cpython":
-    import numpy as np
-    import pandas as pd
-    import plotext as plt
-    from numpy.testing import assert_array_almost_equal
-    from gpiozero import LED
-
-    from .. import interpolator
-    from ..platforms import Firestarter
-else:
-    from ulab import numpy as np
-    from ..ulabext import assert_array_almost_equal
-
-    upython = True
+from ..ulabext import assert_array_almost_equal
 
 
 class Base(unittest.TestCase):
@@ -41,20 +33,7 @@ class Base(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        if not upython:
-            import subprocess
-
-            cls.host.enable.close()
-
-            subprocess.run(
-                [
-                    "raspi-gpio",
-                    "set",
-                    str(cls.host.platform.enable_pin),
-                    "op",
-                    "dh",
-                ]
-            )
+        pass
 
 
 class StaticTest(Base):
@@ -198,8 +177,6 @@ class LaserheadTest(Base):
 
     @executor
     def test_scanline(self, timeout=3, numblines=1_000):
-        from time import ticks_ms
-        from math import isclose
         host = self.host
         line = [1] * host.laser_params["BITSINSCANLINE"]
         # speed can be further improved by precomputing the commands
@@ -222,188 +199,199 @@ class LaserheadTest(Base):
         yield from host.enable_comp(synchronize=False)
 
 
-class MotorTest(Base):
-    """Test BLDC motor
+# port to micropython
+#import numpy as np
+#import pandas as pd
+#import plotext as plt
+#from numpy.testing import assert_array_almost_equal
+#from gpiozero import LED
 
-    There are no virtual tests for the prism motor.
-    The device is debugged by communicating a debug word via SPI.
-    The debug mode is set via MOTORDEBUG, in platforms.py.
-    This program can then be used to analyze the results.
-    """
+#from .. import interpolator
+#from ..platforms import Firestarter
 
-    def finish(self, output):
-        print(
-            "Measurement finished in mode "
-            + f"{self.host.laser_params['MOTORDEBUG']}"
-        )
-        output.to_csv("measurement.csv")
-        mode = self.host.laser_params["MOTORDEBUG"]
-        if mode == "hallstate":
-            output = output[output["word_0"] != 0]
-            output = output.replace(
-                {"word_0": {1: 1, 2: 3, 3: 2, 4: 5, 5: 6, 6: 4}}
-            )
-            # compute fraction
-            # ideally should be 1/6
-            print(
-                (
-                    output.rename(columns={"time": "fraction"})
-                    .groupby(["word_0"])
-                    .count()
-                    .transform(lambda x: x / x.sum())
-                )
-            )
-        elif mode == "PIcontrol":
-            print(output[["word_0"]].describe())
-        elif mode == "ticksinfacet":
-            print(output[["word_0", "word_1"]].describe())
 
-    @executor
-    def test_main(self, debug=False):
-        """turns on the motor board and retrieves the rotor frequency
+# class MotorTest(Base):
+#     """Test BLDC motor
 
-        Method runs for ever, can be interrupted with keyboard interrupt.
-        """
-        host = self.host
-        if self.mod == "motor":
-            blocking = False
-        else:
-            blocking = True
+#     There are no virtual tests for the prism motor.
+#     The device is debugged by communicating a debug word via SPI.
+#     The debug mode is set via MOTORDEBUG, in platforms.py.
+#     This program can then be used to analyze the results.
+#     """
 
-        mode = host.laser_params["MOTORDEBUG"]
-        start = time()
-        if mode == "hallstate":
-            starttime = 5
-            measurementtime = 15
-            totaltime = 120
-        elif mode == "PIcontrol":
-            starttime = 5
-            measurementtime = 15
-            totaltime = 60
-        elif mode == "ticksinfacet":
-            starttime = 5
-            measurementtime = 15
-            totaltime = 60
-        else:
-            starttime = 15
-            measurementtime = 15
-            totaltime = 60
-        output = pd.DataFrame(columns=["time"])
-        measurement = pd.DataFrame(columns=["time"])
-        print(f"Waiting {starttime} seconds to start measurement.")
-        if self.mod == "all":
-            if mode == "ticksinfacet":
-                yield from host.enable_comp(synchronize=True)
-            else:
-                yield from host.enable_comp(polygon=True)
+#     def finish(self, output):
+#         print(
+#             "Measurement finished in mode "
+#             + f"{self.host.laser_params['MOTORDEBUG']}"
+#         )
+#         output.to_csv("measurement.csv")
+#         mode = self.host.laser_params["MOTORDEBUG"]
+#         if mode == "hallstate":
+#             output = output[output["word_0"] != 0]
+#             output = output.replace(
+#                 {"word_0": {1: 1, 2: 3, 3: 2, 4: 5, 5: 6, 6: 4}}
+#             )
+#             # compute fraction
+#             # ideally should be 1/6
+#             print(
+#                 (
+#                     output.rename(columns={"time": "fraction"})
+#                     .groupby(["word_0"])
+#                     .count()
+#                     .transform(lambda x: x / x.sum())
+#                 )
+#             )
+#         elif mode == "PIcontrol":
+#             print(output[["word_0"]].describe())
+#         elif mode == "ticksinfacet":
+#             print(output[["word_0", "word_1"]].describe())
 
-        print("Starting measurement")
-        plt.title(f"Streaming Data in {mode}")
-        # plt.clc()
-        try:
-            sleep(starttime)
-            while True:
-                if (time() - start) >= totaltime:
-                    self.finish(measurement)
-                    break
-                # TODO: why does true not work
-                words = yield from host.get_motordebug(blocking=False)
-                try:
-                    dct = {"time": [time() - start]}
-                    for idx, word in enumerate(words):
-                        dct[f"word_{idx}"] = [word]
-                    if debug:
-                        print(dct)
-                        sleep(0.1)
-                    frame1 = pd.DataFrame(dct)
-                    output = pd.concat([output, frame1], ignore_index=True)
-                    if time() - start > measurementtime:
-                        measurement = pd.concat(
-                            [measurement, frame1], ignore_index=True
-                        )
-                    if mode in [
-                        "cycletime",
-                        "ticksinfacet",
-                        "PIcontrol",
-                    ]:
-                        plt.clf()
-                        plt.clt()  # to clear the terminal
-                        plt.cld()  # to clear the data only
-                        plt.xlim(0, totaltime)
-                        if mode == "cycletime":
-                            plt.ylim(0, 4000)
-                            plt.title("Speed in RPM")
-                            plt.xlabel("Time [seconds]")
-                            plt.ylabel("Speed [RPM]")
-                            plt.scatter(
-                                output["time"], output["word_0"], label="speed"
-                            )
-                        elif mode == "PIcontrol":
-                            plt.ylim(0, 4000)
-                            plt.title("PI controller")
-                            plt.xlabel("Time [seconds]")
-                            plt.ylabel("Counter")
-                            plt.scatter(
-                                output["time"], output["word_0"], label="speed"
-                            )
-                            plt.scatter(
-                                output["time"],
-                                output["word_1"],
-                                label="control",
-                            )
-                            # A PRINT COMMAND will make the plot fail
-                        elif mode == "ticksinfacet":
-                            plt.ylim(0, 4000)
-                            plt.title("Ticksinfacet")
-                            plt.xlabel("Time [seconds]")
-                            plt.ylabel("Counter")
-                            plt.scatter(
-                                output["time"],
-                                output["word_0"],
-                                label="speed hall",
-                            )
-                            plt.scatter(
-                                output["time"],
-                                output["word_1"],
-                                label="speed diode",
-                            )
-                        plt.sleep(0.1)
-                        # open issue; only happens after reboot
-                        #             if script is run succesful once
-                        #             it is fixed
-                        # https://github.com/piccolomo/plotext/issues/185
-                        try:
-                            plt.show()
-                        except IndexError:
-                            print(
-                                "Aborting due to strange plotext bug, try restart."
-                            )
-                            # break
+#     @executor
+#     def test_main(self, debug=False):
+#         """turns on the motor board and retrieves the rotor frequency
 
-                except ValueError as e:
-                    print(e)
-        except KeyboardInterrupt:
-            self.finish(measurement)
-            pass
-        finally:
-            if self.mod == "motor":
-                reset_pin = LED(self.host.platform.reset_pin)
-                reset_pin.off()
-                reset_pin.close()
-                # gpiozero cleans up pins
-                # this ensures pin is kept off
-                subprocess.run(
-                    [
-                        "raspi-gpio",
-                        "set",
-                        str(self.host.platform.reset_pin),
-                        "op",
-                        "dl",
-                    ]
-                )
-            else:
-                yield from host.enable_comp(polygon=False)
-            print("Interrupted, exiting")
+#         Method runs for ever, can be interrupted with keyboard interrupt.
+#         """
+#         host = self.host
+#         if self.mod == "motor":
+#             blocking = False
+#         else:
+#             blocking = True
+
+#         mode = host.laser_params["MOTORDEBUG"]
+#         start = time()
+#         if mode == "hallstate":
+#             starttime = 5
+#             measurementtime = 15
+#             totaltime = 120
+#         elif mode == "PIcontrol":
+#             starttime = 5
+#             measurementtime = 15
+#             totaltime = 60
+#         elif mode == "ticksinfacet":
+#             starttime = 5
+#             measurementtime = 15
+#             totaltime = 60
+#         else:
+#             starttime = 15
+#             measurementtime = 15
+#             totaltime = 60
+#         output = pd.DataFrame(columns=["time"])
+#         measurement = pd.DataFrame(columns=["time"])
+#         print(f"Waiting {starttime} seconds to start measurement.")
+#         if self.mod == "all":
+#             if mode == "ticksinfacet":
+#                 yield from host.enable_comp(synchronize=True)
+#             else:
+#                 yield from host.enable_comp(polygon=True)
+
+#         print("Starting measurement")
+#         plt.title(f"Streaming Data in {mode}")
+#         # plt.clc()
+#         try:
+#             sleep(starttime)
+#             while True:
+#                 if (time() - start) >= totaltime:
+#                     self.finish(measurement)
+#                     break
+#                 # TODO: why does true not work
+#                 words = yield from host.get_motordebug(blocking=False)
+#                 try:
+#                     dct = {"time": [time() - start]}
+#                     for idx, word in enumerate(words):
+#                         dct[f"word_{idx}"] = [word]
+#                     if debug:
+#                         print(dct)
+#                         sleep(0.1)
+#                     frame1 = pd.DataFrame(dct)
+#                     output = pd.concat([output, frame1], ignore_index=True)
+#                     if time() - start > measurementtime:
+#                         measurement = pd.concat(
+#                             [measurement, frame1], ignore_index=True
+#                         )
+#                     if mode in [
+#                         "cycletime",
+#                         "ticksinfacet",
+#                         "PIcontrol",
+#                     ]:
+#                         plt.clf()
+#                         plt.clt()  # to clear the terminal
+#                         plt.cld()  # to clear the data only
+#                         plt.xlim(0, totaltime)
+#                         if mode == "cycletime":
+#                             plt.ylim(0, 4000)
+#                             plt.title("Speed in RPM")
+#                             plt.xlabel("Time [seconds]")
+#                             plt.ylabel("Speed [RPM]")
+#                             plt.scatter(
+#                                 output["time"], output["word_0"], label="speed"
+#                             )
+#                         elif mode == "PIcontrol":
+#                             plt.ylim(0, 4000)
+#                             plt.title("PI controller")
+#                             plt.xlabel("Time [seconds]")
+#                             plt.ylabel("Counter")
+#                             plt.scatter(
+#                                 output["time"], output["word_0"], label="speed"
+#                             )
+#                             plt.scatter(
+#                                 output["time"],
+#                                 output["word_1"],
+#                                 label="control",
+#                             )
+#                             # A PRINT COMMAND will make the plot fail
+#                         elif mode == "ticksinfacet":
+#                             plt.ylim(0, 4000)
+#                             plt.title("Ticksinfacet")
+#                             plt.xlabel("Time [seconds]")
+#                             plt.ylabel("Counter")
+#                             plt.scatter(
+#                                 output["time"],
+#                                 output["word_0"],
+#                                 label="speed hall",
+#                             )
+#                             plt.scatter(
+#                                 output["time"],
+#                                 output["word_1"],
+#                                 label="speed diode",
+#                             )
+#                         plt.sleep(0.1)
+#                         # open issue; only happens after reboot
+#                         #             if script is run succesful once
+#                         #             it is fixed
+#                         # https://github.com/piccolomo/plotext/issues/185
+#                         try:
+#                             plt.show()
+#                         except IndexError:
+#                             print(
+#                                 "Aborting due to strange plotext bug, try restart."
+#                             )
+#                             # break
+
+#                 except ValueError as e:
+#                     print(e)
+#         except KeyboardInterrupt:
+#             self.finish(measurement)
+#             pass
+#         finally:
+#             if self.mod == "motor":
+#                 reset_pin = LED(self.host.platform.reset_pin)
+#                 reset_pin.off()
+#                 reset_pin.close()
+#                 # gpiozero cleans up pins
+#                 # this ensures pin is kept off
+#                 subprocess.run(
+#                     [
+#                         "raspi-gpio",
+#                         "set",
+#                         str(self.host.platform.reset_pin),
+#                         "op",
+#                         "dl",
+#                     ]
+#                 )
+#             else:
+#                 yield from host.enable_comp(polygon=False)
+#             print("Interrupted, exiting")
 
 
 class MoveTest(Base):
@@ -681,20 +669,13 @@ class PrintTest(Base):
         print("Finished exposure")
 
     @executor
-    def test_print(self):
+    def test_print(self, fname="sd/fpga/job.bin"):
         """the LDgraphy test pattern is printed"""
         host = self.host
         host.enable_steppers = True
-        if not upython:
-            from pathlib import Path
-
-            dir_path = os.path.dirname(interpolator.__file__)
-            FILENAME = Path(dir_path, "debug", "test.bin")
-        else:
-            FILENAME = "sd/fpga/job.bin"
         # it assumed the binary is already created and
         # in the interpolator folder
-        if not os.path.isfile(FILENAME):
+        if not os.path.isfile(fname):
             raise Exception("File not found")
         FACETS_IN_LANE = 5377
         LANEWIDTH = 5.45
@@ -712,7 +693,7 @@ class PrintTest(Base):
         print("Reading binary")
         # enable scanhead
         yield from self.host.enable_comp(synchronize=True)
-        with open(FILENAME, "rb") as f:
+        with open(fname, "rb") as f:
             lane = 0
             line_data = np.frombuffer(f.read(bytesinline), dtype=np.uint8)
             while True:

@@ -23,16 +23,21 @@ from .constants import (
 
 
 def executor(func):
-    """executes generator until stop iteration
+    """convert Amaranth style function in normal callable function
 
-    amaranth uses generator syntax and this is used
-    as hack to execute functions.
+    amaranth introduces generators in call chain
+    when using Amaranth, i.e. python, this returns a generator
+    in the case of python, the generator is consumed
     """
-
     def inner(*args, **kwargs):
-        for _ in func(*args, **kwargs):
-            pass
-
+        try:
+            next(func(*args, **kwargs))
+        # function is regular and not a generator
+        # decorator is not needed
+        except TypeError:
+            return func(*args, **kwargs)
+        except StopIteration as e:
+            return e.value
     return inner
 
 
@@ -216,6 +221,7 @@ class Host:
                     blocknum += 1
         self.reset()
         print("flashed fpga")
+
 
     def build(self, do_program=True, verbose=True, mod="all"):
         """builds the FPGA code using amaranth HDL, Yosys, Nextpnr and icepack
@@ -408,10 +414,10 @@ class Host:
         """
         if val:
             self.enable.off() if not self.micropython else self.enable.value(0)
-            self.send_command([COMMANDS.START] + WORD_BYTES * [0])
+            yield from self.send_command([COMMANDS.START] + WORD_BYTES * [0])
         else:
             self.enable.on() if not self.micropython else self.enable.value(1)
-            self.send_command([COMMANDS.STOP] + WORD_BYTES * [0])
+            yield from self.send_command([COMMANDS.STOP] + WORD_BYTES * [0])
 
     @property
     def laser_current(self):
@@ -531,10 +537,8 @@ class Host:
             )
             velocity = [0] * len(speed)
             velocity[idx] = self.steps_to_count(speed_steps) // MOTORFREQ
-            if self.test:
-                (yield from self.set_parsing(True))
-            else:
-                self.set_parsing(True)
+            (yield from self.set_parsing(True))
+
             while ticks_total > 0:
                 ticks_move = (
                     MOVE_TICKS if ticks_total >= MOVE_TICKS else ticks_total
@@ -553,6 +557,9 @@ class Host:
         self._position += displacement
         # set position to zero if home switch hit
         self._position[homeswitches_hit == 1] = 0
+
+    def exec_send_command(self, command, blocking=False):
+        yield from self.send_command(self, command, blocking=blocking)
 
     def send_command(self, command, blocking=False):
         """writes command to spi port
