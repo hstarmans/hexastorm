@@ -46,7 +46,6 @@ class Memfull(Exception):
 
     Exception is raised when the memory is full.
     """
-
     pass
 
 
@@ -389,6 +388,12 @@ class Host:
         for i in range(self.platform.motors):
             read_data = yield from self.send_command(command)
             self._position[i] = unpack("!q", read_data[1:])[0]
+            # code below is not portable between python and micropython
+            # python requires signed=True, micropython does not accep this
+            # overflow error can be generated, if you go below 0
+            # overflow is created during the division,
+            # it's assumed position cannot be negative.
+            # self._position[i] = int.from_bytes(read_data[1:9], 'big', True)
         # step --> mm
         self._position = self._position / np.array(
             list(self.platform.stepspermm.values())
@@ -414,10 +419,8 @@ class Host:
         """
         if val:
             self.enable.off() if not self.micropython else self.enable.value(0)
-            yield from self.send_command([COMMANDS.START] + WORD_BYTES * [0])
         else:
             self.enable.on() if not self.micropython else self.enable.value(1)
-            yield from self.send_command([COMMANDS.STOP] + WORD_BYTES * [0])
 
     @property
     def laser_current(self):
@@ -507,6 +510,7 @@ class Host:
         speed        -- list with speed in mm/s, if None default speeds used
         absolute     -- True if position, False if displacement
         """
+        (yield from self.set_parsing(True))
         assert len(position) == self.platform.motors
         if speed is not None:
             assert len(speed) == self.platform.motors
@@ -557,6 +561,8 @@ class Host:
         self._position += displacement
         # set position to zero if home switch hit
         self._position[homeswitches_hit == 1] = 0
+        # TODO: you enable parsing but don't disable it
+        #       this would require a wait or maybe it should be enabled on
 
     def exec_send_command(self, command, blocking=False):
         yield from self.send_command(self, command, blocking=blocking)

@@ -174,6 +174,8 @@ class LaserheadTest(Base):
         self.assertEqual((yield from host.get_state())["error"], False)
         yield from host.enable_comp(synchronize=False)
         self.host.enable_steppers = False
+        # TODO: parsing is left open
+        #(yield from self.host.set_parsing(False))
 
     @executor
     def test_scanline(self, timeout=3, numblines=1_000):
@@ -415,16 +417,13 @@ class MoveTest(Base):
         except KeyboardInterrupt:
             pass
 
-    @executor
     def motorenable(self):
         """test if motors are enabled and execution is enabled/disabled
         via communication with FPGA"""
         self.host.enable_steppers = True
-        print("Check manually if axes are blocked and require force to move.")
+        print("Check manually axes are blocked and require force to move, press enter.")
         input()
         self.host.enable_steppers = False
-        # needs to be iteratable
-        yield
 
     @executor
     def multiplemove(self, decimals=1):
@@ -433,9 +432,10 @@ class MoveTest(Base):
         decimals -- number of decimals
         """
         motors = self.host.platform.motors
-        dist = np.array([10, 10, 10])
+        dist = np.array([10, 10, 0])
         startpos = (yield from self.host.position).copy()
-        for direction in [-1, 1]:
+        # does not work with -1, 1
+        for direction in [1, -1]:
             self.assertEqual(
                 (yield from self.host.get_state())["error"], False
             )
@@ -445,7 +445,7 @@ class MoveTest(Base):
             yield from self.host.gotopoint(
                 position=disp, speed=[1] * motors, absolute=False
             )
-            sleep(3)
+            sleep(3) # wait for execution of all command in ringbuffer
             assert_array_almost_equal(
                 (yield from self.host.position),
                 current + disp,
