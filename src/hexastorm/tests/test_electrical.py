@@ -3,10 +3,11 @@ if sys.implementation.name == "cpython":
     raise Exception("Module should be called from micropython")
 
 
-import os
+import struct
 import unittest
 from time import sleep, ticks_ms
 from math import isclose
+
 
 from ulab import numpy as np
 
@@ -673,65 +674,47 @@ class PrintTest(Base):
         """the LDgraphy test pattern is printed"""
         host = self.host
         host.enable_steppers = True
-        # it assumed the binary is already created and
-        # in the interpolator folder
-        if not os.path.isfile(fname):
-            raise Exception("File not found")
-        FACETS_IN_LANE = 5377
-        LANEWIDTH = 5.45
-        bytesinline = int(host.laser_params["BITSINSCANLINE"] / 8)
-        stepsperline = 1
-        # z is not homed as it should be already in
-        # position so laser is in focus
-        self.host.enable_steppers = True
-        self.host.laser_current = 130  # assuming 1 channel
-        print("Homing X and Y axis")
-        yield from host.home_axes([1, 1, 0])
-        print("Move to start")
-        # scaning direction offset is needed to prevent lock with home
-        yield from host.gotopoint([70, 5, 0], absolute=False)
-        print("Reading binary")
-        # enable scanhead
-        yield from self.host.enable_comp(synchronize=True)
         with open(fname, "rb") as f:
-            lane = 0
-            line_data = np.frombuffer(f.read(bytesinline), dtype=np.uint8)
-            while True:
-                if not line_data:
-                    break
-                print(f"Exposing lane {lane}")
+            # 1. Header
+            lanewidth = struct.unpack("<f", f.read(4))[0]
+            facetsinlane = struct.unpack("<I", f.read(4))[0]
+            lanes = struct.unpack("<I", f.read(4))[0]
+            # z is not homed as it should be already in
+            # position so laser is in focus
+            host.enable_steppers = True
+            #self.host.laser_current = 130  # assuming 1 channel
+            print("Homing X and Y axis")
+            yield from host.home_axes([1, 1, 0])
+            print("Move to start")
+            # scaning direction offset is needed to prevent lock with home
+            yield from host.gotopoint([70, 5, 0], absolute=False)
+            print("Reading binary")
+            # enable scanhead
+            yield from host.enable_comp(synchronize=True)
+            for lane in range(lanes):
+                print(f"Exposing lane {lane+1} from {lanes}.")
                 if lane > 0:
                     print("Moving in x-direction for next lane")
                     yield from host.gotopoint(
-                        [LANEWIDTH, 0, 0], absolute=False
+                        [lanewidth, 0, 0], absolute=False
                     )
                 if lane % 2 == 1:
-                    direction = 0
                     print("Start exposing forward lane")
                 else:
-                    direction = 1
                     print("Start exposing back lane")
-                for line in range(FACETS_IN_LANE):
-                    # reverse, as exposure is inversed
-                    # line_data = line_data[::-1]
-                    yield from host.writeline(
-                        bitlst=line_data,
-                        stepsperline=stepsperline,
-                        direction=direction,
-                    )
-                    line_data = np.frombuffer(
-                        f.read(bytesinline), dtype=np.uint8
-                    )
-                    if not line_data:
-                        break
-                lane += 1
-            # send stopline
-            yield from host.writeline([])
+                for _ in range(facetsinlane):
+                    # cmd lst has length of 6
+                    for _ in range(6):
+                        cmddata = f.read(9)
+                        (yield from host.send_command(cmddata, 
+                                                      blocking=True))
+                # send stopline
+                yield from host.writeline([])
         # disable scanhead
         sleep(3)
         print("Waiting for stopline to execute")
-        yield from self.host.enable_comp(synchronize=False)
-        self.host.enable_steppers = False
+        yield from host.enable_comp(synchronize=False)
+        host.enable_steppers = False
         print("Finished exposure")
 
 

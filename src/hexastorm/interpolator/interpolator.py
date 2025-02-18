@@ -13,6 +13,7 @@ from scipy import ndimage
 
 from hexastorm.lasers import params as paramsfunc
 from hexastorm.platforms import Firestarter
+from hexastorm.controller import Host
 
 
 # numba.jit decorated functions cannot be defined with self
@@ -100,7 +101,7 @@ class Interpolator:
     These values are either 0 (laser off) or 1 (laser on).
     The files created can also be read and plotted.
     The objects supports different tilt angles which are required by
-    the original light engine described in US10114289B2.
+    the alternative light engine described in US10114289B2.
     """
 
     def __init__(self, stepsperline=1):
@@ -492,68 +493,103 @@ class Interpolator:
         img.save(os.path.join(self.debug_folder, filename + ".png"))
         return img
 
-    def readbin(self, filename="test.parquet", mode="bytes"):
-        """reads a parquet data file
+    def readbin(self, filename="test.bin", mode="bytes"):
+        """reads a binary data file
 
         name  -- name of binary file with laser information
         mode  -- parquet, numpy, bytes
         """
         file_path = os.path.join(self.debug_folder, filename)
-        if mode == "parquet":
-            res = pd.read_parquet(file_path)
-        else:
-            if mode == "numpy":
-                res = np.fromfile(file_path, dtype=np.uint8)
-            else:
-                with open(filename, "rb") as f:
-                    res = np.frombuffer(f.read(), np.uint8)
-            steps = round(res[0] * 0.1, 1)
-            lanewidth = (
-                struct.unpack(">I", struct.pack("4B", *res[1:5]))[0] * 1e-3
-            )
-            res = res[5:]
-            return steps, lanewidth, res
+        bitsinline = int(self.params["bitsinscanline"])
+        bytesinline = int(np.ceil(self.params["bitsinscanline"]//8))
+        pixeldata = []
+        with open(file_path, "rb") as f:
+            # 1. Header
+            lanewidth = struct.unpack("<f", f.read(4))[0]
+            facetsinlane = struct.unpack("<I", f.read(4))[0]
+            lanes = struct.unpack("<I", f.read(4))[0]
+            for lane in range(lanes):
+                if lane % 2 == 1:
+                    direction = 0
+                else:
+                    direction = 1
+                for i in range(facetsinlane):
+                    # cmd lst has lenth of 6, there are 9 bytes in a cmd
+                    cmdlst = []
+                    for _ in range(6):
+                        cmdlst.append(f.read(9))
+                    # let's unpack the cmds, all 6 commands start with write
+                    # first command has the scanline command
+                    # contains direction and steps per line
+                    cmd0 = cmdlst[0]
+                    assert cmd0[0] == 1  # cmd always starts with write
+                    move_word = list(cmd0[1:])[::-1]
+                    assert move_word[0] == 3   # scanline
+                    move_header = move_word[1:]
+                    bits = np.unpackbits(np.array(move_header, dtype=np.uint8), bitorder='litle')
+                    assert bits[0] == direction
+                    # convert to binary, reverse, map to string, convert binary string to int
+                    half_periodbits = int("".join(map(str, bits[1:][::-1])), 2)
+                    stepsperline = int((bitsinline - 1) // half_periodbits) / 2
+                    assert stepsperline == self.params["stepsperline"]
+                    # other command contain the linedata
+                    bitlst = []
+                    for cmd in cmdlst[1:]:
+                        assert cmd[0] == 1 
+                        bits = np.unpackbits(np.array(list(cmd[1:])[::-1], dtype=np.uint8), bitorder='litle')
+                        bitlst.extend(bits)
+                    bitlst = bitlst[:bytesinline*8][::-1]
+                    pixeldata.extend(bitlst)
+        return facetsinlane, lanes, lanewidth, np.packbits(pixeldata)
 
-    def writebin(self, pixeldata, filename="test.parquet", mode="bytes"):
+    def writebin(self, pixeldata, filename="test.bin"):
         """writes pixeldata with parameters to parquet file
 
-        Pixeldata is a chain of bytes. The first bytes defines step size
-        as multiple of 0.1. The next four bytes define the linelength
-        in microns
+        header contains stepsperline, facetsinlane and number of lane
+        rest is the pixeldata
 
 
         pixeldata  -- must have uneven length
         filename   -- name of binary file to write laserinformation to
-        mode       --  parquet, numpy, bytes
         """
         if not os.path.exists(self.debug_folder):
             os.makedirs(self.debug_folder)
         # parquet is more efficient, not supported by micropython
-        if mode == "parquet":
-            df = pd.DataFrame(data=pixeldata, columns=["data"])
-            df = df.join(pd.DataFrame([dict(self.params)]))
-            df.to_parquet(os.path.join(self.debug_folder, filename))
-        else:
-            # micron to mm and split in 4 bytes
-            step_byte = round(self.params["stepsperline"] / 0.1)
-            assert 0 < step_byte < 255
-            lanewidth_bytes = struct.unpack(
-                "4B", struct.pack(">I", round(self.params["lanewidth"] * 1e3))
-            )
-            pixeldata = np.concatenate(
-                [np.array([step_byte]), np.array(lanewidth_bytes), pixeldata]
-            )
-            # micropython ulab has numpy load and save but cannot
-            # load object partially
-            if mode == "numpy":
-                pixeldata = pixeldata.astype(np.uint8)
-                pixeldata.tofile(os.path.join(self.debug_folder, filename))
-            # solution should work for micropython
-            else:
-                pixeldata = pixeldata.astype(np.uint8)
-                with open(filename, "wb") as f:
-                    f.write(pixeldata.tobytes())
-
+        # micropython ulab has numpy load and save but cannot
+        # load object partially, as such default numpy save not used
+        lanes = int(np.ceil(self.params["samplexsize"]/self.params["lanewidth"]))
+        facetsinlane = int(self.params["facetsinlane"])
+        pixeldata = pixeldata.astype(np.uint8)
+        host = Host(platform=Firestarter(micropython=True))
+        reconstructed = []
+        with open(os.path.join(self.debug_folder, filename), "wb") as f:
+            # 1. Header:
+            f.write(struct.pack("<f", self.params["lanewidth"]))
+            f.write(struct.pack("<I", int(self.params["facetsinlane"])))  # unsigned int (4 bytes)
+            f.write(struct.pack("<I", lanes))                    # unsigned int (4 bytes)
+            # Overtime packing changed significantly
+            bitsinline = int(self.params["bitsinscanline"])
+            bytesinline = int(np.ceil(self.params["bitsinscanline"]//8))
+            assert len(pixeldata) == round(facetsinlane*lanes*bytesinline)
+            for lane in range(lanes):
+                if lane % 2 == 1:
+                    direction = 0
+                else:
+                    direction = 1
+                for i in range(facetsinlane):
+                    offset = lane*facetsinlane*bytesinline
+                    start = i * bytesinline + offset
+                    end = (i+1) * bytesinline + offset
+                    linedata = pixeldata[start:end]
+                    reconstructed.extend(linedata)
+                    bits = np.unpackbits(linedata)[:bitsinline]
+                    # reverse, clockwise exposure
+                    bits = bits[::-1]
+                    bytelst = host.bittobytelist(bits, self.params["stepsperline"], direction)
+                    cmdlst = host.bytetocmdlist(bytelst)
+                    # cmd lst has lenth of 6, there are 9 bytes in a cmd
+                    for cmd in cmdlst:
+                        f.write(cmd)
 
 if __name__ == "__main__":
     # https://github.com/hstarmans/ldgraphy
@@ -568,12 +604,17 @@ if __name__ == "__main__":
     stepsperline = 0.5
     interpolator = Interpolator(stepsperline=stepsperline)
     dir_path = os.path.dirname(os.path.realpath(__file__))
-    # hexastorm.png pixelsize 0.035
+    # postscript resolution test
     url = os.path.join(dir_path, "test-patterns", "line-resolution-test.ps")
     ptrn = interpolator.patternfile(url)
+    # hexastorm.png pixelsize 0.035
+    # url = os.path.join(dir_path, "test-patterns", "hexastorm.png")
+    # ptrn = interpolator.patternfile(url, pixelsize=0.035)
+    print("This can take up to 30 seconds")
     interpolator.writebin(ptrn, "test.bin")
-    steps, lanewidth, arr = interpolator.readbin("test.bin", mode="bytes")
-    assert np.allclose(stepsperline, steps, 1e-1)
+    facetsinlane, lanes, lanewidth, arr = interpolator.readbin("test.bin")
     assert np.allclose(interpolator.params["lanewidth"], lanewidth, 1e-3)
+    assert np.allclose(interpolator.params["facetsinlane"], facetsinlane, 1e-3)
+    assert len(arr) == round(facetsinlane*lanes*np.ceil(interpolator.params["bitsinscanline"]//8))
     # TODO: step must be an integer!!
     interpolator.plotptrn(arr, step=1)
