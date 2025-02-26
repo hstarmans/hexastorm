@@ -145,7 +145,8 @@ class Host:
             current in mA
         """
         if self.micropython:
-            from tmc.TMC_2209_StepperDriver import TMC_2209
+            from tmc.stepperdriver import TMC_2209
+            from tmc.uart import ConnectionFail
             for key, value in self.platform.tmc2209.items():
                 try:
                     tmc = TMC_2209(pin_en=38, mtr_id=value)
@@ -158,7 +159,7 @@ class Host:
                     tmc.setMicrosteppingResolution(16)
                     tmc.setInternalRSense(False)
                     tmc.setMotorEnabled(False)
-                except Exception:
+                except ConnectionFail:
                     print(f"Cannot connect to stepper motor {key} axis")
         else:
             import steppers
