@@ -229,6 +229,9 @@ There should not be dtparam=spi=on, somewhere. This would enable two chip select
 creates a conflict with the pin select of SPI1. 
 
 ## Arducam
+Laser spots are measured using the arducam UC-621. There is a binary available for 64 bit, this
+binary only works on the GNU/Linux 11 (bullseye). No sources are available and it cannot be recompiled.
+For more information see https://github.com/ArduCAM/MIPI_Camera.
 Install my version of the Python libary available at [ArducamPython](https://github.com/hstarmans/Arducampython).
 
 <!-- 

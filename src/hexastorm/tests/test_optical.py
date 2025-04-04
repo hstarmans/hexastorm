@@ -1,18 +1,49 @@
 import os
 import time
 import unittest
+import subprocess
+import tempfile
 from pathlib import Path
+import inspect
 
 import camera
 import cv2 as cv
 import numpy as np
 
 import hexastorm.optical as feature
-from hexastorm.controller import Host, executor
 
 TEST_DIR = Path(__file__).parents[0].resolve()
 IMG_DIR = Path(TEST_DIR, "images")
 TESTIMG_DIR = Path(TEST_DIR, "testimages")
+
+
+def micropython(instruction, nofollow=False):
+    """executes instruction using micropython on eps32s3
+    
+    command is executed by micropython interpreter connected via usb cable
+    to the raspberry pi
+
+    nofollow: if True, return immediately and leave the device running the script
+    """
+    with tempfile.NamedTemporaryFile(mode='w+t', delete=False) as temp_file:
+        temp_file.write(inspect.cleandoc(instruction))
+        temp_file_path = temp_file.name
+
+    try:
+        shell_command = ["mpremote", "resume", "run", temp_file_path]
+        if nofollow:
+            shell_command.insert(-1, "--no-follow")
+        process = subprocess.Popen(shell_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = process.communicate()
+
+        if process.returncode != 0:
+            raise Exception(f"Error executing mpremote: {stderr.decode()}")
+        else:
+            print(stdout.decode())
+
+    finally:
+        os.unlink(temp_file_path) # Delete the temporary file.
+
 
 
 class OpticalTest(unittest.TestCase):
@@ -51,47 +82,78 @@ class Tests(unittest.TestCase):
     """Optical test for scanhead"""
 
     @classmethod
-    def setUpClass(cls, flash=False, cam=True):
-        cls.host = Host()
-        cls.host.enable_steppers = False
-        cls.cam = cam
-        if flash:
-            cls.host.build()
-        else:
-            print("Resetting the machine")
-            cls.host.reset()
-        if cam:
-            cls.cam = camera.Cam()
-            cls.cam.init()
+    def setUpClass(cls):
+        cls.cam = camera.Cam()
+        cls.cam.init()
+        micropython("""
+            from control.laserhead import Laserhead
+            lh = Laserhead()
+        """
+        )
 
     @classmethod
     def tearDownClass(cls):
-        if cls.cam:
-            cls.cam.close()
-        cls.host.enable.close()
-        subprocess.run(
-            ["raspi-gpio", "set", str(cls.host.platform.enable_pin), "op", "dh"]
+        cls.cam.close()
+        micropython("""
+            lh.reset_state()
+            lh.reset_fpga()
+        """
         )
 
-    @executor
+    def blinktest(self):
+        """tries to blink red light on ESP32 using micropython shell
+
+        Verifies communication with ESP32 board
+        """
+        micropython("""
+            import machine
+            import time
+            led = machine.Pin(8, machine.Pin.OUT)
+            print('LED ON')
+            led.off()
+            time.sleep(10)
+            print('LED OFF')
+            led.on()
+        """, nofollow=True
+        )
+        print("Light should be red")
+        time.sleep(10)
+        print("Light should be blue")
+        # you can get back to the shell but not exit the program
+
     def alignlaser(self):
         """align laser with prism
 
         Laser is aligned without camera
         """
-        yield from self.host.enable_comp(laser1=True)
+        micropython("""
+            lh.enable_comp(laser0=True)
+        """
+        )
         print("Press enter to confirm laser is aligned with prism")
         input()
-        yield from self.host.enable_comp(laser1=False)
+        micropython("""
+            lh.enable_comp(laser0=False)
+        """
+        )
 
-    @executor
-    def grabline(self):
+    def grabline(self, current=80):
         """turn on laser and motor
+
         User can first preview image. After pressing escape,
         a final image is taken.
+
+        current: value between 0 and 255 (a.u.)
         """
-        yield from self.host.enable_comp(laser1=True, polygon=True)
-        self.host.laser_current = 80
+        micropython("""
+            lh.enable_comp(laser1=True, polygon=True)
+        """
+        )
+        micropython(f"""
+            lh.enable_comp(laser1=True, polygon=True)
+            lh.laser_current({current})
+        """
+        )
         self.cam.set_exposure(7000)
         print("This will open up a window")
         print("Press escape to quit live view")
@@ -99,18 +161,25 @@ class Tests(unittest.TestCase):
         self.takepicture()
         # img = self.takepicture()
         # print(feature.cross_scan_error(img))
-        yield from self.host.enable_comp(laser1=False, polygon=False)
+        micropython("""
+            lh.enable_comp(laser1=False, polygon=False)
+        """
+        )
 
-    @executor
-    def grabspot(self, laserpower=80):
+    def grabspot(self, current=80):
         """turn on laser
         User can first preview image. After pressing escape,
         a final image is taken.
+
+        current: value between 0 and 255 (a.u.)
         """
         # NOTE: all ND filters and a single channel is used
-        self.host.laser_current = laserpower
+        micropython(f"""
+            lh.enable_comp(laser1=True, polygon=False)
+            lh.laser_current({current})
+        """
+        )
         self.cam.set_exposure(1300)
-        yield from self.host.enable_comp(laser1=True)
         print(
             "Calibrate the camera with live view \
                and press escape to confirm spot in vision"
@@ -118,67 +187,44 @@ class Tests(unittest.TestCase):
         self.cam.live_view(scale=0.6)
         img = self.takepicture()
         print(feature.spotsize(img))
-        yield from self.host.enable_comp(laser1=False)
-
-    @executor
-    def ortherror(self, laserpower=80):
+        micropython(f"""
+            lh.enable_comp(laser1=False, polygon=False)
         """
-        eight pictures are taken to compute cross scan error
-        that is the error orthogonal to scan line
-        """
-        # NOTE: all ND filters and a single channel is used
-        self.host.laser_current = laserpower
-        self.cam.set_exposure(1300)
-        yield from self.host.enable_comp(laser1=True)
-        for i in range(8):
-            print(f"Taking picture {i}.")
-            self.cam.live_view(scale=0.6)
-            img = self.cam.capture()
-            grey_img = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
-            if i == 0:
-                result = grey_img
-            else:
-                result += grey_img
-        prismcode = input("Enter prism code:")
-        print(f"Writing to {Path(IMG_DIR, prismcode+'_crosscan.jpg')}")
-        if not os.path.exists(IMG_DIR):
-            os.makedirs(IMG_DIR)
-        cv.imwrite(str(Path(IMG_DIR, prismcode + "_crosscan.jpg")), result)
-        yield from self.host.enable_comp(laser1=False)
-
-    def writepattern(self, pattern):
-        """repeats a pattern so a line is formed and writes to head
-
-        pattern  --  list of bits [0] or [1,0,0]
-        """
-        bits = self.host.laser_params["BITSINSCANLINE"]
-        line = (
-            pattern * (bits // len(pattern)) + pattern[: bits % len(pattern)]
         )
-        yield from self.host.writeline(line)
 
-    @executor
-    def searchcamera(self, timeout=3, build=False):
-        """laser is synced with photodiode and a line is projected
+    # def writepattern(self, pattern):
+    #     """repeats a pattern so a line is formed and writes to head
 
-        This is done for various line patterns and is
-        used to detect the edges of the camera
-        """
-        # self.host.laser_params['SINGLE_LINE'] = True
-        # self.host.laser_params['SINGLE_FACET'] = False
-        if build:
-            self.host.build()
-        self.host.laser_current = 120
-        # self.cam.set_exposure(36000)
-        # yield from self.writepattern([0]*8+[1]*8)
-        yield from self.host.enable_comp(laser1=True, polygon=False)
-        self.cam.live_view(scale=0.6)
-        # TODO: it doesn't catch the stopline
-        # yield from self.host.writeline([])
-        print(f"Wait for stopline to execute, {timeout} seconds")
-        yield from self.host.enable_comp(laser1=False, polygon=False)
-        # time.sleep(timeout)
-        # yield from self.host.enable_comp(synchronize=False)
+    #     pattern  --  list of bits [0] or [1,0,0]
+    #     """
+    #     bits = self.host.laser_params["BITSINSCANLINE"]
+    #     line = (
+    #         pattern * (bits // len(pattern)) + pattern[: bits % len(pattern)]
+    #     )
+    #     yield from self.host.writeline(line)
+
+    # @executor
+    # def searchcamera(self, timeout=3, build=False):
+    #     """laser is synced with photodiode and a line is projected
+
+    #     This is done for various line patterns and is
+    #     used to detect the edges of the camera
+    #     """
+    #     # self.host.laser_params['SINGLE_LINE'] = True
+    #     # self.host.laser_params['SINGLE_FACET'] = False
+    #     if build:
+    #         self.host.build()
+    #     self.host.laser_current = 120
+    #     # self.cam.set_exposure(36000)
+    #     # yield from self.writepattern([0]*8+[1]*8)
+    #     yield from self.host.enable_comp(laser1=True, polygon=False)
+    #     self.cam.live_view(scale=0.6)
+    #     # TODO: it doesn't catch the stopline
+    #     # yield from self.host.writeline([])
+    #     print(f"Wait for stopline to execute, {timeout} seconds")
+    #     yield from self.host.enable_comp(laser1=False, polygon=False)
+    #     # time.sleep(timeout)
+    #     # yield from self.host.enable_comp(synchronize=False)
 
     def takepicture(self):
         "takes picture and store it with timestamp to this folder"
