@@ -135,6 +135,10 @@ class Laserhead(Elaboratable):
         # Exposure start detector
         expose_start_d = Signal()
 
+        # enable laser channel 2
+        m.d.sync += self.lasers[1].eq(self.lasers[0])
+
+
         m.d.sync += expose_start_d.eq(self.expose_start)
         with m.If((expose_start_d == 0) & self.expose_start):
             m.d.sync += [self.process_lines.eq(1), self.expose_finished.eq(0)]

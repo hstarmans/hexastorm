@@ -68,11 +68,13 @@ class platform:
         if micropython:
             self.tmc2209 = {'x': 0, 'y': 1, 'z': 2} # uart ids tmc2209 drivers
             self.scl = 5  # scl pin digipot
-            self.sda = 46  # sda pin digipot TODO: should be 4, hotfix to 46
+            self.sda = 4  # sda pin digipot TODO: should be 4, hotfix to 46
             self.sck = 12
             self.miso = 11
             self.mosi = 13
             self.flash_cs = 10
+            self.led_blue = 18
+            self.led_red = 8
 
             # FPGA allows narrow range of baudrates
             # hardware spi between 2 and 3 MHz
