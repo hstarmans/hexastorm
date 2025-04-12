@@ -111,22 +111,23 @@ class Tests(unittest.TestCase):
             led = machine.Pin(8, machine.Pin.OUT)
             print('LED ON')
             led.off()
-            time.sleep(10)
+            time.sleep(5)
             print('LED OFF')
             led.on()
         """, nofollow=True
         )
         print("Light should be red")
-        time.sleep(10)
+        time.sleep(5)
         print("Light should be blue")
         # you can get back to the shell but not exit the program
 
-    def alignlaser(self):
+    def alignlaser(self, current=80):
         """align laser with prism
 
         Laser is aligned without camera
         """
-        micropython("""
+        micropython(f"""
+            lh.laser_current = {current}
             lh.enable_comp(laser0=True)
         """
         )
@@ -145,13 +146,9 @@ class Tests(unittest.TestCase):
 
         current: value between 0 and 255 (a.u.)
         """
-        micropython("""
-            lh.enable_comp(laser1=True, polygon=True)
-        """
-        )
         micropython(f"""
-            lh.enable_comp(laser1=True, polygon=True)
-            lh.laser_current({current})
+            lh.laser_current = {current}
+            lh.enable_comp(laser0=True, polygon=True)
         """
         )
         self.cam.set_exposure(7000)
@@ -175,8 +172,8 @@ class Tests(unittest.TestCase):
         """
         # NOTE: all ND filters and a single channel is used
         micropython(f"""
+            lh.laser_current = {current}
             lh.enable_comp(laser1=True, polygon=False)
-            lh.laser_current({current})
         """
         )
         self.cam.set_exposure(1300)
