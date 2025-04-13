@@ -1,4 +1,4 @@
-# Laser scanner [![Documentation Status](https://readthedocs.org/projects/luna/badge/?version=latest)](https://hexastorm.readthedocs.io/en/latest/?badge=latest)
+# Laser scanner
 [Laser scanning](https://en.wikipedia.org/wiki/Laser_scanning) is the controlled deflection of laser beams, visible or invisible.
 In a high-speed polygon scanner system, the laser is deflected by a rotating prism or mirror. 
 The position of the laser is determined via a photodiode.  
@@ -37,7 +37,7 @@ Code can be executed as follows.
 ```console
 uv run python -m hexastorm.movement
 uv run python -m hexastorm.platforms
-uv run python -m hexastorm.interpolator
+uv run python -m hexastorm.interpolator.interpolator
 ```
 
 
