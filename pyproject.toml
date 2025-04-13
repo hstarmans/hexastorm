@@ -1,46 +1,41 @@
-[tool.poetry]
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
 name = "hexastorm"
 version = "0.1.0"
 description = "amaranth framework for writing to a substrate with a laser"
-authors = ["Rik Starmans <hstarmans@hexastorm.com>"]
-license = "GPLV3"
+authors = [
+    { name = "Rik Starmans", email = "hstarmans@hexastorm.com" }
+]
+license = { file = "LICENSE.txt" }
 readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "amaranth>=0.5.4",
+    "amaranth-boards",
+    "amaranth-soc",
+    "cairosvg>=2.7.1",
+    "luna-usb",
+    "numba>=0.61.2",
+    "pillow>=11.2.1",
+    "scipy>=1.15.2",
+    "yowasp-nextpnr-ice40>=0.8.0.0.post621",
+    "yowasp-yosys>=0.52.0.0.post894",
+]
 
-[tool.poetry.dependencies]
-python = ">=3.9,<3.13"
-opencv-python = "^4.8.0.74"
-scipy = "^1.11.1"
-pandas = "^2.0.3"
-cairosvg = "^2.7.0"
-amaranth-boards = {git = "https://github.com/amaranth-lang/amaranth-boards.git"}
-amaranth-soc = {git = "https://github.com/amaranth-lang/amaranth-soc.git"}
-fastparquet = "^2023.8.0"
-plotext = "^5.2.8"
-numba = "^0.59.1"
-pillow = "^10.3.0"
-amaranth = "0.4.5"
-luna-usb = {git = "https://github.com/hstarmans/luna.git", branch="patch1"}
+[tool.uv.sources]
+amaranth-boards = { git = "https://github.com/amaranth-lang/amaranth-boards.git" }
+amaranth-soc = { git = "https://github.com/amaranth-lang/amaranth-soc.git" }
+luna-usb = { git = "https://github.com/greatscottgadgets/luna" }
 
-[tool.poetry.group.dev.dependencies]
-ruff = "^0.0.281"
-nbqa = "^1.7.0"
-black = "^24.4.2"
-
-
-[tool.poetry.group.raspberry.dependencies]
-gpiozero = "^1.6.2"
-spidev = "^3.6"
-smbus2 = "^0.4.2"
-rpi-gpio = "^0.7.1"
-
-
-[tool.poetry.group.64bit.dependencies]
-yowasp-nextpnr-ice40 = "^0.6.0.0.post440"
-yowasp-yosys = "^0.40.0.0.post707"
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+[dependency-groups]
+dev = [
+    "black>=25.1.0",
+    "nbqa>=1.9.1",
+    "ruff>=0.11.5",
+]
 
 [tool.black]
 line-length = 79

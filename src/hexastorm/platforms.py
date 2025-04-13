@@ -208,6 +208,6 @@ class Firestarter(LatticeICE40Platform, platform):
 if __name__ == "__main__":
     Firestarter(micropython='/dev/ttyACM0').build(
         Blinky(),
-        do_program=True,
+        do_program=False,
         verbose=True,
     )

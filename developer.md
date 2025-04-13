@@ -2,19 +2,6 @@
 
 The following notes where removed from readme.md for brevity.
 
-
-## Poetry
-
-Poetry gives warning when adding amaranth.
-This can be mitigated by running the following commands
-
-```
-poetry add git+"https://github.com/amaranth-lang/amaranth.git"
-poetry add git+"https://github.com/amaranth-lang/amaranth-boards.git"
-poetry add git+"https://github.com/amaranth-lang/amaranth-soc.git"
-poetry add git+"https://github.com/hstarmans/luna"
-```
-
 ## Precommit
 Install Git pre-commit hooks based on the .pre-commit-config.yaml file.
 ```pre-commit install```
@@ -80,14 +67,37 @@ find / -name llvm-config
 
 ## Notes removed from Camera
 The operation of the laser scanner can be verified with a camera.
-Two camera's have been tried; [uEye](https://en.ids-imaging.com/) 2240 monochrome camera and [Arducam Global shutter](https://www.arducam.com/products/camera-breakout-board/global-shutter-camera/) which used the OV2311 chip.
+Two camera's have been tried; [uEye](https://en.ids-imaging.com/) 2240 monochrome camera and [Arducam Global shutter](https://www.arducam.com/products/camera-breakout-board/global-shutter-camera/) which used the OV2311 chip. I use an old version UC-621 which is not compatible with the latest version of raspberry and drivers.
 The images of the cameras are analyzed with [OpenCV](https://opencv.org/).
 ```console
 sudo apt install -y libopenjp2-7 libilmbase-dev libopenexr-dev libgstreamer1.0-dev ffmpeg
 pip3 install opencv-python
 ```
 Camera must be enabled via raspi-config. Raspi-config states that this will no longer be supported in future versions and denotes camera as legacy.
-I had toleave 'i2c-dev' in '/etc/modules-load.d/modules.conf' for i2c to load.
+I had to leave 'i2c-dev' in '/etc/modules-load.d/modules.conf' for i2c to load.
+
+## Arducam
+Laser spots are measured using the arducam UC-621. There is a binary available for 64 bit, this
+binary only works on the GNU/Linux 11 (bullseye). No sources are available and it cannot be recompiled. There is a new version
+of this camera by arducam but its driver cannot be used by UC-621. The new version uses the libcam driver. My camera is not
+libcam compatabile. For more information see https://github.com/ArduCAM/MIPI_Camera.
+Install my version of the Python libary available at [ArducamPython](https://github.com/hstarmans/Arducampython).
+The following lines need to be in the /boot/config.txt for the arducam to work. If all is well you should see the camera via 
+i2cdetect -y 10;
+```
+# I2C for laserdriver and camera
+dtparam=i2c_arm=on
+dtparam=i2c_vc=on
+# SPI
+dtoverlay=spi0-1cs,cs0_pin=18
+dtoverlay=spi1-1cs,cs0_pin=7
+# camera
+dtoverlay=vc4-fkms-v3d
+start_x=1
+gpu_mem=300
+```
+There should not be dtparam=spi=on, somewhere. This would enable two chip selects for SPI0 and 
+creates a conflict with the pin select of SPI1. 
 
 #### uEye camera
 Disadvantages; uEye is more expensive, drivers require an account and there is no good Python driver.  
@@ -211,28 +221,6 @@ System has no link for LIDAR measurements, circuit can be found [here](https://h
 The FPGA controls all the stepper motors. At the moment it is not possible to read instruction from a GCODE file.  
 Add maximum-length linear-feedback shift register sequence and CRC check.  
 
-## Raspberry pi
-The following lines need to be in the /boot/config.txt;
-```
-# I2C for laserdriver and camera
-dtparam=i2c_arm=on
-dtparam=i2c_vc=on
-# SPI
-dtoverlay=spi0-1cs,cs0_pin=18
-dtoverlay=spi1-1cs,cs0_pin=7
-# camera
-dtoverlay=vc4-fkms-v3d
-start_x=1
-gpu_mem=300
-```
-There should not be dtparam=spi=on, somewhere. This would enable two chip selects for SPI0 and 
-creates a conflict with the pin select of SPI1. 
-
-## Arducam
-Laser spots are measured using the arducam UC-621. There is a binary available for 64 bit, this
-binary only works on the GNU/Linux 11 (bullseye). No sources are available and it cannot be recompiled.
-For more information see https://github.com/ArduCAM/MIPI_Camera.
-Install my version of the Python libary available at [ArducamPython](https://github.com/hstarmans/Arducampython).
 
 <!-- 
 TODO:

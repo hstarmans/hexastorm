@@ -5,7 +5,6 @@ from io import BytesIO
 import struct
 
 import numpy as np
-import pandas as pd
 from cairosvg.surface import PNGSurface
 from numba import jit, typed, types
 from PIL import Image
