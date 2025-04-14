@@ -11,6 +11,8 @@ import cv2 as cv
 import numpy as np
 
 import hexastorm.optical as feature
+from hexastorm.constants import params
+from hexastorm.platforms import Firestarter
 
 TEST_DIR = Path(__file__).parents[0].resolve()
 IMG_DIR = Path(TEST_DIR, "images")
@@ -151,7 +153,9 @@ class Tests(unittest.TestCase):
             lh.enable_comp(laser0=True, polygon=True)
         """
         )
-        self.cam.set_exposure(7000)
+        # 3000 rpm 4 facets --> 200 hertz
+        # one facet per  1/200 = 5 ms
+        self.cam.set_exposure(1400)
         print("This will open up a window")
         print("Press escape to quit live view")
         self.cam.live_view(0.6)
@@ -189,16 +193,24 @@ class Tests(unittest.TestCase):
         """
         )
 
-    # def writepattern(self, pattern):
-    #     """repeats a pattern so a line is formed and writes to head
+    def writepattern(self):
+        """repeats a pattern so a line is formed and writes to head
 
-    #     pattern  --  list of bits [0] or [1,0,0]
-    #     """
-    #     bits = self.host.laser_params["BITSINSCANLINE"]
-    #     line = (
-    #         pattern * (bits // len(pattern)) + pattern[: bits % len(pattern)]
-    #     )
-    #     yield from self.host.writeline(line)
+        pattern  --  list of bits [0] or [1,0,0]
+        """
+        pattern = [1] * 5 + [0] * 35
+        lines = 10000
+        platf = Firestarter(micropython=True)
+        laser_params = params(platf)
+        bits = int(laser_params["BITSINSCANLINE"])
+        micropython(f"""
+            pattern = {pattern}
+            line = (pattern*({bits}//len(pattern)) + pattern[: {bits} % len(pattern)])
+            for _ in range({lines}):
+                lh.write_line(line)
+            """, nofollow=True)
+        self.cam.live_view(0.6)
+        self.takepicture()
 
     # @executor
     # def searchcamera(self, timeout=3, build=False):
