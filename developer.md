@@ -1,6 +1,7 @@
 # Dev notes
 
-The following notes where removed from readme.md for brevity.
+The camera is a major dependency. My version of arducam does not support the latest raspberry pi OS.
+As a result, I fixed numpy on 1.19.5 and python on 3.9.2.
 
 ## Precommit
 Install Git pre-commit hooks based on the .pre-commit-config.yaml file.
