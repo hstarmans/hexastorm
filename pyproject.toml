@@ -13,23 +13,16 @@ license = { file = "LICENSE.txt" }
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
-    "amaranth>=0.5.4",
     "amaranth-boards",
-    "amaranth-soc",
     "cairosvg>=2.7.1",
     "luna-usb",
     "numba>=0.56.4",
     "numpy==1.19.5",
     "pillow>=11.2.1",
     "scipy>=1.10.1",
-    "yowasp-nextpnr-ice40>=0.8.0.0.post621",
-    "yowasp-yosys>=0.52.0.0.post894",
+    "yowasp-nextpnr-ice40==0.6.0.0.post440",
+    "yowasp-yosys==0.40.0.0.post707",
 ]
-
-[tool.uv.sources]
-amaranth-boards = { git = "https://github.com/amaranth-lang/amaranth-boards.git" }
-amaranth-soc = { git = "https://github.com/amaranth-lang/amaranth-soc.git" }
-luna-usb = { git = "https://github.com/greatscottgadgets/luna" }
 
 [dependency-groups]
 dev = [
@@ -43,3 +36,7 @@ raspberry = [
 
 [tool.black]
 line-length = 79
+
+[tool.uv.sources]
+luna-usb = { git = "https://github.com/hstarmans/luna.git", rev = "patch1" }
+amaranth-boards = { git = "https://github.com/amaranth-lang/amaranth-boards/", rev = "1706758" }
