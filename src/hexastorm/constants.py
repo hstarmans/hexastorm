@@ -37,14 +37,14 @@ class platform:
     clks = {0: 48, 1: 24, 2: 12, 3: 6}
     hfosc_div = 2
     laser_var = {
-        "RPM": 2000,
-        "SPINUP_TIME": 10,
+        "RPM": 3000,
+        "SPINUP_TIME": 1.5,
         "STABLE_TIME": 1.125,
         "FACETS": 4,
         "CRYSTAL_HZ": clks[hfosc_div] * 1e6,
         "MOTORDEBUG": "ticksinfacet",
         "MOTORDIVIDER": pow(2, 8),
-        "LASER_HZ": 100e3,
+        "LASER_HZ": 300e3,
         "END%": 0.7,
         "START%": 0.35,
         "SINGLE_LINE": False,

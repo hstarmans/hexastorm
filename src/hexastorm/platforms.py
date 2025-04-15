@@ -53,36 +53,10 @@ class TestPlatform:
         self.memdepth = wordsinmove(self) * 2 + 1
 
 
-class Firestarter(LatticeICE40Platform, platform):
+class Firestarter(platform, LatticeICE40Platform):
     """Kicad board available at
     https://github.com/hstarmans/firestarter/
     """
-
-    name = "firestarter"
-    memdepth = 256
-    device = "iCE40UP5K"
-    package = "SG48"
-    default_clk = "SB_HFOSC"
-    # This division setting selects the internal oscillator speed:
-    # 0: 48MHz, 1: 24MHz, 2: 12MHz, 3: 6MHz.
-    clks = {0: 48, 1: 24, 2: 12, 3: 6}
-    hfosc_div = 2
-    laser_var = {
-        "RPM": 2000,
-        "SPINUP_TIME": 1.5,
-        "STABLE_TIME": 1.125,
-        "FACETS": 4,
-        "CRYSTAL_HZ": clks[hfosc_div] * 1e6,
-        "MOTORDEBUG": "ticksinfacet",
-        "MOTORDIVIDER": pow(2, 8),
-        "LASER_HZ": 100e3,
-        "END%": 0.7,
-        "START%": 0.35,
-        "SINGLE_LINE": False,
-        "SINGLE_FACET": False,
-        "DIRECTION": 0,
-    }
-
     # default_clk = "clk13"
     # clock_domain_generator = FirestarterDomainGenerator
     resources = [
