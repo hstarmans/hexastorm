@@ -106,14 +106,14 @@ class SPIParser(Elaboratable):
         ]
         # Parser
         mtrcntr = Signal(range(platform.motors))
-        wordsreceived = Signal(range(wordsinmove(platform) + 1))
-        error = Signal()
+        wordsreceived = Signal(range(wordsinscanline(platform.laser_var['BITSINSCANLINE']) + 1))
+        worderror = Signal()
         # Peripheral state
         state = Signal(8)
         m.d.sync += [
             state[STATE.PARSING].eq(self.parse),
             state[STATE.FULL].eq(fifo.space_available <= 1),
-            state[STATE.ERROR].eq(self.dispatcherror | error),
+            state[STATE.ERROR].eq(self.dispatcherror | worderror),
         ]
         # remember which word we are processing
         instruction = Signal(8)
@@ -122,7 +122,7 @@ class SPIParser(Elaboratable):
                 m.d.sync += [
                     self.parse.eq(1),
                     wordsreceived.eq(0),
-                    error.eq(0),
+                    worderror.eq(0),
                 ]
                 m.next = "WAIT_COMMAND"
             with m.State("WAIT_COMMAND"):
@@ -172,7 +172,7 @@ class SPIParser(Elaboratable):
                             ]
                             m.next = "WRITE"
                         with m.Else():
-                            m.d.sync += error.eq(1)
+                            m.d.sync += worderror.eq(1)
                             m.next = "WAIT_COMMAND"
                     with m.Else():
                         m.d.sync += [

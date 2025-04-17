@@ -44,7 +44,7 @@ class platform:
         "CRYSTAL_HZ": clks[hfosc_div] * 1e6,
         "MOTORDEBUG": "ticksinfacet",
         "MOTORDIVIDER": pow(2, 8),
-        "LASER_HZ": 300e3,
+        "LASER_HZ": 400e3,
         "END%": 0.7,
         "START%": 0.35,
         "SINGLE_LINE": False,
