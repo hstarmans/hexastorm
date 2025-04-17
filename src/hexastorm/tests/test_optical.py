@@ -140,7 +140,7 @@ class Tests(unittest.TestCase):
         """
         )
 
-    def grabline(self, current=80):
+    def photo_line(self, current=80):
         """turn on laser and motor
 
         User can first preview image. After pressing escape,
@@ -167,7 +167,7 @@ class Tests(unittest.TestCase):
         """
         )
 
-    def grabspot(self, current=80):
+    def photo_spot(self, current=80):
         """turn on laser
         User can first preview image. After pressing escape,
         a final image is taken.
@@ -193,12 +193,12 @@ class Tests(unittest.TestCase):
         """
         )
 
-    def writepattern(self):
-        """repeats a pattern so a line is formed and writes to head
+    def photo_pattern(self):
+        """line with a given pattern is projected and photo is taken
 
         pattern  --  list of bits [0] or [1,0,0]
         """
-        pattern = [1] * 5 + [0] * 35
+        pattern = [1] * 1 + [0] * 39
         lines = 10000
         platf = Firestarter(micropython=True)
         laser_params = params(platf)
@@ -209,8 +209,9 @@ class Tests(unittest.TestCase):
             for _ in range({lines}):
                 lh.write_line(line)
             """, nofollow=True)
+        self.cam.set_exposure(1400)
         self.cam.live_view(0.6)
-        self.takepicture()
+        self.takepicture(times=10)
 
     # @executor
     # def searchcamera(self, timeout=3, build=False):
@@ -235,15 +236,17 @@ class Tests(unittest.TestCase):
     #     # time.sleep(timeout)
     #     # yield from self.host.enable_comp(synchronize=False)
 
-    def takepicture(self):
+    def takepicture(self, times=1):
         "takes picture and store it with timestamp to this folder"
-        img = self.cam.capture()
-        grey_img = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
-        date_string = time.strftime("%Y-%m-%d-%H:%M")
-        print(f"Writing to {Path(IMG_DIR, date_string+'.jpg')}")
-        if not os.path.exists(IMG_DIR):
-            os.makedirs(IMG_DIR)
-        cv.imwrite(str(Path(IMG_DIR, date_string + ".jpg")), grey_img)
+        for _ in range(times):
+            img = self.cam.capture()
+            grey_img = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+            date_string = time.strftime("%Y-%m-%d-%H:%M:%S")
+            print(f"Writing to {Path(IMG_DIR, date_string+'.jpg')}")
+            if not os.path.exists(IMG_DIR):
+                os.makedirs(IMG_DIR)
+            cv.imwrite(str(Path(IMG_DIR, date_string + ".jpg")), grey_img)
+            time.sleep(1)
         return img
 
 
