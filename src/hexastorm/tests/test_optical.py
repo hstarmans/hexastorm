@@ -205,9 +205,9 @@ class Tests(unittest.TestCase):
         bits = int(laser_params["BITSINSCANLINE"])
         micropython(f"""
             pattern = {pattern}
+            bits = lh.host.laser_params["BITSINSCANLINE"]
             line = (pattern*({bits}//len(pattern)) + pattern[: {bits} % len(pattern)])
-            for _ in range({lines}):
-                lh.write_line(line)
+            lh.write_line(line, repititions={lines})
             """, nofollow=True)
         self.cam.set_exposure(1400)
         self.cam.live_view(0.6)

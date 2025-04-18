@@ -677,20 +677,22 @@ class Host:
         return np.array([state[key] for key in axes_names])
 
 
-    def writeline(self, bitlst, stepsperline=1, direction=0):
-        """write bits to FIFO
+    def writeline(self, bitlst, stepsperline=1, direction=0, repetitions=1):
+        """projects given bitlst as line with laserhead
 
         bit list      bits which are written to substrate
                       at the moment laser can only be on or off
                       if bitlst is empty stop command is sent
         stepsperline  stepsperline, should be greater than 0
                       if you don't want to move simply disable motor
+        repitition    multiple times line is repeated
         direction     motor direction of scanning axis
         """
         bytelst = self.bittobytelist(bitlst, stepsperline, direction)
-        cmdlst = self.bytetocmdlist(bytelst)
-        for cmd in cmdlst:
-            (yield from self.send_command(cmd, blocking=True))
+        for _ in range(repetitions):
+            cmdlst = self.bytetocmdlist(bytelst)
+            for cmd in cmdlst:
+                (yield from self.send_command(cmd, blocking=True))
 
     def bytetocmdlist(self, bytelst):
         cmdlist = []
