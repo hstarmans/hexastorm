@@ -12,6 +12,7 @@ from scipy import ndimage
 
 from hexastorm.lasers import params as paramsfunc
 from hexastorm.platforms import Firestarter
+from hexastorm.constants import wordsinscanline
 from hexastorm.controller import Host
 
 
@@ -117,11 +118,11 @@ class Interpolator:
         polygon scanning. The cut is not very clean but in principle
         the prism nature of the system is seperated and only present here.
 
-        stepsperline -- this parameter is not fixed and can be changed
-                        without flashing the board
+        stepsperline -- parameter best kept fixed at 1
+                        line can be exposed multiple times per line
+                        during exposure
         """
-
-        platform = Firestarter()
+        platform = Firestarter(micropython=True)
         var = paramsfunc(platform)
         # TODO: slicer should account for direction
         # bytes are read using little but finally direction is flipped!
@@ -501,6 +502,7 @@ class Interpolator:
         file_path = os.path.join(self.debug_folder, filename)
         bitsinline = int(self.params["bitsinscanline"])
         bytesinline = int(np.ceil(self.params["bitsinscanline"]//8))
+        words_in_line = wordsinscanline(int(self.params['bitsinscanline']))
         pixeldata = []
         with open(file_path, "rb") as f:
             # 1. Header
@@ -515,7 +517,7 @@ class Interpolator:
                 for i in range(facetsinlane):
                     # cmd lst has lenth of 6, there are 9 bytes in a cmd
                     cmdlst = []
-                    for _ in range(6):
+                    for _ in range(words_in_line):
                         cmdlst.append(f.read(9))
                     # let's unpack the cmds, all 6 commands start with write
                     # first command has the scanline command
@@ -598,10 +600,8 @@ if __name__ == "__main__":
     # parallelization could not be used, as I am
     # still on 32 bit (this is easier with
     # camera)
-    # PCB stepsperline 0.5, single channel, current 130
-    # photholithopaper stepsperline 0.5, single channel, current 130
-    stepsperline = 0.5
-    interpolator = Interpolator(stepsperline=stepsperline)
+    # PCB / photopaper stepsperline single channel, current 130, 2x per line
+    interpolator = Interpolator()
     dir_path = os.path.dirname(os.path.realpath(__file__))
     # postscript resolution test
     url = os.path.join(dir_path, "test-patterns", "line-resolution-test.ps")

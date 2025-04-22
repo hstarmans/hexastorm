@@ -253,31 +253,26 @@ class Host:
         if do_program:
             self.reset()
 
-    def reset(self, blank=True):
+    def reset(self):
         "restart the FPGA by flipping the reset pin"
-        if self.micropython:
-            from machine import Pin
-            # free all lines
-            sck = Pin(12, Pin.IN)
-            mosi = Pin(13, Pin.IN)
-            miso = Pin(11, Pin.IN)
-            slct = Pin(10, Pin.IN)
-            self.reset_pin.value(0)
-            sleep(1)
-            self.reset_pin.value(1)
-            sleep(1)
-            self.init_micropython()
-        else:
-            self.reset_pin.off()
-            sleep(1)
-            self.reset_pin.on()
-            sleep(1)
-        # a blank needs to be send, Statictest succeeds but
-        # testlaser fails in test_electrical.py
-        # on HX4K this was not needed
-        # is required for the UP5K
-        if blank:
-            self.send_command([0] * (WORD_BYTES + COMMAND_BYTES))
+        from machine import Pin
+        # free all lines
+        sck = Pin(12, Pin.IN)
+        mosi = Pin(13, Pin.IN)
+        miso = Pin(11, Pin.IN)
+        slct = Pin(10, Pin.IN)
+        self.reset_pin.value(0)
+        sleep(1)
+        self.reset_pin.value(1)
+        sleep(1)
+        self.init_micropython()
+        command = [0] * (WORD_BYTES + COMMAND_BYTES)
+        command = bytearray(command)
+        response = bytearray(command)
+        self.fpga_select.value(0)
+        self.spi.write_readinto(command, response)
+        self.fpga_select.value(1)
+        
 
     def get_motordebug(self, blocking=False):
         """retrieves the motor debug word

@@ -188,7 +188,7 @@ class Tests(unittest.TestCase):
         self.cam.live_view(scale=0.6)
         img = self.takepicture()
         print(feature.spotsize(img))
-        micropython(f"""
+        micropython("""
             lh.enable_comp(laser1=False, polygon=False)
         """
         )
