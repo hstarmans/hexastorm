@@ -588,10 +588,10 @@ class Host:
             while True:
                 trials += 1
                 yield from send_command(command, response)
-                state = yield from self.get_state(response)
-                if state["error"]:
+                byte1 = response[-1]  # can't rely on self.get_state (needs speed!)
+                if (byte1 >> (7-STATE.ERROR)) & 1:
                     raise Exception("Error detected on FPGA")
-                if not state["mem_full"]:
+                if not ((byte1 >> (7-STATE.FULL)) & 1):
                     break
                 if trials > self.maxtrials:
                     raise Memfull(f"Too many trials {trials} needed")

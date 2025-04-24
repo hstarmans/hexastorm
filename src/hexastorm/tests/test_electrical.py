@@ -11,7 +11,7 @@ from math import isclose
 
 from ulab import numpy as np
 
-from ..constants import COMMANDS, MOVE_TICKS, WORD_BYTES, wordsinmove, platform
+from ..constants import COMMANDS, MOVE_TICKS, WORD_BYTES, wordsinmove
 from ..controller import Host, Memfull, executor
 from ..ulabext import assert_array_almost_equal
 
@@ -179,7 +179,7 @@ class LaserheadTest(Base):
         #(yield from self.host.set_parsing(False))
 
     @executor
-    def test_scanline(self, timeout=3, numblines=1_000):
+    def test_scanline(self, numblines=1_000, repeat=True):
         host = self.host
         line = [1] * host.laser_params["BITSINSCANLINE"]
         # speed can be further improved by precomputing the commands
@@ -188,17 +188,22 @@ class LaserheadTest(Base):
         print(f"waiting for polygon to stabilize and laserhead to process {numblines} lines")
         sleep(3)
         starttime = ticks_ms()  # milliseconds
-        for _ in range(numblines):
-            yield from host.writeline(line)
+        if repeat:
+            yield from host.writeline(line, repetitions=numblines)
+        else:
+            for _ in range(numblines):
+                yield from host.writeline(line)
         elapsed = (ticks_ms() - starttime)/1000 # seconds
         measured_freq = numblines/elapsed # hertz    
         yield from host.writeline([])
-        # you achieve 33 hertz which is too low
-        expected_freq = platform.laser_var['RPM']/60*platform.laser_var['FACETS']
+        # 3000 RPM
+        #    100 khz --> pass
+        #    400 Khz --> pass, fail for repeat is False
+        expected_freq = host.platform.laser_var['RPM']/60*host.platform.laser_var['FACETS']
+        print(f"line rate measured: {measured_freq:.2f},  expected {expected_freq:.2f} in Hertz")
         # measured freq is higher as it still need to clean the buffer
         self.assertEqual(isclose(measured_freq, expected_freq, rel_tol=0.1), True)
         self.assertEqual((yield from host.get_state())["error"], False)
-        print(f"passed, line rate measured: {measured_freq:.2f},  expected {expected_freq:.2f} in Hertz")
         yield from host.enable_comp(synchronize=False)
 
 
