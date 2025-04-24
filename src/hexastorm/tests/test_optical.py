@@ -11,7 +11,6 @@ import cv2 as cv
 import numpy as np
 
 import hexastorm.optical as feature
-from hexastorm.constants import params
 from hexastorm.platforms import Firestarter
 
 TEST_DIR = Path(__file__).parents[0].resolve()
@@ -81,8 +80,10 @@ class OpticalTest(unittest.TestCase):
 
 
 class Tests(unittest.TestCase):
-    """Optical test for scanhead"""
-
+    """Optical test for scanhead
+    
+        shutter speed: it is assumed 10 units is 1 ms
+    """
     @classmethod
     def setUpClass(cls):
         cls.cam = camera.Cam()
@@ -155,7 +156,7 @@ class Tests(unittest.TestCase):
         )
         # 3000 rpm 4 facets --> 200 hertz
         # one facet per  1/200 = 5 ms
-        self.cam.set_exposure(1400)
+        self.cam.set_exposure(700)
         print("This will open up a window")
         print("Press escape to quit live view")
         self.cam.live_view(0.6)
@@ -180,7 +181,7 @@ class Tests(unittest.TestCase):
             lh.enable_comp(laser1=True, polygon=False)
         """
         )
-        self.cam.set_exposure(1300)
+        self.cam.set_exposure(300)
         print(
             "Calibrate the camera with live view \
                and press escape to confirm spot in vision"
@@ -199,19 +200,16 @@ class Tests(unittest.TestCase):
         pattern  --  list of bits [0] or [1,0,0]
         """
         pattern = [1] * 1 + [0] * 39
-        lines = 10000
-        platf = Firestarter(micropython=True)
-        laser_params = params(platf)
-        bits = int(laser_params["BITSINSCANLINE"])
+        lines = 10_000
         micropython(f"""
             pattern = {pattern}
             bits = lh.host.laser_params["BITSINSCANLINE"]
-            line = (pattern*({bits}//len(pattern)) + pattern[: {bits} % len(pattern)])
-            lh.write_line(line, repititions={lines})
+            line = (pattern*(bits//len(pattern)) + pattern[: bits % len(pattern)])
+            lh.write_line(line, repetitions={lines})
             """, nofollow=True)
-        self.cam.set_exposure(1400)
+        self.cam.set_exposure(400)
         self.cam.live_view(0.6)
-        self.takepicture(times=10)
+        self.takepicture(times=1)
 
     # @executor
     # def searchcamera(self, timeout=3, build=False):
