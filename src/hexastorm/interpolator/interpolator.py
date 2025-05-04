@@ -1,11 +1,10 @@
 import math
 import os
-import xml.etree.ElementTree
 from io import BytesIO
 import struct
 
 import numpy as np
-from cairosvg.surface import PNGSurface
+from cairosvg import svg2png
 from numba import jit, typed, types
 from PIL import Image
 from scipy import ndimage
@@ -156,7 +155,7 @@ class Interpolator:
             #       you first sample the image,
             #       you then again sample the sampled image
             # height/width of the sample gridth [mm]
-            "samplegridsize": 0.015,
+            "samplegridsize": 0.005,
             "stepsperline": stepsperline,
             "facetsinlane": 0,  # set when file is parsed
             # mm/s
@@ -195,22 +194,14 @@ class Interpolator:
                 params[item] = round(params[item])
         return params
 
-    def svgtopil(self, svg):
+    def svgtopil(self, svg_filepath):
         """converts SVG snippets to a PIL Image"""
-        tree = xml.etree.ElementTree.parse(svg)
-        root = tree.getroot()
+        with open(svg_filepath, 'rb') as f:
+            svg_data = f.read()
         dpi = 25.4 / self.params["samplegridsize"]
-        bytestring = BytesIO(
-            PNGSurface.convert(
-                bytestring=xml.etree.ElementTree.tostring(root), dpi=dpi
-            )
-        )
-        img = Image.open(bytestring)
-        # following is done to fix issue with transparent backgrounds
-        img = img.convert("RGBA")  # PIL doesn't support 2 bit images
-        new_image = Image.new("RGBA", img.size, "WHITE")
-        img.paste(new_image, mask=img)
-        # img.save('test.png')
+        png_data = svg2png(bytestring=svg_data, dpi=dpi)
+        # rotation used to align jitter and crosstest correctly to laser
+        img = Image.open(BytesIO(png_data)).rotate(-90, expand=True)
         return img
 
     def pstopil(self, url, pixelsize=0.3527777778):
@@ -593,25 +584,19 @@ class Interpolator:
                         f.write(cmd)
 
 if __name__ == "__main__":
-    # https://github.com/hstarmans/ldgraphy
-    # numba greatly improves performance
-    # install procedure followed is
-    # https://github.com/numba/llvmlite/issues/604
-    # parallelization could not be used, as I am
-    # still on 32 bit (this is easier with
-    # camera)
     # PCB / photopaper stepsperline single channel, current 130, 2x per line
+    fname = "jittertest"
     interpolator = Interpolator()
     dir_path = os.path.dirname(os.path.realpath(__file__))
     # postscript resolution test
-    url = os.path.join(dir_path, "test-patterns", "line-resolution-test.ps")
+    url = os.path.join(dir_path, "patterns", f"{fname}.svg")
     ptrn = interpolator.patternfile(url)
     # hexastorm.png pixelsize 0.035
     # url = os.path.join(dir_path, "test-patterns", "hexastorm.png")
     # ptrn = interpolator.patternfile(url, pixelsize=0.035)
     print("This can take up to 30 seconds")
-    interpolator.writebin(ptrn, "test.bin")
-    facetsinlane, lanes, lanewidth, arr = interpolator.readbin("test.bin")
+    interpolator.writebin(ptrn, f"{fname}.bin")
+    facetsinlane, lanes, lanewidth, arr = interpolator.readbin(f"{fname}.bin")
     assert np.allclose(interpolator.params["lanewidth"], lanewidth, 1e-3)
     assert np.allclose(interpolator.params["facetsinlane"], facetsinlane, 1e-3)
     assert len(arr) == round(facetsinlane*lanes*np.ceil(interpolator.params["bitsinscanline"]//8))
