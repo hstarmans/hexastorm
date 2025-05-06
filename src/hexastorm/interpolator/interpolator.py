@@ -379,7 +379,7 @@ class Interpolator:
         Converts image at URL to pattern for laser scanner
 
         url   -- path to file
-        positivistresist -- False if negative resist
+        positiveresist -- False if negative resist
         test  -- runs a sampling test, whether laser
                  frequency sufficient to provide accurate sample
         """
@@ -405,24 +405,14 @@ class Interpolator:
         ids = self.createcoordinates()
         print("Created coordinates for interpolation")
         print(f"Elapsed {time()-ctime:.2f} seconds")
-        if test:
-            ptrn = ndimage.map_coordinates(
-                input=layerarr,
-                output=np.uint8,
-                coordinates=ids,
-                order=1,
-                mode="constant",
-                cval=1,
-            )
-        else:
-            ptrn = ndimage.map_coordinates(
-                input=layerarr,
-                output=np.uint8,
-                coordinates=ids,
-                order=1,
-                mode="constant",
-                cval=0,
-            )
+        ptrn = ndimage.map_coordinates(
+            input=layerarr,
+            output=np.uint8,
+            coordinates=ids,
+            order=1,
+            mode="constant",
+            cval=0,
+        )
         print("Completed interpolation")
         print(f"Elapsed {time()-ctime:.2f} seconds")
         if ptrn.min() < 0 or ptrn.max() > 1:
@@ -440,6 +430,9 @@ class Interpolator:
         and the plotted as an image.
         The result is returned as numpy array and stored
         in script folder under filename.
+        The origin is in the lower-left corner, 
+        the starting point of the exposure.
+        The laser line is parallel to the x axis.
 
         ptrn_df  --  dataframe with laserdata
         step     --  pixel step, can be used to lower the number
@@ -480,7 +473,7 @@ class Interpolator:
         ptrn = ptrn[: len(xcor)]
         arr[xcor[:], ycor[:]] = ptrn[0 : len(ptrn) : step]
         arr = arr * 255
-        img = Image.fromarray(arr)
+        img = Image.fromarray(arr).rotate(90, expand=True)
         img.save(os.path.join(self.debug_folder, filename + ".png"))
         return img
 
