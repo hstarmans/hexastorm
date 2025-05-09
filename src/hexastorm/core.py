@@ -106,7 +106,7 @@ class SPIParser(Elaboratable):
         ]
         # Parser
         mtrcntr = Signal(range(platform.motors))
-        wordsreceived = Signal(range(max(wordsinmove(platform), wordsinscanline(platform.laser_var['BITSINSCANLINE']))))
+        wordsreceived = Signal(range(max(wordsinmove(platform), wordsinscanline(platform.laser_var['BITSINSCANLINE']))+1))
         worderror = Signal()
         # Peripheral state
         state = Signal(8)
