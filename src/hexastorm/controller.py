@@ -601,16 +601,19 @@ class Host:
         return response
 
     def enable_comp(
-        self, laser0=False, laser1=False, polygon=False, synchronize=False
+        self, laser0=False, laser1=False, polygon=False, synchronize=False, 
+        singlefacet=False
     ):
         """enable components
-
+        
         FPGA does need to be parsing FIFO
         These instructions are executed directly.
 
         laser0   -- True enables laser channel 0
         laser1   -- True enables laser channel 1
         polygon  -- False enables polygon motor
+        synchronize -- Enable synchronization
+        singlefacet -- Enable singlefacet
         """
         laser0, laser1, polygon = (
             int(bool(laser0)),
@@ -618,10 +621,11 @@ class Host:
             int(bool(polygon)),
         )
         synchronize = int(bool(synchronize))
+        singlefacet = int(bool(singlefacet))
         data = (
             [COMMANDS.WRITE]
             + [0] * (WORD_BYTES - 2)
-            + [int(f"{synchronize}{polygon}{laser1}{laser0}", 2)]
+            + [int(f"{singlefacet}{synchronize}{polygon}{laser1}{laser0}", 2)]
             + [INSTRUCTIONS.WRITEPIN]
         )
         yield from self.send_command(data, blocking=True)

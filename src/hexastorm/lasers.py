@@ -18,6 +18,7 @@ class Laserhead(Elaboratable):
     I/O signals:
     O: synchronized   -- if true, laser is in sync and prism is rotating
     I: synchronize    -- activate synchronization
+    I: singlefacet    -- activate single facet
     I: expose_start   -- start reading lines and exposing
     O: expose_finish  -- exposure is finished
     O: error          -- error signal
@@ -47,6 +48,7 @@ class Laserhead(Elaboratable):
         self.enable_prism = Signal()
         self.synchronize = Signal()
         self.synchronized = Signal()
+        self.singlefacet = Signal()
         self.error = Signal()
         self.ticksinfacet = Signal(range(self.dct["TICKSINFACET"] * 2))
         self.photodiode = Signal()
@@ -198,7 +200,7 @@ class Laserhead(Elaboratable):
                             m.d.sync += facetcnt.eq(0)
                         with m.Else():
                             m.d.sync += facetcnt.eq(facetcnt + 1)
-                        with m.If(dct["SINGLE_FACET"] & (facetcnt > 0)):
+                        with m.If(self.singlefacet & (facetcnt > 0)):
                             m.next = "WAIT_END"
                         with m.Elif(self.empty | ~self.process_lines):
                             m.next = "WAIT_END"
@@ -667,7 +669,6 @@ class SinglelinesinglefacetTest(BaseTest):
 
     platform = TestPlatform()
     laser_var = deepcopy(platform.laser_var)
-    laser_var["SINGLE_FACET"] = True
     laser_var["SINGLE_LINE"] = True
     FRAGMENT_UNDER_TEST = DiodeSimulator
     FRAGMENT_ARGUMENTS = {"platform": platform, "laser_var": laser_var}
@@ -675,6 +676,7 @@ class SinglelinesinglefacetTest(BaseTest):
     @sync_test_case
     def test_single_line_single_facet(self):
         dut = self.dut
+        yield dut.singlefacet.eq(1)
         lines = [[1] * dut.dct["BITSINSCANLINE"]]
         for line in lines:
             yield from self.write_line(line)
@@ -694,6 +696,7 @@ class SinglelinesinglefacetTest(BaseTest):
     @sync_test_case
     def test_move(self):
         dut = self.dut
+        yield dut.singlefacet.eq(1)
         lines = [[1] * dut.dct["BITSINSCANLINE"]]
         stepsperline = 1
         for line in lines:

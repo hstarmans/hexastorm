@@ -106,7 +106,7 @@ class SPIParser(Elaboratable):
         ]
         # Parser
         mtrcntr = Signal(range(platform.motors))
-        wordsreceived = Signal(range(wordsinscanline(platform.laser_var['BITSINSCANLINE']) + 1))
+        wordsreceived = Signal(range(max(wordsinmove(platform), wordsinscanline(platform.laser_var['BITSINSCANLINE']))))
         worderror = Signal()
         # Peripheral state
         state = Signal(8)
@@ -385,7 +385,7 @@ class Dispatcher(Elaboratable):
         # connect spi
         m.d.comb += parser.spi.connect(spi)
         # pins you can write to
-        pins = Cat(lasers, enable_prism, laserhead.synchronize)
+        pins = Cat(lasers, enable_prism, laserhead.synchronize, laserhead.singlefacet)
         with m.FSM(reset="RESET", name="dispatcher"):
             with m.State("RESET"):
                 m.next = "WAIT_INSTRUCTION"
@@ -644,7 +644,7 @@ class TestDispatcher(SPIGatewareTestCase):
     def test_writepin(self):
         """verify homing procedure works correctly"""
         yield from self.host.enable_comp(
-            laser0=True, laser1=False, polygon=False
+            laser0=True, laser1=False, polygon=True, synchronize=1, singlefacet=1
         )
         # wait till instruction is received
         while (yield self.dut.parser.empty):
@@ -653,9 +653,11 @@ class TestDispatcher(SPIGatewareTestCase):
         self.assertEqual((yield from self.host.get_state())["error"], False)
         self.assertEqual((yield self.dut.laserheadpins.laser0), 1)
         self.assertEqual((yield self.dut.laserheadpins.laser1), 0)
-        # TODO: the enable pin is no longer on the laser head but
-        #       the prism motor
-        # self.assertEqual((yield self.dut.laserheadpins.en), 0)
+        self.assertEqual((yield self.dut.laserheadpins.en), 1)
+        # NOT tested, these signals are not physical and not exposed via 
+        # laserheadpins
+        #self.assertEqual((yield self.dut.laserheadpins.synchronize), 1)
+        #self.assertEqual((yield self.dut.laserheadpins.singlefacet), 1)
 
     @sync_test_case
     def test_home(self):
