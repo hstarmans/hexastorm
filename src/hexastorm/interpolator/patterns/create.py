@@ -96,8 +96,8 @@ for key, spine in ax.spines.items():
 fix_dimensions(fig, ax, pix_per_mm)
 #print(fig.get_size_inches()*25.4)
 #print(fig.get_dpi())
-print("Creating jittertest")
-plt.savefig("jittertest.svg",  bbox_inches='tight', dpi=fig.get_dpi(), pad_inches=0)
+print("Creating jittertest old")
+plt.savefig("jittertestold.svg",  bbox_inches='tight', dpi=fig.get_dpi(), pad_inches=0)
 
 
 ## Creates a fan of lines
@@ -183,7 +183,6 @@ plt.savefig("fantest.svg",  bbox_inches='tight', dpi=fig.get_dpi(), pad_inches=0
 ##
 ##
 pattern_x_width = 25       # mm
-horizitonal_lines = 50
 final_linewidth = 0.300    # mm 
 linewidth_start = 0.025    # mm
 stepsize = 0.025
@@ -232,3 +231,58 @@ plt.ylim(0, pattern_y_width+0.5*height_line_group)
 fix_dimensions(fig, ax, pix_per_mm)
 print("Creating crossscantest")
 plt.savefig("crosscantest.svg",  bbox_inches='tight', dpi=fig.get_dpi(), pad_inches=0)
+
+
+## Creates a jitter test, similar to the one above
+##
+##
+pattern_x_width = 25       # mm
+final_linewidth = 0.300    # mm 
+linewidth_start = 0.025    # mm
+stepsize = 0.025
+width_line_group = 5      # mm
+lines_per_group = 10       # number
+
+plt.rcParams.update({'font.size': points_text,
+                     'xtick.major.size': points_ticks,    # Size of major tick marks in points
+                     'ytick.major.size': points_ticks,
+                     'xtick.minor.size': points_ticks,    # Size of minor tick marks in points
+                     'ytick.minor.size': points_ticks,
+                     'grid.linewidth': points_ticks})   # Width of grid lines in points 
+
+
+
+def thicknes_line(n):
+    return n*stepsize+linewidth_start
+
+
+
+fig, ax = plt.subplots()
+
+#fix_dimensions(fig, ax, pix_per_mm)
+x_ticks = np.arange(5, pattern_x_width + 1, width_line_group)
+x_labels = [f"{thicknes_line(idx)*1000:.0f}" for idx, _ in enumerate(x_ticks)]
+
+assert lines_per_group <  int(width_line_group // thicknes_line(len(x_ticks)))
+
+for idx, pos_width in enumerate(x_ticks):
+    thickness = thicknes_line(idx)
+    start_width = pos_width - lines_per_group * thickness
+    for line in range(lines_per_group):
+       rect = Rectangle((start_width+thickness*2*line, 0), thickness, pattern_y_width, linewidth=0, edgecolor='none', facecolor='black')
+       # Add the patch to the axes
+       ax.add_patch(rect)
+
+ax.set_xticks(x_ticks)
+ax.set_xticklabels(x_labels)
+ax.yaxis.set_major_locator(MultipleLocator(base=10))
+ax.set_xlabel("Width [μm]")
+ax.set_ylabel("Offset [mm]")
+for key, spine in ax.spines.items():
+    spine.set_visible(False)
+plt.xlim(0, pattern_x_width+0.5*height_line_group)  
+plt.ylim(0, pattern_y_width)
+plt.xticks(rotation=-90)
+fix_dimensions(fig, ax, pix_per_mm)
+print("Creating jittertest")
+plt.savefig("jittertest.svg",  bbox_inches='tight', dpi=fig.get_dpi(), pad_inches=0)
