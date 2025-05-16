@@ -1,6 +1,7 @@
 from struct import unpack
 from time import sleep
 import sys
+import logging
 
 try:
     import numpy as np
@@ -21,6 +22,8 @@ from .constants import (
     params,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def executor(func):
     """convert Amaranth style function in normal callable function
@@ -39,6 +42,28 @@ def executor(func):
         except StopIteration as e:
             return e.value
     return inner
+
+def retry_on_fpga_error(func):
+    """
+    A decorator to retry a function if an "FPGA" error occurs.
+    """
+    def wrapper(instance_self, *args, **kwargs):
+        for attempt in range(instance_self.max_attempts + 1):
+            try:
+                return func(instance_self, *args, **kwargs)
+            except Exception as e:
+                if "FPGA" in str(e):
+                    if attempt == instance_self.max_attempts:
+                        logging.error("Communication with FPGA not successful, job aborted")
+                    else:
+                        logging.error("Error detected on FPGA, " +
+                                        "wait 3 seconds for buffer to deplete and try again.")
+                        sleep(3)
+                    instance_self.reset()
+                else:
+                    raise
+        return None
+    return wrapper
 
 
 class Memfull(Exception):
@@ -65,12 +90,13 @@ class Host:
             self.micropython = True
         else:
             self.micropython = micropython
-
-        # case raspberry
+        self.max_attempts = 1
+       
         if platform is None:
             self.test = False
             # case micropython
             if self.micropython:
+                self.max_attempts = 3
                 self.init_micropython()
             # case raspberry
             else:
@@ -160,7 +186,7 @@ class Host:
                     tmc.setInternalRSense(False)
                     tmc.setMotorEnabled(False)
                 except ConnectionFail:
-                    print(f"Cannot connect to stepper motor {key} axis")
+                    logging.debug(f"Cannot connect to stepper motor {key} axis")
         else:
             import steppers
             self.motors = [
@@ -212,15 +238,15 @@ class Host:
             blocknum = 0
             while True:
                 buf = infile.read(buffsize)
-                print(f" Writing {blocknum}.")
+                logging.info(f" Writing {blocknum}.")
                 f.writeblocks(blocknum, buf)
                 if len(buf) < buffsize:
-                    print(f"Final block {blocknum}")
+                    logging.info(f"Final block {blocknum}")
                     break
                 else:
                     blocknum += 1
         self.reset()
-        print("flashed fpga")
+        logging.info("flashed fpga")
 
 
     def build(self, do_program=True, verbose=True, mod="all"):
@@ -231,7 +257,7 @@ class Host:
         verbose     -- prints output of Yosys, Nextpnr and icepack
         """
         if self.micropython:
-            print("Micropython cannot update binary, using stored one")
+            logging.info("Micropython cannot update binary, using stored one")
         else:
             from .core import Dispatcher
             from .motor import Driver
@@ -272,7 +298,6 @@ class Host:
         self.fpga_select.value(0)
         self.spi.write_readinto(command, response)
         self.fpga_select.value(1)
-        
 
     def get_motordebug(self, blocking=False):
         """retrieves the motor debug word
@@ -334,6 +359,7 @@ class Host:
         else:
             return response
 
+    @retry_on_fpga_error
     def get_state(self, data=None):
         """retrieves the state of the FPGA as dictionary
 
@@ -371,6 +397,7 @@ class Host:
         return dct
 
     @property
+    @retry_on_fpga_error
     def position(self):
         """retrieves position from FPGA and updates internal position
 
@@ -452,6 +479,7 @@ class Host:
         else:
             self.bus.write_byte_data(self.platform.ic_address, 0, val)
 
+    @retry_on_fpga_error
     def set_parsing(self, value):
         """enables or disables parsing of FIFO by FPGA
 
@@ -466,6 +494,7 @@ class Host:
         command += WORD_BYTES * [0]
         return (yield from self.send_command(command))
 
+    @retry_on_fpga_error
     def home_axes(self, axes, speed=None, displacement=-200):
         """home given axes, i.e. [1,0,1] homes x, z and not y
 
@@ -496,6 +525,7 @@ class Host:
         count = (steps << (1 + bitshift)) + (1 << (bitshift - 1))
         return count
 
+    @retry_on_fpga_error
     def gotopoint(self, position, speed=None, absolute=True):
         """move machine to position or with displacement at constant speed
 
@@ -560,9 +590,6 @@ class Host:
         # TODO: you enable parsing but don't disable it
         #       this would require a wait or maybe it should be enabled on
 
-    def exec_send_command(self, command, blocking=False):
-        yield from self.send_command(self, command, blocking=blocking)
-
     def send_command(self, command, blocking=False):
         """writes command to spi port
 
@@ -600,6 +627,7 @@ class Host:
 
         return response
 
+    @retry_on_fpga_error
     def enable_comp(
         self, laser0=False, laser1=False, polygon=False, synchronize=False, 
         singlefacet=False
@@ -675,7 +703,7 @@ class Host:
         axes_names = list(platform.stepspermm.keys())
         return np.array([state[key] for key in axes_names])
 
-
+    @retry_on_fpga_error
     def writeline(self, bitlst, stepsperline=1, direction=0, repetitions=1):
         """projects given bitlst as line with laserhead
 
