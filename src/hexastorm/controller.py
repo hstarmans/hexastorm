@@ -8,7 +8,6 @@ try:
 except ImportError or ModuleNotFoundError:
     from ulab import numpy as np
 
-
 from . import ulabext
 from .constants import (
     COMMAND_BYTES,
@@ -43,28 +42,6 @@ def executor(func):
             return e.value
     return inner
 
-def retry_on_fpga_error(func):
-    """
-    A decorator to retry a function if an "FPGA" error occurs.
-    """
-    def wrapper(instance_self, *args, **kwargs):
-        for attempt in range(instance_self.max_attempts + 1):
-            try:
-                return func(instance_self, *args, **kwargs)
-            except Exception as e:
-                if "FPGA" in str(e):
-                    if attempt == instance_self.max_attempts:
-                        logging.error("Communication with FPGA not successful, job aborted")
-                    else:
-                        logging.error("Error detected on FPGA, " +
-                                        "wait 3 seconds for buffer to deplete and try again.")
-                        sleep(3)
-                    instance_self.reset()
-                else:
-                    raise
-        return None
-    return wrapper
-
 
 class Memfull(Exception):
     """SRAM memory of FPGA, i.e. FIFO, is full
@@ -86,6 +63,8 @@ class Host:
         micropython -- if true object uses libraries suited
         for micropython
         """
+        self.steppers_initialized = False
+
         if sys.implementation.name == "micropython":
             self.micropython = True
         else:
@@ -138,12 +117,12 @@ class Host:
 
     def init_micropython(self):
         from .constants import platform as platformmicro
-        from machine import Pin, SPI, SoftI2C
+        from machine import Pin, SPI, I2C
 
         self.platform = platformmicro(micropython=True)
         self.reset_pin = Pin(self.platform.reset_pin, Pin.OUT)
         self.reset_pin.value(1)
-        self.bus = SoftI2C(
+        self.bus = I2C(
             scl=Pin(self.platform.scl), sda=Pin(self.platform.sda)
         )
         # hardware SPI works partly, set speed to 3e6
@@ -170,9 +149,10 @@ class Host:
         """ steppers are configured for TMC2209
             current in mA
         """
-        if self.micropython:
+        if self.micropython and not self.steppers_initialized:
             from tmc.stepperdriver import TMC_2209
             from tmc.uart import ConnectionFail
+            failed = False
             for key, value in self.platform.tmc2209.items():
                 try:
                     tmc = TMC_2209(pin_en=38, mtr_id=value)
@@ -186,24 +166,11 @@ class Host:
                     tmc.setInternalRSense(False)
                     tmc.setMotorEnabled(False)
                 except ConnectionFail:
+                    failed = True
                     logging.debug(f"Cannot connect to stepper motor {key} axis")
-        else:
-            import steppers
-            self.motors = [
-                steppers.TMC2130(link_index=i)
-                for i in range(1, 1 + self.platform.motors)
-            ]
-            steppers.bcm2835_init()
-            for motor in self.motors:
-                motor.begin()
-                motor.toff(5)
-                # ideally should be 0
-                # on working equipment it is always 2
-                assert motor.test_connection() == 2
-                motor.rms_current(600)
-                motor.microsteps(16)
-                motor.en_pwm_mode(True)
-            steppers.bcm2835_close()
+            if not failed:
+                self.steppers_initialized = True
+
 
     def flash_fpga(self, filename):
         if not self.micropython:
@@ -359,7 +326,7 @@ class Host:
         else:
             return response
 
-    @retry_on_fpga_error
+
     def get_state(self, data=None):
         """retrieves the state of the FPGA as dictionary
 
@@ -397,7 +364,6 @@ class Host:
         return dct
 
     @property
-    @retry_on_fpga_error
     def position(self):
         """retrieves position from FPGA and updates internal position
 
@@ -479,7 +445,7 @@ class Host:
         else:
             self.bus.write_byte_data(self.platform.ic_address, 0, val)
 
-    @retry_on_fpga_error
+
     def set_parsing(self, value):
         """enables or disables parsing of FIFO by FPGA
 
@@ -494,7 +460,6 @@ class Host:
         command += WORD_BYTES * [0]
         return (yield from self.send_command(command))
 
-    @retry_on_fpga_error
     def home_axes(self, axes, speed=None, displacement=-200):
         """home given axes, i.e. [1,0,1] homes x, z and not y
 
@@ -525,7 +490,6 @@ class Host:
         count = (steps << (1 + bitshift)) + (1 << (bitshift - 1))
         return count
 
-    @retry_on_fpga_error
     def gotopoint(self, position, speed=None, absolute=True):
         """move machine to position or with displacement at constant speed
 
@@ -606,7 +570,6 @@ class Host:
                 self.fpga_select.value(0)
                 self.spi.write_readinto(command, response)
                 self.fpga_select.value(1)
-        
         command = bytearray(command)
         response = bytearray(command)
 
@@ -617,6 +580,10 @@ class Host:
                 yield from send_command(command, response)
                 byte1 = response[-1]  # can't rely on self.get_state (needs speed!)
                 if (byte1 >> (7-STATE.ERROR)) & 1:
+                    if self.micropython:
+                        # lower SPI speed, change FPGA implementation
+                        # you cannot recover from this
+                        self.reset()
                     raise Exception("Error detected on FPGA")
                 if not ((byte1 >> (7-STATE.FULL)) & 1):
                     break
@@ -627,7 +594,6 @@ class Host:
 
         return response
 
-    @retry_on_fpga_error
     def enable_comp(
         self, laser0=False, laser1=False, polygon=False, synchronize=False, 
         singlefacet=False
@@ -703,7 +669,6 @@ class Host:
         axes_names = list(platform.stepspermm.keys())
         return np.array([state[key] for key in axes_names])
 
-    @retry_on_fpga_error
     def writeline(self, bitlst, stepsperline=1, direction=0, repetitions=1):
         """projects given bitlst as line with laserhead
 
