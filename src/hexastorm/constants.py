@@ -79,7 +79,7 @@ class platform:
             # hardware spi between 2 and 3 MHz
             # software spi can be 1 MHz
              
-            self.baudrate = int(3e6) # higher, i.e. 3.1 doesn't work
+            self.baudrate = int(2.9e6) # higher, i.e. 3.1 doesn't work
             self.phase = 1        # spi phase must be 1
             self.fpga_cs = 9
             self.enable_pin = 38  # enable pin stepper motors

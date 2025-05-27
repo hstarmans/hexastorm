@@ -38,6 +38,7 @@ Code can be executed as follows.
 uv run python -m hexastorm.movement
 uv run python -m hexastorm.platforms
 uv sync --group plot
+uv run python -m hexastorm.interpolator.patterns.create
 uv run python -m hexastorm.interpolator.interpolator
 ```
 

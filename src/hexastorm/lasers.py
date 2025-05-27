@@ -137,9 +137,6 @@ class Laserhead(Elaboratable):
         # Exposure start detector
         expose_start_d = Signal()
 
-        # enable laser channel 2
-        m.d.sync += self.lasers[1].eq(self.lasers[0])
-
 
         m.d.sync += expose_start_d.eq(self.expose_start)
         with m.If((expose_start_d == 0) & self.expose_start):
@@ -171,9 +168,9 @@ class Laserhead(Elaboratable):
                         m.next = "SPINUP"
             with m.State("SPINUP"):
                 with m.If(tickcounter > dct["SPINUPTICKS"] - 1):
-                    # turn on laser
+                    # turn on single channel
                     m.d.sync += [
-                        self.lasers.eq(int("1" * 2, 2)),
+                        self.lasers.eq(int("10", 2)),
                         tickcounter.eq(0),
                     ]
                     m.next = "WAIT_STABLE"
@@ -259,7 +256,8 @@ class Laserhead(Elaboratable):
                     m.d.sync += [self.read_en.eq(1), self.write_en_2.eq(1)]
                     m.next = "DATA_RUN"
             with m.State("DATA_RUN"):
-                m.d.sync += tickcounter.eq(tickcounter + 1)
+                m.d.sync += [tickcounter.eq(tickcounter + 1),
+                             self.lasers[1].eq(self.lasers[0])]
                 # NOTE:
                 #      readbit is your current position in memory
                 #      scanbit current byte position in scanline
@@ -272,7 +270,7 @@ class Laserhead(Elaboratable):
                     with m.If(scanbit >= dct["BITSINSCANLINE"]):
                         m.d.sync += [
                             self.write_commit_2.eq(1),
-                            self.lasers.eq(0),
+                            self.lasers[0].eq(0),
                         ]
                         with m.If(dct["SINGLE_LINE"] & self.empty):
                             m.d.sync += self.read_discard.eq(1)
@@ -347,7 +345,7 @@ class Laserhead(Elaboratable):
                     tickcounter
                     >= round(dct["TICKSINFACET"] - dct["JITTERTICKS"] - 2)
                 ):
-                    m.d.sync += lasers.eq(int("11", 2))
+                    m.d.sync += lasers.eq(int("10", 2))
                     m.next = "WAIT_STABLE"
                 with m.Else():
                     m.d.sync += lasers.eq(int("00", 2))
@@ -494,7 +492,7 @@ class BaseTest(LunaGatewareTestCase):
     def waituntilState(self, state, fsm=None):
         dut = self.dut
         timeout = max(
-            dut.dct["TICKSINFACET"] * 2,
+            dut.dct["TICKSINFACET"] * 6,
             dut.dct["STABLETICKS"],
             dut.dct["SPINUPTICKS"],
         )
