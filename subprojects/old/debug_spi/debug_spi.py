@@ -1,15 +1,8 @@
-""" debug spi
-
-Does not work with luna, see https://github.com/greatscottgadgets/luna/issues/101
-Ensure you use the patch
-https://github.com/hstarmans/luna/tree/patch1
-"""
-
 from amaranth import Elaboratable, Module
 from luna.gateware.interface.spi import SPIDeviceInterface
-from luna.gateware.utils.cdc import synchronize
 
 from hexastorm.platforms import Firestarter
+from hexastorm.spi_helpers import connect_synchronized_spi
 
 
 class DebugSPIExample(Elaboratable):
@@ -27,9 +20,7 @@ class DebugSPIExample(Elaboratable):
         # Use command interface.
         m.submodules.interface = self.interface
 
-        # Synchronize and connect SPI.
-        spi = synchronize(m, board_spi)
-        m.d.comb += self.interface.spi.connect(spi)
+        connect_synchronized_spi(m, board_spi, self.interface)
 
         # Turn on a single LED, to show something's running.
         led = platform.request("led", 0)

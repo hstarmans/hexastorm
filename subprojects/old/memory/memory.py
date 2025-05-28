@@ -14,8 +14,8 @@ class Memtest(Elaboratable):
 
     def elaborate(self, platform):
         m = Module()
-        led0 = platform.request("led", 0)
-        led1 = platform.request("led", 1)
+        led0 = platform.request("led", 0).o
+        #led1 = platform.request("led", 1)
         m.submodules.rdport = rdport = self.mem.read_port()
         with m.If(rdport.data == 255):
             m.d.comb += led0.eq(0)
@@ -27,7 +27,7 @@ class Memtest(Elaboratable):
         with m.Else():
             m.d.comb += rdport.addr.eq(0)
         m.d.sync += timer.eq(timer + 1)
-        m.d.comb += led1.o.eq(timer[-1])
+        #m.d.comb += led1.o.eq(timer[-1])
         return m
 
 
