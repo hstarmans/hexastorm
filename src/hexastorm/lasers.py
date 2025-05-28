@@ -5,10 +5,10 @@ from struct import unpack
 
 from amaranth import Elaboratable, Module, Signal
 from luna.gateware.memory import TransactionalizedFIFO
-from luna.gateware.test import LunaGatewareTestCase, sync_test_case
 
 from . import controller
 from .constants import INSTRUCTIONS, MEMWIDTH, WORD_BYTES, params
+from .utils import LunaGatewareTestCase, async_test_case
 from .platforms import TestPlatform
 
 
@@ -142,7 +142,7 @@ class Laserhead(Elaboratable):
         with m.If((expose_start_d == 0) & self.expose_start):
             m.d.sync += [self.process_lines.eq(1), self.expose_finished.eq(0)]
 
-        with m.FSM(reset="RESET") as laserfsm:
+        with m.FSM(init="RESET") as laserfsm:
             with m.State("RESET"):
                 m.d.sync += [self.error.eq(0), self.ticksinfacet.eq(0)]
                 m.next = "STOP"
@@ -450,17 +450,17 @@ class DiodeSimulator(Laserhead):
 class BaseTest(LunaGatewareTestCase):
     "Base class for laserhead test"
 
-    def initialize_signals(self):
-        """If not triggered the photodiode is high"""
-        yield self.dut.photodiode.eq(1)
+    async def initialize_signals(self, sim):
+        sim.set(self.dut.photodiode, 1)
         self.host = controller.Host(self.platform)
+        await sim.tick()
 
-    def getState(self, fsm=None):
+    async def getState(self, sim, fsm=None):
         if fsm is None:
             fsm = self.dut.laserfsm
-        return fsm.decoding[(yield fsm.state)]
+        return fsm.decoding[sim.get(fsm.state)]
 
-    def count_steps(self, single=False):
+    async def count_steps(self, sim, single=False):
         """counts steps while accounting for direction
         single -- in single line mode dut.empty is not
                   a good measure
@@ -470,26 +470,19 @@ class BaseTest(LunaGatewareTestCase):
         count = 0
         dut = self.dut
         ticks = 0
-        # when the last line is exposed the memory is empty
-        # as a result you need to wait one line/facet longer
         thresh = dut.dct["TICKSINFACET"]
         if single:
             thresh = 4 * thresh
-        while ((yield dut.empty) == 0) | (ticks < thresh):
-            if single:
+        while (sim.get(dut.empty) == 0) or (ticks < thresh):
+            if single or sim.get(dut.empty) == 1:
                 ticks += 1
-            elif (yield dut.empty) == 1:
-                ticks += 1
-            old = yield self.dut.step
-            yield
-            if old and ((yield self.dut.step) == 0):
-                if (yield self.dut.dir):
-                    count += 1
-                else:
-                    count -= 1
+            old = sim.get(dut.step)
+            await sim.tick()
+            if old and sim.get(dut.step) == 0:
+                count += 1 if sim.get(dut.dir) else -1
         return count
 
-    def waituntilState(self, state, fsm=None):
+    async def waituntilState(self, sim, state, fsm=None):
         dut = self.dut
         timeout = max(
             dut.dct["TICKSINFACET"] * 6,
@@ -497,45 +490,49 @@ class BaseTest(LunaGatewareTestCase):
             dut.dct["SPINUPTICKS"],
         )
         count = 0
-        while (yield from self.getState(fsm)) != state:
-            yield
+        while await self.getState(sim, fsm) != state:
+            await sim.tick()
             count += 1
             if count > timeout:
                 print(f"Did not reach {state} in {timeout} ticks")
                 self.assertTrue(count < timeout)
 
-    def assertState(self, state, fsm=None):
-        self.assertEqual(self.getState(state), state)
+    async def assertState(self, sim, state, fsm=None):
+        self.assertEqual(await self.getState(sim, fsm), state)
 
-    def checkline(self, bitlst, stepsperline=1, direction=0):
+    async def checkline(self, sim, bitlst, stepsperline=1, direction=0):
         "it is verified wether the laser produces the pattern in bitlist"
         dut = self.dut
         if not dut.dct["SINGLE_LINE"]:
-            self.assertEqual((yield dut.empty), False)
-        yield from self.waituntilState("READ_INSTRUCTION")
-        yield
-        self.assertEqual((yield dut.dir), direction)
-        self.assertEqual((yield dut.error), False)
+            self.assertEqual(sim.get(dut.empty), False)
+
+        await self.waituntilState(sim, "READ_INSTRUCTION")
+        await sim.tick()
+
+        self.assertEqual(sim.get(dut.dir), direction)
+        self.assertEqual(sim.get(dut.error), False)
+
         if len(bitlst):
             self.assertEqual(
-                (yield dut.stephalfperiod),
+                sim.get(dut.stephalfperiod),
                 stepsperline * (dut.dct["BITSINSCANLINE"] - 1) // 2,
             )
-            yield from self.waituntilState("DATA_RUN")
-            yield
+            await self.waituntilState(sim, "DATA_RUN")
+            await sim.tick()
             for idx, bit in enumerate(bitlst):
-                assert (yield dut.lasercnt) == dut.dct["LASERTICKS"] - 1
-                assert (yield dut.scanbit) == idx + 1
+                self.assertEqual(sim.get(dut.lasercnt), dut.dct["LASERTICKS"] - 1)
+                self.assertEqual(sim.get(dut.scanbit), idx + 1)
                 for _ in range(dut.dct["LASERTICKS"]):
-                    assert (yield dut.lasers[0]) == bit
-                    yield
+                    self.assertEqual(sim.get(dut.lasers[0]), bit)
+                    await sim.tick()
         else:
-            self.assertEqual((yield dut.expose_finished), True)
-        yield from self.waituntilState("WAIT_END")
-        self.assertEqual((yield self.dut.error), False)
-        self.assertEqual((yield dut.synchronized), True)
+            self.assertEqual(sim.get(dut.expose_finished), True)
 
-    def read_line(self, totalbytes):
+        await self.waituntilState(sim, "WAIT_END")
+        self.assertEqual(sim.get(dut.error), False)
+        self.assertEqual(sim.get(dut.synchronized), True)
+
+    async def read_line(self, sim, totalbytes):
         """reads line from fifo
 
         This is a helper function to allow testing of the module
@@ -543,17 +540,18 @@ class BaseTest(LunaGatewareTestCase):
         """
         dut = self.dut
         # read the line number
-        yield from self.pulse(dut.read_en_2)
-        data_out = [(yield dut.read_data_2)]
+        await self.pulse(sim, dut.read_en_2)
+        data_out = [sim.get(dut.read_data_2)]
         # TODO: THIS CODE IS HALFWAY COMMIT
         # print(data_out)
         for _ in range(0, totalbytes, WORD_BYTES):
-            yield from self.pulse(dut.read_en_2)
-            data_out.append((yield dut.read_data_2))
-        yield from self.pulse(dut.read_commit_2)
+            await self.pulse(sim, dut.read_en_2)
+            data_out.append(sim.get(dut.read_data_2))
+
+        await self.pulse(sim, dut.read_commit_2)
         return data_out
 
-    def write_line(self, bitlist, stepsperline=1, direction=0):
+    async def write_line(self, sim, bitlist, stepsperline=1, direction=0):
         """write line to fifo
 
         This is a helper function to allow testing of the module
@@ -565,28 +563,28 @@ class BaseTest(LunaGatewareTestCase):
         for i in range(0, len(bytelst), WORD_BYTES):
             lst = bytelst[i : i + WORD_BYTES]
             number = unpack("Q", bytearray(lst))[0]
-            yield dut.write_data.eq(number)
-            yield from self.pulse(dut.write_en)
-        yield from self.pulse(dut.write_commit)
+            sim.set(dut.write_data, number)
+            await self.pulse(sim, dut.write_en)
 
-    def scanlineringbuffer(self, numblines=3):
+        await self.pulse(sim, dut.write_commit)
+
+    async def scanlineringbuffer(self, sim, numblines=3):
         "write several scanlines and verify receival"
         dut = self.dut
-        lines = []
-        for _ in range(numblines):
-            line = []
-            for _ in range(dut.dct["BITSINSCANLINE"]):
-                line.append(randint(0, 1))
-            lines.append(line)
-        lines.append([])
+        lines = [[randint(0, 1) for _ in range(dut.dct["BITSINSCANLINE"])] for _ in range(numblines)]
+        lines.append([])  # sentinel line
+
         for line in lines:
-            yield from self.write_line(line)
-        yield from self.pulse(dut.expose_start)
-        yield dut.synchronize.eq(1)
+            await self.write_line(sim, line)
+
+        await self.pulse(sim, dut.expose_start)
+        sim.set(dut.synchronize, 1)
+
         for line in lines:
-            yield from self.checkline(line)
-        self.assertEqual((yield dut.empty), True)
-        self.assertEqual((yield dut.expose_finished), True)
+            await self.checkline(sim, line)
+
+        self.assertEqual(sim.get(dut.empty), True)
+        self.assertEqual(sim.get(dut.expose_finished), True)
 
 
 class LaserheadTest(BaseTest):
@@ -596,74 +594,94 @@ class LaserheadTest(BaseTest):
     FRAGMENT_UNDER_TEST = Laserhead
     FRAGMENT_ARGUMENTS = {"platform": platform}
 
-    @sync_test_case
-    def test_pwmpulse(self):
+    @async_test_case
+    async def test_pwmpulse(self, sim):
         """pwm pulse generation test"""
         dut = self.dut
         dct = params(self.platform)
-        while (yield dut.pwm) == 0:
-            yield
-        cnt = 0
-        while (yield dut.pwm) == 1:
-            cnt += 1
-            yield
-        self.assertEqual(
-            cnt, int(dct["CRYSTAL_HZ"] / (dct["POLY_HZ"] * 6 * 2))
-        )
 
-    @sync_test_case
-    def test_sync(self):
+        # Wait for the pwm signal to go high
+        while sim.get(dut.pwm) == 0:
+            await sim.tick()
+
+        # Count how many cycles the pwm stays high
+        cnt = 0
+        while sim.get(dut.pwm) == 1:
+            cnt += 1
+            await sim.tick()
+
+        expected = int(dct["CRYSTAL_HZ"] / (dct["POLY_HZ"] * 6 * 2))
+        self.assertEqual(cnt, expected)
+
+    @async_test_case
+    async def test_sync(self, sim):
         """error is raised if laser not synchronized"""
         dut = self.dut
-        yield dut.synchronize.eq(1)
-        yield from self.waituntilState("SPINUP")
-        self.assertEqual((yield dut.error), 0)
-        yield from self.waituntilState("WAIT_STABLE")
-        yield from self.waituntilState("STOP")
-        self.assertEqual((yield dut.error), 1)
+
+        sim.set(dut.synchronize, 1)
+        await sim.tick()
+
+        await self.waituntilState(sim, "SPINUP")
+        self.assertEqual(sim.get(dut.error), 0)
+
+        await self.waituntilState(sim, "WAIT_STABLE")
+        await self.waituntilState(sim, "STOP")
+
+        self.assertEqual(sim.get(dut.error), 1)
 
 
 class SinglelineTest(BaseTest):
     "Test laserhead while triggering photodiode and single line"
+
     platform = TestPlatform()
     laser_var = deepcopy(platform.laser_var)
     laser_var["SINGLE_LINE"] = True
     FRAGMENT_UNDER_TEST = DiodeSimulator
     FRAGMENT_ARGUMENTS = {"platform": platform, "laser_var": laser_var}
 
-    @sync_test_case
-    def test_single_line(self):
+    @async_test_case
+    async def test_single_line(self, sim):
         dut = self.dut
-        # full line
+
+        # Full line
         lines = [[1] * dut.dct["BITSINSCANLINE"]]
         for line in lines:
-            yield from self.write_line(line)
-        yield dut.synchronize.eq(1)
-        yield from self.pulse(dut.expose_start)
+            await self.write_line(sim, line)
+
+        sim.set(dut.synchronize, 1)
+        await sim.tick()
+
+        await self.pulse(sim, dut.expose_start)
+
         for _ in range(2):
-            yield from self.checkline(line)
-        self.assertEqual((yield dut.synchronized), True)
-        # 2 other lines
+            await self.checkline(sim, line)
+
+        self.assertEqual(sim.get(dut.synchronized), True)
+
+        # Two other lines (one random, one empty)
         lines = [[randint(0, 1) for _ in range(dut.dct["BITSINSCANLINE"])], []]
-        self.assertEqual((yield dut.expose_finished), 0)
+        self.assertEqual(sim.get(dut.expose_finished), 0)
+
         for line in lines:
-            yield from self.write_line(line)
-        # the last line, i.e. [], triggers exposure finished
-        while (yield dut.expose_finished) == 0:
-            yield
-        self.assertEqual((yield dut.expose_finished), 1)
-        yield dut.synchronize.eq(0)
-        # TODO: this code is half-way microscopy commit
-        # for _ in range(2):
-        #    print((yield from self.read_line(dut.dct['BITSINSCANLINE'])))
-        yield from self.waituntilState("STOP")
-        self.assertEqual((yield dut.error), False)
+            await self.write_line(sim, line)
+
+        # The last line (empty) triggers exposure finished
+        while sim.get(dut.expose_finished) == 0:
+            await sim.tick()
+        self.assertEqual(sim.get(dut.expose_finished), 1)
+
+        sim.set(dut.synchronize, 0)
+        await sim.tick()
+
+        await self.waituntilState(sim, "STOP")
+        self.assertEqual(sim.get(dut.error), False)
 
 
 class SinglelinesinglefacetTest(BaseTest):
     """Test laserhead while triggering photodiode.
 
-    Laserhead is in single line and single facet mode"""
+    Laserhead is in single line and single facet mode
+    """
 
     platform = TestPlatform()
     laser_var = deepcopy(platform.laser_var)
@@ -671,40 +689,54 @@ class SinglelinesinglefacetTest(BaseTest):
     FRAGMENT_UNDER_TEST = DiodeSimulator
     FRAGMENT_ARGUMENTS = {"platform": platform, "laser_var": laser_var}
 
-    @sync_test_case
-    def test_single_line_single_facet(self):
+    @async_test_case
+    async def test_single_line_single_facet(self, sim):
         dut = self.dut
-        yield dut.singlefacet.eq(1)
+
+        sim.set(dut.singlefacet, 1)
+        await sim.tick()
+
         lines = [[1] * dut.dct["BITSINSCANLINE"]]
         for line in lines:
-            yield from self.write_line(line)
-        yield dut.synchronize.eq(1)
-        yield from self.pulse(dut.expose_start)
-        # facet counter changes
-        for facet in range(self.platform.laser_var["FACETS"] - 1):
-            self.assertEqual(facet, (yield dut.facetcnt))
-            yield from self.waituntilState("WAIT_STABLE")
-            yield from self.waituntilState("WAIT_END")
-        # still line only projected at specific facet count
-        for _ in range(3):
-            yield from self.checkline(line)
-            self.assertEqual(1, (yield dut.facetcnt))
-        self.assertEqual((yield dut.error), False)
+            await self.write_line(sim, line)
 
-    @sync_test_case
-    def test_move(self):
+        sim.set(dut.synchronize, 1)
+        await sim.tick()
+
+        await self.pulse(sim, dut.expose_start)
+
+        for facet in range(self.platform.laser_var["FACETS"] - 1):
+            self.assertEqual(facet, sim.get(dut.facetcnt))
+            await self.waituntilState(sim, "WAIT_STABLE")
+            await self.waituntilState(sim, "WAIT_END")
+
+        for _ in range(3):
+            await self.checkline(sim, line)
+            self.assertEqual(1, sim.get(dut.facetcnt))
+
+        self.assertEqual(sim.get(dut.error), False)
+
+    @async_test_case
+    async def test_move(self, sim):
         dut = self.dut
-        yield dut.singlefacet.eq(1)
+
+        sim.set(dut.singlefacet, 1)
+        await sim.tick()
+
         lines = [[1] * dut.dct["BITSINSCANLINE"]]
         stepsperline = 1
+
         for line in lines:
-            yield from self.write_line(
-                line, stepsperline=stepsperline, direction=1
-            )
-        yield from self.write_line([], stepsperline)
-        yield dut.synchronize.eq(1)
-        yield from self.pulse(dut.expose_start)
-        steps = yield from self.count_steps(single=True)
+            await self.write_line(sim, line, stepsperline=stepsperline, direction=1)
+
+        await self.write_line(sim, [], stepsperline=stepsperline)
+
+        sim.set(dut.synchronize, 1)
+        await sim.tick()
+
+        await self.pulse(sim, dut.expose_start)
+
+        steps = await self.count_steps(sim, single=True)
         self.assertEqual(steps, stepsperline)
 
 
@@ -714,108 +746,93 @@ class MultilineTest(BaseTest):
     FRAGMENT_UNDER_TEST = DiodeSimulator
     FRAGMENT_ARGUMENTS = {"platform": platform}
 
-    def checkmove(
-        self, direction, stepsperline=1, numblines=3, appendstop=True
-    ):
+    async def checkmove(self, sim, direction, stepsperline=1, numblines=3, appendstop=True):
         dut = self.dut
         lines = [[1] * dut.dct["BITSINSCANLINE"]] * numblines
         if appendstop:
             lines.append([])
         for line in lines:
-            yield from self.write_line(line, stepsperline, direction)
-        yield dut.synchronize.eq(1)
-        yield from self.pulse(dut.expose_start)
-        steps = yield from self.count_steps()
-        if not direction:
-            direction = -1
-        self.assertEqual(steps, stepsperline * numblines * direction)
-        self.assertEqual((yield dut.synchronized), True)
-        self.assertEqual((yield dut.error), False)
+            await self.write_line(sim, line, stepsperline, direction)
+        sim.set(dut.synchronize, 1)
+        await sim.tick()
+        await self.pulse(sim, dut.expose_start)
+        steps = await self.count_steps(sim)
+        self.assertEqual(steps, stepsperline * numblines * (1 if direction else -1))
+        self.assertTrue(sim.get(dut.synchronized))
+        self.assertFalse(sim.get(dut.error))
 
-    def checknomove(self, thresh=None):
+    async def checknomove(self, sim, thresh=None):
         dut = self.dut
         if thresh is None:
-            thresh = (yield dut.stephalfperiod) * 2
+            thresh = sim.get(dut.stephalfperiod) * 2
 
-        current = yield dut.step
+        current = sim.get(dut.step)
         count = 0
         res = False
-        while (yield dut.step) == current:
+        while sim.get(dut.step) == current:
             count += 1
-            yield
+            await sim.tick()
             if count > thresh:
                 res = True
                 break
-        self.assertEqual(True, res)
-        self.assertEqual((yield dut.error), False)
 
-    @sync_test_case
-    def test_sync(self):
-        """as photodiode is triggered wait end is reached"""
+        self.assertTrue(res)
+        self.assertFalse(sim.get(dut.error))
+
+    @async_test_case
+    async def test_sync(self, sim):
         dut = self.dut
-        yield dut.synchronize.eq(1)
-        yield from self.waituntilState("SPINUP")
-        self.assertEqual((yield dut.error), 0)
+        sim.set(dut.synchronize, 1)
+        await sim.tick()
+        await self.waituntilState(sim, "SPINUP")
+        self.assertEqual(sim.get(dut.error), 0)
         for _ in range(3):
-            yield from self.waituntilState("WAIT_STABLE")
-            yield from self.waituntilState("WAIT_END")
-        self.assertEqual((yield dut.error), 0)
+            await self.waituntilState(sim, "WAIT_STABLE")
+            await self.waituntilState(sim, "WAIT_END")
+        self.assertEqual(sim.get(dut.error), 0)
 
-    @sync_test_case
-    def test_stopline(self):
-        "verify data run is not reached when stopline is sent"
+    @async_test_case
+    async def test_stopline(self, sim):
         line = []
         dut = self.dut
-        yield from self.write_line(line)
-        yield dut.synchronize.eq(1)
-        yield from self.pulse(dut.expose_start)
-        self.assertEqual((yield dut.empty), 0)
-        yield from self.waituntilState("SPINUP")
-        yield dut.synchronize.eq(1)
-        yield from self.checkline(line)
-        self.assertEqual((yield dut.expose_finished), True)
-        # to ensure it stays finished
-        yield
-        yield
-        self.assertEqual((yield dut.expose_finished), True)
-        self.assertEqual((yield dut.empty), True)
+        await self.write_line(sim, line)
+        sim.set(dut.synchronize, 1)
+        await sim.tick()
+        await self.pulse(sim, dut.expose_start)
+        self.assertEqual(sim.get(dut.empty), 0)
+        await self.waituntilState(sim, "SPINUP")
+        sim.set(dut.synchronize, 1)
+        await sim.tick()
+        await self.checkline(sim, line)
+        self.assertTrue(sim.get(dut.expose_finished))
+        await sim.tick()
+        await sim.tick()
+        self.assertTrue(sim.get(dut.expose_finished))
+        self.assertTrue(sim.get(dut.empty))
 
-    @sync_test_case
-    def test_interruption(self, numblines=3, stepsperline=1):
-        """verify scanhead moves as expected forward / backward
-
-        stepsperline  -- number of steps per line
-        direction     -- 0 is negative and 1 is positive
-        """
+    @async_test_case
+    async def test_interruption(self, sim):
         dut = self.dut
-        yield dut.synchronize.eq(1)
-        yield from self.pulse(dut.expose_start)
-        yield from self.checkmove(0, appendstop=False)
-        # scanner should not move it move is interrupted
-        # due to lack of data
-        yield from self.checknomove()
-        yield from self.checkmove(0)
+        sim.set(dut.synchronize, 1)
+        await sim.tick()
+        await self.pulse(sim, dut.expose_start)
+        await self.checkmove(sim, 0, appendstop=False)
+        await self.checknomove(sim)
+        await self.checkmove(sim, 0)
 
-    @sync_test_case
-    def test_movement(self):
-        """verify scanhead moves as expected forward / backward
+    @async_test_case
+    async def test_movement(self, sim):
+        await self.checkmove(sim, direction=0)
+        await self.checkmove(sim, direction=1)
+        await self.checknomove(sim)
 
-        stepsperline  -- number of steps per line
-        direction     -- 0 is negative and 1 is positive
-        """
-        yield from self.checkmove(direction=0)
-        yield from self.checkmove(direction=1)
-        # scanner should not move after stop
-        yield from self.checknomove()
-
-    @sync_test_case
-    def test_scanlineringbuffer(self, numblines=3):
-        "write several scanlines and verify receival"
-        yield from self.scanlineringbuffer(numblines=numblines)
+    @async_test_case
+    async def test_scanlineringbuffer(self, sim):
+        await self.scanlineringbuffer(sim, numblines=3)
 
 
 class Loweredge(BaseTest):
-    "Test Scanline of length MEMWDITH"
+    "Test Scanline of length MEMWIDTH"
     platform = TestPlatform()
     FRAGMENT_UNDER_TEST = DiodeSimulator
 
@@ -826,10 +843,10 @@ class Loweredge(BaseTest):
     dct["BITSINSCANLINE"] = MEMWIDTH
     FRAGMENT_ARGUMENTS = {"platform": platform, "laser_var": dct}
 
-    @sync_test_case
-    def test_scanlineringbuffer(self, numblines=3):
+    @async_test_case
+    async def test_scanlineringbuffer(self, sim):
         "write several scanlines and verify receival"
-        yield from self.scanlineringbuffer(numblines=numblines)
+        await self.scanlineringbuffer(sim, numblines=3)
 
 
 class Upperedge(Loweredge):
