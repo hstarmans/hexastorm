@@ -11,9 +11,9 @@ from luna.gateware.interface.spi import (
 )
 from luna.gateware.memory import TransactionalizedFIFO
 from luna.gateware.test.utils import sync_test_case
-from luna.gateware.utils.cdc import synchronize
 from numpy.testing import assert_array_almost_equal, assert_array_equal
 
+from .spi_helpers import connect_synchronized_spi
 from .constants import (
     COMMAND_BYTES,
     COMMANDS,
@@ -27,7 +27,7 @@ from .constants import (
 )
 from .controller import Host, Memfull
 from .lasers import DiodeSimulator, Laserhead, params
-from .motor import Driver
+# from .motor import Driver
 from .movement import Polynomal
 from .platforms import TestPlatform
 from .resources import get_all_resources
@@ -82,16 +82,16 @@ class SPIParser(Elaboratable):
         m = Module()
         if platform and self.top:
             board_spi = platform.request("debug_spi")
-            spi2 = synchronize(m, board_spi)
-            m.d.comb += self.spi.connect(spi2)
+            connect_synchronized_spi(m, board_spi, self)
         if self.platform:
             platform = self.platform
         spi = self.spi
         interf = SPICommandInterface(
             command_size=COMMAND_BYTES * 8, word_size=WORD_BYTES * 8
         )
-        m.d.comb += interf.spi.connect(spi)
         m.submodules.interf = interf
+        connect_synchronized_spi(m, spi, interf)
+
         # FIFO connection
         fifo = TransactionalizedFIFO(width=MEMWIDTH, depth=platform.memdepth)
         if platform.name == "Test":
@@ -117,7 +117,7 @@ class SPIParser(Elaboratable):
         ]
         # remember which word we are processing
         instruction = Signal(8)
-        with m.FSM(reset="RESET", name="parser"):
+        with m.FSM(init="RESET", name="parser"):
             with m.State("RESET"):
                 m.d.sync += [
                     self.parse.eq(1),
@@ -241,8 +241,7 @@ class Dispatcher(Elaboratable):
         polynomal = Polynomal(self.platform)
         m.submodules.polynomal = polynomal
         if platform:
-            board_spi = platform.request("debug_spi")
-            spi = synchronize(m, board_spi)
+            spi = platform.request("debug_spi")
             laserheadpins = platform.request("laserscanner")
             steppers = [res for res in get_all_resources(platform, "stepper")]
             # bldc = platform.request("bldc")
@@ -251,9 +250,9 @@ class Dispatcher(Elaboratable):
         else:
             platform = self.platform
             self.spi = SPIBus()
+            spi = self.spi
             self.parser = parser
             self.pol = polynomal
-            spi = synchronize(m, self.spi)
             self.laserheadpins = platform.laserhead
             self.steppers = steppers = platform.steppers
             self.busy = busy
@@ -383,10 +382,11 @@ class Dispatcher(Elaboratable):
         # Busy signal
         m.d.comb += busy.eq(polynomal.busy | laserhead.process_lines)
         # connect spi
-        m.d.comb += parser.spi.connect(spi)
+        connect_synchronized_spi(m, spi, parser)
+
         # pins you can write to
         pins = Cat(lasers, enable_prism, laserhead.synchronize, laserhead.singlefacet)
-        with m.FSM(reset="RESET", name="dispatcher"):
+        with m.FSM(init="RESET", name="dispatcher"):
             with m.State("RESET"):
                 m.next = "WAIT_INSTRUCTION"
                 m.d.sync += pins.eq(0)

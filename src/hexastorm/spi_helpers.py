@@ -16,11 +16,22 @@ def connect_synchronized_spi(m, board_spi, spi_interface):
     synced_csn  = Signal()
     synced_mosi = Signal()
 
+    # in luna record objects signals have direction
+    # this is no longer needed and fixed below
+
+    def _get_input_signal(signal):
+        return signal.i if hasattr(signal, "i") else signal
+
+    def _get_output_signal(signal):
+        return signal.o if hasattr(signal, "o") else signal
+    
+
+
     # Add synchronizers
     m.submodules += [
-        FFSynchronizer(board_spi.sck.i,  synced_clk),
-        FFSynchronizer(board_spi.cs.i,   synced_csn),
-        FFSynchronizer(board_spi.sdi.i,  synced_mosi)
+        FFSynchronizer(_get_input_signal(board_spi.sck),  synced_clk),
+        FFSynchronizer(_get_input_signal(board_spi.cs),   synced_csn),
+        FFSynchronizer(_get_input_signal(board_spi.sdi),  synced_mosi)
     ]
 
     # Wire up to the SPI interface
@@ -28,5 +39,5 @@ def connect_synchronized_spi(m, board_spi, spi_interface):
         spi_interface.spi.sck.eq(synced_clk),
         spi_interface.spi.cs.eq(synced_csn),
         spi_interface.spi.sdi.eq(synced_mosi),
-        board_spi.sdo.o.eq(spi_interface.spi.sdo)
-    ]
+        _get_output_signal(board_spi.sdo).eq(spi_interface.spi.sdo)
+    ]#

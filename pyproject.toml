@@ -20,8 +20,8 @@ dependencies = [
     "numpy==1.19.5",
     "pillow>=11.2.1",
     "scipy>=1.10.1",
-    "yowasp-nextpnr-ice40==0.6.0.0.post440",
-    "yowasp-yosys==0.40.0.0.post707",
+    "yowasp-nextpnr-ice40>=0.8.0.0.post621",
+    "yowasp-yosys>=0.53.0.0.post912",
 ]
 
 [dependency-groups]
@@ -42,5 +42,5 @@ raspberry = [
 line-length = 79
 
 [tool.uv.sources]
-luna-usb = { git = "https://github.com/hstarmans/luna.git", rev = "patch1" }
-amaranth-boards = { git = "https://github.com/amaranth-lang/amaranth-boards/", rev = "1706758" }
+luna-usb = { git = "https://github.com/greatscottgadgets/luna.git", rev = "6c7c93d6ff5bd2390f430949cea4baf6686f0f97" }
+amaranth-boards = { git = "https://github.com/amaranth-lang/amaranth-boards.git", rev = "c26a72e59c786b38e0e989ae64c6c2560ca7c29c" }

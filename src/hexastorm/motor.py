@@ -1,4 +1,3 @@
-import unittest
 import math
 
 from amaranth import Cat, Elaboratable, Module, Signal, ClockDomain
@@ -158,7 +157,7 @@ class Driver(Elaboratable):
         # rotation to hall and vice versa
         rotating = Signal()
 
-        with m.FSM(reset="ROTATION", name="algo"):
+        with m.FSM(init="ROTATION", name="algo"):
             with m.State("ROTATION"):
                 with m.If(mtrpulsecntr == start_statetime):
                     m.d.slow += mtrpulsecntr.eq(0)
@@ -423,6 +422,3 @@ class Driver(Elaboratable):
 
         return m
 
-
-if __name__ == "__main__":
-    unittest.main()

@@ -19,35 +19,24 @@ resolution-markers = [
 
 [[package]]
 name = "amaranth"
-version = "0.4.5"
+version = "0.5.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jinja2" },
+    { name = "jschon" },
     { name = "pyvcd" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c9/71/e7d128be370127c37b3695e95e5438c655a4c5de14dde64449709afd9c16/amaranth-0.4.5.tar.gz", hash = "sha256:a150fb9455d5aa00e0dbb496979711950abe82e6768fe15683b487c626fb5934", size = 228128 }
+sdist = { url = "https://files.pythonhosted.org/packages/74/e6/b2aff6577bb1fb4a00e1f5631c8fde1a82917676d70fe9829f0ccf58fe73/amaranth-0.5.6.tar.gz", hash = "sha256:e6439af40248d76f9f9d761769edb7fd4bcf4bdd120fbc48bad20c72e349d97b", size = 226610 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1a/bf/cff5c705f2f5978889e1fa0fc2a70e0fadbb9f2a51db2d3315c3bda7c3ea/amaranth-0.4.5-py3-none-any.whl", hash = "sha256:a9e81b7746eabd03b8f66b4a73534cae7ff34518f215716b5d7f3a0b4e9498a7", size = 203041 },
+    { url = "https://files.pythonhosted.org/packages/11/30/626dfdf7ef2f3c91731d76ccf44429db923b14cb81008ed363d58e7ea48e/amaranth-0.5.6-py3-none-any.whl", hash = "sha256:88c64d8849769c576eaecd7add5869765e921b0573658fc7562edf2b350a6476", size = 253669 },
 ]
 
 [[package]]
 name = "amaranth-boards"
-version = "0.1.dev241+g1706758"
-source = { git = "https://github.com/amaranth-lang/amaranth-boards/?rev=1706758#170675812b71ee722bcf8ccdb88409a9ad97ffe2" }
+version = "0.1.dev258+gc26a72e"
+source = { git = "https://github.com/amaranth-lang/amaranth-boards.git?rev=c26a72e59c786b38e0e989ae64c6c2560ca7c29c#c26a72e59c786b38e0e989ae64c6c2560ca7c29c" }
 dependencies = [
     { name = "amaranth" },
-]
-
-[[package]]
-name = "apollo-fpga"
-version = "1.1.1.post2+git.04507dfa.dirty"
-source = { git = "https://github.com/greatscottgadgets/apollo.git#04507dfaeeb0c03fbad6bd0649a74cc562050955" }
-dependencies = [
-    { name = "deprecation" },
-    { name = "prompt-toolkit" },
-    { name = "pyusb" },
-    { name = "pyvcd" },
-    { name = "pyxdg" },
 ]
 
 [[package]]
@@ -369,18 +358,6 @@ wheels = [
 ]
 
 [[package]]
-name = "deprecation"
-version = "2.1.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "packaging" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/5a/d3/8ae2869247df154b64c1884d7346d412fed0c49df84db635aab2d1c40e62/deprecation-2.1.0.tar.gz", hash = "sha256:72b3bde64e5d778694b0cf68178aed03d15e15477116add3fb773e581f9518ff", size = 173788 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/02/c3/253a89ee03fc9b9682f1541728eb66db7db22148cd94f89ab22528cd1e1b/deprecation-2.1.0-py2.py3-none-any.whl", hash = "sha256:a10811591210e1fb0e768a8c25517cabeabcba6f0bf96564f8ff45189f90b14a", size = 11178 },
-]
-
-[[package]]
 name = "exceptiongroup"
 version = "1.2.2"
 source = { registry = "https://pypi.org/simple" }
@@ -480,15 +457,15 @@ raspberry = [
 
 [package.metadata]
 requires-dist = [
-    { name = "amaranth-boards", git = "https://github.com/amaranth-lang/amaranth-boards/?rev=1706758" },
+    { name = "amaranth-boards", git = "https://github.com/amaranth-lang/amaranth-boards.git?rev=c26a72e59c786b38e0e989ae64c6c2560ca7c29c" },
     { name = "cairosvg", specifier = ">=2.7.1" },
-    { name = "luna-usb", git = "https://github.com/hstarmans/luna.git?rev=patch1" },
+    { name = "luna-usb", git = "https://github.com/greatscottgadgets/luna.git?rev=6c7c93d6ff5bd2390f430949cea4baf6686f0f97" },
     { name = "numba", specifier = ">=0.56.4" },
     { name = "numpy", specifier = "==1.19.5" },
     { name = "pillow", specifier = ">=11.2.1" },
     { name = "scipy", specifier = ">=1.10.1" },
-    { name = "yowasp-nextpnr-ice40", specifier = "==0.6.0.0.post440" },
-    { name = "yowasp-yosys", specifier = "==0.40.0.0.post707" },
+    { name = "yowasp-nextpnr-ice40", specifier = ">=0.8.0.0.post621" },
+    { name = "yowasp-yosys", specifier = ">=0.53.0.0.post912" },
 ]
 
 [package.metadata.requires-dev]
@@ -595,6 +572,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/df/bf/f7da0350254c0ed7c72f3e33cef02e048281fec7ecec5f032d4aac52226b/jinja2-3.1.6.tar.gz", hash = "sha256:0137fb05990d35f1275a587e9aee6d56da821fc83491a0fb838183be43f66d6d", size = 245115 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/62/a1/3d680cbfd5f4b8f15abc1d571870c5fc3e594bb582bc3b64ea099db13e56/jinja2-3.1.6-py3-none-any.whl", hash = "sha256:85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67", size = 134899 },
+]
+
+[[package]]
+name = "jschon"
+version = "0.11.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "rfc3986" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/7b/8b/5cbfbb4751533027ba97a59dfe4c9e694fbceaf549fa9cd7cb9a6066bd60/jschon-0.11.1.tar.gz", hash = "sha256:c0ca0beab1f1694a03d726b91ed75ec604a7787af3ae91ead765f78215bf149f", size = 69411 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ce/b1/31f454a2ac0d23b0a47283d115f0af4abe2a1ea391f5ccb223e02d685b82/jschon-0.11.1-py3-none-any.whl", hash = "sha256:2350e8b6747b17358022960f91208bea70de448b914827af3184d30e20500f0f", size = 66971 },
 ]
 
 [[package]]
@@ -867,11 +856,10 @@ wheels = [
 
 [[package]]
 name = "luna-usb"
-version = "0.0.0"
-source = { git = "https://github.com/hstarmans/luna.git?rev=patch1#782098013e8cc98f147e4516cc56aa15e676683e" }
+version = "0.2.0.post7+git.6c7c93d6.dirty"
+source = { git = "https://github.com/greatscottgadgets/luna.git?rev=6c7c93d6ff5bd2390f430949cea4baf6686f0f97#6c7c93d6ff5bd2390f430949cea4baf6686f0f97" }
 dependencies = [
     { name = "amaranth" },
-    { name = "apollo-fpga" },
     { name = "libusb1" },
     { name = "pyserial" },
     { name = "pyusb" },
@@ -1412,15 +1400,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pyxdg"
-version = "0.28"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/b0/25/7998cd2dec731acbd438fbf91bc619603fc5188de0a9a17699a781840452/pyxdg-0.28.tar.gz", hash = "sha256:3267bb3074e934df202af2ee0868575484108581e6f3cb006af1da35395e88b4", size = 77776 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e5/8d/cf41b66a8110670e3ad03dab9b759704eeed07fa96e90fdc0357b2ba70e2/pyxdg-0.28-py2.py3-none-any.whl", hash = "sha256:bdaf595999a0178ecea4052b7f4195569c1ff4d344567bccdc12dfdf02d545ab", size = 49520 },
-]
-
-[[package]]
 name = "pyzmq"
 version = "26.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1507,6 +1486,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/bd/d4/2c64e54749536ad1633400f28d71e71e19375d00ce1fe9bb1123364dc927/pyzmq-26.4.0-pp39-pypy39_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:8112af16c406e4a93df2caef49f884f4c2bb2b558b0b5577ef0b2465d15c1abc", size = 756751 },
     { url = "https://files.pythonhosted.org/packages/08/e6/34d119af43d06a8dcd88bf7a62dac69597eaba52b49ecce76ff06b40f1fd/pyzmq-26.4.0-pp39-pypy39_pp73-manylinux_2_28_x86_64.whl", hash = "sha256:c76c298683f82669cab0b6da59071f55238c039738297c69f187a542c6d40099", size = 745400 },
     { url = "https://files.pythonhosted.org/packages/f8/49/b5e471d74a63318e51f30d329b17d2550bdededaab55baed2e2499de7ce4/pyzmq-26.4.0-pp39-pypy39_pp73-win_amd64.whl", hash = "sha256:49b6ca2e625b46f499fb081aaf7819a177f41eeb555acb05758aa97f4f95d147", size = 555367 },
+]
+
+[[package]]
+name = "rfc3986"
+version = "2.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/85/40/1520d68bfa07ab5a6f065a186815fb6610c86fe957bc065754e47f7b0840/rfc3986-2.0.0.tar.gz", hash = "sha256:97aacf9dbd4bfd829baad6e6309fa6573aaf1be3f6fa735c8ab05e46cecb261c", size = 49026 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ff/9a/9afaade874b2fa6c752c36f1548f718b5b83af81ed9b76628329dab81c1b/rfc3986-2.0.0-py2.py3-none-any.whl", hash = "sha256:50b1502b60e289cb37883f3dfd34532b8873c7de9f49bb546641ce9cbd256ebd", size = 31326 },
 ]
 
 [[package]]
@@ -1690,28 +1678,34 @@ wheels = [
 
 [[package]]
 name = "usb-protocol"
-version = "0.9.1.post8+git.5ee66a2c.dirty"
-source = { git = "https://github.com/usb-tools/python-usb-protocol#5ee66a2c97ba184b518541c4b49cb269fca5349c" }
+version = "0.9.1"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "construct" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a5/0b/f789bcf7f2b5a471d11ae4053ebc09fae8334e8ad6a84489a86a3783e750/usb_protocol-0.9.1.tar.gz", hash = "sha256:e6ff4cf96279bfb5d0107dd9c6e4f3de03762d0f6136f42c4b0247e07dd2fe24", size = 42246 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/91/95/8d036a4d260e8a9ac9a865e1d59ed8d24cc8809e24dfa7e2e9baaa3ba0d7/usb_protocol-0.9.1-py3-none-any.whl", hash = "sha256:9410292ce2f609c335a53ab176ff285e29ecb2ef90394f9cfea2836d1be0ae7b", size = 53658 },
 ]
 
 [[package]]
 name = "wasmtime"
-version = "31.0.0"
+version = "33.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "importlib-resources" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0c/ce/085dc62c20a83c548c3b548673968bee4328266d674010ff5becb261b8b3/wasmtime-31.0.0-py3-none-any.whl", hash = "sha256:2767197830a5d9dc19dc1d91f209e761704421482f01e35e172d7b6ae667e6d7", size = 5869185 },
-    { url = "https://files.pythonhosted.org/packages/d4/3c/27ab48c7296b9ffb5159bb48315483d7b57afaf2958ccbda09c203dd1a36/wasmtime-31.0.0-py3-none-macosx_10_13_x86_64.whl", hash = "sha256:5c45cdea9ec5c40b38ccaea2415865d28a42c7abf1f778ebbea82220e591bb68", size = 7061795 },
-    { url = "https://files.pythonhosted.org/packages/c0/7d/38bc7eb9d9615316cb42fd0ba76803a85e4a8400a5e586f1da167173d362/wasmtime-31.0.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:e8609eba2760d4c7f54909a9232b73cb86c6ac376a2027f807d17245c90616af", size = 6322377 },
-    { url = "https://files.pythonhosted.org/packages/17/73/268edbcd43e9c8d527baf53fd76c3adcdc14c2bdd9497439a2cdf9dc0166/wasmtime-31.0.0-py3-none-manylinux1_x86_64.whl", hash = "sha256:63308a3b00a928d802443c088b5457df1a1385ddc4e3d7dad3109b04f12bcbe1", size = 7496977 },
-    { url = "https://files.pythonhosted.org/packages/a1/56/ddf6df651e6d18e939f6b5618ceaa334b53f88759f3edbf75d2e745a9136/wasmtime-31.0.0-py3-none-manylinux2014_aarch64.whl", hash = "sha256:cafe4fe4c5e7dc07e2433a0a94b1aa3d718b9b02555c6589fd236912ecaebe7a", size = 6902165 },
-    { url = "https://files.pythonhosted.org/packages/38/66/8a7d3f4b85e353446267d0c4e5a574b3471812e853c60963d5ef719991f0/wasmtime-31.0.0-py3-none-musllinux_1_2_x86_64.whl", hash = "sha256:0160eac524dd886a762c3325b56e21e0612039e2dc9a03efd36c75d9e8fa0341", size = 7498061 },
-    { url = "https://files.pythonhosted.org/packages/41/e7/a1ac843c07540f135ae63364e0f0ab75901db5df835fbebe447620eec1b0/wasmtime-31.0.0-py3-none-win_amd64.whl", hash = "sha256:58b1c2d8279a6ecd3c20ff274aad7e3a49a33ec3a11faf6a3d3adba430324886", size = 5869192 },
-    { url = "https://files.pythonhosted.org/packages/31/25/556cd32be4258e41f2e534f26e961b07d96731f1ceb922c763d80273dd90/wasmtime-31.0.0-py3-none-win_arm64.whl", hash = "sha256:e23da13619ee59e931fbd4ee4f036ecb03d29a58f8929a1711fd05f14fb8e8c5", size = 5340958 },
+    { url = "https://files.pythonhosted.org/packages/90/69/3f65a4cc5cfca92cab669f655e93e3e1f32974be95274fdd2389dda6329d/wasmtime-33.0.0-py3-none-android_26_arm64_v8a.whl", hash = "sha256:a26e46c7f81888bcde8d12bae9302d7dcddd8a719fc19419fb27e4a06281c71a", size = 7488876 },
+    { url = "https://files.pythonhosted.org/packages/eb/d3/1d5c6eb9ad73f60f2d034cfb9597bf621e07a61a915879317f95b148b210/wasmtime-33.0.0-py3-none-android_26_x86_64.whl", hash = "sha256:e1243becb59ffda44ed2ba00bdd62d0b90adf8bfd3d960dccf8d30391a278a0e", size = 7878185 },
+    { url = "https://files.pythonhosted.org/packages/99/cc/e33294735cfdf8be5a0cb0d16d33f9cc42cb4a86be2669b1019c53dd91d7/wasmtime-33.0.0-py3-none-any.whl", hash = "sha256:122d76e3d7886bee29aa86cd55ddd767b48da5990abeab3cd54f73e79ab56e4b", size = 6311145 },
+    { url = "https://files.pythonhosted.org/packages/40/a9/16bbb3d483da3d10091f3067fd4eb814526a3278e9a22902be5fb9d9d499/wasmtime-33.0.0-py3-none-macosx_10_13_x86_64.whl", hash = "sha256:ab1d1eea16ed11a476d1d94926f674cc0b72376777cb913ba2e6a620ebb745cd", size = 7593761 },
+    { url = "https://files.pythonhosted.org/packages/ef/4b/111b46c4a78ce2917eb2e499c8f86e6af892f1df5796cedeaf009e96cd5d/wasmtime-33.0.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:68ed6205bf7935cd272eb65105bd4d70fdbdc3fc678ff68b8ef9c5a71ebbcef4", size = 6831291 },
+    { url = "https://files.pythonhosted.org/packages/f4/53/c0cfef5560859ac2775ed124c38feab5af6d32ed495129724f693845dae9/wasmtime-33.0.0-py3-none-manylinux1_x86_64.whl", hash = "sha256:f78e907ba860967e340421b23dcce62fd1497b250f4d0e1f349c114f71813df0", size = 8098843 },
+    { url = "https://files.pythonhosted.org/packages/db/00/cfda08e54a20e559ba3a403702780bba226c33a83b5c1a9cf13eba7ba260/wasmtime-33.0.0-py3-none-manylinux2014_aarch64.whl", hash = "sha256:71d4e0ca9b0223dd888b0224fcd98c6a38c58bee81f57955ec866464e361ded5", size = 7479498 },
+    { url = "https://files.pythonhosted.org/packages/e9/48/88e1b3cce0a2886c393a74da68a86e8f37d22db46604166c93ba5c5fbe36/wasmtime-33.0.0-py3-none-musllinux_1_2_x86_64.whl", hash = "sha256:ad715713d73e89c0796d610d4111ac47fb6ae0327c7f56b772f7a48d0e52f525", size = 8109741 },
+    { url = "https://files.pythonhosted.org/packages/61/d1/02d0fcb1a0bade73dd4c60fd8975e817df0629c6bf3f4a4b57fbfc5fbe52/wasmtime-33.0.0-py3-none-win_amd64.whl", hash = "sha256:29da818ff7754fe013de577c04a701cd558cf90a518b2f79f890d0bc3e97b555", size = 6311152 },
+    { url = "https://files.pythonhosted.org/packages/a9/2c/b0367a704ee0bd662fb5c7c24597bc388ff2bb8b1634c1f40abb39c59624/wasmtime-33.0.0-py3-none-win_arm64.whl", hash = "sha256:0cefe9014a2804fd679e20e09c8db53f89bf6a46782800077a7adba5adf42cb2", size = 5727145 },
 ]
 
 [[package]]
@@ -1734,37 +1728,37 @@ wheels = [
 
 [[package]]
 name = "yowasp-nextpnr-ice40"
-version = "0.6.0.0.post440"
+version = "0.8.0.0.post621"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "yowasp-runtime" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6a/d6/012f11b024914ba37a81439c2a8129ae5f4abfb057b26fdcbd4f065dbce3/yowasp_nextpnr_ice40-0.6.0.0.post440-py3-none-any.whl", hash = "sha256:a0ce124c254410c7dbd843dcb438d63f30b0427d626e83a39b5f9614688ed900", size = 72021629 },
+    { url = "https://files.pythonhosted.org/packages/d6/4e/6a9cfbe03e777d7b1ce67818e5ee86660510098da8c04cb9033dde36225f/yowasp_nextpnr_ice40-0.8.0.0.post621-py3-none-any.whl", hash = "sha256:1e8b92f21bb5771eb439c16b0ae3c916802659c36b9f775f05ceabe4c0e73f93", size = 71677124 },
 ]
 
 [[package]]
 name = "yowasp-runtime"
-version = "1.71"
+version = "1.76"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "platformdirs" },
     { name = "wasmtime" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f5/d3/268b59c56b010f085acbda62ed9e32581323a51d2cb7081adf784f966616/yowasp_runtime-1.71-py3-none-any.whl", hash = "sha256:a6bdbff28c3ecea4b09637740f0ccfe0108824f387e707893fed6947c41960e5", size = 5612 },
+    { url = "https://files.pythonhosted.org/packages/a1/2b/2781cde033507853452bf1e924f6f211a80a4723edc9b302ddf5b9da8ece/yowasp_runtime-1.76-py3-none-any.whl", hash = "sha256:749181a5950764882a2bb33572d5337b0a8b96039a4f578bb78499974c08dff6", size = 5166 },
 ]
 
 [[package]]
 name = "yowasp-yosys"
-version = "0.40.0.0.post707"
+version = "0.53.0.0.post912"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
     { name = "yowasp-runtime" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8a/c7/bd6f2b6d1bb3bfbfa2cba48fa116092cb8d6615a8af2940a0b48ba562156/yowasp_yosys-0.40.0.0.post707-py3-none-any.whl", hash = "sha256:b65a895d909c742a898f4a0a935b2daf197b79eeb2a46d42ea0bc4f8dededfbe", size = 7152625 },
+    { url = "https://files.pythonhosted.org/packages/26/aa/a698e6c4d6827c1a18944d37e9de7a70b2b80af87c10d55e9f385cbf619c/yowasp_yosys-0.53.0.0.post912-py3-none-any.whl", hash = "sha256:681017e3d2fe8db2b5d5845233866ce19eca93d35dbcd5d3a0d0a8c23fcd9413", size = 9476310 },
 ]
 
 [[package]]
