@@ -2,8 +2,8 @@ import unittest
 
 from amaranth import Elaboratable, Module, Signal, signed
 from amaranth.hdl import Array
-from luna.gateware.test import LunaGatewareTestCase, sync_test_case
 
+from .utils import LunaGatewareTestCase, async_test_case
 from .constants import MOVE_TICKS, bit_shift
 from .controller import Host
 from .platforms import TestPlatform
@@ -118,7 +118,7 @@ class Polynomal(Elaboratable):
             # positive case --> increasing
             with m.Elif(counter_d[motor] < cntrs[motor * self.order]):
                 m.d.sync += self.dir[motor].eq(1)
-        with m.FSM(reset="RESET", name="polynomen"):
+        with m.FSM(init="RESET", name="polynomen"):
             with m.State("RESET"):
                 m.next = "WAIT_START"
 
@@ -175,113 +175,91 @@ class TestPolynomal(LunaGatewareTestCase):
     FRAGMENT_UNDER_TEST = Polynomal
     FRAGMENT_ARGUMENTS = {"platform": platform}
 
-    def initialize_signals(self):
+    async def initialize_signals(self, sim):
         self.host = Host(self.platform)
-        yield self.dut.ticklimit.eq(MOVE_TICKS)
+        sim.set(self.dut.ticklimit, MOVE_TICKS)
+        await sim.tick()
 
-    def count_steps(self, motor):
+    async def count_steps(self, sim, motor):
         """counts steps in accounting for direction"""
         count = 0
-        while (yield self.dut.busy):
-            old = yield self.dut.step[motor]
-            yield
-            if old and ((yield self.dut.step[motor]) == 0):
-                if (yield self.dut.dir[motor]):
+        while sim.get(self.dut.busy):
+            old = sim.get(self.dut.step[motor])
+            await sim.tick()
+            if old and sim.get(self.dut.step[motor]) == 0:
+                if sim.get(self.dut.dir[motor]):
                     count += 1
                 else:
                     count -= 1
         return count
 
-    def send_coefficients(self, a, b, c):
+    async def send_coefficients(self, sim, a, b, c):
         """send coefficients and pulse start
 
         a,b,c --  for cx^3+bx^2+ax
         """
         coefs = [a, b, c]
-        # load coefficients
         for _ in range(self.platform.motors):
             for coef in range(self.dut.order):
-                yield self.dut.coeff[coef].eq(coefs[coef])
-        yield from self.pulse(self.dut.start)
+                sim.set(self.dut.coeff[coef], coefs[coef])
+        await self.pulse(sim, self.dut.start)
 
-    @sync_test_case
-    def test_ticklimit(self):
-        """Test wich max speed can be reached
+    @async_test_case
+    async def test_ticklimit(self, sim):
+        """Test max speed limit behavior."""
 
-        Suppose max RPM stepper motor is 600, microstepping 16,
-        update frequency 1 MHz
-         --> (600*60*16)/1E6 = 0.576 step per tick.
-        If there are 10_000 ticks per segment;
-          5760 steps is maximum you can do in one segment from a physical
-          point of view
-        At max speed, the motor is on and subsequenctly off
-        in subsequent steps, ergo your motor update frequency determines max
-        speed (see also Nyquist frequency)
-        """
-
-        def limittest(limit, steps):
+        async def limittest(limit, steps):
             a = round(self.host.steps_to_count(steps) / limit)
-            yield self.dut.ticklimit.eq(limit)
-            yield from self.send_coefficients(a, 0, 0)
-            step_count = yield from self.count_steps(0)
+            sim.set(self.dut.ticklimit, limit)
+            await sim.tick()
+            await self.send_coefficients(sim, a, 0, 0)
+            step_count = await self.count_steps(sim, 0)
             self.assertEqual(step_count, steps)
 
-        yield from limittest(MOVE_TICKS, 4000)
-        yield from limittest(10_000, 1)
+        await limittest(MOVE_TICKS, 4000)
+        await limittest(10_000, 1)
 
-    @sync_test_case
-    def test_calculation(self, a=2, b=3, c=1):
-        """Test a simple relation e.g. cx^3+bx^2+ax"""
+    @async_test_case
+    async def test_calculation(self, sim, a=2, b=3, c=1):
+        """Test a simple relation cx^3 + bx^2 + ax"""
         if self.dut.order < 3:
             c = 0
         if self.dut.order < 2:
             b = 0
-        yield from self.send_coefficients(a, b, c)
-        while (yield self.dut.busy):
-            yield
-        self.assertEqual(
-            (yield self.dut.cntrs[0]),
-            a * MOVE_TICKS + b * pow(MOVE_TICKS, 2) + c * pow(MOVE_TICKS, 3),
-        )
 
-    @sync_test_case
-    def test_jerk(self):
-        """Test lower limit of highest degree, e.g. order 3 the jerk
+        await self.send_coefficients(sim, a, b, c)
 
-        Smallest value required is defined by pure higest order move
-        with 1 step.
-        Test if higest order move can be executed with one step.
-        """
+        while sim.get(self.dut.busy):
+            await sim.tick()
+
+        result = sim.get(self.dut.cntrs[0])
+        expected = a * MOVE_TICKS + b * MOVE_TICKS**2 + c * MOVE_TICKS**3
+        self.assertEqual(result, expected)
+
+    @async_test_case
+    async def test_jerk(self, sim):
+        """Test minimum coefficient for highest-order term"""
         steps = 1
-        coef = round(
-            self.host.steps_to_count(steps) / pow(MOVE_TICKS, self.dut.order)
-        )
+        coef = round(self.host.steps_to_count(steps) / (MOVE_TICKS**self.dut.order))
         coeffs = [0] * 3
         coeffs[self.dut.order - 1] = coef
-        yield from self.send_coefficients(*coeffs)
-        step_count = yield from self.count_steps(0)
+        await self.send_coefficients(sim, *coeffs)
+        step_count = await self.count_steps(sim, 0)
         self.assertEqual(step_count, steps)
 
-    @sync_test_case
-    def test_move(self):
-        """Movement
+    @async_test_case
+    async def test_move(self, sim):
+        """Forward and backward move at constant speed."""
 
-        Test forward and backward move at constant speed.
-        The largest constant in polynomal is determined by pure
-        velocity move with half time limit as steps.
-        """
-
-        def do_move(steps):
-            # NOTE: (a = s/t) != -1*(-s/t)
-            #       might be due to rounding and bitshift
+        async def do_move(steps):
             a = round(self.host.steps_to_count(steps) / MOVE_TICKS)
-            yield from self.send_coefficients(a, 0, 0)
-            count = yield from self.count_steps(0)
+            await self.send_coefficients(sim, a, 0, 0)
+            count = await self.count_steps(sim, 0)
             self.assertEqual(count, steps)
 
         steps = round(0.4 * MOVE_TICKS)
-        yield from do_move(steps)
-        yield from do_move(-steps)
+        await do_move(steps)
+        await do_move(-steps)
 
 
 if __name__ == "__main__":
