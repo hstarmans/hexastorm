@@ -1,6 +1,5 @@
 import cv2 as cv
 import numpy as np
-
 # NOTE: you should use principal component analysis
 #       for cross scan error etc
 

@@ -28,6 +28,7 @@ dependencies = [
 dev = [
     "black>=25.1.0",
     "nbqa>=1.9.1",
+    "pdm>=2.24.2",
     "ruff>=0.11.5",
 ]
 plot = [
@@ -40,6 +41,9 @@ raspberry = [
 
 [tool.black]
 line-length = 79
+
+[tool.pdm.scripts]
+test = "python -m unittest discover -t . -s tests -v"
 
 [tool.uv.sources]
 luna-usb = { git = "https://github.com/greatscottgadgets/luna.git", rev = "6c7c93d6ff5bd2390f430949cea4baf6686f0f97" }

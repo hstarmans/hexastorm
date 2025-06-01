@@ -35,8 +35,8 @@ uv sync
 ```
 Code can be executed as follows. 
 ```console
-uv run python -m hexastorm.movement
-uv run python -m hexastorm.platforms
+uv sync --group dev 
+uv run pdm run test
 uv sync --group plot
 uv run python -m hexastorm.interpolator.patterns.create
 uv run python -m hexastorm.interpolator.interpolator
