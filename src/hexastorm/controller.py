@@ -266,7 +266,7 @@ class Host:
         self.spi.write_readinto(command, response)
         self.fpga_select.value(1)
 
-    def get_motordebug(self, blocking=False):
+    async def get_motordebug(self, blocking=False):
         """retrieves the motor debug word
 
         This is used to debug the PI controller and
@@ -276,7 +276,7 @@ class Host:
                       a build with all modules
         """
         command = [COMMANDS.DEBUG] + WORD_BYTES * [0]
-        response = (yield from self.send_command(command, blocking=blocking))[
+        response = (await self.send_command(command, blocking=blocking))[
             1:
         ]
 
@@ -327,7 +327,7 @@ class Host:
             return response
 
 
-    def get_state(self, data=None):
+    async def get_state(self, data=None):
         """retrieves the state of the FPGA as dictionary
 
         data: string to decode to state, if None data is retrieved from FPGA
@@ -344,7 +344,7 @@ class Host:
         """
         if data is None:
             command = [COMMANDS.READ] + WORD_BYTES * [0]
-            data = yield from self.send_command(command)
+            data = await self.send_command(command)
 
         dct = {}
         # 9 bytes are returned
@@ -364,7 +364,7 @@ class Host:
         return dct
 
     @property
-    def position(self):
+    async def position(self):
         """retrieves position from FPGA and updates internal position
 
         position is stored on the FPGA in steps
@@ -375,7 +375,7 @@ class Host:
         """
         command = [COMMANDS.POSITION] + WORD_BYTES * [0]
         for i in range(self.platform.motors):
-            read_data = yield from self.send_command(command)
+            read_data = await self.send_command(command)
             self._position[i] = unpack("!q", read_data[1:])[0]
             # code below is not portable between python and micropython
             # python requires signed=True, micropython does not accep this
@@ -446,7 +446,7 @@ class Host:
             self.bus.write_byte_data(self.platform.ic_address, 0, val)
 
 
-    def set_parsing(self, value):
+    async def set_parsing(self, value):
         """enables or disables parsing of FIFO by FPGA
 
         val -- True   FPGA parses FIFO
@@ -458,9 +458,9 @@ class Host:
         else:
             command = [COMMANDS.STOP]
         command += WORD_BYTES * [0]
-        return (yield from self.send_command(command))
+        return (await self.send_command(command))
 
-    def home_axes(self, axes, speed=None, displacement=-200):
+    async def home_axes(self, axes, speed=None, displacement=-200):
         """home given axes, i.e. [1,0,1] homes x, z and not y
 
         axes         -- list with axes to home
@@ -469,7 +469,7 @@ class Host:
         """
         assert len(axes) == self.platform.motors
         dist = np.array(axes) * np.array([displacement] * self.platform.motors)
-        yield from self.gotopoint(
+        await self.gotopoint(
             position=dist.tolist(), speed=speed, absolute=False
         )
 
@@ -490,7 +490,7 @@ class Host:
         count = (steps << (1 + bitshift)) + (1 << (bitshift - 1))
         return count
 
-    def gotopoint(self, position, speed=None, absolute=True):
+    async def gotopoint(self, position, speed=None, absolute=True):
         """move machine to position or with displacement at constant speed
 
         Axes are moved independently to simplify the calculation.
@@ -500,7 +500,7 @@ class Host:
         speed        -- list with speed in mm/s, if None default speeds used
         absolute     -- True if position, False if displacement
         """
-        (yield from self.set_parsing(True))
+        (await self.set_parsing(True))
         assert len(position) == self.platform.motors
         if speed is not None:
             assert len(speed) == self.platform.motors
@@ -531,14 +531,14 @@ class Host:
             )
             velocity = [0] * len(speed)
             velocity[idx] = self.steps_to_count(speed_steps) // MOTORFREQ
-            (yield from self.set_parsing(True))
+            (await self.set_parsing(True))
 
             while ticks_total > 0:
                 ticks_move = (
                     MOVE_TICKS if ticks_total >= MOVE_TICKS else ticks_total
                 )
                 # execute move and retrieve if switch is hit
-                switches_hit = yield from self.spline_move(
+                switches_hit = await self.spline_move(
                     int(ticks_move), velocity
                 )
                 ticks_total -= ticks_move
@@ -554,18 +554,18 @@ class Host:
         # TODO: you enable parsing but don't disable it
         #       this would require a wait or maybe it should be enabled on
 
-    def send_command(self, command, blocking=False):
+    async def send_command(self, command, blocking=False):
         """writes command to spi port
 
         blocking  --  try again if memory is full
         returns bytearray with length equal to data sent
         """
         assert len(command) == WORD_BYTES + COMMAND_BYTES
-        def send_command(command, response):
+        async def send_command(command, response):
             # caller arguments are bytearrays and mutable
             if self.test:
                 # function is created in Amaranth HDL
-                response[:] = (yield from self.spi_exchange_data(command))
+                response[:] = (await self.spi_exchange_data(command))
             else:
                 self.fpga_select.value(0)
                 self.spi.write_readinto(command, response)
@@ -577,7 +577,7 @@ class Host:
             trials = 0
             while True:
                 trials += 1
-                yield from send_command(command, response)
+                await send_command(command, response)
                 byte1 = response[-1]  # can't rely on self.get_state (needs speed!)
                 if (byte1 >> (7-STATE.ERROR)) & 1:
                     if self.micropython:
@@ -590,11 +590,11 @@ class Host:
                 if trials > self.maxtrials:
                     raise Memfull(f"Too many trials {trials} needed")
         else:
-            yield from send_command(command, response)
+            await send_command(command, response)
 
         return response
 
-    def enable_comp(
+    async def enable_comp(
         self, laser0=False, laser1=False, polygon=False, synchronize=False, 
         singlefacet=False
     ):
@@ -622,9 +622,9 @@ class Host:
             + [int(f"{singlefacet}{synchronize}{polygon}{laser1}{laser0}", 2)]
             + [INSTRUCTIONS.WRITEPIN]
         )
-        yield from self.send_command(data, blocking=True)
+        await self.send_command(data, blocking=True)
 
-    def spline_move(self, ticks, coefficients):
+    async def spline_move(self, ticks, coefficients):
         """write spline move instruction with ticks and coefficients to FIFO
 
         If you have 2 motors and execute a second order spline
@@ -664,12 +664,12 @@ class Host:
                 commands += [write_byte + data]
         # send commands to FPGA
         for command in commands:
-            data_out = yield from self.send_command(command, blocking=True)
-            state = yield from self.get_state(data_out)
+            data_out = await self.send_command(command, blocking=True)
+            state = await self.get_state(data_out)
         axes_names = list(platform.stepspermm.keys())
         return np.array([state[key] for key in axes_names])
 
-    def writeline(self, bitlst, stepsperline=1, direction=0, repetitions=1):
+    async def writeline(self, bitlst, stepsperline=1, direction=0, repetitions=1):
         """projects given bitlst as line with laserhead
 
         bit list      bits which are written to substrate
@@ -684,7 +684,7 @@ class Host:
         for _ in range(repetitions):
             cmdlst = self.bytetocmdlist(bytelst)
             for cmd in cmdlst:
-                (yield from self.send_command(cmd, blocking=True))
+                (await self.send_command(cmd, blocking=True))
 
     def bytetocmdlist(self, bytelst):
         cmdlist = []
