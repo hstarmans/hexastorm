@@ -4,7 +4,7 @@ from hexastorm.platforms import TestPlatform
 from hexastorm.constants import MOVE_TICKS
 from hexastorm.movement import Polynomial
 
-class TestPolynomal(LunaGatewareTestCase):
+class TestPolynomial(LunaGatewareTestCase):
     platform = TestPlatform()
     FRAGMENT_UNDER_TEST = Polynomial
     FRAGMENT_ARGUMENTS = {"platform": platform}

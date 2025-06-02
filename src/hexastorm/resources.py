@@ -1,7 +1,7 @@
 import itertools
 
 from amaranth import Record
-from amaranth.build import Pins, PinsN, Resource, ResourceError, Subsignal
+from amaranth.build import Pins, PinsN, Resource, ResourceError, Subsignal, Attrs
 from amaranth.hdl.ast import unsigned
 from amaranth.hdl.rec import Layout
 
@@ -40,33 +40,26 @@ class StepperRecord(Record):
         super().__init__(StepperLayout())
 
 
-def StepperResource(
-    *args, step, direction, limit, number=None, conn=None, attrs=None
-):
-    """The enable pin is currently activated via the Linux host
+def StepperResource(*args, step_pin, dir_pin, limit_pin, number=None, conn=None):
+    """
+    Stepper motor resource.
 
     I/O signals:
-        O: step           -- pin for step pulse
-        O: dir            -- rotating direction of motor
-        I: limit          -- limit switch to detect end movement
+        step_pin     -- Output step pulse
+        dir_pin      -- Output direction control
+        limit_pin    -- Input limit switch
     """
-    io = []
-    io.append(
-        Subsignal("step", Pins(step, dir="o", conn=conn, assert_width=1))
-    )
-    io.append(
-        Subsignal("dir", Pins(direction, dir="o", conn=conn, assert_width=1))
-    )
-    io.append(
-        Subsignal("limit", Pins(limit, dir="i", conn=conn, assert_width=1))
-    )
-    if attrs is not None:
-        io.append(attrs)
-    return Resource.family(*args, number, default_name="stepper", ios=io)
+    ios = [
+        Subsignal("step", Pins(step_pin, dir="o", conn=conn, assert_width=1)),
+        Subsignal("dir", Pins(dir_pin, dir="o", conn=conn, assert_width=1)),
+        Subsignal("limit", Pins(limit_pin, dir="i", conn=conn, assert_width=1)),
+    ]
+    ios.append(Attrs(IO_STANDARD="SB_LVCMOS"))
 
+    return Resource.family(*args, number, default_name="stepper", ios=ios)
 
 class BLDCLayout(Layout):
-    """Layout for BLDC motor"""
+    """Signal layout for a 3-phase BLDC motor."""
 
     def __init__(self):
         super().__init__(
@@ -85,7 +78,7 @@ class BLDCLayout(Layout):
 
 
 class BLDCRecord(Record):
-    """Record for BLDC motor"""
+    """Record representation of a BLDC motor resource."""
 
     def __init__(self):
         super().__init__(BLDCLayout())
@@ -93,49 +86,35 @@ class BLDCRecord(Record):
 
 def BLDCResource(
     *args,
-    uL,
-    uH,
-    vL,
-    vH,
-    wL,
-    wH,
-    sensor0,
-    sensor1,
-    sensor2,
-    number=None,
-    conn=None,
-    attrs=None
+    uL, uH, vL, vH, wL, wH,
+    sensor0, sensor1, sensor2,
+    number=None, conn=None,
 ):
-    """BLDC driver resource
+    """
+    BLDC motor resource.
 
     I/O signals:
-        I: *L *H   -- low or high impedance input
-                      of BLDC motor
-        O: sensor* -- Hall sensors
+        uL/uH, vL/vH, wL/wH -- 3-phase low/high drive signals
+        sensor*             -- Hall sensor inputs
     """
-    io = []
-    io.append(Subsignal("uL", Pins(uL, dir="o", conn=conn, assert_width=1)))
-    io.append(Subsignal("uH", Pins(uH, dir="o", conn=conn, assert_width=1)))
-    io.append(Subsignal("vL", Pins(vL, dir="o", conn=conn, assert_width=1)))
-    io.append(Subsignal("vH", Pins(vH, dir="o", conn=conn, assert_width=1)))
-    io.append(Subsignal("wL", Pins(wL, dir="o", conn=conn, assert_width=1)))
-    io.append(Subsignal("wH", Pins(wH, dir="o", conn=conn, assert_width=1)))
-    io.append(
-        Subsignal("sensor0", Pins(sensor0, dir="i", conn=conn, assert_width=1))
-    )
-    io.append(
-        Subsignal("sensor1", Pins(sensor1, dir="i", conn=conn, assert_width=1))
-    )
-    io.append(
-        Subsignal("sensor2", Pins(sensor2, dir="i", conn=conn, assert_width=1))
-    )
-    if attrs is not None:
-        io.append(attrs)
-    return Resource.family(*args, number, default_name="bldc", ios=io)
+    ios = [
+        Subsignal("uL", Pins(uL, dir="o", conn=conn, assert_width=1)),
+        Subsignal("uH", Pins(uH, dir="o", conn=conn, assert_width=1)),
+        Subsignal("vL", Pins(vL, dir="o", conn=conn, assert_width=1)),
+        Subsignal("vH", Pins(vH, dir="o", conn=conn, assert_width=1)),
+        Subsignal("wL", Pins(wL, dir="o", conn=conn, assert_width=1)),
+        Subsignal("wH", Pins(wH, dir="o", conn=conn, assert_width=1)),
+        Subsignal("sensor0", Pins(sensor0, dir="i", conn=conn, assert_width=1)),
+        Subsignal("sensor1", Pins(sensor1, dir="i", conn=conn, assert_width=1)),
+        Subsignal("sensor2", Pins(sensor2, dir="i", conn=conn, assert_width=1)),
+    ]
+    ios.append(Attrs(IO_STANDARD="SB_LVCMOS"))
+
+    return Resource.family(*args, number, default_name="bldc", ios=ios)
 
 
 class LaserScannerLayout(Layout):
-    """Layout for laser scanner """
+    """Signal layout for a laser scanner head."""
     def __init__(self):
         super().__init__([
             ("laser0", 1),
@@ -153,29 +132,26 @@ class LaserscannerRecord(Record):
 
 
 def LaserscannerResource(
-    *args, laser0, laser1, photodiode, pwm, enable, number=None, conn=None, attrs=None
+    *args,
+    laser0, laser1, photodiode, pwm, enable,
+    number=None, conn=None,
 ):
-    """Resource for laser scanner
-
-    The enable pin is currently activated via the Linux host
+    """
+    Laser scanner resource.
 
     I/O signals:
-        O: laser0         -- laser channel 0
-        O: laser1         -- laser channel 1
-        I: photodiode     -- photodiode used to measure position of laser
+        laser0, laser1   -- Output to laser driver
+        photodiode       -- Input signal from scanner sensor
+        pwm              -- Output PWM control
+        enable           -- Output enable pin (active low)
     """
-    io = []
-    io.append(
-        Subsignal("laser0", Pins(laser0, dir="o", conn=conn, assert_width=1))
-    )
-    io.append(
-        Subsignal("laser1", Pins(laser1, dir="o", conn=conn, assert_width=1))
-    )
-    io.append(Subsignal("photodiode",
-              Pins(photodiode, dir="i", conn=conn, assert_width=1)))
-    io.append(Subsignal("pwm", Pins(pwm, dir="o", conn=conn, assert_width=1)))
-    io.append(Subsignal("en", PinsN(enable, dir="o",
-                            conn=conn, assert_width=1)))
-    if attrs is not None:
-        io.append(attrs)
-    return Resource.family(*args, number, default_name="laserscanner", ios=io)
+    ios = [
+        Subsignal("laser0", Pins(laser0, dir="o", conn=conn, assert_width=1)),
+        Subsignal("laser1", Pins(laser1, dir="o", conn=conn, assert_width=1)),
+        Subsignal("photodiode", Pins(photodiode, dir="i", conn=conn, assert_width=1)),
+        Subsignal("pwm", Pins(pwm, dir="o", conn=conn, assert_width=1)),
+        Subsignal("en", PinsN(enable, dir="o", conn=conn, assert_width=1)),
+    ]
+    ios.append(Attrs(IO_STANDARD="SB_LVCMOS"))
+
+    return Resource.family(*args, number, default_name="laserscanner", ios=ios)

@@ -71,7 +71,6 @@ class Firestarter(PlatformConfig, LatticeICE40Platform):
             photodiode="46",
             pwm="6", 
             enable="4",
-            attrs=Attrs(IO_STANDARD="SB_LVCMOS"),
         ),
         # # BLDC driver
         # BLDCResource(
@@ -85,31 +84,27 @@ class Firestarter(PlatformConfig, LatticeICE40Platform):
         #     sensor0="45",
         #     sensor1="47",
         #     sensor2="48",
-        #     attrs=Attrs(IO_STANDARD="SB_LVCMOS"),
         # ),
         # x-stepper
         StepperResource(
             number=0,
-            step="26",
-            direction="20",
-            limit="42",  
-            attrs=Attrs(IO_STANDARD="SB_LVCMOS"),
+            step_pin="26",
+            dir_pin="20",
+            limit_pin="42",  
         ),
         # y-stepper
         StepperResource(
             number=1,
-            step="37",
-            direction="36",
-            limit="21",
-            attrs=Attrs(IO_STANDARD="SB_LVCMOS"),
+            step_pin="37",
+            dir_pin="36",
+            limit_pin="21",
         ),
         # z-stepper
         StepperResource(
             number=2,
-            step="35",
-            direction="27",
-            limit="23",  
-            attrs=Attrs(IO_STANDARD="SB_LVCMOS"),
+            step_pin="35",
+            dir_pin="27",
+            limit_pin="23",  
         ),
     ]
     connectors = []

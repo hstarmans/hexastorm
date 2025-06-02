@@ -19,7 +19,7 @@ from .constants import (
 )
 from .lasers import DiodeSimulator, Laserhead, params
 # from .motor import Driver
-from .movement import Polynomal
+from .movement import Polynomial
 from .resources import get_all_resources
 
 
@@ -227,9 +227,9 @@ class Dispatcher(Elaboratable):
         # Busy used to detect move or scanline in action
         # disabled "dispatching"
         busy = Signal()
-        # Polynomal Move
-        polynomal = Polynomal(self.platform)
-        m.submodules.polynomal = polynomal
+        # Polynomial Move
+        polynomial = Polynomial(self.platform)
+        m.submodules.polynomial = polynomial
         if platform:
             spi = platform.request("debug_spi")
             laserheadpins = platform.request("laserscanner")
@@ -242,7 +242,7 @@ class Dispatcher(Elaboratable):
             self.spi = SPIBus()
             spi = self.spi
             self.parser = parser
-            self.pol = polynomal
+            self.pol = polynomial
             self.laserheadpins = platform.laserhead
             self.steppers = steppers = platform.steppers
             self.busy = busy
@@ -268,8 +268,8 @@ class Dispatcher(Elaboratable):
         m.submodules.laserhead = laserhead
         if platform.name == "Test":
             self.laserhead = laserhead
-        # polynomal iterates over count
-        coeffcnt = Signal(range(len(polynomal.coeff) + 1))
+        # polynomial iterates over count
+        coeffcnt = Signal(range(len(polynomial.coeff) + 1))
         ## PCB motor, disabled
         # # Prism motor
         # prism_driver = Driver(platform)
@@ -324,11 +324,11 @@ class Dispatcher(Elaboratable):
         ]
         # connect motors
         for idx, stepper in enumerate(steppers):
-            step = polynomal.step[idx] & ((stepper.limit == 0) | stepper.dir)
+            step = polynomial.step[idx] & ((stepper.limit == 0) | stepper.dir)
             if idx != (
                 list(platform.stepspermm.keys()).index(platform.laser_axis)
             ):
-                direction = polynomal.dir[idx]
+                direction = polynomial.dir[idx]
                 m.d.comb += [
                     stepper.step.eq(step),
                     stepper.dir.eq(direction),
@@ -343,7 +343,7 @@ class Dispatcher(Elaboratable):
                         | (laserhead.step & (laserhead.process_lines))
                     ),
                     stepper.dir.eq(
-                        (polynomal.dir[idx] & (~laserhead.process_lines))
+                        (polynomial.dir[idx] & (~laserhead.process_lines))
                         | (laserhead.dir & (laserhead.process_lines))
                     ),
                 ]
@@ -370,7 +370,7 @@ class Dispatcher(Elaboratable):
                     m.d.sync += pos.eq(pos - 1)
 
         # Busy signal
-        m.d.comb += busy.eq(polynomal.busy | laserhead.process_lines)
+        m.d.comb += busy.eq(polynomial.busy | laserhead.process_lines)
         # connect spi
         connect_synchronized_spi(m, spi, parser)
 
@@ -381,7 +381,7 @@ class Dispatcher(Elaboratable):
                 m.next = "WAIT_INSTRUCTION"
                 m.d.sync += pins.eq(0)
             with m.State("WAIT_INSTRUCTION"):
-                m.d.sync += [self.read_commit.eq(0), polynomal.start.eq(0)]
+                m.d.sync += [self.read_commit.eq(0), polynomial.start.eq(0)]
                 with m.If((self.empty == 0) & parser.parse & (busy == 0)):
                     m.d.sync += self.read_en.eq(1)
                     m.next = "PARSEHEAD"
@@ -391,10 +391,10 @@ class Dispatcher(Elaboratable):
                 m.d.sync += self.read_en.eq(0)
                 with m.If(byte0 == INSTRUCTIONS.MOVE):
                     m.d.sync += [
-                        polynomal.ticklimit.eq(self.read_data[8:]),
+                        polynomial.ticklimit.eq(self.read_data[8:]),
                         coeffcnt.eq(0),
                     ]
-                    m.next = "MOVE_POLYNOMAL"
+                    m.next = "MOVE_POLYNOMIAL"
                 with m.Elif(byte0 == INSTRUCTIONS.WRITEPIN):
                     m.d.sync += [
                         pins.eq(self.read_data[8:]),
@@ -414,19 +414,19 @@ class Dispatcher(Elaboratable):
                 with m.Else():
                     m.next = "ERROR"
                     m.d.sync += parser.dispatcherror.eq(1)
-            with m.State("MOVE_POLYNOMAL"):
-                with m.If(coeffcnt < len(polynomal.coeff)):
+            with m.State("MOVE_POLYNOMIAL"):
+                with m.If(coeffcnt < len(polynomial.coeff)):
                     with m.If(self.read_en == 0):
                         m.d.sync += self.read_en.eq(1)
                     with m.Else():
                         m.d.sync += [
-                            polynomal.coeff[coeffcnt].eq(self.read_data),
+                            polynomial.coeff[coeffcnt].eq(self.read_data),
                             coeffcnt.eq(coeffcnt + 1),
                             self.read_en.eq(0),
                         ]
                 with m.Else():
                     m.next = "WAIT"
-                    m.d.sync += [polynomal.start.eq(1), self.read_commit.eq(1)]
+                    m.d.sync += [polynomial.start.eq(1), self.read_commit.eq(1)]
             with m.State("SCANLINE"):
                 m.d.sync += [
                     self.read_discard.eq(0),
@@ -436,7 +436,7 @@ class Dispatcher(Elaboratable):
             # NOTE: you need to wait for busy to be raised
             #       in time
             with m.State("WAIT"):
-                m.d.sync += polynomal.start.eq(0)
+                m.d.sync += polynomial.start.eq(0)
                 m.next = "WAIT_INSTRUCTION"
             # NOTE: system never recovers user must reset
             with m.State("ERROR"):
@@ -449,7 +449,7 @@ class Dispatcher(Elaboratable):
 #  -- transactionalized FIFO
 #  -- SPI parser (basically an extension of SPI command interface)
 #  -- Dispatcher --> dispatches signals to actual hardware
-#  -- Polynomal integrator --> determines position via integrating counters
+#  -- Polynomial integrator --> determines position via integrating counters
 
 # TODO:
 #   -- in practice, position is not reached with small differences like 0.02 mm
