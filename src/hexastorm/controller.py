@@ -116,10 +116,10 @@ class Host:
             )
 
     def init_micropython(self):
-        from .constants import platform as platformmicro
+        from .constants import PlatformConfig
         from machine import Pin, SPI, I2C
 
-        self.platform = platformmicro(micropython=True)
+        self.platform = PlatformConfig()
         self.reset_pin = Pin(self.platform.reset_pin, Pin.OUT)
         self.reset_pin.value(1)
         self.bus = I2C(

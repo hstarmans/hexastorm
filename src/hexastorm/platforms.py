@@ -3,17 +3,15 @@ import platform as pltf
 import subprocess
 from collections import OrderedDict
 
-from amaranth import Signal
-from amaranth.build import Attrs, Clock, Pins, PinsN, Resource, Subsignal
-from amaranth.hdl import Array
+from amaranth.build import Attrs, Pins, PinsN, Resource, Subsignal
 from amaranth.vendor import LatticeICE40Platform
 from amaranth_boards.resources import LEDResources
 from amaranth_boards.test.blinky import Blinky
 
-from .constants import platform, wordsinmove
+from .constants import PlatformConfig, wordsinmove
 from .resources import (
-    BLDCRecord,
-    BLDCResource,
+    # BLDCRecord,
+    # BLDCResource,
     LaserscannerRecord,
     LaserscannerResource,
     StepperRecord,
@@ -21,11 +19,9 @@ from .resources import (
 )
 
 
-class TestPlatform:
+class TestPlatform(PlatformConfig):
     name = "Test"
-    stepspermm = OrderedDict()
-    stepspermm["x"] = 400
-    stepspermm["y"] = 400
+    stepspermm = OrderedDict([("x", 400), ("y", 400)])
     clks = {0: 1}  # dictionary to determine clock divider, e.g. movement.py
     hfosc_div = 0  # selects clock speed on UP5K and clk divider
     poldegree = 2  # degree of polynomal
@@ -43,28 +39,21 @@ class TestPlatform:
         "SINGLE_FACET": False,
         "DIRECTION": 0,
     }
-    motors = len(stepspermm.keys())
+    motors = len(stepspermm)
     steppers = [StepperRecord()] * motors
     laserhead = LaserscannerRecord()
     # bldc = BLDCRecord()
-    # leds = Array(Signal() for _ in range(3))
 
     def __init__(self):
         self.memdepth = wordsinmove(self) * 2 + 1
 
 
-class Firestarter(platform, LatticeICE40Platform):
-    """Kicad board available at
-    https://github.com/hstarmans/firestarter/
-    """
-    # default_clk = "clk13"
-    # clock_domain_generator = FirestarterDomainGenerator
+class Firestarter(PlatformConfig, LatticeICE40Platform):
+    """Kicad board: https://github.com/hstarmans/firestarter/"""
     resources = [
         *LEDResources(
             pins="39", invert=True, attrs=Attrs(IO_STANDARD="SB_LVCMOS")
         ),
-        # NOTE: there is a proper resource in nmigen_boards
-        #       this is used as it is also done by luna
         Resource(
             "debug_spi",
             0,
@@ -80,7 +69,8 @@ class Firestarter(platform, LatticeICE40Platform):
             laser0="11",
             laser1="12",
             photodiode="46",
-            pwm="6", enable="4",
+            pwm="6", 
+            enable="4",
             attrs=Attrs(IO_STANDARD="SB_LVCMOS"),
         ),
         # # BLDC driver
@@ -124,59 +114,33 @@ class Firestarter(platform, LatticeICE40Platform):
     ]
     connectors = []
 
-    def __init__(self, micropython=False):
-        # port to micropython e.g. /dev/ttyS8
-        self.micropython = micropython
+    def __init__(self):
         LatticeICE40Platform.__init__(self)
-        platform.__init__(self, micropython)
+        PlatformConfig.__init__(self)
 
     def build(self, *args, **kwargs):
-        if pltf.system() == "Windows":
-            search_command = "where"
-        else:
-            search_command = "which"
+        search_command = "where" if pltf.system() == "Windows" else "which"
         base = f"{search_command} yowasp-"
-        end = ""
-        # yowasp-yosys doesn't work
-        os.environ["YOSYS"] = subprocess.getoutput(base + "yosys" + end)
-        os.environ["NEXTPNR_ICE40"] = subprocess.getoutput(
-            base + "nextpnr-ice40" + end
-        )
-        os.environ["ICEPACK"] = subprocess.getoutput(base + "icepack" + end)
+        os.environ["YOSYS"] = subprocess.getoutput(base + "yosys")
+        os.environ["NEXTPNR_ICE40"] = subprocess.getoutput(base + "nextpnr-ice40")
+        os.environ["ICEPACK"] = subprocess.getoutput(base + "icepack")
         super().build(*args, **kwargs)
 
     def toolchain_program(self, products, name, **kwargs):
-        with products.extract("{}.bin".format(name)) as bitstream_filename:
-            if self.micropython:
-                subprocess.check_call(
-                    [
-                        "mpremote",
-                        "resume",
-                        "connect",
-                        self.micropython,
-                        "fs",
-                        "cp",
-                        bitstream_filename,
-                        ":sd/fpga/fpga.bit",
-                    ]
-                )
-                for str in ['from hexastorm.controller import Host',
-                            'hst = Host(micropython=True)',
-                            'hst.flash_fpga("sd/fpga/fpga.bit")']:
-                    subprocess.check_call(
-                        [
-                            "mpremote",
-                            "resume",
-                            "connect",
-                            self.micropython,
-                            "exec",
-                            str,
-                        ]
-                    )
-
-            else:
-                subprocess.check_call(["fomu-flash", "-w", bitstream_filename])
-                subprocess.check_call(["fomu-flash", "-r"])
+        with products.extract(f"{name}.bin") as bitstream_filename:
+            subprocess.check_call([
+                "mpremote", "resume", "connect", self.micropython,
+                "fs", "cp", bitstream_filename, ":sd/fpga/fpga.bit"
+            ])
+            for cmd in [
+                "from hexastorm.controller import Host",
+                "hst = Host(micropython=True)",
+                'hst.flash_fpga("sd/fpga/fpga.bit")'
+            ]:
+                subprocess.check_call([
+                    "mpremote", "resume", "connect", self.micropython,
+                    "exec", cmd
+                ])
 
 
 if __name__ == "__main__":

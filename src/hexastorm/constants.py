@@ -26,7 +26,7 @@ MOVE_TICKS = 10_000  # maximum ticks in move segment
 MOVE_INSTRUCTION = {"INSTRUCTION": 1, "TICKS": 7}
 
 
-class platform:
+class PlatformConfig:
     memdepth = 256
     name = "firestarter"
     device = "iCE40UP5K"
@@ -51,7 +51,7 @@ class platform:
         "DIRECTION": 0,
     }
 
-    def __init__(self, micropython=False):
+    def __init__(self):
         self.laser_bits = 1  # enables adding pwm to laser (not widely tested)
         self.poldegree = (
             2  # degree of polynomal to execute move, see movement.py
@@ -64,33 +64,25 @@ class platform:
         self.laser_axis = "y"
         self.motors = len(list(self.stepspermm.keys()))
         self.ic_address = 0x28  # spi address
-        if micropython:
-            self.tmc2209 = {'x': 0, 'y': 1, 'z': 2} # uart ids tmc2209 drivers
-            self.scl = 5  # scl pin digipot
-            self.sda = 4  # sda pin digipot TODO: should be 4, hotfix to 46
-            self.sck = 12
-            self.miso = 11
-            self.mosi = 13
-            self.flash_cs = 10
-            self.led_blue = 18
-            self.led_red = 8
+        self.tmc2209 = {'x': 0, 'y': 1, 'z': 2} # uart ids tmc2209 drivers
+        self.scl = 5  # scl pin digipot
+        self.sda = 4  # sda pin digipot TODO: should be 4, hotfix to 46
+        self.sck = 12
+        self.miso = 11
+        self.mosi = 13
+        self.flash_cs = 10
+        self.led_blue = 18
+        self.led_red = 8
 
-            # FPGA allows narrow range of baudrates
-            # hardware spi between 2 and 3 MHz
-            # software spi can be 1 MHz
-             
-            self.baudrate = int(2.9e6) # higher, i.e. 3.1 doesn't work
-            self.phase = 1        # spi phase must be 1
-            self.fpga_cs = 9
-            self.enable_pin = 38  # enable pin stepper motors
-            self.reset_pin = 47   # can be used to reset FPGA
-        # raspberry pi
-        else:
-            self.ic_dev_nr = 1  # digit pot connection
-            self.enable_pin = 17  # enable pin for stepper motors
-            self.reset_pin = 26  # can be used to reset FPGA
-            self.chip_select = 8  # spi chip select
-            self.spi_dev = (0, 0)  # device and channel
+        # FPGA allows narrow range of baudrates
+        # hardware spi between 2 and 3 MHz
+        # software spi can be 1 MHz
+            
+        self.baudrate = int(2.9e6) # higher, i.e. 3.1 doesn't work
+        self.phase = 1        # spi phase must be 1
+        self.fpga_cs = 9
+        self.enable_pin = 38  # enable pin stepper motors
+        self.reset_pin = 47   # can be used to reset FPGA
 
 
 def params(platform):
@@ -168,9 +160,7 @@ def bit_shift(platform):
 def wordsinscanline(bits):
     """calcuates number of words for a single scanline instruction
     """
-    bytesinline = 8  # Instruction, direction, ticksperstep
-    bytesinline += ceil(bits / 8)
-    return ceil(bytesinline / WORD_BYTES)
+    return ceil((8 + ceil(bits / 8)) / WORD_BYTES)
 
 
 def wordsinmove(platform):

@@ -2,11 +2,11 @@ from hexastorm.utils import LunaGatewareTestCase, async_test_case
 from hexastorm.controller import Host
 from hexastorm.platforms import TestPlatform
 from hexastorm.constants import MOVE_TICKS
-from hexastorm.movement import Polynomal
+from hexastorm.movement import Polynomial
 
 class TestPolynomal(LunaGatewareTestCase):
     platform = TestPlatform()
-    FRAGMENT_UNDER_TEST = Polynomal
+    FRAGMENT_UNDER_TEST = Polynomial
     FRAGMENT_ARGUMENTS = {"platform": platform}
 
     async def initialize_signals(self, sim):

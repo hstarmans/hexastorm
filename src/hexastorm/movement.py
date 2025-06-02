@@ -1,5 +1,3 @@
-import unittest
-
 from amaranth import Elaboratable, Module, Signal, signed
 from amaranth.hdl import Array
 
@@ -7,14 +5,15 @@ from .constants import MOVE_TICKS, bit_shift
 from .resources import get_all_resources
 
 
-class Polynomal(Elaboratable):
-    """Sets motor states using a polynomal algorithm
+class Polynomial(Elaboratable):
+    """Polynomial motor controller
 
-    A polynomal up to 3 order, i.e. c*t^3+b*t^2+a*t,
-    is evaluated under the assumption that t starts at 0
-    and has a maximum of say 10_000 ticks.
-    The polynomal describes the stepper position of a single axis.
-    A counter is used to capture the state of the polynomal.
+    Computes a polynomial of the form:
+        pos(t) = c*t^3 + b*t^2 + a*t
+    where t is a counter incremented every clock tick.
+
+    The polynomial describes the stepper position of a single axis.
+    A counter is used to capture the state of the polynomial.
     If a given bit, denoted by bitshift, of the counter changes,
     a step is sent to the motor.
     In every tick the step can at most increase
@@ -35,14 +34,15 @@ class Polynomal(Elaboratable):
     max ticks per move is 10_000
     update frequency motor is 1 MHz
 
-    I/O signals:
-    I: coeff          -- polynomal coefficients
-    I: start          -- start signal
-    O: busy           -- busy signal
-    O: finished       -- finished signal
-    O: total steps    -- total steps executed in move
-    O: dir            -- direction; 1 is postive and 0 is negative
-    O: step           -- step signal
+    Inputs:
+        coeff       - Array of polynomial coefficients [a, b, c] per motor
+        start       - Start signal
+        ticklimit   - Number of ticks to evaluate the polynomial
+
+    Outputs:
+        step        - Step signal (Array)
+        dir         - Direction signal (Array)
+        busy        - Active when running
     """
 
     def __init__(self, platform=None, top=False):
@@ -57,19 +57,18 @@ class Polynomal(Elaboratable):
         self.bit_shift = bit_shift(platform)
         self.motors = platform.motors
         self.max_steps = int(MOVE_TICKS / 2)  # Nyquist
-        # inputs
+
+        # Input
         self.coeff = Array()
         for _ in range(self.motors):
-            self.coeff.extend(
-                [
-                    Signal(signed(self.bit_shift + 1)),
-                    Signal(signed(self.bit_shift + 1)),
-                    Signal(signed(self.bit_shift + 1)),
-                ][: self.order]
-            )
+            self.coeff.extend([
+                Signal(signed(self.bit_shift + 1))
+                for _ in range(self.order)
+            ])
         self.start = Signal()
         self.ticklimit = Signal(MOVE_TICKS.bit_length())
-        # output
+        
+        # Output
         self.busy = Signal()
         self.dir = Array(Signal() for _ in range(self.motors))
         self.step = Array(Signal() for _ in range(self.motors))
@@ -78,48 +77,46 @@ class Polynomal(Elaboratable):
         m = Module()
         # add 1 MHz clock domain
         cntr = Signal(range(self.divider))
-        # pos
-        max_bits = (self.max_steps << self.bit_shift).bit_length()
-        cntrs = Array(
-            Signal(signed(max_bits + 1)) for _ in range(len(self.coeff))
-        )
-        assert max_bits <= 64
         ticks = Signal(MOVE_TICKS.bit_length())
+        
+        # Internal signed counters per motor per order
+        max_bits = (self.max_steps << self.bit_shift).bit_length()
+        cntrs = Array(Signal(signed(max_bits + 1)) for _ in range(len(self.coeff)))
+        prev = Array(Signal(signed(max_bits + 1)) for _ in range(self.motors))
+        assert max_bits <= 64
+        
         if self.top:
-            steppers = [res for res in get_all_resources(platform, "stepper")]
-            assert len(steppers) != 0
-            for idx, stepper in enumerate(steppers):
+            steppers = get_all_resources(platform, "stepper")
+            assert steppers, "No stepper resources found"
+            for i, stepper in enumerate(steppers):
                 m.d.comb += [
-                    stepper.step.eq(self.step[idx]),
-                    stepper.dir.eq(self.dir[idx]),
+                    stepper.step.eq(self.step[i]),
+                    stepper.dir.eq(self.dir[i]),
                 ]
         else:
             self.ticks = ticks
             self.cntrs = cntrs
 
-        # steps
+        # Step signal generation based on bit toggle
         for motor in range(self.motors):
             m.d.comb += self.step[motor].eq(
                 cntrs[motor * self.order][self.bit_shift]
             )
 
-        # directions
-        counter_d = Array(
-            Signal(signed(max_bits + 1)) for _ in range(self.motors)
-        )
+        # Direction detection
         for motor in range(self.motors):
-            m.d.sync += counter_d[motor].eq(cntrs[motor * self.order])
-            # negative case --> decreasing
-            with m.If(counter_d[motor] > cntrs[motor * self.order]):
-                m.d.sync += self.dir[motor].eq(0)
-            # positive case --> increasing
-            with m.Elif(counter_d[motor] < cntrs[motor * self.order]):
-                m.d.sync += self.dir[motor].eq(1)
+            idx = motor * self.order
+            m.d.sync += prev[motor].eq(cntrs[idx])
+            with m.If(prev[motor] > cntrs[idx]):
+                m.d.sync += self.dir[motor].eq(0)  # Negative
+            with m.Elif(prev[motor] < cntrs[idx]):
+                m.d.sync += self.dir[motor].eq(1)  # Positive
+        
         with m.FSM(init="RESET", name="polynomen"):
             with m.State("RESET"):
+                m.d.sync += self.busy.eq(0)
                 m.next = "WAIT_START"
 
-                m.d.sync += self.busy.eq(0)
             with m.State("WAIT_START"):
                 with m.If(self.start):
                     for motor in range(self.motors):
@@ -127,7 +124,7 @@ class Polynomal(Elaboratable):
                         step_bit = self.bit_shift + 1
                         m.d.sync += [
                             cntrs[coef0].eq(cntrs[coef0][:step_bit]),
-                            counter_d[motor].eq(counter_d[motor][:step_bit]),
+                            prev[motor].eq(prev[motor][:step_bit]),
                         ]
                         for degree in range(1, self.order):
                             m.d.sync += cntrs[coef0 + degree].eq(0)
@@ -135,21 +132,22 @@ class Polynomal(Elaboratable):
                     m.next = "RUNNING"
                 with m.Else():
                     m.d.sync += self.busy.eq(0)
+
             with m.State("RUNNING"):
                 with m.If(
                     (ticks < self.ticklimit) & (cntr >= self.divider - 1)
                 ):
                     m.d.sync += [ticks.eq(ticks + 1), cntr.eq(0)]
                     for motor in range(self.motors):
-                        order = self.order
-                        idx = motor * order
+                        idx = motor * self.order
+
                         op3, op2, op1 = 0, 0, 0
-                        if order > 2:
+                        if self.order > 2:
                             op3 += 3 * 2 * self.coeff[idx + 2] + cntrs[idx + 2]
                             op2 += cntrs[idx + 2]
                             op1 += self.coeff[idx + 2] + cntrs[idx + 2]
                             m.d.sync += cntrs[idx + 2].eq(op3)
-                        if order > 1:
+                        if self.order > 1:
                             op2 += 2 * self.coeff[idx + 1] + cntrs[idx + 1]
                             m.d.sync += cntrs[idx + 1].eq(op2)
                         op1 += (
