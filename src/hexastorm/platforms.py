@@ -8,7 +8,7 @@ from amaranth.vendor import LatticeICE40Platform
 from amaranth_boards.resources import LEDResources
 from amaranth_boards.test.blinky import Blinky
 
-from .constants import PlatformConfig, wordsinmove
+from .constants import PlatformConfig
 from .resources import (
     # BLDCRecord,
     # BLDCResource,
@@ -18,29 +18,12 @@ from .resources import (
     StepperResource,
 )
 
-
 class TestPlatform(PlatformConfig):
     name = "Test"
-    stepspermm = OrderedDict([("x", 400), ("y", 400)])
     clks = {0: 1}  # dictionary to determine clock divider, e.g. movement.py
     hfosc_div = 0  # selects clock speed on UP5K and clk divider
     poldegree = 2  # degree of polynomal
     laser_bits = 1
-    laser_axis = "y"
-    laser_var = {
-        "RPM": 1000,
-        "FACETS": 4,
-        "SINGLE_LINE": False,
-        "MOTORDEBUG": "ticksinfacet",
-        "MOTORDIVIDER": pow(2, 8),
-        "TICKSINFACET": 20,
-        "BITSINSCANLINE": 3,
-        "LASERTICKS": 4,
-        "SINGLE_FACET": False,
-        "DIRECTION": 0,
-    }
-    motors = len(stepspermm)
-    steppers = [StepperRecord()] * motors
     laserhead = LaserscannerRecord()
     # bldc = BLDCRecord()
 
@@ -48,8 +31,15 @@ class TestPlatform(PlatformConfig):
         self.memdepth = wordsinmove(self) * 2 + 1
 
 
-class Firestarter(PlatformConfig, LatticeICE40Platform):
+class Firestarter(LatticeICE40Platform):
     """Kicad board: https://github.com/hstarmans/firestarter/"""
+    settings = PlatformConfig(test=False)
+    cfg = settings.set_ice40
+    device     = cfg['device']
+    package    = cfg['package']
+    default_clk = cfg['default_clk']
+    hfosc_div = cfg['hfosc_div']
+
     resources = [
         *LEDResources(
             pins="39", invert=True, attrs=Attrs(IO_STANDARD="SB_LVCMOS")
@@ -111,7 +101,8 @@ class Firestarter(PlatformConfig, LatticeICE40Platform):
 
     def __init__(self):
         LatticeICE40Platform.__init__(self)
-        PlatformConfig.__init__(self)
+        self.build_opts = self.settings.build_opts
+
 
     def build(self, *args, **kwargs):
         search_command = "where" if pltf.system() == "Windows" else "which"

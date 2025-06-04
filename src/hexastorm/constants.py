@@ -19,7 +19,7 @@ STATE = namedtuple("STATE", ["FULL", "PARSING", "ERROR"])(*range(3))
 
 COMMAND_BYTES = 1
 WORD_BYTES = 8
-MEMWIDTH = WORD_BYTES * 8
+
 MOTORFREQ = 1e6  # motor move interpolation freq in Hz
 MOVE_TICKS = 10_000  # maximum ticks in move segment
 
@@ -27,120 +27,196 @@ MOVE_INSTRUCTION = {"INSTRUCTION": 1, "TICKS": 7}
 
 
 class PlatformConfig:
-    memdepth = 256
-    name = "firestarter"
-    device = "iCE40UP5K"
-    package = "SG48"
-    default_clk = "SB_HFOSC"
-    # This division setting selects the internal oscillator speed:
-    # 0: 48MHz, 1: 24MHz, 2: 12MHz, 3: 6MHz.
-    clks = {0: 48, 1: 24, 2: 12, 3: 6}
-    hfosc_div = 2
-    laser_var = {
-        "RPM": 3000,
-        "SPINUP_TIME": 1.5,
-        "STABLE_TIME": 1.125,
-        "FACETS": 4,
-        "CRYSTAL_HZ": clks[hfosc_div] * 1e6,
-        "MOTORDEBUG": "ticksinfacet",
-        "MOTORDIVIDER": pow(2, 8),
-        "LASER_HZ": 400e3,
-        "END%": 0.7,
-        "START%": 0.35,
-        "SINGLE_LINE": False,
-        "DIRECTION": 0,
-    }
-
-    def __init__(self):
-        self.laser_bits = 1  # enables adding pwm to laser (not widely tested)
-        self.poldegree = (
-            2  # degree of polynomal to execute move, see movement.py
-        )
-        # micropython changes order very strangely
-        self.stepspermm = OrderedDict()
-        self.stepspermm["x"] = 76.2
-        self.stepspermm["y"] = 76.2
-        self.stepspermm["z"] = 1600
-        self.laser_axis = "y"
-        self.motors = len(list(self.stepspermm.keys()))
-        self.ic_address = 0x28  # spi address
-        self.tmc2209 = {'x': 0, 'y': 1, 'z': 2} # uart ids tmc2209 drivers
-        self.scl = 5  # scl pin digipot
-        self.sda = 4  # sda pin digipot TODO: should be 4, hotfix to 46
-        self.sck = 12
-        self.miso = 11
-        self.mosi = 13
-        self.flash_cs = 10
-        self.led_blue = 18
-        self.led_red = 8
-
-        # FPGA allows narrow range of baudrates
-        # hardware spi between 2 and 3 MHz
-        # software spi can be 1 MHz
-            
-        self.baudrate = int(2.9e6) # higher, i.e. 3.1 doesn't work
-        self.phase = 1        # spi phase must be 1
-        self.fpga_cs = 9
-        self.enable_pin = 38  # enable pin stepper motors
-        self.reset_pin = 47   # can be used to reset FPGA
-
-
-def params(platform):
-    """determines parameters for laser scanner
-
-    returns dictionary
     """
-    var = platform.laser_var
-    var["POLY_HZ"] = var["RPM"] / 60
-    if platform.name == "Test":
-        var["CRYSTAL_HZ"] = round(
-            var["TICKSINFACET"] * var["FACETS"] * var["POLY_HZ"]
-        )
-        var["LASER_HZ"] = var["CRYSTAL_HZ"] / var["LASERTICKS"]
-        var["SPINUP_TIME"] = 10 / var["CRYSTAL_HZ"]
-        # TODO: stop scanline seems to affect the stable thresh?!
-        # can be 30 without stopline (this is from old repo)
-        var["STABLE_TIME"] = 5 * var["TICKSINFACET"] / var["CRYSTAL_HZ"]
-        var["START%"] = 2 / var["TICKSINFACET"]
-        var["END%"] = (var["LASERTICKS"] * var["BITSINSCANLINE"]) / var[
-            "TICKSINFACET"
-        ] + var["START%"]
-        assert var["TICKSINFACET"] == round(
-            var["CRYSTAL_HZ"] / (var["POLY_HZ"] * var["FACETS"])
-        )
-        bitsinscanline = var["BITSINSCANLINE"]
-    else:
-        var["TICKSINFACET"] = round(
-            var["CRYSTAL_HZ"] / (var["POLY_HZ"] * var["FACETS"])
-        )
-    # parameter creation
-    var["LASERTICKS"] = int(var["CRYSTAL_HZ"] / var["LASER_HZ"])
-    # jitter requires 2
-    # you also need to enable read pin at count one when you read bits
-    assert var["LASERTICKS"] > 2
-    var['JITTERTICKS'] = round(0.5 * var['LASERTICKS'])
-    # PCBmotor
-    # var["JITTERTICKS"] = round(0.08 * var["TICKSINFACET"])
-    if var["END%"] > round(1 - (var["JITTERTICKS"] + 1) / var["TICKSINFACET"]):
-        raise Exception("Invalid settings, END% too high")
-    var["BITSINSCANLINE"] = round(
-        (var["TICKSINFACET"] * (var["END%"] - var["START%"]))
-        / var["LASERTICKS"]
-    )
-    if platform.name == "Test":
-        assert var["BITSINSCANLINE"] == bitsinscanline
-    # bits are packed and therefore need to be multiple of 8
-    elif (var["BITSINSCANLINE"] % 8) != 0:
-        var["BITSINSCANLINE"] += 8 - var["BITSINSCANLINE"] % 8
+    Holds platform configuration. 
+    """
+    def __init__(self, test=False):
+        """
+        Initialization follows one of two routes:
 
-    if var["BITSINSCANLINE"] <= 0:
-        raise Exception("Bits in scanline invalid")
-    var["SPINUPTICKS"] = round(var["SPINUP_TIME"] * var["CRYSTAL_HZ"])
-    var["STABLETICKS"] = round(var["STABLE_TIME"] * var["CRYSTAL_HZ"])
-    # 6 as the original mirror polygon has six sides
-    var["POLYPERIOD"] = int(var["CRYSTAL_HZ"] / (var["POLY_HZ"] * 6 * 2))
-    return var
+            - **Test Mode** (`test=True`): 
+            - You define low-level timing values directly (`TICKSINFACET`, `LASERTICKS`, `BITSINSCANLINE`)
+            - Useful for simulation or FPGA-level tuning
 
+            - **Production Mode** (`test=False`):
+            - You define real-world timing values (`LASER_HZ`, `SPINUP_TIME`, etc.)
+            - The system computes derived timing parameters
+
+            After initial input, shared constants are injected, and the `params()` method is called to:
+            - Normalize both modes into a consistent parameter space
+            - Compute all secondary parameters (e.g., `JITTERTICKS`, `POLYPERIOD`)
+            - Perform sanity checks (e.g., ensure scanline fits within available ticks)
+
+            The final result is stored in `self.laser_var`, a flat dictionary of all configuration values.
+        """
+        self.test = test
+        if test:
+            self.laser_var = dict(
+                rpm = 1000,
+                ticks_in_facet = 20,
+                bits_in_scanline = 3,
+                laser_ticks = 4,
+            )
+        else:
+            self.laser_var = dict(
+                rpm = 3000,
+                spinup_time = 1.5,
+                stable_time = 1.125,
+                laser_hz = 400e3,
+                start_frac = 0.35,
+                end_frac = 0.7,
+            )
+        self.laser_var.update(dict(
+            facets = 4,
+            single_line = False,
+            motor_divider = pow(2,8),
+            motor_debug = "ticks_in_facet",
+            direction = 0,
+        ))
+        self.params()
+        self.laser_bits = 1  # enables adding pwm to laser (not widely tested)
+    
+    @property
+    def set_esp32(self):
+        return dict(
+                tmc2209 = {'x': 0, 'y': 1, 'z': 2}, # uart ids tmc2209 drivers
+                scl = 5,  # scl pin digipot
+                sda = 4,  # sda pin digipot TODO: should be 4, hotfix to 46
+                sck = 12,
+                miso = 11,
+                mosi = 13,
+                ic_address = 0x28,     # spi address
+                baudrate = int(2.9e6), # higher, i.e. 3.1 doesn't work
+                phase = 1,             # spi phase must be 1
+                fpga_cs = 9,
+                enable_pin = 38 , # enable pin stepper motors
+                reset_pin = 47,   # can be used to reset FPGA
+                flash_cs = 10,
+                led_blue = 18,
+                led_red = 8,)
+
+    @property
+    def set_ice40(self):
+        """required for LatticeICE40Platform"""
+        return dict(
+            device = "iCE40UP5K",
+            package = "SG48",
+            default_clk = "SB_HFOSC",
+            hfosc_div = 2,    
+        )
+
+    @property
+    def build_opts(self):
+        """required for amaranth synthesis"""
+        if self.test:
+            pass
+        else:
+            return dict(
+                name = "firestarter",
+                memdepth = 256,
+                memwidth = WORD_BYTES * 8,
+                poldegree = 2,
+                motors = len(self.motor_set['stepspermm']),
+            )  
+
+    @property
+    def words_scanline(self):
+        """Returns the number of words required for a single scanline instruction."""
+        return ceil((8 + ceil(self.laser_var['bits_in_scanline'] / 8)) / WORD_BYTES)
+
+
+    @property
+    def words_move(self):
+        """Returns the number of words required for a single move instruction."""
+        bytesingcode = (
+            sum(MOVE_INSTRUCTION.values())
+            + self.build_opts['motors'] * self.build_opts['poldegree'] * WORD_BYTES
+        )
+        bytesingcode += bytesingcode % WORD_BYTES
+        return ceil(bytesingcode / WORD_BYTES)
+    
+    @property
+    def motor_set(self):
+        if self.test:
+            steps = OrderedDict([("x", 400), ("y", 400)])
+        else:  
+            steps = OrderedDict([
+                    ("x", 76.2),
+                    ("y", 76.2),
+                    ("z", 1600),
+                ])
+        return dict(
+            stepspermm = steps,
+            laser_axis = "y",
+        )
+
+    def params(self):
+        """Calculate laser timing parameters and store in laser_var."""
+        # Unpack into locals for brevity
+        rpm = self.laser_var["rpm"]
+        facets = self.laser_var["facets"]
+
+        poly_hz = rpm / 60
+
+        if self.test:
+            ticks_in_facet = self.laser_var["ticks_in_facet"]
+            laser_ticks = self.laser_var["laser_ticks"]
+            bits_in_scanline = self.laser_var["bits_in_scanline"]
+
+            crystal_hz = round(ticks_in_facet * facets * poly_hz)
+            laser_hz = crystal_hz / laser_ticks
+            spinup_time = 10 / crystal_hz
+            stable_time = 5 * ticks_in_facet / crystal_hz
+            start_frac = 2 / ticks_in_facet
+            end_frac = (laser_ticks * bits_in_scanline) / ticks_in_facet + start_frac
+            assert ticks_in_facet == round(crystal_hz / (poly_hz * facets))
+        else:
+            spinup_time = self.laser_var["spinup_time"]
+            stable_time = self.laser_var["stable_time"]
+            start_frac = self.laser_var["start_frac"]
+            end_frac = self.laser_var["end_frac"]
+
+            clks = {0: 48, 1: 24, 2: 12, 3: 6}
+            crystal_hz = clks[self.set_ice40["hfosc_div"]] * 1e6
+            ticks_in_facet = round(crystal_hz / (poly_hz * facets))
+            laser_hz = self.laser_var["laser_hz"]
+            laser_ticks = int(crystal_hz / laser_hz)
+
+        spinup_ticks = round(spinup_time * crystal_hz)
+        stable_ticks = round(stable_time * crystal_hz)
+        jitter_ticks = round(0.5 * laser_ticks)
+
+        bits_in_scanline = round(ticks_in_facet * (end_frac - start_frac) / laser_ticks)
+        polyperiod = int(crystal_hz / (poly_hz * 6 * 2))
+
+        # Sanity checks
+        assert laser_ticks > 2
+        if end_frac > round(1 - (jitter_ticks + 1) / ticks_in_facet):
+            raise Exception("Invalid settings, end_frac too high")
+
+        if self.test == "Test":
+            assert bits_in_scanline == self.laser_var["bits_in_scanline"]
+        elif bits_in_scanline % 8 != 0:
+            bits_in_scanline += 8 - bits_in_scanline % 8
+
+        if bits_in_scanline <= 0:
+            raise Exception("Bits in scanline invalid")
+        # Update dictionary
+        self.laser_var.update({
+            "crystal_hz": crystal_hz,
+            "laser_hz": laser_hz,
+            "ticks_in_facet": ticks_in_facet,
+            "laser_ticks": laser_ticks,
+            "spinup_time": spinup_time,
+            "stable_time": stable_time,
+            "start_frac": start_frac,
+            "end_frac": end_frac,
+            "spinup_ticks": spinup_ticks,
+            "stable_ticks": stable_ticks,
+            "jitter_ticks": jitter_ticks,
+            "bits_in_scanline": bits_in_scanline,
+            "polyperiod": polyperiod,
+        })
 
 def bit_shift(platform):
     """retrieve bit shif for a give degree
@@ -157,20 +233,7 @@ def bit_shift(platform):
     return bit_shift
 
 
-def wordsinscanline(bits):
-    """calcuates number of words for a single scanline instruction
-    """
-    return ceil((8 + ceil(bits / 8)) / WORD_BYTES)
 
-
-def wordsinmove(platform):
-    """calcuates number of words for a single move instruction"""
-    bytesingcode = (
-        sum(MOVE_INSTRUCTION.values())
-        + platform.motors * platform.poldegree * WORD_BYTES
-    )
-    bytesingcode += bytesingcode % WORD_BYTES
-    return ceil(bytesingcode / WORD_BYTES)
 
 
 def getmovedct(platform):

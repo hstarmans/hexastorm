@@ -1,16 +1,16 @@
 import unittest
 
-from ..core import Dispatcher, SPIParser
-from ..movement import Polynomal
-from ..platforms import Firestarter
+from hexastorm.core import Dispatcher, SPIParser
+from hexastorm.movement import Polynomial
+from hexastorm.platforms import Firestarter
 
 
 class TestBuild(unittest.TestCase):
     """Platform is passed to object which is then built"""
 
     # build directory created in folder python is executed
-    def test_all(self, micropython=True):
-        platform = Firestarter(micropython)
+    def test_all(self):
+        platform = Firestarter()
         platform.build(
             Dispatcher(Firestarter()),
             do_program=False,
@@ -26,7 +26,7 @@ class TestBuild(unittest.TestCase):
     def polynomal(self):
         platform = Firestarter()
         platform.build(
-            Polynomal(Firestarter()), do_program=False, verbose=True
+            Polynomial(Firestarter()), do_program=False, verbose=True
         )
 
 
