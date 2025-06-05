@@ -70,9 +70,7 @@ class Divisor(Elaboratable):
                 m.d.sync += [
                     self.busy.eq(1),
                     self.dbz.eq(0),
-                    Cat(q1, ac).eq(
-                        Cat(Const(0, 1), self.x, Const(0, self.width))
-                    ),
+                    Cat(q1, ac).eq(Cat(Const(0, 1), self.x, Const(0, self.width))),
                 ]
         with m.Elif(self.busy):
             with m.If(i == self.width - 1):
@@ -86,4 +84,3 @@ class Divisor(Elaboratable):
             with m.Else():
                 m.d.sync += [i.eq(i + 1), ac.eq(ac_next), q1.eq(q1_next)]
         return m
-

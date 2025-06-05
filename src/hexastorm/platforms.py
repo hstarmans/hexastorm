@@ -1,7 +1,6 @@
 import os
 import platform as pltf
 import subprocess
-from collections import OrderedDict
 
 from amaranth.build import Attrs, Pins, PinsN, Resource, Subsignal
 from amaranth.vendor import LatticeICE40Platform
@@ -14,9 +13,9 @@ from .resources import (
     # BLDCResource,
     LaserscannerRecord,
     LaserscannerResource,
-    StepperRecord,
     StepperResource,
 )
+
 
 class TestPlatform(PlatformConfig):
     name = "Test"
@@ -33,17 +32,16 @@ class TestPlatform(PlatformConfig):
 
 class Firestarter(LatticeICE40Platform):
     """Kicad board: https://github.com/hstarmans/firestarter/"""
+
     settings = PlatformConfig(test=False)
-    cfg = settings.set_ice40
-    device     = cfg['device']
-    package    = cfg['package']
-    default_clk = cfg['default_clk']
-    hfosc_div = cfg['hfosc_div']
+    cfg = settings.ice40_cnfg
+    device = cfg["device"]
+    package = cfg["package"]
+    default_clk = cfg["default_clk"]
+    hfosc_div = cfg["hfosc_div"]
 
     resources = [
-        *LEDResources(
-            pins="39", invert=True, attrs=Attrs(IO_STANDARD="SB_LVCMOS")
-        ),
+        *LEDResources(pins="39", invert=True, attrs=Attrs(IO_STANDARD="SB_LVCMOS")),
         Resource(
             "debug_spi",
             0,
@@ -59,7 +57,7 @@ class Firestarter(LatticeICE40Platform):
             laser0="11",
             laser1="12",
             photodiode="46",
-            pwm="6", 
+            pwm="6",
             enable="4",
         ),
         # # BLDC driver
@@ -80,7 +78,7 @@ class Firestarter(LatticeICE40Platform):
             number=0,
             step_pin="26",
             dir_pin="20",
-            limit_pin="42",  
+            limit_pin="42",
         ),
         # y-stepper
         StepperResource(
@@ -94,15 +92,14 @@ class Firestarter(LatticeICE40Platform):
             number=2,
             step_pin="35",
             dir_pin="27",
-            limit_pin="23",  
+            limit_pin="23",
         ),
     ]
     connectors = []
 
     def __init__(self):
         LatticeICE40Platform.__init__(self)
-        self.build_opts = self.settings.build_opts
-
+        self.build_opts = self.settings.amaranth_cnfg
 
     def build(self, *args, **kwargs):
         search_command = "where" if pltf.system() == "Windows" else "which"
@@ -114,23 +111,30 @@ class Firestarter(LatticeICE40Platform):
 
     def toolchain_program(self, products, name, **kwargs):
         with products.extract(f"{name}.bin") as bitstream_filename:
-            subprocess.check_call([
-                "mpremote", "resume", "connect", self.micropython,
-                "fs", "cp", bitstream_filename, ":sd/fpga/fpga.bit"
-            ])
+            subprocess.check_call(
+                [
+                    "mpremote",
+                    "resume",
+                    "connect",
+                    self.micropython,
+                    "fs",
+                    "cp",
+                    bitstream_filename,
+                    ":sd/fpga/fpga.bit",
+                ]
+            )
             for cmd in [
                 "from hexastorm.controller import Host",
                 "hst = Host(micropython=True)",
-                'hst.flash_fpga("sd/fpga/fpga.bit")'
+                'hst.flash_fpga("sd/fpga/fpga.bit")',
             ]:
-                subprocess.check_call([
-                    "mpremote", "resume", "connect", self.micropython,
-                    "exec", cmd
-                ])
+                subprocess.check_call(
+                    ["mpremote", "resume", "connect", self.micropython, "exec", cmd]
+                )
 
 
 if __name__ == "__main__":
-    Firestarter(micropython='/dev/ttyACM0').build(
+    Firestarter(micropython="/dev/ttyACM0").build(
         Blinky(),
         do_program=False,
         verbose=True,
