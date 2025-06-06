@@ -1,4 +1,5 @@
 import sys
+
 if sys.implementation.name == "cpython":
     raise Exception("Module should be called from micropython")
 
@@ -10,7 +11,7 @@ from math import isclose
 
 from ulab import numpy as np
 
-from ..constants import COMMANDS, MOVE_TICKS, WORD_BYTES, wordsinmove
+from ..config import COMMANDS, MOVE_TICKS, WORD_BYTES, wordsinmove
 from ..controller import Host, Memfull, executor
 from ..ulabext import assert_array_almost_equal
 
@@ -100,7 +101,7 @@ class LaserheadTest(Base):
 
     @executor
     def lasertest(self, laser1=True):
-        "enable and disable laser by pressing enter"        
+        "enable and disable laser by pressing enter"
         host = self.host
         print(f"Press enter to turn laser {1 if laser1 else 0} on")
         input()
@@ -146,9 +147,7 @@ class LaserheadTest(Base):
         host = self.host
         laser_params = host.laser_params
         numblines = round(
-            dist
-            * host.platform.stepspermm[host.platform.laser_axis]
-            * stepsperline
+            dist * host.platform.stepspermm[host.platform.laser_axis] * stepsperline
         )
         yield from host.enable_comp(synchronize=True)
         startpos = (yield from host.position).copy()
@@ -165,9 +164,7 @@ class LaserheadTest(Base):
             indx = indx.index(host.platform.laser_axis)
             # assume y axis is 1
             startpos[indx] += dist if direction else -dist
-            assert_array_almost_equal(
-                (yield from host.position), startpos, decimal=1
-            )
+            assert_array_almost_equal((yield from host.position), startpos, decimal=1)
         yield from host.writeline([])
         print(f"Wait for stopline to execute, {timeout} seconds")
         sleep(timeout)
@@ -175,7 +172,7 @@ class LaserheadTest(Base):
         yield from host.enable_comp(synchronize=False)
         self.host.enable_steppers = False
         # TODO: parsing is left open
-        #(yield from self.host.set_parsing(False))
+        # (yield from self.host.set_parsing(False))
 
     @executor
     def test_scanline(self, numblines=1_000, repeat=True, singlefacet=False):
@@ -184,7 +181,9 @@ class LaserheadTest(Base):
         yield from host.enable_comp(singlefacet=singlefacet)
         for _ in range(8):
             yield from host.writeline(line)
-        print(f"waiting for polygon to stabilize and laserhead to process {numblines} lines")
+        print(
+            f"waiting for polygon to stabilize and laserhead to process {numblines} lines"
+        )
         sleep(3)
         starttime = ticks_ms()  # milliseconds
         if repeat:
@@ -192,16 +191,18 @@ class LaserheadTest(Base):
         else:
             for _ in range(numblines):
                 yield from host.writeline(line)
-        elapsed = (ticks_ms() - starttime)/1000 # seconds
-        measured_freq = numblines/elapsed # hertz    
+        elapsed = (ticks_ms() - starttime) / 1000  # seconds
+        measured_freq = numblines / elapsed  # hertz
         yield from host.writeline([])
         # 3000 RPM
         #    100 khz --> pass
         #    400 Khz --> pass, fail for repeat is False
-        expected_freq = host.platform.laser_var['RPM']/60
+        expected_freq = host.platform.laser_timing["RPM"] / 60
         if not singlefacet:
-            expected_freq *= host.platform.laser_var['FACETS']
-        print(f"line rate measured: {measured_freq:.2f},  expected {expected_freq:.2f} in Hertz")
+            expected_freq *= host.platform.laser_timing["FACETS"]
+        print(
+            f"line rate measured: {measured_freq:.2f},  expected {expected_freq:.2f} in Hertz"
+        )
         # measured freq is higher as it still need to clean the buffer
         self.assertEqual(isclose(measured_freq, expected_freq, rel_tol=0.1), True)
         self.assertEqual((yield from host.get_state())["error"], False)
@@ -209,14 +210,14 @@ class LaserheadTest(Base):
 
 
 # port to micropython
-#import numpy as np
-#import pandas as pd
-#import plotext as plt
-#from numpy.testing import assert_array_almost_equal
-#from gpiozero import LED
+# import numpy as np
+# import pandas as pd
+# import plotext as plt
+# from numpy.testing import assert_array_almost_equal
+# from gpiozero import LED
 
-#from .. import interpolator
-#from ..platforms import Firestarter
+# from .. import interpolator
+# from ..platforms import Firestarter
 
 
 # class MotorTest(Base):
@@ -417,9 +418,7 @@ class MoveTest(Base):
         try:
             while True:
                 dct = yield from self.host.get_state()
-                print(
-                    f"[x, y, z] is [{dct['x']}, " + f"{dct['y']}, {dct['z']}]"
-                )
+                print(f"[x, y, z] is [{dct['x']}, " + f"{dct['y']}, {dct['z']}]")
                 sleep(1)
         except KeyboardInterrupt:
             pass
@@ -443,16 +442,14 @@ class MoveTest(Base):
         startpos = (yield from self.host.position).copy()
         # does not work with -1, 1
         for direction in [1, -1]:
-            self.assertEqual(
-                (yield from self.host.get_state())["error"], False
-            )
+            self.assertEqual((yield from self.host.get_state())["error"], False)
             self.host.enable_steppers = True
             current = (yield from self.host.position).copy()
             disp = dist * direction
             yield from self.host.gotopoint(
                 position=disp, speed=[1] * motors, absolute=False
             )
-            sleep(3) # wait for execution of all command in ringbuffer
+            sleep(3)  # wait for execution of all command in ringbuffer
             assert_array_almost_equal(
                 (yield from self.host.position),
                 current + disp,
@@ -462,6 +459,7 @@ class MoveTest(Base):
             (yield from self.host.position), startpos, decimal=decimals
         )
         self.host.enable_steppers = False
+
 
 if __name__ == "__main__":
     unittest.main()

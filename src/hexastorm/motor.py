@@ -5,7 +5,7 @@ from amaranth.hdl import Array
 from luna.gateware.interface.spi import SPICommandInterface
 from luna.gateware.utils.cdc import synchronize
 
-from .constants import WORD_BYTES, COMMAND_BYTES, params
+from .config import WORD_BYTES, COMMAND_BYTES, params
 from .resources import get_all_resources
 
 
@@ -125,9 +125,7 @@ class Driver(Elaboratable):
         for idx in range(len(self.leds)):
             m.d.comb += self.leds[idx].eq(self.hall[idx])
 
-        m.d.comb += hallstate.eq(
-            Cat(~self.hall[0], ~self.hall[1], ~self.hall[2])
-        )
+        m.d.comb += hallstate.eq(Cat(~self.hall[0], ~self.hall[1], ~self.hall[2]))
 
         def get_statetime(frequency):
             """time needed for one state"""
@@ -246,10 +244,7 @@ class Driver(Elaboratable):
                 m.d.slow += hall_counters[4].eq(hallcntr)
             with m.Elif(hallstate == 6):
                 m.d.slow += hall_counters[5].eq(hallcntr)
-            with m.If(
-                ticks_facet_hall
-                < int(start_statetime * (states_fullcycle / 2))
-            ):
+            with m.If(ticks_facet_hall < int(start_statetime * (states_fullcycle / 2))):
                 m.d.slow += rotating.eq(1)
         # counter is overflowing, implying there is no rotation
         with m.Elif(hallcntr == start_statetime - 1):
@@ -283,11 +278,7 @@ class Driver(Elaboratable):
         upperlimit = get_statetime(start_freq) * states_fullcycle
 
         if not self.platform.name == "Test":
-            assert (
-                (upperlimit > lowerlimit)
-                & (setpoint_ticks > 0)
-                & (lowerlimit > 0)
-            )
+            assert (upperlimit > lowerlimit) & (setpoint_ticks > 0) & (lowerlimit > 0)
         lower_l = int(-setpoint_ticks)
         upper_l = int(upperlimit - setpoint_ticks)
         assert lower_l < 0
@@ -319,9 +310,7 @@ class Driver(Elaboratable):
                 err.eq(ticks_facet_hall - setpoint_ticks),
             ]
         with m.Elif(hallcntr == 1):
-            with m.If(
-                ((intg + err) > int_lower_l) & ((intg + err) < int_upper_l)
-            ):
+            with m.If(((intg + err) > int_lower_l) & ((intg + err) < int_upper_l)):
                 m.d.slow += intg.eq(intg + err)
         with m.Else():
             m.d.slow += [duty.eq((err >> K_p) + (intg >> K_i))]
@@ -412,13 +401,10 @@ class Driver(Elaboratable):
         if mode == "hallstate":
             m.d.sync += self.debugword.eq(hallstate)
         elif mode == "ticksinfacet":
-            m.d.sync += self.debugword.eq(
-                Cat(ticks_facet_hall, ticks_facet_diode)
-            )
+            m.d.sync += self.debugword.eq(Cat(ticks_facet_hall, ticks_facet_diode))
         elif mode == "PIcontrol":
             m.d.sync += self.debugword.eq(Cat(ticks_facet_hall, duty))
         else:
             raise Exception(f"{motorstate} not supported")
 
         return m
-

@@ -11,7 +11,7 @@ from scipy import ndimage
 
 from hexastorm.lasers import params as paramsfunc
 from hexastorm.platforms import Firestarter
-from hexastorm.constants import wordsinscanline
+from hexastorm.config import wordsinscanline
 from hexastorm.controller import Host
 
 
@@ -61,9 +61,7 @@ def fxpos(pixel, params, xstart=0):
                 can be negative
     """
     line_pixel = params["startpixel"] + pixel % params["bitsinscanline"]
-    xpos = (
-        np.sin(params["tiltangle"]) * displacement(line_pixel, params) + xstart
-    )
+    xpos = np.sin(params["tiltangle"]) * displacement(line_pixel, params) + xstart
     return xpos / params["samplegridsize"]
 
 
@@ -166,8 +164,7 @@ class Interpolator:
             ),
             # first calculates all bits in scanline and then the start
             "startpixel": (
-                (var["BITSINSCANLINE"] / (var["END%"] - var["START%"]))
-                * var["START%"]
+                (var["BITSINSCANLINE"] / (var["END%"] - var["START%"])) * var["START%"]
             ),
             # number of pixels in a line [new 785]
             "bitsinscanline": var["BITSINSCANLINE"],
@@ -196,7 +193,7 @@ class Interpolator:
 
     def svgtopil(self, svg_filepath):
         """converts SVG snippets to a PIL Image"""
-        with open(svg_filepath, 'rb') as f:
+        with open(svg_filepath, "rb") as f:
             svg_data = f.read()
         dpi = 25.4 / self.params["samplegridsize"]
         png_data = svg2png(bytestring=svg_data, dpi=dpi)
@@ -243,12 +240,8 @@ class Interpolator:
             nonzero_row[0] : nonzero_row[-1], nonzero_col[0] : nonzero_col[-1]
         ]
         # update settings
-        x_size, y_size = [
-            i * self.params["samplegridsize"] for i in img_array.shape
-        ]
-        if (x_size > self.params["pltfxsize"]) or (
-            y_size > self.params["pltfysize"]
-        ):
+        x_size, y_size = [i * self.params["samplegridsize"] for i in img_array.shape]
+        if (x_size > self.params["pltfxsize"]) or (y_size > self.params["pltfysize"]):
             raise Exception("Object does not fit on platform")
         print(f"Sample size is {x_size:.2f} mm by {y_size:.2f} mm")
         # NOTE: this is only a crude approximation
@@ -272,10 +265,7 @@ class Interpolator:
         params = self.params
         if not params["sampleysize"] or not params["samplexsize"]:
             raise Exception("Sampleysize or samplexsize are set to zero.")
-        if (
-            fxpos(0, params) < 0
-            or fxpos(params["bitsinscanline"] - 1, params) > 0
-        ):
+        if fxpos(0, params) < 0 or fxpos(params["bitsinscanline"] - 1, params) > 0:
             raise Exception("Line seems ill positioned")
         # mm
         lanewidth = self.lanewidth()
@@ -300,19 +290,14 @@ class Interpolator:
         vfxpos = np.vectorize(fxpos2, otypes=[np.int16])
         vfypos = np.vectorize(fypos2, otypes=[np.int16])
         xstart = abs(
-            fxpos2(int(params["bitsinscanline"]) - 1)
-            * params["samplegridsize"]
+            fxpos2(int(params["bitsinscanline"]) - 1) * params["samplegridsize"]
         )
         xpos_facet = vfxpos(range(0, int(params["bitsinscanline"])), xstart)
         # TODO: you still don't account for ystart
         # (you are moving in the y, so if you start
         #  at the edge you miss something)
-        ypos_forwardfacet = vfypos(
-            range(0, int(params["bitsinscanline"])), True
-        )
-        ypos_backwardfacet = vfypos(
-            range(0, int(params["bitsinscanline"])), False
-        )
+        ypos_forwardfacet = vfypos(range(0, int(params["bitsinscanline"])), True)
+        ypos_backwardfacet = vfypos(range(0, int(params["bitsinscanline"])), False)
         # single lane
         xpos_lane = np.tile(xpos_facet, facets_inlane)
         # TODO: parallel not supported on 32 bit hardware
@@ -351,9 +336,7 @@ class Interpolator:
         def loop1(params):
             xpos = np.zeros((lanes, len(xpos_lane)), dtype=np.int16)
             ypos = np.zeros((lanes, len(ypos_forwardlane)), dtype=np.int16)
-            xwidthlane = fxpos(0, params) - fxpos(
-                params["bitsinscanline"] - 1, params
-            )
+            xwidthlane = fxpos(0, params) - fxpos(params["bitsinscanline"] - 1, params)
             for lane in range(0, lanes):
                 # TODO: why is this force needed?
                 xoffset = int(round(lane * xwidthlane))
@@ -401,10 +384,10 @@ class Interpolator:
         if test:
             layerarr = np.ones_like(layerarr)
         print("Retrieved image")
-        print(f"Elapsed {time()-ctime:.2f} seconds")
+        print(f"Elapsed {time() - ctime:.2f} seconds")
         ids = self.createcoordinates()
         print("Created coordinates for interpolation")
-        print(f"Elapsed {time()-ctime:.2f} seconds")
+        print(f"Elapsed {time() - ctime:.2f} seconds")
         ptrn = ndimage.map_coordinates(
             input=layerarr,
             output=np.uint8,
@@ -414,7 +397,7 @@ class Interpolator:
             cval=0,
         )
         print("Completed interpolation")
-        print(f"Elapsed {time()-ctime:.2f} seconds")
+        print(f"Elapsed {time() - ctime:.2f} seconds")
         if ptrn.min() < 0 or ptrn.max() > 1:
             raise Exception("This is not a bit list")
         if not positiveresist:
@@ -430,7 +413,7 @@ class Interpolator:
         and the plotted as an image.
         The result is returned as numpy array and stored
         in script folder under filename.
-        The origin is in the lower-left corner, 
+        The origin is in the lower-left corner,
         the starting point of the exposure.
         The laser line is parallel to the x axis.
 
@@ -485,8 +468,8 @@ class Interpolator:
         """
         file_path = os.path.join(self.debug_folder, filename)
         bitsinline = int(self.params["bitsinscanline"])
-        bytesinline = int(np.ceil(self.params["bitsinscanline"]//8))
-        words_in_line = wordsinscanline(int(self.params['bitsinscanline']))
+        bytesinline = int(np.ceil(self.params["bitsinscanline"] // 8))
+        words_in_line = wordsinscanline(int(self.params["bitsinscanline"]))
         pixeldata = []
         with open(file_path, "rb") as f:
             # 1. Header
@@ -509,9 +492,11 @@ class Interpolator:
                     cmd0 = cmdlst[0]
                     assert cmd0[0] == 1  # cmd always starts with write
                     move_word = list(cmd0[1:])[::-1]
-                    assert move_word[0] == 3   # scanline
+                    assert move_word[0] == 3  # scanline
                     move_header = move_word[1:]
-                    bits = np.unpackbits(np.array(move_header, dtype=np.uint8), bitorder='litle')
+                    bits = np.unpackbits(
+                        np.array(move_header, dtype=np.uint8), bitorder="litle"
+                    )
                     assert bits[0] == direction
                     # convert to binary, reverse, map to string, convert binary string to int
                     half_periodbits = int("".join(map(str, bits[1:][::-1])), 2)
@@ -520,10 +505,13 @@ class Interpolator:
                     # other command contain the linedata
                     bitlst = []
                     for cmd in cmdlst[1:]:
-                        assert cmd[0] == 1 
-                        bits = np.unpackbits(np.array(list(cmd[1:])[::-1], dtype=np.uint8), bitorder='litle')
+                        assert cmd[0] == 1
+                        bits = np.unpackbits(
+                            np.array(list(cmd[1:])[::-1], dtype=np.uint8),
+                            bitorder="litle",
+                        )
                         bitlst.extend(bits)
-                    bitlst = bitlst[:bytesinline*8][::-1]
+                    bitlst = bitlst[: bytesinline * 8][::-1]
                     pixeldata.extend(bitlst)
         return facetsinlane, lanes, lanewidth, np.packbits(pixeldata)
 
@@ -542,7 +530,7 @@ class Interpolator:
         # parquet is more efficient, not supported by micropython
         # micropython ulab has numpy load and save but cannot
         # load object partially, as such default numpy save not used
-        lanes = int(np.ceil(self.params["samplexsize"]/self.params["lanewidth"]))
+        lanes = int(np.ceil(self.params["samplexsize"] / self.params["lanewidth"]))
         facetsinlane = int(self.params["facetsinlane"])
         pixeldata = pixeldata.astype(np.uint8)
         host = Host(platform=Firestarter(micropython=True))
@@ -550,31 +538,36 @@ class Interpolator:
         with open(os.path.join(self.debug_folder, filename), "wb") as f:
             # 1. Header:
             f.write(struct.pack("<f", self.params["lanewidth"]))
-            f.write(struct.pack("<I", int(self.params["facetsinlane"])))  # unsigned int (4 bytes)
-            f.write(struct.pack("<I", lanes))                    # unsigned int (4 bytes)
+            f.write(
+                struct.pack("<I", int(self.params["facetsinlane"]))
+            )  # unsigned int (4 bytes)
+            f.write(struct.pack("<I", lanes))  # unsigned int (4 bytes)
             # Overtime packing changed significantly
             bitsinline = int(self.params["bitsinscanline"])
-            bytesinline = int(np.ceil(self.params["bitsinscanline"]//8))
-            assert len(pixeldata) == round(facetsinlane*lanes*bytesinline)
+            bytesinline = int(np.ceil(self.params["bitsinscanline"] // 8))
+            assert len(pixeldata) == round(facetsinlane * lanes * bytesinline)
             for lane in range(lanes):
                 if lane % 2 == 1:
                     direction = 0
                 else:
                     direction = 1
                 for i in range(facetsinlane):
-                    offset = lane*facetsinlane*bytesinline
+                    offset = lane * facetsinlane * bytesinline
                     start = i * bytesinline + offset
-                    end = (i+1) * bytesinline + offset
+                    end = (i + 1) * bytesinline + offset
                     linedata = pixeldata[start:end]
                     reconstructed.extend(linedata)
                     bits = np.unpackbits(linedata)[:bitsinline]
                     # reverse, clockwise exposure
                     bits = bits[::-1]
-                    bytelst = host.bittobytelist(bits, self.params["stepsperline"], direction)
+                    bytelst = host.bittobytelist(
+                        bits, self.params["stepsperline"], direction
+                    )
                     cmdlst = host.bytetocmdlist(bytelst)
                     # cmd lst has lenth of 6, there are 9 bytes in a cmd
                     for cmd in cmdlst:
                         f.write(cmd)
+
 
 if __name__ == "__main__":
     # PCB / photopaper stepsperline single channel, current 130, 2x per line
@@ -592,6 +585,8 @@ if __name__ == "__main__":
     facetsinlane, lanes, lanewidth, arr = interpolator.readbin(f"{fname}.bin")
     assert np.allclose(interpolator.params["lanewidth"], lanewidth, 1e-3)
     assert np.allclose(interpolator.params["facetsinlane"], facetsinlane, 1e-3)
-    assert len(arr) == round(facetsinlane*lanes*np.ceil(interpolator.params["bitsinscanline"]//8))
+    assert len(arr) == round(
+        facetsinlane * lanes * np.ceil(interpolator.params["bitsinscanline"] // 8)
+    )
     # TODO: step must be an integer!!
     interpolator.plotptrn(arr, step=1)

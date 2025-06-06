@@ -1,4 +1,3 @@
-import unittest
 from random import randint
 
 import numpy as np
@@ -6,17 +5,18 @@ from numpy.testing import assert_array_almost_equal, assert_array_equal
 
 from hexastorm.utils import async_test_case
 from hexastorm.spi import SPIGatewareTestCase
-from hexastorm.constants import (
-    MOTORFREQ, 
-    wordsinscanline, 
+from hexastorm.config import (
+    MOTORFREQ,
+    wordsinscanline,
     wordsinmove,
     COMMANDS,
-    WORD_BYTES
+    WORD_BYTES,
 )
 from hexastorm.lasers import params
 from hexastorm.controller import Host, Memfull
 from hexastorm.core import SPIParser, Dispatcher
 from hexastorm.platforms import TestPlatform
+
 
 class TestParser(SPIGatewareTestCase):
     platform = TestPlatform()
@@ -25,7 +25,9 @@ class TestParser(SPIGatewareTestCase):
 
     async def initialize_signals(self, sim):
         self.host = Host(self.platform)
-        self.host.spi_exchange_data = lambda data: self.spi_exchange_data(sim=sim, data=data)
+        self.host.spi_exchange_data = lambda data: self.spi_exchange_data(
+            sim=sim, data=data
+        )
         sim.set(self.dut.spi.cs, 0)
         await sim.tick()
 
@@ -51,7 +53,7 @@ class TestParser(SPIGatewareTestCase):
 
     @async_test_case
     async def test_writescanline(self, sim):
-        await self.host.writeline([1] * self.platform.laser_var["BITSINSCANLINE"])
+        await self.host.writeline([1] * self.platform.laser_timing["BITSINSCANLINE"])
         while sim.get(self.dut.empty) == 1:
             await sim.tick()
         wordslaser = wordsinscanline(params(self.platform)["BITSINSCANLINE"])
@@ -62,14 +64,12 @@ class TestParser(SPIGatewareTestCase):
         await self.host.writeline([])
         await self.instruction_ready(sim, 1)
 
-
     @async_test_case
     async def test_writepin(self, sim):
         "write move instruction and verify FIFO is no longer empty"
         self.assertEqual(sim.get(self.dut.empty), 1)
         await self.host.enable_comp(laser0=True, laser1=False, polygon=False)
         await self.instruction_ready(sim, 1)
-
 
     @async_test_case
     async def test_writemoveinstruction(self, sim):
@@ -83,8 +83,12 @@ class TestParser(SPIGatewareTestCase):
     @async_test_case
     async def test_readpinstate(self, sim):
         """set pins to random state"""
+
         async def test_pins():
-            keys = list(self.platform.stepspermm.keys()) + ["photodiode_trigger", "synchronized"]
+            keys = list(self.platform.stepspermm.keys()) + [
+                "photodiode_trigger",
+                "synchronized",
+            ]
             olddct = await self.host.get_state()
             olddct = {k: randint(0, 1) for k in keys}
             bitlist = list(olddct.values())[::-1]
@@ -125,15 +129,17 @@ class TestParser(SPIGatewareTestCase):
             pass
         self.assertEqual((await self.host.get_state())["mem_full"], True)
 
+
 class TestDispatcher(SPIGatewareTestCase):
     platform = TestPlatform()
     FRAGMENT_UNDER_TEST = Dispatcher
     FRAGMENT_ARGUMENTS = {"platform": platform, "simdiode": True}
 
-
     async def initialize_signals(self, sim):
         self.host = Host(self.platform)
-        self.host.spi_exchange_data = lambda data: self.spi_exchange_data(sim=sim, data=data)
+        self.host.spi_exchange_data = lambda data: self.spi_exchange_data(
+            sim=sim, data=data
+        )
         sim.set(self.dut.spi.cs, 0)
         await sim.tick()
 
@@ -146,7 +152,6 @@ class TestDispatcher(SPIGatewareTestCase):
             else:
                 cntr += 1
             await sim.tick()
-
 
     @async_test_case
     async def test_memfull(self, sim):
@@ -172,7 +177,6 @@ class TestDispatcher(SPIGatewareTestCase):
         await sim.tick()
         self.assertEqual((await self.host.get_state())["error"], False)
 
-
     @async_test_case
     async def test_readdiode(self, sim):
         """verify you can receive photodiode trigger
@@ -194,7 +198,6 @@ class TestDispatcher(SPIGatewareTestCase):
         self.assertEqual(sim.get(self.dut.laserhead.photodiode_t), True)
         self.assertEqual(val, True)
 
-
     @async_test_case
     async def test_writepin(self, sim):
         """verify homing procedure works correctly"""
@@ -209,11 +212,10 @@ class TestDispatcher(SPIGatewareTestCase):
         self.assertEqual(sim.get(self.dut.laserheadpins.laser0), 1)
         self.assertEqual(sim.get(self.dut.laserheadpins.laser1), 0)
         self.assertEqual(sim.get(self.dut.laserheadpins.en), 1)
-        # NOT tested, these signals are not physical and not exposed via 
+        # NOT tested, these signals are not physical and not exposed via
         # laserheadpins
         # self.assertEqual(sim.get(self.dut.laserheadpins.synchronize), 1)
         # self.assertEqual(sim.get(self.dut.laserheadpins.singlefacet), 1)
-
 
     @async_test_case
     async def test_home(self, sim):
@@ -271,8 +273,9 @@ class TestDispatcher(SPIGatewareTestCase):
         mm = -mm
         await self.host.gotopoint(mm.tolist(), speed.tolist(), absolute=False)
         await self.wait_complete(sim)
-        assert_array_almost_equal(await self.host.position, np.zeros(self.platform.motors), decimal=1)
-
+        assert_array_almost_equal(
+            await self.host.position, np.zeros(self.platform.motors), decimal=1
+        )
 
     @async_test_case
     async def test_movereceipt(self, sim, ticks=10_000):
@@ -296,14 +299,18 @@ class TestDispatcher(SPIGatewareTestCase):
             for degree in range(self.platform.poldegree):
                 indx = motor * self.platform.poldegree + degree
                 cnt += ticks ** (degree + 1) * coeff[indx]
-            self.assertEqual(sim.get(self.dut.pol.cntrs[motor * self.platform.poldegree]), cnt)
+            self.assertEqual(
+                sim.get(self.dut.pol.cntrs[motor * self.platform.poldegree]), cnt
+            )
 
     @async_test_case
     async def test_writeline(self, sim, numblines=20, stepsperline=0.5):
         "write line and see it is processed accordingly"
         host = self.host
         for _ in range(numblines):
-            await host.writeline([1] * host.laser_params["BITSINSCANLINE"], stepsperline, 0)
+            await host.writeline(
+                [1] * host.laser_params["BITSINSCANLINE"], stepsperline, 0
+            )
         await host.writeline([])
         self.assertEqual((await host.get_state())["synchronized"], True)
         while sim.get(self.dut.parser.empty) == 0:
@@ -316,7 +323,9 @@ class TestDispatcher(SPIGatewareTestCase):
         # TODO: the x position changes as well!?
         assert_array_almost_equal(-dist, (await host.position)[idx], decimal=decimals)
         for _ in range(numblines):
-            await host.writeline([1] * host.laser_params["BITSINSCANLINE"], stepsperline, 1)
+            await host.writeline(
+                [1] * host.laser_params["BITSINSCANLINE"], stepsperline, 1
+            )
         await host.writeline([])
         await host.enable_comp(synchronize=False)
         while sim.get(self.dut.parser.empty) == 0:

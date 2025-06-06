@@ -1,7 +1,8 @@
 import unittest
 
 from hexastorm.core import Dispatcher, SPIParser
-from hexastorm.movement import Polynomial
+
+# from hexastorm.movement import Polynomial
 from hexastorm.platforms import Firestarter
 
 
@@ -25,9 +26,7 @@ class TestBuild(unittest.TestCase):
 
     def polynomal(self):
         platform = Firestarter()
-        platform.build(
-            Polynomial(Firestarter()), do_program=False, verbose=True
-        )
+        platform.build(Polynomial(Firestarter()), do_program=False, verbose=True)
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ from struct import unpack
 
 from hexastorm.lasers import Laserhead, DiodeSimulator
 import hexastorm.controller as controller
-from hexastorm.constants import MEMWIDTH, WORD_BYTES, params
+from hexastorm.config import MEMWIDTH, WORD_BYTES, params
 from hexastorm.utils import LunaGatewareTestCase, async_test_case
 from hexastorm.platforms import TestPlatform
 
@@ -134,7 +134,10 @@ class BaseTest(LunaGatewareTestCase):
     async def scanlineringbuffer(self, sim, numblines=3):
         "write several scanlines and verify receival"
         dut = self.dut
-        lines = [[randint(0, 1) for _ in range(dut.dct["BITSINSCANLINE"])] for _ in range(numblines)]
+        lines = [
+            [randint(0, 1) for _ in range(dut.dct["BITSINSCANLINE"])]
+            for _ in range(numblines)
+        ]
         lines.append([])  # sentinel line
 
         for line in lines:
@@ -197,7 +200,7 @@ class SinglelineTest(BaseTest):
     "Test laserhead while triggering photodiode and single line"
 
     platform = TestPlatform()
-    laser_var = deepcopy(platform.laser_var)
+    laser_var = deepcopy(platform.laser_timing)
     laser_var["SINGLE_LINE"] = True
     FRAGMENT_UNDER_TEST = DiodeSimulator
     FRAGMENT_ARGUMENTS = {"platform": platform, "laser_var": laser_var}
@@ -247,7 +250,7 @@ class SinglelinesinglefacetTest(BaseTest):
     """
 
     platform = TestPlatform()
-    laser_var = deepcopy(platform.laser_var)
+    laser_var = deepcopy(platform.laser_timing)
     laser_var["SINGLE_LINE"] = True
     FRAGMENT_UNDER_TEST = DiodeSimulator
     FRAGMENT_ARGUMENTS = {"platform": platform, "laser_var": laser_var}
@@ -268,7 +271,7 @@ class SinglelinesinglefacetTest(BaseTest):
 
         await self.pulse(sim, dut.expose_start)
 
-        for facet in range(self.platform.laser_var["FACETS"] - 1):
+        for facet in range(self.platform.laser_timing["FACETS"] - 1):
             self.assertEqual(facet, sim.get(dut.facetcnt))
             await self.waituntilState(sim, "WAIT_STABLE")
             await self.waituntilState(sim, "WAIT_END")
@@ -305,11 +308,14 @@ class SinglelinesinglefacetTest(BaseTest):
 
 class MultilineTest(BaseTest):
     "Test laserhead while triggering photodiode and ring buffer"
+
     platform = TestPlatform()
     FRAGMENT_UNDER_TEST = DiodeSimulator
     FRAGMENT_ARGUMENTS = {"platform": platform}
 
-    async def checkmove(self, sim, direction, stepsperline=1, numblines=3, appendstop=True):
+    async def checkmove(
+        self, sim, direction, stepsperline=1, numblines=3, appendstop=True
+    ):
         dut = self.dut
         lines = [[1] * dut.dct["BITSINSCANLINE"]] * numblines
         if appendstop:
@@ -396,10 +402,11 @@ class MultilineTest(BaseTest):
 
 class Loweredge(BaseTest):
     "Test Scanline of length MEMWIDTH"
+
     platform = TestPlatform()
     FRAGMENT_UNDER_TEST = DiodeSimulator
 
-    dct = deepcopy(platform.laser_var)
+    dct = deepcopy(platform.laser_timing)
     dct["TICKSINFACET"] = 500
     dct["LASERTICKS"] = 3
     dct["SINGLE_LINE"] = False
@@ -415,12 +422,13 @@ class Loweredge(BaseTest):
 class Upperedge(Loweredge):
     platform = TestPlatform()
     FRAGMENT_UNDER_TEST = DiodeSimulator
-    dct = deepcopy(platform.laser_var)
+    dct = deepcopy(platform.laser_timing)
     dct["TICKSINFACET"] = 500
     dct["LASERTICKS"] = 3
     dct["SINGLE_LINE"] = False
     dct["BITSINSCANLINE"] = MEMWIDTH + 1
     FRAGMENT_ARGUMENTS = {"platform": platform, "laser_var": dct}
+
 
 # NOTE: new class is created to reset settings
 #       couldn't avoid this easily so kept for now

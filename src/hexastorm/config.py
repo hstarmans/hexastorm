@@ -1,54 +1,67 @@
-"""Constants
+"""Platform and SPI Configuration
 
-Settings of the implementation are saved in board.by and constants.py.
-Constants are more related to the actual implementation on the FPGA.
+This module defines constants and utilities for the SPI communication protocol,
+as well as platform-level configuration settings used for FPGA synthesis and firmware setup.
+
+- `Spi`: SPI protocol structure (commands, instructions, state bits, and word size logic)
+- `PlatformConfig`: High-level platform configuration object for both test and production modes
 """
 
 from collections import OrderedDict
 from math import ceil
 
 
-class SPI:
+class Spi:
     """Holds constants and types for the SPI communication protocol."""
 
-    COMMAND_BYTES = 1
-    WORD_BYTES = 8
-    MOVE_INSTRUCTION = dict(instruction=1, ticks=7)
+    command_bytes = 1
+    word_bytes = 8
+    move_instruction = dict(instruction=1, ticks=7)
 
-    class COMMANDS:
+    class Commands:
         """SPI protocol command. Each command is followed by a word."""
 
-        EMPTY = 0
-        WRITE = 1
-        READ = 2
-        DEBUG = 3
-        POSITION = 4
-        START = 5
-        STOP = 6
+        empty = 0
+        write = 1
+        read = 2
+        debug = 3
+        position = 4
+        start = 5
+        stop = 6
 
-    class INSTRUCTIONS:
+    class Instructions:
         """Instruction types encoded in SPI words. Each word can contain a subcommand."""
 
-        MOVE = 1
-        WRITEPIN = 2
-        SCANLINE = 3
-        LASTSCANLINE = 4
+        move = 1
+        write_pin = 2
+        scanline = 3
+        last_scanline = 4
 
-    class STATE:
+    class State:
         """State word returned by SPI. Each bit represent a specific status flag."""
 
-        FULL = 0
-        PARSING = 1
-        ERROR = 2
+        full = 0
+        parsing = 1
+        error = 2
+
+    def words_scanline(laser_timing):
+        """Returns the number of words required for a single scanline instruction."""
+        return ceil((8 + ceil(laser_timing["bits_in_scanline"] / 8)) / Spi.word_bytes)
+
+    def words_move(hdl_cfg):
+        """Returns the number of words required for a single move instruction."""
+        bytes_move = (
+            sum(Spi.move_instruction.values())
+            + hdl_cfg["motors"] * hdl_cfg["poldegree"] * Spi.word_bytes
+        )
+        bytes_move += bytes_move % Spi.word_bytes
+        return ceil(bytes_move / Spi.word_bytes)
 
 
 class PlatformConfig:
     """
     Holds platform configuration.
     """
-
-    MOTORFREQ = 1e6  # motor move interpolation freq in Hz
-    MOVE_TICKS = 10_000  # maximum ticks in move segment
 
     def __init__(self, test=False):
         """
@@ -71,14 +84,14 @@ class PlatformConfig:
         """
         self.test = test
         if test:
-            self.laser_var = dict(
+            self.laser_timing = dict(
                 rpm=1000,
                 ticks_in_facet=20,
                 bits_in_scanline=3,
                 laser_ticks=4,
             )
         else:
-            self.laser_var = dict(
+            self.laser_timing = dict(
                 rpm=3000,
                 spinup_time=1.5,
                 stable_time=1.125,
@@ -86,20 +99,11 @@ class PlatformConfig:
                 start_frac=0.35,
                 end_frac=0.7,
             )
-        self.laser_var.update(
-            dict(
-                facets=4,
-                single_line=False,
-                motor_divider=pow(2, 8),
-                motor_debug="ticks_in_facet",
-                direction=0,
-            )
-        )
-        self.params()
+        self.update_laser_timing()
         self.laser_bits = 1  # enables adding pwm to laser (not widely tested)
 
     @property
-    def esp32_cnfg(self):
+    def esp32_cfg(self):
         """Connections to esp32S3."""
         return dict(
             stepper_cs=38,  # enable pin stepper motors
@@ -115,6 +119,7 @@ class PlatformConfig:
                 miso=11,
                 mosi=13,
                 phase=1,
+                polarity=0,
                 # higher, i.e. 3 doesn't work
                 baudrate=int(2.9e6),
             ),
@@ -128,7 +133,7 @@ class PlatformConfig:
         )
 
     @property
-    def ice40_cnfg(self):
+    def ice40_cfg(self):
         """Required for LatticeICE40Platform."""
         return dict(
             device="iCE40UP5K",
@@ -138,38 +143,34 @@ class PlatformConfig:
         )
 
     @property
-    def amaranth_cnfg(self):
+    def hdl_cfg(self):
         """Required for amaranth synthesis."""
         if self.test:
-            pass
+            cfg = dict(test=True, memwidth=self.words_move * 2 + 1)
+
         else:
-            return dict(
-                name="firestarter",
-                memdepth=256,
-                memwidth=SPI.WORD_BYTES * 8,
-                poldegree=2,
-                motors=len(self.motor_cnfg["stepspermm"]),
+            cfg = dict(
+                test=False,
+                mem_depth=256,
+                mem_width=Spi.word_bytes * 8,
+                motor_freq=1e6,  # motor move interpolation freq in Hz
+                move_ticks=10_000,  # maximum ticks in move segment
+                direction=0,  # axis parallel to laser, here x
+                motors=len(self.motor_cfg["steps_mm"]),
             )
-
-    @property
-    def words_scanline(self):
-        """Returns the number of words required for a single scanline instruction."""
-        return ceil((8 + ceil(self.laser_var["bits_in_scanline"] / 8)) / SPI.WORD_BYTES)
-
-    @property
-    def words_move(self):
-        """Returns the number of words required for a single move instruction."""
-        bytesingcode = (
-            sum(SPI.MOVE_INSTRUCTION.values())
-            + self.amaranth_cnfg["motors"]
-            * self.amaranth_cnfg["poldegree"]
-            * SPI.WORD_BYTES
+        cfg.update(
+            dict(
+                motor_divider=pow(2, 8),
+                poldegree=2,
+                words_scanline=Spi.words_scanline(self.laser_timing),
+                motor_debug="ticks_in_facet",
+            )
         )
-        bytesingcode += bytesingcode % SPI.WORD_BYTES
-        return ceil(bytesingcode / SPI.WORD_BYTES)
+        cfg["words_move"] = Spi.words_move(cfg)
+        return type("Hdl_cfg", (), cfg)()
 
     @property
-    def motor_cnfg(self):
+    def motor_cfg(self):
         """Returns the steps per mm and axis orthogonal to laserline."""
         if self.test:
             steps = OrderedDict([("x", 400), ("y", 400)])
@@ -186,18 +187,18 @@ class PlatformConfig:
             orth2lsrline="y",
         )
 
-    def params(self):
-        """Calculate laser timing parameters and store in laser_var."""
+    def update_laser_timing(self):
+        """Update laser timing parameters."""
         # Unpack into locals for brevity
-        rpm = self.laser_var["rpm"]
-        facets = self.laser_var["facets"]
+        rpm = self.laser_timing["rpm"]
+        facets = 4
 
         poly_hz = rpm / 60
 
         if self.test:
-            ticks_in_facet = self.laser_var["ticks_in_facet"]
-            laser_ticks = self.laser_var["laser_ticks"]
-            bits_in_scanline = self.laser_var["bits_in_scanline"]
+            ticks_in_facet = self.laser_timing["ticks_in_facet"]
+            laser_ticks = self.laser_timing["laser_ticks"]
+            bits_in_scanline = self.laser_timing["bits_in_scanline"]
 
             crystal_hz = round(ticks_in_facet * facets * poly_hz)
             laser_hz = crystal_hz / laser_ticks
@@ -207,15 +208,15 @@ class PlatformConfig:
             end_frac = (laser_ticks * bits_in_scanline) / ticks_in_facet + start_frac
             assert ticks_in_facet == round(crystal_hz / (poly_hz * facets))
         else:
-            spinup_time = self.laser_var["spinup_time"]
-            stable_time = self.laser_var["stable_time"]
-            start_frac = self.laser_var["start_frac"]
-            end_frac = self.laser_var["end_frac"]
+            spinup_time = self.laser_timing["spinup_time"]
+            stable_time = self.laser_timing["stable_time"]
+            start_frac = self.laser_timing["start_frac"]
+            end_frac = self.laser_timing["end_frac"]
 
             clks = {0: 48, 1: 24, 2: 12, 3: 6}
-            crystal_hz = clks[self.ice40_cnfg["hfosc_div"]] * 1e6
+            crystal_hz = clks[self.ice40_cfg["hfosc_div"]] * 1e6
             ticks_in_facet = round(crystal_hz / (poly_hz * facets))
-            laser_hz = self.laser_var["laser_hz"]
+            laser_hz = self.laser_timing["laser_hz"]
             laser_ticks = int(crystal_hz / laser_hz)
 
         spinup_ticks = round(spinup_time * crystal_hz)
@@ -231,14 +232,14 @@ class PlatformConfig:
             raise Exception("Invalid settings, end_frac too high")
 
         if self.test:
-            assert bits_in_scanline == self.laser_var["bits_in_scanline"]
+            assert bits_in_scanline == self.laser_timing["bits_in_scanline"]
         elif bits_in_scanline % 8 != 0:
             bits_in_scanline += 8 - bits_in_scanline % 8
 
         if bits_in_scanline <= 0:
             raise Exception("Bits in scanline invalid")
         # Update dictionary
-        self.laser_var.update(
+        self.laser_timing.update(
             {
                 "crystal_hz": crystal_hz,
                 "laser_hz": laser_hz,
@@ -273,7 +274,7 @@ def bit_shift(platform):
 
 
 def getmovedct(platform):
-    dct = SPI.MOVE_INSTRUCTION
+    dct = Spi.move_instruction
     for i in range(platform.motors):
         for j in range(platform.poldegree):
             dct.update({f"C{i}{j}": 8})

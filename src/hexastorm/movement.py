@@ -1,7 +1,7 @@
 from amaranth import Elaboratable, Module, Signal, signed
 from amaranth.hdl import Array
 
-from .constants import MOVE_TICKS, bit_shift
+from .config import MOVE_TICKS, bit_shift
 from .resources import get_all_resources
 
 
@@ -61,13 +61,12 @@ class Polynomial(Elaboratable):
         # Input
         self.coeff = Array()
         for _ in range(self.motors):
-            self.coeff.extend([
-                Signal(signed(self.bit_shift + 1))
-                for _ in range(self.order)
-            ])
+            self.coeff.extend(
+                [Signal(signed(self.bit_shift + 1)) for _ in range(self.order)]
+            )
         self.start = Signal()
         self.ticklimit = Signal(MOVE_TICKS.bit_length())
-        
+
         # Output
         self.busy = Signal()
         self.dir = Array(Signal() for _ in range(self.motors))
@@ -78,13 +77,13 @@ class Polynomial(Elaboratable):
         # add 1 MHz clock domain
         cntr = Signal(range(self.divider))
         ticks = Signal(MOVE_TICKS.bit_length())
-        
+
         # Internal signed counters per motor per order
         max_bits = (self.max_steps << self.bit_shift).bit_length()
         cntrs = Array(Signal(signed(max_bits + 1)) for _ in range(len(self.coeff)))
         prev = Array(Signal(signed(max_bits + 1)) for _ in range(self.motors))
         assert max_bits <= 64
-        
+
         if self.top:
             steppers = get_all_resources(platform, "stepper")
             assert steppers, "No stepper resources found"
@@ -99,9 +98,7 @@ class Polynomial(Elaboratable):
 
         # Step signal generation based on bit toggle
         for motor in range(self.motors):
-            m.d.comb += self.step[motor].eq(
-                cntrs[motor * self.order][self.bit_shift]
-            )
+            m.d.comb += self.step[motor].eq(cntrs[motor * self.order][self.bit_shift])
 
         # Direction detection
         for motor in range(self.motors):
@@ -111,7 +108,7 @@ class Polynomial(Elaboratable):
                 m.d.sync += self.dir[motor].eq(0)  # Negative
             with m.Elif(prev[motor] < cntrs[idx]):
                 m.d.sync += self.dir[motor].eq(1)  # Positive
-        
+
         with m.FSM(init="RESET", name="polynomen"):
             with m.State("RESET"):
                 m.d.sync += self.busy.eq(0)
@@ -134,9 +131,7 @@ class Polynomial(Elaboratable):
                     m.d.sync += self.busy.eq(0)
 
             with m.State("RUNNING"):
-                with m.If(
-                    (ticks < self.ticklimit) & (cntr >= self.divider - 1)
-                ):
+                with m.If((ticks < self.ticklimit) & (cntr >= self.divider - 1)):
                     m.d.sync += [ticks.eq(ticks + 1), cntr.eq(0)]
                     for motor in range(self.motors):
                         idx = motor * self.order
@@ -163,4 +158,3 @@ class Polynomial(Elaboratable):
                     m.d.sync += ticks.eq(0)
                     m.next = "WAIT_START"
         return m
-

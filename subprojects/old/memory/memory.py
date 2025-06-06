@@ -1,10 +1,11 @@
-""" SRAM synthesis check
+"""SRAM synthesis check
 
 If you run the code below an sram is synthesized by Yosys
 """
+
 from amaranth import Elaboratable, Memory, Module, Signal
 
-from hexastorm.constants import MEMWIDTH
+from hexastorm.config import MEMWIDTH
 from hexastorm.platforms import Firestarter
 
 
@@ -15,7 +16,7 @@ class Memtest(Elaboratable):
     def elaborate(self, platform):
         m = Module()
         led0 = platform.request("led", 0).o
-        #led1 = platform.request("led", 1)
+        # led1 = platform.request("led", 1)
         m.submodules.rdport = rdport = self.mem.read_port()
         with m.If(rdport.data == 255):
             m.d.comb += led0.eq(0)
@@ -27,7 +28,7 @@ class Memtest(Elaboratable):
         with m.Else():
             m.d.comb += rdport.addr.eq(0)
         m.d.sync += timer.eq(timer + 1)
-        #m.d.comb += led1.o.eq(timer[-1])
+        # m.d.comb += led1.o.eq(timer[-1])
         return m
 
 

@@ -7,16 +7,12 @@ from luna.gateware.interface.spi import (
 from luna.gateware.memory import TransactionalizedFIFO
 
 from .spi_helpers import connect_synchronized_spi
-from .constants import (
-    COMMAND_BYTES,
-    COMMANDS,
-    INSTRUCTIONS,
-    STATE,
-    WORD_BYTES,
-)
-#from .lasers import DiodeSimulator, Laserhead, params
+from .config import Spi
+
+
+# from .lasers import DiodeSimulator, Laserhead, params
 # from .motor import Driver
-from .movement import Polynomial
+# from .movement import Polynomial
 from .resources import get_all_resources
 
 
@@ -45,6 +41,7 @@ class SPIParser(Elaboratable):
             - read_data    : FIFO output
             - empty        : FIFO empty flag
     """
+
     def __init__(self, platform, top=False):
         """
         platform  -- pass test platform
@@ -55,7 +52,7 @@ class SPIParser(Elaboratable):
 
         self.spi = SPIBus()
         self.position = Array(
-            Signal(signed(64)) for _ in range(platform.build_opts['motors'])
+            Signal(signed(64)) for _ in range(platform.hdl_cfg.motors)
         )
         self.pinstate = Signal(8)
 
@@ -65,28 +62,30 @@ class SPIParser(Elaboratable):
         self.read_discard = Signal()
 
         self.dispatcherror = Signal()
-        self.word_to_send = Signal(platform.build_opts['memwidth'])
+        self.word_to_send = Signal(platform.hdl_cfg.mem_width)
         self.parse = Signal()
-        self.read_data = Signal(platform.build_opts['memwidth'])
+        self.read_data = Signal(platform.hdl_cfg.mem_width)
         self.empty = Signal()
 
     def elaborate(self, platform):
         m = Module()
-        platform = self.platform or platform
+        plf = self.platform or platform
 
-        if platform and self.top:
-            board_spi = platform.request("debug_spi")
+        if plf and self.top:
+            board_spi = plf.request("debug_spi")
             connect_synchronized_spi(m, board_spi, self)
 
         interf = SPICommandInterface(
-            command_size=COMMAND_BYTES * 8, word_size=WORD_BYTES * 8
+            command_size=Spi.command_bytes * 8, word_size=Spi.word_bytes * 8
         )
         m.submodules.interf = interf
         connect_synchronized_spi(m, self.spi, interf)
 
         # FIFO instantation
-        fifo = TransactionalizedFIFO(width=platform.build_opts['memwidth'], depth=platform.build_opts['memdepth'])
-        if platform.build_opts['name'] == "Test":
+        fifo = TransactionalizedFIFO(
+            width=plf.hdl_cfg.mem_width, depth=plf.hdl_cfg.mem_depth
+        )
+        if plf.hdl_cfg.test:
             self.fifo = fifo
         m.submodules.fifo = fifo
 
@@ -98,20 +97,26 @@ class SPIParser(Elaboratable):
             fifo.read_en.eq(self.read_en),
             self.empty.eq(fifo.empty),
         ]
-        
+
         # Internal state
         state = Signal(8)
-        mtr_idx = Signal(range(platform.build_opts['motors']))
+        mtr_idx = Signal(range(plf.hdl_cfg.motors))
 
-        words_received = Signal(range(max(platform.settings.words_move, 
-                                          platform.settings.words_scanline+1)))
+        words_received = Signal(
+            range(
+                max(
+                    plf.hdl_cfg.words_move,
+                    plf.hdl_cfg.words_scanline + 1,
+                )
+            )
+        )
         instruction = Signal(8)
-        worderror = Signal()
-        
+        word_error = Signal()
+
         m.d.sync += [
-            state[STATE.PARSING].eq(self.parse),
-            state[STATE.FULL].eq(fifo.space_available <= 1),
-            state[STATE.ERROR].eq(self.dispatcherror | worderror),
+            state[Spi.State.parsing].eq(self.parse),
+            state[Spi.State.full].eq(fifo.space_available <= 1),
+            state[Spi.State.error].eq(self.dispatcherror | word_error),
         ]
 
         with m.FSM(name="parser", init="RESET"):
@@ -119,39 +124,45 @@ class SPIParser(Elaboratable):
                 m.d.sync += [
                     self.parse.eq(1),
                     words_received.eq(0),
-                    worderror.eq(0),
+                    word_error.eq(0),
                 ]
                 m.next = "WAIT_COMMAND"
             with m.State("WAIT_COMMAND"):
                 with m.If(interf.command_ready):
                     word = Cat(state[::-1], self.pinstate[::-1])
                     with m.Switch(interf.command):
-                        with m.Case(COMMANDS.EMPTY):
+                        with m.Case(Spi.Commands.empty):
                             m.next = "WAIT_COMMAND"
-                        with m.Case(COMMANDS.START):
+                        with m.Case(Spi.Commands.start):
                             m.d.sync += self.parse.eq(1)
                             m.next = "WAIT_COMMAND"
-                        with m.Case(COMMANDS.STOP):
+                        with m.Case(Spi.Commands.stop):
                             m.d.sync += self.parse.eq(0)
                             m.next = "WAIT_COMMAND"
-                        with m.Case(COMMANDS.WRITE):
+                        with m.Case(Spi.Commands.write):
                             m.d.sync += interf.word_to_send.eq(word)
-                            with m.If(state[STATE.FULL] == 0):
+                            with m.If(state[Spi.State.full] == 0):
                                 m.next = "WAIT_WORD"
                             with m.Else():
                                 m.next = "WAIT_COMMAND"
-                        with m.Case(COMMANDS.READ):
+                        with m.Case(Spi.Commands.read):
                             m.d.sync += interf.word_to_send.eq(word)
                             m.next = "WAIT_COMMAND"
-                        with m.Case(COMMANDS.DEBUG):
+                        with m.Case(Spi.Commands.debug):
                             m.d.sync += interf.word_to_send.eq(self.word_to_send)
                             m.next = "WAIT_COMMAND"
-                        with m.Case(COMMANDS.POSITION):
+                        with m.Case(Spi.Commands.position):
                             # position is requested multiple times for multiple
                             # motors
                             m.d.sync += [
                                 interf.word_to_send.eq(self.position[mtr_idx]),
-                                mtr_idx.eq(Mux(mtr_idx < platform.build_opts['motors'] - 1, mtr_idx + 1, 0))
+                                mtr_idx.eq(
+                                    Mux(
+                                        mtr_idx < plf.hdl_cfg.motors - 1,
+                                        mtr_idx + 1,
+                                        0,
+                                    )
+                                ),
                             ]
                             m.next = "WAIT_COMMAND"
             with m.State("WAIT_WORD"):
@@ -169,7 +180,7 @@ class SPIParser(Elaboratable):
                             m.next = "WRITE"
                         with m.Else():
                             # Invalid instruction → mark error and discard
-                            m.d.sync += worderror.eq(1)
+                            m.d.sync += word_error.eq(1)
                             m.next = "WAIT_COMMAND"
                     with m.Else():
                         # Additional words for multi-word instructions
@@ -182,18 +193,20 @@ class SPIParser(Elaboratable):
             with m.State("WRITE"):
                 m.d.sync += fifo.write_en.eq(0)
 
-                # Compute how many words are expected for each instruction type
-                words_laser = platform.settings.words_scanline
-                words_motor = platform.settings.words_move
-
                 # Define when an instruction is ready to be committed
                 is_ready_to_commit = Signal()
 
                 m.d.comb += is_ready_to_commit.eq(
-                    ((instruction == INSTRUCTIONS.MOVE)      & (words_received >= words_motor)) |
-                    ((instruction == INSTRUCTIONS.SCANLINE)  & (words_received >= words_laser)) |
-                    (instruction == INSTRUCTIONS.WRITEPIN) |
-                    (instruction == INSTRUCTIONS.LASTSCANLINE)
+                    (
+                        (instruction == Spi.Instructions.move)
+                        & (words_received >= plf.hdl_cfg.words_move)
+                    )
+                    | (
+                        (instruction == Spi.Instructions.scanline)
+                        & (words_received >= plf.hdl_cfg.words_scanline)
+                    )
+                    | (instruction == Spi.Instructions.write_pin)
+                    | (instruction == Spi.Instructions.last_scanline)
                 )
 
                 with m.If(is_ready_to_commit):
@@ -223,7 +236,7 @@ class Dispatcher(Elaboratable):
         self.platform = platform
         self.read_commit = Signal()
         self.read_en = Signal()
-        self.read_data = Signal(platform.build_opts['memwidth'])
+        self.read_data = Signal(platform.hdl_cfg.mem_width)
         self.read_discard = Signal()
         self.empty = Signal()
 
@@ -232,10 +245,10 @@ class Dispatcher(Elaboratable):
         # Parser
         parser = SPIParser(self.platform)
         m.submodules.parser = parser
-        # # Busy used to detect move or scanline in action
-        # # disabled "dispatching"
-        # busy = Signal()
-        # # Polynomial Move
+        # Busy used to detect move or scanline in action
+        # disabled "dispatching"
+        busy = Signal()
+        # Polynomial Move
         # polynomial = Polynomial(self.platform)
         # m.submodules.polynomial = polynomial
         # if platform:
@@ -450,6 +463,7 @@ class Dispatcher(Elaboratable):
         #     with m.State("ERROR"):
         #         m.next = "ERROR"
         return m
+
 
 # Overview:
 #  the hardware consists out of the following elements

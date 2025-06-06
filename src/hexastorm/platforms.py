@@ -7,7 +7,7 @@ from amaranth.vendor import LatticeICE40Platform
 from amaranth_boards.resources import LEDResources
 from amaranth_boards.test.blinky import Blinky
 
-from .constants import PlatformConfig
+from .config import PlatformConfig
 from .resources import (
     # BLDCRecord,
     # BLDCResource,
@@ -34,7 +34,7 @@ class Firestarter(LatticeICE40Platform):
     """Kicad board: https://github.com/hstarmans/firestarter/"""
 
     settings = PlatformConfig(test=False)
-    cfg = settings.ice40_cnfg
+    cfg = settings.ice40_cfg
     device = cfg["device"]
     package = cfg["package"]
     default_clk = cfg["default_clk"]
@@ -99,7 +99,7 @@ class Firestarter(LatticeICE40Platform):
 
     def __init__(self):
         LatticeICE40Platform.__init__(self)
-        self.build_opts = self.settings.amaranth_cnfg
+        self.hdl_cfg = self.settings.hdl_cfg
 
     def build(self, *args, **kwargs):
         search_command = "where" if pltf.system() == "Windows" else "which"
