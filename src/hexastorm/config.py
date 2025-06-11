@@ -52,7 +52,7 @@ class Spi:
         """Returns the number of words required for a single move instruction."""
         bytes_move = (
             sum(Spi.move_instruction.values())
-            + hdl_cfg["motors"] * hdl_cfg["poldegree"] * Spi.word_bytes
+            + hdl_cfg["motors"] * hdl_cfg["pol_degree"] * Spi.word_bytes
         )
         bytes_move += bytes_move % Spi.word_bytes
         return ceil(bytes_move / Spi.word_bytes)
@@ -159,7 +159,7 @@ class PlatformConfig:
                 direction=0,  # axis parallel to laser, here x
                 motors=len(self.motor_cfg["steps_mm"]),
                 motor_divider=pow(2, 8),
-                poldegree=2,
+                pol_degree=2,
                 mem_width=Spi.word_bytes * 8,
                 words_scanline=Spi.words_scanline(self.laser_timing),
                 motor_debug="ticks_in_facet",

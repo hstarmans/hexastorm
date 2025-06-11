@@ -60,7 +60,7 @@ class SPIParser(Elaboratable):
         self.read_discard = Signal()
 
         self.error_dispatch = Signal()
-        self.word_to_send = Signal(cfg.mem_width)
+        self.debug_word = Signal(cfg.mem_width)
         self.parse = Signal()
         self.read_data = Signal(cfg.mem_width)
         self.empty = Signal()
@@ -128,7 +128,7 @@ class SPIParser(Elaboratable):
                 m.next = "WAIT_COMMAND"
             with m.State("WAIT_COMMAND"):
                 with m.If(interf.command_ready):
-                    word = Cat(state[::-1], self.pin_state[::-1])
+                    state_word = Cat(state, self.pin_state)
                     cmd = Spi.Commands
                     with m.Switch(interf.command):
                         with m.Case(cmd.empty):
@@ -140,16 +140,16 @@ class SPIParser(Elaboratable):
                             m.d.sync += self.parse.eq(0)
                             m.next = "WAIT_COMMAND"
                         with m.Case(cmd.write):
-                            m.d.sync += interf.word_to_send.eq(word)
+                            m.d.sync += interf.word_to_send.eq(state_word)
                             with m.If(state[status.full] == 0):
                                 m.next = "WAIT_WORD"
                             with m.Else():
                                 m.next = "WAIT_COMMAND"
                         with m.Case(cmd.read):
-                            m.d.sync += interf.word_to_send.eq(word)
+                            m.d.sync += interf.word_to_send.eq(state_word)
                             m.next = "WAIT_COMMAND"
                         with m.Case(cmd.debug):
-                            m.d.sync += interf.word_to_send.eq(self.word_to_send)
+                            m.d.sync += interf.word_to_send.eq(self.debug_word)
                             m.next = "WAIT_COMMAND"
                         with m.Case(cmd.position):
                             # Position requested multiple times

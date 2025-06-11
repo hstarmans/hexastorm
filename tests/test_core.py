@@ -62,7 +62,7 @@ class TestParser(SPIGatewareTestCase):
         Verifies that writing a full scanline sends the expected number of words to the FIFO.
         """
         laser_timing = self.host.cfg.laser_timing
-        await self.host.writeline([1] * laser_timing["bits_in_scanline"])
+        await self.host.write_line([1] * laser_timing["bits_in_scanline"])
         while sim.get(self.dut.empty) == 1:
             await sim.tick()
         await self.assert_fifo_written(self.platform.hdl_cfg.words_scanline)
@@ -72,7 +72,7 @@ class TestParser(SPIGatewareTestCase):
         """
         Verifies that an empty scanline triggers a stop command (1 word written to FIFO).
         """
-        await self.host.writeline([])
+        await self.host.write_line([])
         await self.assert_fifo_written(1)
 
     @async_test_case
@@ -85,63 +85,84 @@ class TestParser(SPIGatewareTestCase):
         await self.assert_fifo_written(1)
 
     @async_test_case
-    async def test_writemoveinstruction(self, sim):
-        "Write move instruction and verify FIFO is no longer empty"
+    async def test_fifo_not_empty_after_spline_move(self, sim):
+        "Check spline move instruction writes the expected number of words to the FIFO"
         self.assertEqual(sim.get(self.dut.empty), 1)
         cfg = self.platform.hdl_cfg
-        coeff = [randint(0, 10)] * cfg.motors * cfg.poldegree
+        coeff = [randint(0, 10)] * cfg.motors * cfg.pol_degree
         await self.host.spline_move(1000, coeff)
         await self.assert_fifo_written(cfg.words_move)
 
     @async_test_case
-    async def test_readpinstate(self, sim):
-        """set pins to random state"""
+    async def test_pin_state_reflects_random_inputs(self, sim):
+        """Test that the pin state reflects randomly set digital inputs correctly."""
 
         async def test_pins():
-            keys = list(self.host.cfg.motor_cfg["steps_mm"].keys()) + [
+            pin_keys = list(self.host.cfg.motor_cfg["steps_mm"].keys()) + [
                 "photodiode_trigger",
                 "synchronized",
             ]
-            olddct = await self.host.get_state()
-            olddct = {k: randint(0, 1) for k in keys}
-            bitlist = list(olddct.values())[::-1]
-            b = int("".join(str(i) for i in bitlist), 2)
-            sim.set(self.dut.pin_state, b)
+
+            # Generate a random state dictionary
+            expected_state = {key: randint(0, 1) for key in pin_keys}
+
+            # Pack values into a bitfield (LSB = first key, MSB = last)
+            bit_values = [expected_state[key] for key in reversed(pin_keys)]
+            bitfield = int("".join(map(str, bit_values)), 2)
+
+            # Apply to simulated pin_state and tick
+            sim.set(self.dut.pin_state, bitfield)
             await sim.tick()
-            newdct = await self.host.get_state()
-            newdct = {k: newdct[k] for k in keys}
-            self.assertDictEqual(olddct, newdct)
+
+            # Retrieve state from host and filter for comparison
+            actual_state = await self.host.fpga_state
+            actual_state = {k: actual_state[k] for k in pin_keys}
+
+            self.assertDictEqual(expected_state, actual_state)
 
         await test_pins()
         await test_pins()
 
     @async_test_case
-    async def test_enableparser(self, sim):
-        """enables SRAM parser via command and verifies status with
-        different command"""
+    async def test_parser_can_be_disabled(self, sim):
+        """
+        Disable FIFO parser and verify FPGA state reflects the change.
+        """
         await self.host.set_parsing(False)
         self.assertEqual(sim.get(self.dut.parse), 0)
-        self.assertEqual((await self.host.get_state())["parsing"], 0)
+        self.assertEqual((await self.host.fpga_state)["parsing"], 0)
 
     @async_test_case
-    async def test_invalidwrite(self, sim):
-        """write invalid instruction and verify error is raised"""
+    async def test_error_flag_set_on_invalid_instruction(self, sim):
+        """
+        Send invalid write instruction and verify FPGA sets error flag.
+        """
         command = [Spi.Commands.write] + [0] * Spi.word_bytes
         await self.host.send_command(command)
-        self.assertEqual((await self.host.get_state())["error"], True)
+
+        state = await self.host.fpga_state
+        self.assertTrue(state["error"])
 
     @async_test_case
-    async def test_memfull(self, sim):
-        "write move instruction until memory is full"
+    async def test_fifo_reports_full_after_max_writes(self, sim):
+        """
+        Fill instruction FIFO until full and verify mem_full flag is set.
+        """
         self.assertEqual(sim.get(self.dut.empty), 1)
-        self.assertEqual((await self.host.get_state())["mem_full"], False)
+
+        state = await self.host.fpga_state
+        self.assertFalse(state["mem_full"])
+
         cfg = self.platform.hdl_cfg
+
         try:
             for _ in range(cfg.mem_depth):
                 await self.host.spline_move(1000, [1] * cfg.motors)
         except Memfull:
             pass
-        self.assertEqual((await self.host.get_state())["mem_full"], True)
+
+        state = await self.host.fpga_state
+        self.assertTrue(state["mem_full"])
 
 
 # class TestDispatcher(SPIGatewareTestCase):
