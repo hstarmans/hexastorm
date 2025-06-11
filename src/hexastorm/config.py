@@ -146,27 +146,29 @@ class PlatformConfig:
     def hdl_cfg(self):
         """Required for amaranth synthesis."""
         if self.test:
-            cfg = dict(test=True, memwidth=self.words_move * 2 + 1)
-
+            cfg = dict(test=True)
         else:
             cfg = dict(
                 test=False,
                 mem_depth=256,
-                mem_width=Spi.word_bytes * 8,
                 motor_freq=1e6,  # motor move interpolation freq in Hz
                 move_ticks=10_000,  # maximum ticks in move segment
-                direction=0,  # axis parallel to laser, here x
-                motors=len(self.motor_cfg["steps_mm"]),
             )
         cfg.update(
             dict(
+                direction=0,  # axis parallel to laser, here x
+                motors=len(self.motor_cfg["steps_mm"]),
                 motor_divider=pow(2, 8),
                 poldegree=2,
+                mem_width=Spi.word_bytes * 8,
                 words_scanline=Spi.words_scanline(self.laser_timing),
                 motor_debug="ticks_in_facet",
             )
         )
         cfg["words_move"] = Spi.words_move(cfg)
+        if self.test:
+            cfg["mem_depth"] = cfg["words_move"] * 2 + 1
+
         return type("Hdl_cfg", (), cfg)()
 
     @property

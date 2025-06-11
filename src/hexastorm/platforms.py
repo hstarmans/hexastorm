@@ -17,17 +17,15 @@ from .resources import (
 )
 
 
-class TestPlatform(PlatformConfig):
-    name = "Test"
+class TestPlatform:
     clks = {0: 1}  # dictionary to determine clock divider, e.g. movement.py
     hfosc_div = 0  # selects clock speed on UP5K and clk divider
-    poldegree = 2  # degree of polynomal
-    laser_bits = 1
     laserhead = LaserscannerRecord()
     # bldc = BLDCRecord()
 
     def __init__(self):
-        self.memdepth = wordsinmove(self) * 2 + 1
+        settings = PlatformConfig(test=True)
+        self.hdl_cfg = settings.hdl_cfg
 
 
 class Firestarter(LatticeICE40Platform):
