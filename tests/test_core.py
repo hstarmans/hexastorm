@@ -3,9 +3,10 @@ from random import randint
 import numpy as np
 from numpy.testing import assert_array_almost_equal, assert_array_equal
 
+from hexastorm.config import Spi
 from hexastorm.utils import async_test_case
 from hexastorm.spi import SPIGatewareTestCase
-from hexastorm.controller import Host, Memfull
+from hexastorm.controller import TestHost, Memfull
 from hexastorm.core import SPIParser, Dispatcher
 from hexastorm.platforms import TestPlatform
 
@@ -16,24 +17,36 @@ class TestParser(SPIGatewareTestCase):
     FRAGMENT_ARGUMENTS = {"platform": platform}
 
     async def initialize_signals(self, sim):
-        self.host = Host(test=True)
+        self.host = TestHost()
+        self.sim = sim
         self.host.spi_exchange_data = lambda data: self.spi_exchange_data(
             sim=sim, data=data
         )
         sim.set(self.dut.spi.cs, 0)
         await sim.tick()
 
-    async def instruction_ready(self, sim, check):
+    async def assert_fifo_written(self, check):
+        """
+        Waits for the FIFO to become non-empty and verifies that the expected
+        number of bytes have been written.
+
+        Args:
+            expected_bytes (int): Number of bytes expected to be in the FIFO.
+        """
+        sim = self.sim
         while sim.get(self.dut.empty) == 1:
             await sim.tick()
         self.assertEqual(sim.get(self.dut.empty), 0)
         self.assertEqual(
             sim.get(self.dut.fifo.space_available),
-            self.platform.memdepth - check,
+            self.platform.hdl_cfg.mem_depth - check,
         )
 
     @async_test_case
-    async def test_getposition(self, sim):
+    async def test_position_readout(self, sim):
+        """
+        Checks that host-reported motor positions match values set on FPGA accounting for mm conversion.
+        """
         decimals = 3
         position = [randint(-2000, 2000) for _ in range(self.platform.hdl_cfg.motors)]
         for idx, pos in enumerate(self.dut.position):
@@ -44,83 +57,91 @@ class TestParser(SPIGatewareTestCase):
         assert_array_equal(lst, (np.array(position) / steps_mm).round(decimals))
 
     @async_test_case
-    async def test_writescanline(self, sim):
+    async def test_scanline_write_to_fifo(self, sim):
+        """
+        Verifies that writing a full scanline sends the expected number of words to the FIFO.
+        """
         laser_timing = self.host.cfg.laser_timing
-        await self.host.writeline([1] * laser_timing["BITSINSCANLINE"])
+        await self.host.writeline([1] * laser_timing["bits_in_scanline"])
         while sim.get(self.dut.empty) == 1:
             await sim.tick()
-        await self.instruction_ready(sim, self.platform.hdl_cfg.words_scanline)
+        await self.assert_fifo_written(self.platform.hdl_cfg.words_scanline)
 
+    @async_test_case
+    async def test_scanline_empty_to_fifo(self, sim):
+        """
+        Verifies that an empty scanline triggers a stop command (1 word written to FIFO).
+        """
+        await self.host.writeline([])
+        await self.assert_fifo_written(1)
 
-#     @async_test_case
-#     async def test_lastscanline(self, sim):
-#         await self.host.writeline([])
-#         await self.instruction_ready(sim, 1)
+    @async_test_case
+    async def test_enable_comp_triggers_write(self, sim):
+        """
+        Checks that enable_comp sends a single write command to the FIFO.
+        """
+        self.assertEqual(sim.get(self.dut.empty), 1)
+        await self.host.enable_comp(laser0=True, laser1=False, polygon=False)
+        await self.assert_fifo_written(1)
 
-#     @async_test_case
-#     async def test_writepin(self, sim):
-#         "write move instruction and verify FIFO is no longer empty"
-#         self.assertEqual(sim.get(self.dut.empty), 1)
-#         await self.host.enable_comp(laser0=True, laser1=False, polygon=False)
-#         await self.instruction_ready(sim, 1)
+    @async_test_case
+    async def test_writemoveinstruction(self, sim):
+        "Write move instruction and verify FIFO is no longer empty"
+        self.assertEqual(sim.get(self.dut.empty), 1)
+        cfg = self.platform.hdl_cfg
+        coeff = [randint(0, 10)] * cfg.motors * cfg.poldegree
+        await self.host.spline_move(1000, coeff)
+        await self.assert_fifo_written(cfg.words_move)
 
-#     @async_test_case
-#     async def test_writemoveinstruction(self, sim):
-#         "write move instruction and verify FIFO is no longer empty"
-#         self.assertEqual(sim.get(self.dut.empty), 1)
-#         coeff = [randint(0, 10)] * self.platform.motors * self.platform.poldegree
-#         await self.host.spline_move(1000, coeff)
-#         words = wordsinmove(self.platform)
-#         await self.instruction_ready(sim, words)
+    @async_test_case
+    async def test_readpinstate(self, sim):
+        """set pins to random state"""
 
-#     @async_test_case
-#     async def test_readpinstate(self, sim):
-#         """set pins to random state"""
+        async def test_pins():
+            keys = list(self.host.cfg.motor_cfg["steps_mm"].keys()) + [
+                "photodiode_trigger",
+                "synchronized",
+            ]
+            olddct = await self.host.get_state()
+            olddct = {k: randint(0, 1) for k in keys}
+            bitlist = list(olddct.values())[::-1]
+            b = int("".join(str(i) for i in bitlist), 2)
+            sim.set(self.dut.pin_state, b)
+            await sim.tick()
+            newdct = await self.host.get_state()
+            newdct = {k: newdct[k] for k in keys}
+            self.assertDictEqual(olddct, newdct)
 
-#         async def test_pins():
-#             keys = list(self.platform.stepspermm.keys()) + [
-#                 "photodiode_trigger",
-#                 "synchronized",
-#             ]
-#             olddct = await self.host.get_state()
-#             olddct = {k: randint(0, 1) for k in keys}
-#             bitlist = list(olddct.values())[::-1]
-#             b = int("".join(str(i) for i in bitlist), 2)
-#             sim.set(self.dut.pinstate, b)
-#             await sim.tick()
-#             newdct = await self.host.get_state()
-#             newdct = {k: newdct[k] for k in keys}
-#             self.assertDictEqual(olddct, newdct)
+        await test_pins()
+        await test_pins()
 
-#         await test_pins()
-#         await test_pins()
+    @async_test_case
+    async def test_enableparser(self, sim):
+        """enables SRAM parser via command and verifies status with
+        different command"""
+        await self.host.set_parsing(False)
+        self.assertEqual(sim.get(self.dut.parse), 0)
+        self.assertEqual((await self.host.get_state())["parsing"], 0)
 
-#     @async_test_case
-#     async def test_enableparser(self, sim):
-#         """enables SRAM parser via command and verifies status with
-#         different command"""
-#         await self.host.set_parsing(False)
-#         self.assertEqual(sim.get(self.dut.parse), 0)
-#         self.assertEqual((await self.host.get_state())["parsing"], 0)
+    @async_test_case
+    async def test_invalidwrite(self, sim):
+        """write invalid instruction and verify error is raised"""
+        command = [Spi.Commands.write] + [0] * Spi.word_bytes
+        await self.host.send_command(command)
+        self.assertEqual((await self.host.get_state())["error"], True)
 
-#     @async_test_case
-#     async def test_invalidwrite(self, sim):
-#         """write invalid instruction and verify error is raised"""
-#         command = [COMMANDS.WRITE] + [0] * WORD_BYTES
-#         await self.host.send_command(command)
-#         self.assertEqual((await self.host.get_state())["error"], True)
-
-#     @async_test_case
-#     async def test_memfull(self, sim):
-#         "write move instruction until memory is full"
-#         self.assertEqual(sim.get(self.dut.empty), 1)
-#         self.assertEqual((await self.host.get_state())["mem_full"], False)
-#         try:
-#             for _ in range(self.platform.memdepth):
-#                 await self.host.spline_move(1000, [1] * self.platform.motors)
-#         except Memfull:
-#             pass
-#         self.assertEqual((await self.host.get_state())["mem_full"], True)
+    @async_test_case
+    async def test_memfull(self, sim):
+        "write move instruction until memory is full"
+        self.assertEqual(sim.get(self.dut.empty), 1)
+        self.assertEqual((await self.host.get_state())["mem_full"], False)
+        cfg = self.platform.hdl_cfg
+        try:
+            for _ in range(cfg.mem_depth):
+                await self.host.spline_move(1000, [1] * cfg.motors)
+        except Memfull:
+            pass
+        self.assertEqual((await self.host.get_state())["mem_full"], True)
 
 
 # class TestDispatcher(SPIGatewareTestCase):

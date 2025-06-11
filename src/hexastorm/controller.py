@@ -32,9 +32,11 @@ class Memfull(Exception):
     pass
 
 
-class Host:
+class BaseHost:
     """
     Host interface to interact with the FPGA.
+
+    Several implementation exist such as test and micropython.
 
     Args:
         test (bool): If True, runs in test mode with virtual FPGA platform.
@@ -45,17 +47,341 @@ class Host:
     def __init__(self, test=False):
         self.test = test
         self.cfg = PlatformConfig(self.test)
-        self.steppers_init = False
 
-        if self.test:
-            self.spi_tries = 1
-            self.fifo_tries = 10
-            self._position = np.array([0] * self.cfg.hdl_cfg.motors, dtype=float)
+    @property
+    async def position(self):
+        """retrieves position from FPGA and updates internal position
+
+        position is stored on the FPGA in steps
+        position is stored on object in mm
+
+        return positions as np.array in mm
+               order is [x, y, z]
+        """
+        cmd_getposition = [Spi.Commands.position] + Spi.word_bytes * [0]
+
+        for motor in range(self.cfg.hdl_cfg.motors):
+            read_data = await self.send_command(cmd_getposition)
+            self._position[motor] = unpack("!q", read_data[1:])[0]
+            # code below is not portable between python and micropython
+            # python requires signed=True, micropython does not accep this
+            # overflow error can be generated, if you go below 0
+            # overflow is created during the division,
+            # it's assumed position cannot be negative.
+            # self._position[i] = int.from_bytes(read_data[1:9], 'big', True)
+        # step --> mm
+        cfg = self.cfg.motor_cfg
+        self._position = self._position / np.array(list(cfg["steps_mm"].values()))
+        return self._position
+
+    async def send_command(self, command, blocking=False):
+        """writes command to spi port
+
+        blocking  --  try again if memory is full
+        returns bytearray with length equal to data sent
+        """
+        assert len(command) == Spi.word_bytes + Spi.command_bytes
+
+        command = bytearray(command)
+        response = bytearray(command)
+
+        trials = 0
+        while True:
+            trials += 1
+            if self.test:
+                # function is created in Amaranth HDL
+                response[:] = await self.spi_exchange_data(command)
+            else:
+                self.fpga_select.value(0)
+                self.spi.write_readinto(command, response)
+                self.fpga_select.value(1)
+            if not blocking:
+                break
+
+            byte1 = response[-1]  # can't rely on self.get_state (needs speed!)
+            if (byte1 >> (7 - Spi.State.error)) & 1:
+                if not self.test:
+                    # lower SPI speed, change FPGA implementation
+                    # you cannot recover from this
+                    self.reset()
+                raise Exception("Error detected on FPGA")
+            if not ((byte1 >> (7 - Spi.State.full)) & 1):
+                break
+            if trials > self.spi_tries:
+                raise Memfull(f"Too many trials {trials} needed")
+
+        return response
+
+    def bytetocmdlist(self, bytelst):
+        cmdlist = []
+        write_byte = Spi.Commands.write.to_bytes(1, "big")
+        bytelst_len = len(bytelst)
+        for i in range(0, bytelst_len, 8):
+            lst = bytelst[i : i + 8]
+            lst.reverse()
+            data = write_byte + bytes(lst)
+            cmdlist.append(data)
+        return cmdlist
+
+    def bittobytelist(self, bitlst, stepsperline=1, direction=0):
+        """converts bitlst to bytelst
+
+        bit list      bits which are written to substrate
+                      at the moment laser can only be on or off
+                      if bitlst is empty stop command is sent
+        stepsperline  stepsperline, should be greater than 0
+                      if you don't want to move simply disable motor
+        direction     motor direction of scanning axis
+        """
+        # the halfperiod is sent over
+        # this is the amount of ticks in half a cycle of
+        # the motor
+        # watch out for python "banker's rounding"
+        # sometimes target might not be equal to steps
+        bitorder = "little"
+        bits_in_scanline = self.cfg.laser_timing["bits_in_scanline"]
+        halfperiod = int((bits_in_scanline - 1) // (stepsperline * 2))
+        if halfperiod < 1:
+            raise Exception("Steps per line cannot be achieved")
+        # TODO: is this still an issue?
+        # you could check as follows
+        # steps = self.laser_params['TICKSINFACET']/(halfperiod*2)
+        #    print(f"{steps} is actual steps per line")
+        direction_byte = [int(bool(direction))]
+
+        def pad_with_zeros(bytelst):
+            word_length = Spi.word_bytes
+            padding_length = (word_length - len(bytelst) % word_length) % word_length
+            bytelst.extend([0] * padding_length)
+
+        if not len(bitlst):
+            bytelst = [Spi.Instructions.last_scanline]
+            pad_with_zeros(bytelst)
+            return bytelst
+
+        bytelst = [Spi.Instructions.scanline]
+        halfperiodbits = [int(i) for i in bin(halfperiod)[2:]]
+        halfperiodbits.reverse()
+        assert len(halfperiodbits) < 56
+        bytelst.extend(
+            list(ulabext.packbits(direction_byte + halfperiodbits, bitorder=bitorder))
+        )
+        pad_with_zeros(bytelst)
+
+        bitlst_len = len(bitlst)
+        if bitlst_len == bits_in_scanline:
+            bytelst.extend(ulabext.packbits(bitlst, bitorder=bitorder))
+        elif bitlst_len == bits_in_scanline // 8:
+            bytelst.extend(bitlst)
         else:
-            self.spi_tries = 3
-            self.fifo_tries = 1e5
-            self._position = np.array([0] * self.cfg.hdl_cfg.motors, dtype=np.float)
-            self.init_micropython()
+            raise Exception("Invalid line length")
+        pad_with_zeros(bytelst)
+        return bytelst
+
+    async def writeline(self, bitlst, stepsperline=1, direction=0, repetitions=1):
+        """
+        Projects the given bit list as a line using the laser head.
+
+        Parameters:
+            bitlst (List[int]): Bits to be written to the substrate.
+                                Currently, the laser can only be on or off.
+                                If empty, a stop command is sent.
+            stepsperline (int): Number of motor steps per line.
+                                Must be greater than 0. To disable motion,
+                                turn off the motor separately.
+            direction (int): Direction of laser head movement (0 = backward, 1 = forward).
+            repetitions (int): Number of times the line is projected.
+
+        Behavior:
+            Converts the bit list into a sequence of commands and
+            sends them to the FPGA controller. Commands are repeated
+            for the specified number of repetitions.
+        """
+        bytelst = self.bittobytelist(bitlst, stepsperline, direction)
+        for _ in range(repetitions):
+            cmdlst = self.bytetocmdlist(bytelst)
+            for cmd in cmdlst:
+                (await self.send_command(cmd, blocking=True))
+
+    async def enable_comp(
+        self,
+        laser0=False,
+        laser1=False,
+        polygon=False,
+        synchronize=False,
+        singlefacet=False,
+    ):
+        """enable components
+
+        FPGA does need to be parsing FIFO
+        These instructions are executed directly.
+
+        laser0   -- True enables laser channel 0
+        laser1   -- True enables laser channel 1
+        polygon  -- False enables polygon motor
+        synchronize -- Enable synchronization
+        singlefacet -- Enable singlefacet
+        """
+        laser0, laser1, polygon = (
+            int(bool(laser0)),
+            int(bool(laser1)),
+            int(bool(polygon)),
+        )
+        synchronize = int(bool(synchronize))
+        singlefacet = int(bool(singlefacet))
+        data = (
+            [Spi.Commands.write]
+            + [0] * (Spi.word_bytes - 2)
+            + [int(f"{singlefacet}{synchronize}{polygon}{laser1}{laser0}", 2)]
+            + [Spi.Instructions.write_pin]
+        )
+        await self.send_command(data, blocking=True)
+
+    async def spline_move(self, ticks, coefficients):
+        """write spline move instruction with ticks and coefficients to FIFO
+
+        If you have 2 motors and execute a second order spline
+        You send 4 coefficients.
+        If the controller supports a third order spline,
+        remaining coefficients are padded as zero.
+        User needs to submit all coefficients up to highest order used.
+
+        ticks           -- number of ticks in move, integer
+        coefficients    -- coefficients for spline move per axis, list
+
+        returns array with zero if home switch is hit
+        """
+        cfg = self.cfg.hdl_cfg
+        # maximum allowable ticks is move ticks,
+        # otherwise counters overflow in FPGA
+        assert ticks <= cfg.move_ticks
+        assert len(coefficients) % cfg.motors == 0
+        write_byte = Spi.Commands.write.to_bytes(1, "big")
+        move_byte = Spi.Instructions.move.to_bytes(1, "big")
+        commands = [write_byte + ticks.to_bytes(7, "big") + move_byte]
+        # check max order given by caller of function
+        max_coeff_order = len(coefficients) // cfg.motors
+        # prepare commands
+        for motor in range(cfg.motors):
+            for degree in range(cfg.poldegree):
+                # set to zero if coeff not provided by caller
+                if degree > max_coeff_order - 1:
+                    coeff = 0
+                else:
+                    idx = degree + motor * max_coeff_order
+                    coeff = coefficients[idx]
+                if sys.implementation.name == "micropython":
+                    data = int(coeff).to_bytes(8, "big", True)
+                else:
+                    data = int(coeff).to_bytes(8, "big", signed=True)
+                commands += [write_byte + data]
+        # send commands to FPGA
+        for command in commands:
+            data_out = await self.send_command(command, blocking=True)
+            state = await self.get_state(data_out)
+        axes_names = list(self.cfg.motor_cfg["steps_mm"].keys())
+        return np.array([state[key] for key in axes_names])
+
+    async def get_state(self, data=None):
+        """retrieves the state of the FPGA as dictionary
+
+        data: string to decode to state, if None data is retrieved from FPGA
+
+        dictionary with the following keys
+          parsing: True if commands are executed
+          mem_full: True if memory is full
+          error: True if an error state is reached by any of
+                 the submodules
+          x, y, z:            state of motor endswitches
+          photodiode_trigger: True if photodiode is triggered during last
+                              rotation of prism
+          synchronized: True if laserhead is synchronized by photodiode
+        """
+        if data is None:
+            command = [Spi.Commands.read] + Spi.word_bytes * [0]
+            data = await self.send_command(command)
+
+        dct = {}
+        # 9 bytes are returned
+        # the state is decoded from byte 7 and 8, i.e. -2 and -1
+        byte1 = data[-1]  # Last byte
+
+        dct["parsing"] = (byte1 >> (7 - Spi.State.parsing)) & 1
+        dct["error"] = (byte1 >> (7 - Spi.State.error)) & 1
+        dct["mem_full"] = (byte1 >> (7 - Spi.State.full)) & 1
+
+        byte2 = data[-2]  # Second to last byte
+        mapping = list(self.cfg.motor_cfg["steps_mm"].keys())
+
+        motors = self.cfg.hdl_cfg.motors
+        for i in range(motors):
+            dct[mapping[i]] = (byte2 >> (7 - i)) & 1
+        dct["photodiode_trigger"] = (byte2 >> (7 - motors)) & 1
+        dct["synchronized"] = (byte2 >> (7 - motors - 1)) & 1
+        return dct
+
+    async def set_parsing(self, value):
+        """enables or disables parsing of FIFO by FPGA
+
+        val -- True   FPGA parses FIFO
+               False  FPGA does not parse FIFO
+        """
+        assert isinstance(value, bool)
+        if value:
+            command = [Spi.Commands.start]
+        else:
+            command = [Spi.Commands.stop]
+        command += Spi.word_bytes * [0]
+        return await self.send_command(command)
+
+
+class TestHost(BaseHost):
+    def __init__(self):
+        super().__init__(test=True)
+        self.spi_tries = 1
+        self.fifo_tries = 10
+        self._position = np.array([0] * self.cfg.hdl_cfg.motors, dtype=float)
+
+    def build(self, do_program=False, verbose=True, mod="all"):
+        """
+        Builds the FPGA code using Amaranth HDL, Yosys, Nextpnr, and Icepack.
+
+        Parameters:
+        - do_program (bool): If True, flashes the FPGA using fomu-flash and resets afterwards.
+        - verbose (bool): If True, prints output of Yosys, Nextpnr, and Icepack.
+        - mod (str): Specifies which module to build. Options: 'all', 'motor'.
+        """
+        platform = Firestarter()
+        if mod == "all":
+            module = Dispatcher(platform)
+        elif mod == "motor":
+            module = Driver(platform, top=True)
+        else:
+            raise Exception(f"Print building {mod} is not supported.")
+        platform.build(
+            module,
+            do_program=do_program,
+            verbose=verbose,
+        )
+
+
+class MicropythonHost(BaseHost):
+    """
+    Host interface to interact with the FPGA.
+
+    Args:
+        test (bool): If True, runs in test mode with virtual FPGA platform.
+
+    In test mode, the object uses mock settings and disables MicroPython-specific code.
+    """
+
+    def __init__(self, test=False):
+        super().__init__(test=False)
+        self.steppers_init = False
+        self.spi_tries = 3
+        self.fifo_tries = 1e5
+        self._position = np.array([0] * self.cfg.hdl_cfg.motors, dtype=np.float)
+        self.init_micropython()
 
     def init_micropython(self):
         """Initialize hardware peripherals in a MicroPython environment.
@@ -164,40 +490,12 @@ class Host:
         self.reset()
         logging.info("Flashed fpga.")
 
-    def build(self, do_program=False, verbose=True, mod="all"):
-        """
-        Builds the FPGA code using Amaranth HDL, Yosys, Nextpnr, and Icepack.
-
-        Parameters:
-        - do_program (bool): If True, flashes the FPGA using fomu-flash and resets afterwards.
-        - verbose (bool): If True, prints output of Yosys, Nextpnr, and Icepack.
-        - mod (str): Specifies which module to build. Options: 'all', 'motor'.
-        """
-        if self.micropython:
-            logging.info("Micropython cannot update binary, using stored one")
-        else:
-            platform = Firestarter()
-            if mod == "all":
-                module = Dispatcher(platform)
-            elif mod == "motor":
-                module = Driver(platform, top=True)
-            else:
-                raise Exception(f"Print building {mod} is not supported.")
-            platform.build(
-                module,
-                do_program=do_program,
-                verbose=verbose,
-            )
-        if do_program:
-            self.reset()
-
     async def reset(self):
         "restart the FPGA by toggling the reset pin and initializing communication"
-
-        cfg = self.cfg.esp32_cfg
         # free all lines
         self.spi.deinit()
-        Pin(cfg["flash_cs"], Pin.IN)
+        self.flash_cs.mode(Pin.IN)
+
         self.fpga_reset.value(0)
         await sleep(1)
         self.fpga_reset.value(1)
@@ -254,68 +552,6 @@ class Host:
     #         return [response]
     #     else:
     #         return response
-
-    # async def get_state(self, data=None):
-    #     """retrieves the state of the FPGA as dictionary
-
-    #     data: string to decode to state, if None data is retrieved from FPGA
-
-    #     dictionary with the following keys
-    #       parsing: True if commands are executed
-    #       mem_full: True if memory is full
-    #       error: True if an error state is reached by any of
-    #              the submodules
-    #       x, y, z:            state of motor endswitches
-    #       photodiode_trigger: True if photodiode is triggered during last
-    #                           rotation of prism
-    #       synchronized: True if laserhead is synchronized by photodiode
-    #     """
-    #     if data is None:
-    #         command = [COMMANDS.READ] + WORD_BYTES * [0]
-    #         data = await self.send_command(command)
-
-    #     dct = {}
-    #     # 9 bytes are returned
-    #     # the state is decoded from byte 7 and 8, i.e. -2 and -1
-    #     byte1 = data[-1]  # Last byte
-
-    #     dct["parsing"] = (byte1 >> (7 - STATE.PARSING)) & 1
-    #     dct["error"] = (byte1 >> (7 - STATE.ERROR)) & 1
-    #     dct["mem_full"] = (byte1 >> (7 - STATE.FULL)) & 1
-
-    #     byte2 = data[-2]  # Second to last byte
-    #     mapping = list(self.platform.stepspermm.keys())
-    #     for i in range(self.platform.motors):
-    #         dct[mapping[i]] = (byte2 >> (7 - i)) & 1
-    #     dct["photodiode_trigger"] = (byte2 >> (7 - self.platform.motors)) & 1
-    #     dct["synchronized"] = (byte2 >> (7 - self.platform.motors - 1)) & 1
-    #     return dct
-
-    @property
-    async def position(self):
-        """retrieves position from FPGA and updates internal position
-
-        position is stored on the FPGA in steps
-        position is stored on object in mm
-
-        return positions as np.array in mm
-               order is [x, y, z]
-        """
-        cmd_getposition = [Spi.Commands.position] + Spi.word_bytes * [0]
-
-        for motor in range(self.cfg.hdl_cfg.motors):
-            read_data = await self.send_command(cmd_getposition)
-            self._position[motor] = unpack("!q", read_data[1:])[0]
-            # code below is not portable between python and micropython
-            # python requires signed=True, micropython does not accep this
-            # overflow error can be generated, if you go below 0
-            # overflow is created during the division,
-            # it's assumed position cannot be negative.
-            # self._position[i] = int.from_bytes(read_data[1:9], 'big', True)
-        # step --> mm
-        cfg = self.cfg.motor_cfg
-        self._position = self._position / np.array(list(cfg["steps_mm"].values()))
-        return self._position
 
     @property
     def enable_steppers(self) -> bool:
@@ -383,20 +619,6 @@ class Host:
             )
 
         self.bus.writeto_mem(self.platform.ic_address, 0, bytes([val]))
-
-    # async def set_parsing(self, value):
-    #     """enables or disables parsing of FIFO by FPGA
-
-    #     val -- True   FPGA parses FIFO
-    #            False  FPGA does not parse FIFO
-    #     """
-    #     assert isinstance(value, bool)
-    #     if value:
-    #         command = [COMMANDS.START]
-    #     else:
-    #         command = [COMMANDS.STOP]
-    #     command += WORD_BYTES * [0]
-    #     return await self.send_command(command)
 
     # async def home_axes(self, axes, speed=None, displacement=-200):
     #     """home given axes, i.e. [1,0,1] homes x, z and not y
@@ -483,201 +705,3 @@ class Host:
     #     self._position[homeswitches_hit == 1] = 0
     #     # TODO: you enable parsing but don't disable it
     #     #       this would require a wait or maybe it should be enabled on
-
-    async def send_command(self, command, blocking=False):
-        """writes command to spi port
-
-        blocking  --  try again if memory is full
-        returns bytearray with length equal to data sent
-        """
-        assert len(command) == Spi.word_bytes + Spi.command_bytes
-
-        command = bytearray(command)
-        response = bytearray(command)
-
-        trials = 0
-        while True:
-            trials += 1
-            if self.test:
-                # function is created in Amaranth HDL
-                response[:] = await self.spi_exchange_data(command)
-            else:
-                self.fpga_select.value(0)
-                self.spi.write_readinto(command, response)
-                self.fpga_select.value(1)
-            if not blocking:
-                break
-
-            byte1 = response[-1]  # can't rely on self.get_state (needs speed!)
-            if (byte1 >> (7 - Spi.State.error)) & 1:
-                if self.micropython:
-                    # lower SPI speed, change FPGA implementation
-                    # you cannot recover from this
-                    self.reset()
-                raise Exception("Error detected on FPGA")
-            if not ((byte1 >> (7 - Spi.State.full)) & 1):
-                break
-            if trials > self.maxtrials:
-                raise Memfull(f"Too many trials {trials} needed")
-
-        return response
-
-    # async def enable_comp(
-    #     self,
-    #     laser0=False,
-    #     laser1=False,
-    #     polygon=False,
-    #     synchronize=False,
-    #     singlefacet=False,
-    # ):
-    #     """enable components
-
-    #     FPGA does need to be parsing FIFO
-    #     These instructions are executed directly.
-
-    #     laser0   -- True enables laser channel 0
-    #     laser1   -- True enables laser channel 1
-    #     polygon  -- False enables polygon motor
-    #     synchronize -- Enable synchronization
-    #     singlefacet -- Enable singlefacet
-    #     """
-    #     laser0, laser1, polygon = (
-    #         int(bool(laser0)),
-    #         int(bool(laser1)),
-    #         int(bool(polygon)),
-    #     )
-    #     synchronize = int(bool(synchronize))
-    #     singlefacet = int(bool(singlefacet))
-    #     data = (
-    #         [COMMANDS.WRITE]
-    #         + [0] * (WORD_BYTES - 2)
-    #         + [int(f"{singlefacet}{synchronize}{polygon}{laser1}{laser0}", 2)]
-    #         + [INSTRUCTIONS.WRITEPIN]
-    #     )
-    #     await self.send_command(data, blocking=True)
-
-    # async def spline_move(self, ticks, coefficients):
-    #     """write spline move instruction with ticks and coefficients to FIFO
-
-    #     If you have 2 motors and execute a second order spline
-    #     You send 4 coefficients.
-    #     If the controller supports a third order spline,
-    #     remaining coefficients are padded as zero.
-    #     User needs to submit all coefficients up to highest order used.
-
-    #     ticks           -- number of ticks in move, integer
-    #     coefficients    -- coefficients for spline move per axis, list
-
-    #     returns array with zero if home switch is hit
-    #     """
-    #     platform = self.platform
-    #     # maximum allowable ticks is move ticks,
-    #     # otherwise counters overflow in FPGA
-    #     assert ticks <= MOVE_TICKS
-    #     assert len(coefficients) % platform.motors == 0
-    #     write_byte = COMMANDS.WRITE.to_bytes(1, "big")
-    #     move_byte = INSTRUCTIONS.MOVE.to_bytes(1, "big")
-    #     commands = [write_byte + ticks.to_bytes(7, "big") + move_byte]
-    #     # check max order given by caller of function
-    #     max_coeff_order = len(coefficients) // platform.motors
-    #     # prepare commands
-    #     for motor in range(platform.motors):
-    #         for degree in range(platform.poldegree):
-    #             # set to zero if coeff not provided by caller
-    #             if degree > max_coeff_order - 1:
-    #                 coeff = 0
-    #             else:
-    #                 idx = degree + motor * max_coeff_order
-    #                 coeff = coefficients[idx]
-    #             if sys.implementation.name == "micropython":
-    #                 data = int(coeff).to_bytes(8, "big", True)
-    #             else:
-    #                 data = int(coeff).to_bytes(8, "big", signed=True)
-    #             commands += [write_byte + data]
-    #     # send commands to FPGA
-    #     for command in commands:
-    #         data_out = await self.send_command(command, blocking=True)
-    #         state = await self.get_state(data_out)
-    #     axes_names = list(platform.stepspermm.keys())
-    #     return np.array([state[key] for key in axes_names])
-
-    # async def writeline(self, bitlst, stepsperline=1, direction=0, repetitions=1):
-    #     """projects given bitlst as line with laserhead
-
-    #     bit list      bits which are written to substrate
-    #                   at the moment laser can only be on or off
-    #                   if bitlst is empty stop command is sent
-    #     stepsperline  stepsperline, should be greater than 0
-    #                   if you don't want to move simply disable motor
-    #     repitition    multiple times line is repeated
-    #     direction     motor direction of scanning axis
-    #     """
-    #     bytelst = self.bittobytelist(bitlst, stepsperline, direction)
-    #     for _ in range(repetitions):
-    #         cmdlst = self.bytetocmdlist(bytelst)
-    #         for cmd in cmdlst:
-    #             (await self.send_command(cmd, blocking=True))
-
-    # def bytetocmdlist(self, bytelst):
-    #     cmdlist = []
-    #     write_byte = COMMANDS.WRITE.to_bytes(1, "big")
-    #     bytelst_len = len(bytelst)
-    #     for i in range(0, bytelst_len, 8):
-    #         lst = bytelst[i : i + 8]
-    #         lst.reverse()
-    #         data = write_byte + bytes(lst)
-    #         cmdlist.append(data)
-    #     return cmdlist
-
-    # def bittobytelist(self, bitlst, stepsperline=1, direction=0, bitorder="little"):
-    #     """converts bitlst to bytelst
-
-    #     bit list      bits which are written to substrate
-    #                   at the moment laser can only be on or off
-    #                   if bitlst is empty stop command is sent
-    #     stepsperline  stepsperline, should be greater than 0
-    #                   if you don't want to move simply disable motor
-    #     direction     motor direction of scanning axis
-    #     """
-    #     # the halfperiod is sent over
-    #     # this is the amount of ticks in half a cycle of
-    #     # the motor
-    #     # watch out for python "banker's rounding"
-    #     # sometimes target might not be equal to steps
-    #     bits_in_scanline = self.laser_params["BITSINSCANLINE"]
-    #     halfperiod = int((bits_in_scanline - 1) // (stepsperline * 2))
-    #     if halfperiod < 1:
-    #         raise Exception("Steps per line cannot be achieved")
-    #     # TODO: is this still an issue?
-    #     # you could check as follows
-    #     # steps = self.laser_params['TICKSINFACET']/(halfperiod*2)
-    #     #    print(f"{steps} is actual steps per line")
-    #     direction_byte = [int(bool(direction))]
-
-    #     def pad_with_zeros(bytelst):
-    #         padding_length = (WORD_BYTES - len(bytelst) % WORD_BYTES) % WORD_BYTES
-    #         bytelst.extend([0] * padding_length)
-
-    #     if not len(bitlst):
-    #         bytelst = [INSTRUCTIONS.LASTSCANLINE]
-    #         pad_with_zeros(bytelst)
-    #         return bytelst
-
-    #     bytelst = [INSTRUCTIONS.SCANLINE]
-    #     halfperiodbits = [int(i) for i in bin(halfperiod)[2:]]
-    #     halfperiodbits.reverse()
-    #     assert len(halfperiodbits) < 56
-    #     bytelst.extend(
-    #         list(ulabext.packbits(direction_byte + halfperiodbits, bitorder=bitorder))
-    #     )
-    #     pad_with_zeros(bytelst)
-
-    #     bitlst_len = len(bitlst)
-    #     if bitlst_len == bits_in_scanline:
-    #         bytelst.extend(ulabext.packbits(bitlst, bitorder=bitorder))
-    #     elif bitlst_len == bits_in_scanline // 8:
-    #         bytelst.extend(bitlst)
-    #     else:
-    #         raise Exception("Invalid line length")
-    #     pad_with_zeros(bytelst)
-    #     return bytelst

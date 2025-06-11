@@ -68,7 +68,7 @@ class PlatformConfig:
         Initialization follows one of two routes:
 
             - **Test Mode** (`test=True`):
-            - You define low-level timing values directly (`TICKSINFACET`, `LASERTICKS`, `BITSINSCANLINE`)
+            - You define low-level timing values directly (`ticks_in_facet`, `laser_ticks`, `bits_in_scanline`)
             - Useful for simulation or FPGA-level tuning
 
             - **Production Mode** (`test=False`):
@@ -151,11 +151,11 @@ class PlatformConfig:
             cfg = dict(
                 test=False,
                 mem_depth=256,
-                motor_freq=1e6,  # motor move interpolation freq in Hz
-                move_ticks=10_000,  # maximum ticks in move segment
             )
         cfg.update(
             dict(
+                motor_freq=1e6,  # motor move interpolation freq in Hz
+                move_ticks=10_000,  # maximum ticks in move segment
                 direction=0,  # axis parallel to laser, here x
                 motors=len(self.motor_cfg["steps_mm"]),
                 motor_divider=pow(2, 8),
