@@ -165,8 +165,8 @@ class BaseHost:
         # watch out for python "banker's rounding"
         # sometimes target might not be equal to steps
         bit_order = "little"
-        bits_in_scanline = self.cfg.laser_timing["bits_in_scanline"]
-        half_period = int((bits_in_scanline - 1) // (steps_line * 2))
+        scanline_length = self.cfg.laser_timing["scanline_length"]
+        half_period = int((scanline_length - 1) // (steps_line * 2))
         if half_period < 1:
             raise Exception("Steps per line cannot be achieved")
         # TODO: is this still an issue?
@@ -201,9 +201,9 @@ class BaseHost:
 
         # Append actual scanline data
         laser_bits_len = len(laser_bits)
-        if laser_bits_len == bits_in_scanline:
+        if laser_bits_len == scanline_length:
             byte_lst.extend(ulabext.packbits(laser_bits, bitorder=bit_order))
-        elif laser_bits_len == bits_in_scanline // 8:
+        elif laser_bits_len == scanline_length // 8:
             byte_lst.extend(laser_bits)
         else:
             raise Exception("Invalid line length")

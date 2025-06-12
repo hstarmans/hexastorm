@@ -46,7 +46,7 @@ class Spi:
 
     def words_scanline(laser_timing):
         """Returns the number of words required for a single scanline instruction."""
-        return ceil((8 + ceil(laser_timing["bits_in_scanline"] / 8)) / Spi.word_bytes)
+        return ceil((8 + ceil(laser_timing["scanline_length"] / 8)) / Spi.word_bytes)
 
     def words_move(hdl_cfg):
         """Returns the number of words required for a single move instruction."""
@@ -86,8 +86,8 @@ class PlatformConfig:
         if test:
             self.laser_timing = dict(
                 rpm=1000,
-                ticks_in_facet=20,
-                bits_in_scanline=3,
+                scanline_length=3,
+                facet_ticks=20,
                 laser_ticks=4,
             )
         else:
@@ -154,6 +154,7 @@ class PlatformConfig:
             )
         cfg.update(
             dict(
+                single_line=False,
                 motor_freq=1e6,  # motor move interpolation freq in Hz
                 move_ticks=10_000,  # maximum ticks in move segment
                 direction=0,  # axis parallel to laser, here x
@@ -198,17 +199,17 @@ class PlatformConfig:
         poly_hz = rpm / 60
 
         if self.test:
-            ticks_in_facet = self.laser_timing["ticks_in_facet"]
+            facet_ticks = self.laser_timing["facet_ticks"]
             laser_ticks = self.laser_timing["laser_ticks"]
-            bits_in_scanline = self.laser_timing["bits_in_scanline"]
+            scanline_length = self.laser_timing["scanline_length"]
 
-            crystal_hz = round(ticks_in_facet * facets * poly_hz)
+            crystal_hz = round(facet_ticks * facets * poly_hz)
             laser_hz = crystal_hz / laser_ticks
             spinup_time = 10 / crystal_hz
-            stable_time = 5 * ticks_in_facet / crystal_hz
-            start_frac = 2 / ticks_in_facet
-            end_frac = (laser_ticks * bits_in_scanline) / ticks_in_facet + start_frac
-            assert ticks_in_facet == round(crystal_hz / (poly_hz * facets))
+            stable_time = 5 * facet_ticks / crystal_hz
+            start_frac = 2 / facet_ticks
+            end_frac = (laser_ticks * scanline_length) / facet_ticks + start_frac
+            assert facet_ticks == round(crystal_hz / (poly_hz * facets))
         else:
             spinup_time = self.laser_timing["spinup_time"]
             stable_time = self.laser_timing["stable_time"]
@@ -217,45 +218,44 @@ class PlatformConfig:
 
             clks = {0: 48, 1: 24, 2: 12, 3: 6}
             crystal_hz = clks[self.ice40_cfg["hfosc_div"]] * 1e6
-            ticks_in_facet = round(crystal_hz / (poly_hz * facets))
+            facet_ticks = round(crystal_hz / (poly_hz * facets))
             laser_hz = self.laser_timing["laser_hz"]
             laser_ticks = int(crystal_hz / laser_hz)
 
         spinup_ticks = round(spinup_time * crystal_hz)
         stable_ticks = round(stable_time * crystal_hz)
-        jitter_ticks = round(0.5 * laser_ticks)
 
-        bits_in_scanline = round(ticks_in_facet * (end_frac - start_frac) / laser_ticks)
-        polyperiod = int(crystal_hz / (poly_hz * 6 * 2))
+        jitter_ticks = round(0.5 * laser_ticks)
+        scanline_length = round(facet_ticks * (end_frac - start_frac) / laser_ticks)
+        motor_period = int(crystal_hz / (poly_hz * 6 * 2))
 
         # Sanity checks
         assert laser_ticks > 2
-        if end_frac > round(1 - (jitter_ticks + 1) / ticks_in_facet):
+        if end_frac > round(1 - (jitter_ticks + 1) / facet_ticks):
             raise Exception("Invalid settings, end_frac too high")
 
         if self.test:
-            assert bits_in_scanline == self.laser_timing["bits_in_scanline"]
-        elif bits_in_scanline % 8 != 0:
-            bits_in_scanline += 8 - bits_in_scanline % 8
+            assert scanline_length == self.laser_timing["scanline_length"]
+        elif scanline_length % 8 != 0:
+            scanline_length += 8 - scanline_length % 8
 
-        if bits_in_scanline <= 0:
+        if scanline_length <= 0:
             raise Exception("Bits in scanline invalid")
         # Update dictionary
         self.laser_timing.update(
             {
+                "facets": facets,
                 "crystal_hz": crystal_hz,
                 "laser_hz": laser_hz,
-                "ticks_in_facet": ticks_in_facet,
-                "laser_ticks": laser_ticks,
-                "spinup_time": spinup_time,
-                "stable_time": stable_time,
                 "start_frac": start_frac,
                 "end_frac": end_frac,
+                "facet_ticks": facet_ticks,
+                "laser_ticks": laser_ticks,
                 "spinup_ticks": spinup_ticks,
                 "stable_ticks": stable_ticks,
                 "jitter_ticks": jitter_ticks,
-                "bits_in_scanline": bits_in_scanline,
-                "polyperiod": polyperiod,
+                "scanline_length": scanline_length,
+                "motor_period": motor_period,
             }
         )
 

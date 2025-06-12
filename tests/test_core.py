@@ -62,7 +62,7 @@ class TestParser(SPIGatewareTestCase):
         Verifies that writing a full scanline sends the expected number of words to the FIFO.
         """
         laser_timing = self.host.cfg.laser_timing
-        await self.host.write_line([1] * laser_timing["bits_in_scanline"])
+        await self.host.write_line([1] * laser_timing["scanline_length"])
         while sim.get(self.dut.empty) == 1:
             await sim.tick()
         await self.assert_fifo_written(self.platform.hdl_cfg.words_scanline)
