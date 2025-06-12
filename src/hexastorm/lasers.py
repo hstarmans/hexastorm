@@ -69,8 +69,9 @@ class Laserhead(Elaboratable):
 
     def elaborate(self, platform):
         m = Module()
-        laz_tim = platform.settings.laser_timing
-        hdl_cfg = platform.hdl_cfg
+        plf = self.platform or platform
+        laz_tim = plf.settings.laser_timing
+        hdl_cfg = plf.hdl_cfg
 
         # Pulse generator for prism motor
         pwm_counter = Signal(range(laz_tim["motor_period"]))
@@ -289,7 +290,7 @@ class Laserhead(Elaboratable):
                         m.d.sync += (self.lasers[0].eq(0),)
 
                         # Commit or discard based on configuration and FIFO status
-                        with m.If(hdl_cfg["single_line"] & self.empty):
+                        with m.If(hdl_cfg.single_line & self.empty):
                             m.d.sync += self.read_discard.eq(1)
                         with m.Else():
                             m.d.sync += self.read_commit.eq(1)
@@ -339,7 +340,7 @@ class Laserhead(Elaboratable):
                     self.write_commit_2.eq(1),
                 ]
                 # Decide whether to commit or discard the current line
-                with m.If(hdl_cfg["single_line"] & self.empty):
+                with m.If(hdl_cfg.single_line & self.empty):
                     m.d.sync += self.read_discard.eq(0)
                 with m.Else():
                     m.d.sync += self.read_commit.eq(0)
@@ -396,11 +397,12 @@ class DiodeSimulator(Laserhead):
             self.read_data_2 = Signal(hdl_cfg.mem_width)
 
     def elaborate(self, platform):
+        platform = self.platform or platform
         m = super().elaborate(platform)
         hdl_cfg = platform.hdl_cfg
         laz_tim = platform.settings.laser_timing
 
-        diode_cnt = Signal(range(laz_tim["ticks_facet"]))
+        diode_cnt = Signal(range(laz_tim["facet_ticks"]))
         self.diode_cnt = diode_cnt
 
         if self.addfifo:
@@ -444,9 +446,9 @@ class DiodeSimulator(Laserhead):
                 self.read_data_2.eq(fifo2.read_data),
             ]
 
-        with m.If(diode_cnt == (laz_tim["ticks_facet"] - 1)):
+        with m.If(diode_cnt == (laz_tim["facet_ticks"] - 1)):
             m.d.sync += diode_cnt.eq(0)
-        with m.Elif(diode_cnt > (laz_tim["ticks_facet"] - 4)):
+        with m.Elif(diode_cnt > (laz_tim["facet_ticks"] - 4)):
             m.d.sync += [
                 self.photodiode.eq(
                     ~(self.enable_prism_in & (self.laser0in | self.laser1in))

@@ -19,9 +19,7 @@ class TestParser(SPIGatewareTestCase):
     async def initialize_signals(self, sim):
         self.host = TestHost()
         self.sim = sim
-        self.host.spi_exchange_data = lambda data: self.spi_exchange_data(
-            sim=sim, data=data
-        )
+        self.host.spi_exchange_data = self.spi_exchange_data
         sim.set(self.dut.spi.cs, 0)
         await sim.tick()
 

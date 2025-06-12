@@ -24,8 +24,8 @@ class TestPlatform:
     # bldc = BLDCRecord()
 
     def __init__(self):
-        settings = PlatformConfig(test=True)
-        self.hdl_cfg = settings.hdl_cfg
+        self.settings = PlatformConfig(test=True)
+        self.hdl_cfg = self.settings.hdl_cfg
 
 
 class Firestarter(LatticeICE40Platform):
