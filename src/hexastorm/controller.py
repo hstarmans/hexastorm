@@ -159,7 +159,7 @@ class BaseHost:
         Returns:
             List[int]: Byte list ready to be packed into SPI commands.
         """
-        # the halfperiod is sent over
+        # the half_period is sent over
         # this is the amount of ticks in half a cycle of
         # the motor
         # watch out for python "banker's rounding"

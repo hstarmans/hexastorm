@@ -176,7 +176,7 @@ class Laserhead(Elaboratable):
                 with m.If(tickcounter > laz_tim["spinup_ticks"] - 1):
                     # turn on single channel
                     m.d.sync += [
-                        self.lasers.eq(0b10),
+                        lasers.eq(0b10),
                         tickcounter.eq(0),
                     ]
                     m.next = "WAIT_STABLE"
@@ -392,8 +392,8 @@ class DiodeSimulator(Laserhead):
         super().__init__(platform)
 
         self.addfifo = addfifo
-        self.laser0in = Signal()
-        self.laser1in = Signal()
+        self.laser0 = Signal()
+        self.laser1 = Signal()
         self.enable_prism_in = Signal()
 
         if addfifo:
@@ -416,8 +416,8 @@ class DiodeSimulator(Laserhead):
         if self.addfifo:
             m.d.comb += [
                 self.enable_prism_in.eq(self.enable_prism),
-                self.laser0in.eq(self.lasers[0]),
-                self.laser1in.eq(self.lasers[1]),
+                self.laser0.eq(self.lasers[0]),
+                self.laser1.eq(self.lasers[1]),
             ]
             # FIFO 1:
             fifo = TransactionalizedFIFO(
@@ -456,10 +456,10 @@ class DiodeSimulator(Laserhead):
 
         with m.If(diode_cnt == (laz_tim["facet_ticks"] - 1)):
             m.d.sync += diode_cnt.eq(0)
-        with m.Elif(diode_cnt > (laz_tim["facet_ticks"] - 4)):
+        with m.Elif(diode_cnt > (laz_tim["facet_ticks"] - laz_tim["facets"])):
             m.d.sync += [
                 self.photodiode.eq(
-                    ~(self.enable_prism_in & (self.laser0in | self.laser1in))
+                    ~(self.enable_prism_in & (self.laser0 | self.laser1))
                 ),
                 diode_cnt.eq(diode_cnt + 1),
             ]

@@ -18,6 +18,7 @@ class BaseTest(LunaGatewareTestCase):
     FRAGMENT_ARGUMENTS = {"platform": platform}
 
     async def initialize_signals(self, sim):
+        """Initialize signals and host configuration for simulation."""
         self.host = TestHost()
         self.sim = sim
         sim.set(self.dut.photodiode, 1)
@@ -424,43 +425,60 @@ class MultilineTest(BaseTest):
         await self.scanline_ring_buffer(numb_lines=3)
 
 
-# class Loweredge(BaseTest):
-#     "Test Scanline of length MEMWIDTH"
+class Loweredge(BaseTest):
+    """Test Laserhead scanline exposure when scanline length equals memory word width."""
 
-#     platform = TestPlatform()
-#     platform.hdl_cfg.single_line = True
-#     laz_tim = platform.settings.laser_timing
-#     laz_tim_backup = deepcopy(laz_tim)
-#     FRAGMENT_UNDER_TEST = DiodeSimulator
+    platform = TestPlatform()
+    laz_tim = platform.settings.laser_timing
+    laz_tim_backup = laz_tim
+    laz_tim.update(
+        {
+            "facet_ticks": 500,
+            "laser_ticks": 3,
+            "scanline_length": platform.hdl_cfg.mem_width,
+        }
+    )
+    platform.settings.laser_timing = laz_tim
+    platform.settings.update_laser_timing()
 
-#     async def initialize_signals(self, sim):
-#         self.laz_tim["facet_ticks"] = 500
-#         self.laz_tim["laser_ticks"] = 3
-#         self.laz_tim["scanline_length"] = self.platform.hdl_cfg.mem_width
-#         self.host = TestHost()
-#         self.host.cfg.laser_timing = self.laz_tim
-#         self.sim = sim
-#         sim.set(self.dut.photodiode, 1)
-#         await sim.tick()
+    FRAGMENT_UNDER_TEST = DiodeSimulator
+    FRAGMENT_ARGUMENTS = {"platform": platform}
 
-#     def tearDown(self):
-#         self.laz_tim = self.laz_tim_backup
+    async def initialize_signals(self, sim):
+        """Initialize signals and host configuration for simulation."""
+        self.sim = sim
+        self.host = TestHost()
+        self.host.cfg.laser_timing = self.platform.settings.laser_timing
+        self.host.cfg.hdl_cfg.single_line = False
+        sim.set(self.dut.photodiode, 1)
+        await sim.tick()
 
-#     @async_test_case
-#     async def test_scanlineringbuffer(self, sim):
-#         "write several scanlines and verify receival"
-#         await self.scanline_ring_buffer(numb_lines=3)
+    def tearDown(self):
+        """Restore original laser timing after test."""
+        self.laz_tim = self.laz_tim_backup
+
+    @async_test_case
+    async def test_scanlineringbuffer(self, sim):
+        """Write several scanlines and verify they are processed correctly."""
+        await self.scanline_ring_buffer(numb_lines=3)
 
 
-# class Upperedge(Loweredge):
-#     platform = TestPlatform()
-#     FRAGMENT_UNDER_TEST = DiodeSimulator
-#     dct = deepcopy(platform.laser_timing)
-#     dct["TICKSINFACET"] = 500
-#     dct["LASERTICKS"] = 3
-#     dct["SINGLE_LINE"] = False
-#     dct["BITSINSCANLINE"] = MEMWIDTH + 1
-#     FRAGMENT_ARGUMENTS = {"platform": platform, "laser_var": dct}
+class Upperedge(Loweredge):
+    platform = TestPlatform()
+    laz_tim = platform.settings.laser_timing
+    laz_tim_backup = laz_tim
+    laz_tim.update(
+        {
+            "facet_ticks": 500,
+            "laser_ticks": 3,
+            "scanline_length": platform.hdl_cfg.mem_width + 1,
+        }
+    )
+    platform.settings.laser_timing = laz_tim
+    platform.settings.update_laser_timing()
+
+    FRAGMENT_UNDER_TEST = DiodeSimulator
+    FRAGMENT_ARGUMENTS = {"platform": platform}
 
 
 # NOTE: new class is created to reset settings
