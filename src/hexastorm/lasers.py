@@ -5,26 +5,33 @@ from .config import Spi
 
 
 class Laserhead(Elaboratable):
-    """Controller of laser scanner with rotating mirror or prism
+    """
+    Controller for laser scanning systems using a rotating mirror or prism.
 
-    I/O signals:
-    O: synchronized   -- if true, laser is in sync and prism is rotating
-    I: synchronize    -- activate synchronization
-    I: singlefacet    -- activate single facet
-    I: expose_start   -- start reading lines and exposing
-    O: expose_finish  -- exposure is finished
-    O: error          -- error signal
-    O: lasers         -- laser pin
-    O: pwm            -- pulse for scanner motor
-    O: enable_prism   -- enable pin scanner motor
-    I: photodiode     -- trigger for photodiode
-    O: photodiode_t   -- high if photodiode triggered in this cycle
-    O: read_commit    -- finalize read transactionalizedfifo
-    O: read_en        -- enable read transactionalizedfifo
-    I: read_data      -- read data from transactionalizedfifo, AKA busy
-    I: empty          -- signal wether fifo is empty
-    O: step           -- step signal
-    O: direction      -- direction signal
+    This module manages synchronization with a photodiode, precise timing of laser
+    exposure, scanline processing from FIFO, and motor stepping logic. It supports
+    single-facet and multi-facet scanning modes.
+
+    Inputs:
+        synchronize     -- Start/enable synchronization process.
+        singlefacet     -- Limit operation to a single facet.
+        expose_start    -- Start exposing scanlines.
+        photodiode      -- Photodiode input for synchronization.
+        read_data       -- Data from scanline FIFO.
+        empty           -- FIFO empty flag.
+
+    Outputs:
+        synchronized    -- High when synchronized with photodiode signal.
+        expose_finished -- High when all scanlines have been exposed.
+        error           -- Indicates synchronization or data error.
+        lasers          -- Laser output signal (2-bit).
+        pwm             -- Motor PWM output.
+        enable_prism    -- Enable signal for motor driver.
+        photodiode_t    -- High if photodiode triggered this cycle.
+        read_en         -- Read enable signal for FIFO.
+        read_commit     -- Commit current line in FIFO.
+        step            -- Step signal for motor.
+        dir             -- Stepper motor direction.
     """
 
     def __init__(self, platform):
@@ -372,11 +379,12 @@ class Laserhead(Elaboratable):
 
 
 class DiodeSimulator(Laserhead):
-    """Laserhead wrapper for simulating a photodiode in test environments.
+    """
+    Simulates a photodiode signal for testing laserhead behavior in a controlled environment.
 
-    The simulated photodiode goes low (active) only when the prism motor
-    is enabled and the laser is on so the diode
-    can be triggered.
+    The photodiode goes low (active) only when the prism motor is enabled
+    and at least one laser channel is on, mimicking real-world diode triggering.
+    Optionally includes transactional FIFO buffers for scanline data emulation.
     """
 
     def __init__(self, platform, addfifo=True):

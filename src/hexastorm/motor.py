@@ -1,3 +1,5 @@
+# out of date, used in PCB motor experiments
+
 import math
 
 from amaranth import Cat, Elaboratable, Module, Signal, ClockDomain
