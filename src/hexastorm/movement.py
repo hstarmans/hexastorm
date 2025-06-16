@@ -1,15 +1,15 @@
 from amaranth import Elaboratable, Module, Signal, signed
 from amaranth.hdl import Array
 
-from .config import MOVE_TICKS, bit_shift
 from .resources import get_all_resources
 
 
 class Polynomial(Elaboratable):
     """Polynomial motor controller
 
-    Computes a polynomial of the form:
-        pos(t) = c*t^3 + b*t^2 + a*t
+    Evaluates:
+        pos(t) = c·t³ + b·t² + a·t
+
     where t is a counter incremented every clock tick.
 
     The polynomial describes the stepper position of a single axis.
@@ -36,36 +36,40 @@ class Polynomial(Elaboratable):
 
     Inputs:
         coeff       - Array of polynomial coefficients [a, b, c] per motor
-        start       - Start signal
+        start       - Start evaluation
         ticklimit   - Number of ticks to evaluate the polynomial
 
     Outputs:
-        step        - Step signal (Array)
-        dir         - Direction signal (Array)
-        busy        - Active when running
+        step        - Step signal per motor (Array)
+        dir         - Direction signal per motor (Array)
+        busy        - Active while polynomial is being evaluated
     """
 
-    def __init__(self, platform=None, top=False):
+    def __init__(self, platform, top=False):
         """
         platform  -- pass test platform
         top       -- trigger synthesis of module
         """
         self.top = top
         self.platform = platform
+
+        cfg = platform.hdl_cfg
+        self.order = cfg.pol_degree
+        self.motors = cfg.motors
+        self.max_steps = int(cfg.move_ticks / 2)  # Nyquist
+        self.bit_shift = cfg.bit_shift
         self.divider = platform.clks[platform.hfosc_div]
-        self.order = platform.poldegree
-        self.bit_shift = bit_shift(platform)
-        self.motors = platform.motors
-        self.max_steps = int(MOVE_TICKS / 2)  # Nyquist
 
         # Input
         self.coeff = Array()
-        for _ in range(self.motors):
-            self.coeff.extend(
-                [Signal(signed(self.bit_shift + 1)) for _ in range(self.order)]
-            )
+        self.coeff = Array(
+            [
+                Signal(signed(self.bit_shift + 1))
+                for _ in range(self.motors * self.order)
+            ]
+        )
         self.start = Signal()
-        self.ticklimit = Signal(MOVE_TICKS.bit_length())
+        self.tick_limit = Signal(cfg.move_ticks.bit_length())
 
         # Output
         self.busy = Signal()
@@ -74,9 +78,11 @@ class Polynomial(Elaboratable):
 
     def elaborate(self, platform):
         m = Module()
-        # add 1 MHz clock domain
+        platform = self.platform or platform
+
+        # Timing counters
         cntr = Signal(range(self.divider))
-        ticks = Signal(MOVE_TICKS.bit_length())
+        ticks = Signal(platform.hdl_cfg.move_ticks.bit_length())
 
         # Internal signed counters per motor per order
         max_bits = (self.max_steps << self.bit_shift).bit_length()
@@ -85,6 +91,7 @@ class Polynomial(Elaboratable):
         assert max_bits <= 64
 
         if self.top:
+            # Connect to platform stepper resources
             steppers = get_all_resources(platform, "stepper")
             assert steppers, "No stepper resources found"
             for i, stepper in enumerate(steppers):
@@ -93,23 +100,26 @@ class Polynomial(Elaboratable):
                     stepper.dir.eq(self.dir[i]),
                 ]
         else:
+            # Expose internals for simulation
             self.ticks = ticks
             self.cntrs = cntrs
 
-        # Step signal generation based on bit toggle
+        # Generate step pulse based on toggling specific bit
         for motor in range(self.motors):
-            m.d.comb += self.step[motor].eq(cntrs[motor * self.order][self.bit_shift])
+            idx = motor * self.order
+            m.d.comb += self.step[motor].eq(cntrs[idx][self.bit_shift])
 
-        # Direction detection
+        # Direction signal based on delta between ticks
         for motor in range(self.motors):
             idx = motor * self.order
             m.d.sync += prev[motor].eq(cntrs[idx])
             with m.If(prev[motor] > cntrs[idx]):
-                m.d.sync += self.dir[motor].eq(0)  # Negative
+                m.d.sync += self.dir[motor].eq(0)  # Negative move
             with m.Elif(prev[motor] < cntrs[idx]):
-                m.d.sync += self.dir[motor].eq(1)  # Positive
+                m.d.sync += self.dir[motor].eq(1)  # Positive move
 
-        with m.FSM(init="RESET", name="polynomen"):
+        # State machine for execution
+        with m.FSM(init="RESET", name="polynomial_fsm"):
             with m.State("RESET"):
                 m.d.sync += self.busy.eq(0)
                 m.next = "WAIT_START"
@@ -119,41 +129,51 @@ class Polynomial(Elaboratable):
                     for motor in range(self.motors):
                         coef0 = motor * self.order
                         step_bit = self.bit_shift + 1
+
+                        for degree in range(1, self.order):
+                            m.d.sync += cntrs[coef0 + degree].eq(0)
+
                         m.d.sync += [
                             cntrs[coef0].eq(cntrs[coef0][:step_bit]),
                             prev[motor].eq(prev[motor][:step_bit]),
                         ]
-                        for degree in range(1, self.order):
-                            m.d.sync += cntrs[coef0 + degree].eq(0)
+
                     m.d.sync += self.busy.eq(1)
                     m.next = "RUNNING"
                 with m.Else():
                     m.d.sync += self.busy.eq(0)
 
             with m.State("RUNNING"):
-                with m.If((ticks < self.ticklimit) & (cntr >= self.divider - 1)):
+                # Tick handling and polynomial evaluation
+                with m.If((ticks < self.tick_limit) & (cntr >= self.divider - 1)):
                     m.d.sync += [ticks.eq(ticks + 1), cntr.eq(0)]
-                    for motor in range(self.motors):
-                        idx = motor * self.order
 
-                        op3, op2, op1 = 0, 0, 0
+                    for motor in range(self.motors):
+                        base = motor * self.order
+                        acc = [Signal.like(cntrs[base + i]) for i in range(self.order)]
+
                         if self.order > 2:
-                            op3 += 3 * 2 * self.coeff[idx + 2] + cntrs[idx + 2]
-                            op2 += cntrs[idx + 2]
-                            op1 += self.coeff[idx + 2] + cntrs[idx + 2]
-                            m.d.sync += cntrs[idx + 2].eq(op3)
+                            acc[2] = 3 * 2 * self.coeff[base + 2] + cntrs[base + 2]
+                            m.d.sync += cntrs[base + 2].eq(acc[2])
+                            acc[1] = cntrs[base + 2]
+
                         if self.order > 1:
-                            op2 += 2 * self.coeff[idx + 1] + cntrs[idx + 1]
-                            m.d.sync += cntrs[idx + 1].eq(op2)
-                        op1 += (
-                            self.coeff[idx + 1]
-                            + self.coeff[idx]
-                            + cntrs[idx + 1]
-                            + cntrs[idx]
+                            acc[1] = acc[1] + 2 * self.coeff[base + 1] + cntrs[base + 1]
+                            m.d.sync += cntrs[base + 1].eq(acc[1])
+
+                        acc[0] = (
+                            self.coeff[base]
+                            + self.coeff[base + 1]
+                            + cntrs[base]
+                            + cntrs[base + 1]
                         )
-                        m.d.sync += cntrs[idx].eq(op1)
-                with m.Elif(ticks < self.ticklimit):
+                        if self.order > 2:
+                            acc[0] += self.coeff[base + 2] + cntrs[base + 2]
+                        m.d.sync += cntrs[base].eq(acc[0])
+
+                with m.Elif(ticks < self.tick_limit):
                     m.d.sync += cntr.eq(cntr + 1)
+
                 with m.Else():
                     m.d.sync += ticks.eq(0)
                     m.next = "WAIT_START"

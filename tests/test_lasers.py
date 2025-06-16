@@ -1,5 +1,3 @@
-import unittest
-from copy import deepcopy
 from random import randint
 from struct import unpack
 
@@ -464,6 +462,8 @@ class Loweredge(BaseTest):
 
 
 class Upperedge(Loweredge):
+    """Test scanline exposure with length one bit longer than the memory word width."""
+
     platform = TestPlatform()
     laz_tim = platform.settings.laser_timing
     laz_tim_backup = laz_tim
@@ -488,3 +488,6 @@ class Upperedge(Loweredge):
 #       prism spins up and systems goes into sync
 #
 #       spin up of prism is done without profile
+#
+#       I am not sure why there are tests called lower / upper edge.
+#       Changing the limits does not reveal an edge or failure of the test?

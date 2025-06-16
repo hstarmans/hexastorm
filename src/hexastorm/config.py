@@ -166,6 +166,15 @@ class PlatformConfig:
                 motor_debug="ticks_in_facet",
             )
         )
+
+        # Choose bit used for stepping
+        if cfg["pol_degree"] == 3:
+            cfg["bit_shift"] = 40
+        elif cfg["pol_degree"] == 2:
+            cfg["bit_shift"] = 25
+        else:
+            raise ValueError("Only polynomial orders 2 and 3 are supported")
+
         cfg["words_move"] = Spi.words_move(cfg)
         if self.test:
             cfg["mem_depth"] = cfg["words_move"] * 2 + 1
@@ -258,21 +267,6 @@ class PlatformConfig:
                 "motor_period": motor_period,
             }
         )
-
-
-def bit_shift(platform):
-    """retrieve bit shif for a give degree
-
-    Determined by running the test of
-    movement.py and varying parameter
-    """
-    if platform.poldegree == 3:
-        bit_shift = 40
-    elif platform.poldegree == 2:
-        bit_shift = 25
-    else:
-        raise Exception("Order not supported")
-    return bit_shift
 
 
 def getmovedct(platform):

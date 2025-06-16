@@ -270,6 +270,26 @@ class BaseHost:
         )
         await self.send_command(data, blocking=True)
 
+    # TODO: this is strange, should it be here
+    #       on the board steps and count is stored
+    #       you could move this to spline_coefficients
+    #       the flow over method of a certain bit comes from beagleg
+    def steps_to_count(self, steps):
+        """Convert a number of motor steps to the corresponding count value.
+
+        Each step requires two ticks. The final count includes a small adjustment
+        to ensure the threshold is slightly exceeded.
+
+        Parameters:
+        steps (int): Number of small motor steps
+
+        Returns:
+        int: The count value for the given number of steps.
+        """
+        bit_shift = self.cfg.hdl_cfg.bit_shift
+        count = (steps << (1 + bit_shift)) + (1 << (bit_shift - 1))
+        return count
+
     async def spline_move(self, ticks, coefficients):
         """
         Send a spline move instruction to the FPGA FIFO.
@@ -693,23 +713,6 @@ class MicropythonHost(BaseHost):
     #     assert len(axes) == self.platform.motors
     #     dist = np.array(axes) * np.array([displacement] * self.platform.motors)
     #     await self.gotopoint(position=dist.tolist(), speed=speed, absolute=False)
-
-    # # TODO: this is strange, should it be here
-    # #       on the board steps and count is stored
-    # #       you could move this to spline_coefficients
-    # #       the flow over method of a certain bit comes from beagleg
-    # def steps_to_count(self, steps):
-    #     """compute count for a given number of steps
-
-    #     steps  -- motor moves in small steps
-
-    #     Shift is needed as two ticks per step are required
-    #     You need to count slightly over the threshold. That is why
-    #     +1 is added.
-    #     """
-    #     bitshift = bit_shift(self.platform)
-    #     count = (steps << (1 + bitshift)) + (1 << (bitshift - 1))
-    #     return count
 
     # async def gotopoint(self, position, speed=None, absolute=True):
     #     """move machine to position or with displacement at constant speed
