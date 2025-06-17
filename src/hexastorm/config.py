@@ -140,6 +140,8 @@ class PlatformConfig:
             package="SG48",
             default_clk="SB_HFOSC",
             hfosc_div=2,
+            # Not required
+            clks={0: 48, 1: 24, 2: 12, 3: 6},
         )
 
     @property
@@ -225,8 +227,7 @@ class PlatformConfig:
             start_frac = self.laser_timing["start_frac"]
             end_frac = self.laser_timing["end_frac"]
 
-            clks = {0: 48, 1: 24, 2: 12, 3: 6}
-            crystal_hz = clks[self.ice40_cfg["hfosc_div"]] * 1e6
+            crystal_hz = self.ice40_cfg["clks"][self.ice40_cfg["hfosc_div"]] * 1e6
             facet_ticks = round(crystal_hz / (poly_hz * facets))
             laser_hz = self.laser_timing["laser_hz"]
             laser_ticks = int(crystal_hz / laser_hz)

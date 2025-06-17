@@ -10,9 +10,10 @@ from .config import Spi
 from .resources import get_all_resources
 from .spi_helpers import connect_synchronized_spi
 
-# from .lasers import DiodeSimulator, Laserhead, params
+from .lasers import DiodeSimulator, Laserhead
+
 # from .motor import Driver
-# from .movement import Polynomial
+from .movement import Polynomial
 
 
 class SPIParser(Elaboratable):
@@ -225,11 +226,10 @@ class Dispatcher(Elaboratable):
     This is the top module
     """
 
-    def __init__(self, platform=None, simdiode=False):
+    def __init__(self, platform=None):
         """
         platform  -- used to pass test platform
         """
-        self.simdiode = simdiode
         self.platform = platform
         self.read_commit = Signal()
         self.read_en = Signal()
@@ -239,226 +239,200 @@ class Dispatcher(Elaboratable):
 
     def elaborate(self, platform):
         m = Module()
-        # Parser
-        parser = SPIParser(self.platform)
-        m.submodules.parser = parser
+        platform = self.platform or platform
+
+        parser = m.submodules.parser = SPIParser(platform)
+        polynomial = m.submodules.polynomial = Polynomial(platform)
+
         # Busy used to detect move or scanline in action
         # disabled "dispatching"
         busy = Signal()
-        # Polynomial Move
-        # polynomial = Polynomial(self.platform)
-        # m.submodules.polynomial = polynomial
-        # if platform:
-        #     spi = platform.request("debug_spi")
-        #     laserheadpins = platform.request("laserscanner")
-        #     steppers = [res for res in get_all_resources(platform, "stepper")]
-        #     # bldc = platform.request("bldc")
-        #     # leds = [res.o for res in get_all_resources(platform, "led")]
-        #     assert len(steppers) != 0
-        # else:
-        #     platform = self.platform
-        #     self.spi = SPIBus()
-        #     spi = self.spi
-        #     self.parser = parser
-        #     self.pol = polynomial
-        #     self.laserheadpins = platform.laserhead
-        #     self.steppers = steppers = platform.steppers
-        #     self.busy = busy
-        #     laserheadpins = platform.laserhead
-        #     # PCB motor
-        #     # bldc = platform.bldc
-        #     # leds = platform.leds
-        # # Local laser signal clones
-        # enable_prism = Signal()
-        # lasers = Signal(2)
-        # # Laserscan Head
-        # if self.simdiode:
-        #     laserhead = DiodeSimulator(platform=platform, addfifo=False)
-        #     lh = laserhead
-        #     m.d.comb += [
-        #         lh.enable_prism_in.eq(enable_prism | lh.enable_prism),
-        #         lh.laser0in.eq(lasers[0] | lh.lasers[0]),
-        #         laserhead.laser1in.eq(lasers[1] | lh.lasers[1]),
-        #     ]
-        # else:
-        #     laserhead = Laserhead(platform=platform)
-        #     m.d.comb += laserhead.photodiode.eq(laserheadpins.photodiode.i)
-        # m.submodules.laserhead = laserhead
-        # if platform.name == "Test":
-        #     self.laserhead = laserhead
-        # # polynomial iterates over count
-        # coeffcnt = Signal(range(len(polynomial.coeff) + 1))
-        # ## PCB motor, disabled
-        # # # Prism motor
-        # # prism_driver = Driver(platform)
-        # # m.submodules.prism_driver = prism_driver
-        # # # connect prism motor
-        # # for idx in range(len(leds)):
-        # #     m.d.comb += leds[idx].eq(prism_driver.leds[idx])
 
-        # # m.d.comb += [
-        # #     prism_driver.enable_prism.eq(
-        # #         enable_prism | laserhead.enable_prism
-        # #     ),
-        # #     parser.word_to_send.eq(prism_driver.debugword),
-        # # ]
-        # # m.d.comb += [
-        # #     bldc.uL.eq(prism_driver.uL),
-        # #     bldc.uH.eq(prism_driver.uH),
-        # #     bldc.vL.eq(prism_driver.vL),
-        # #     bldc.vH.eq(prism_driver.vH),
-        # #     bldc.wL.eq(prism_driver.wL),
-        # #     bldc.wH.eq(prism_driver.wH),
-        # # ]
-        # # m.d.comb += [
-        # #     prism_driver.hall[0].eq(bldc.sensor0),
-        # #     prism_driver.hall[1].eq(bldc.sensor1),
-        # #     prism_driver.hall[2].eq(bldc.sensor2),
-        # # ]
-        # # # connect laser module to prism motor
-        # # m.d.comb += [
-        # #     prism_driver.ticksinfacet.eq(laserhead.ticksinfacet),
-        # #     prism_driver.synchronized.eq(laserhead.synchronized),
-        # # ]
+        # shared signals
+        enable_prism = Signal()
+        lasers = Signal(2)
 
-        # # connect laserhead
-        # m.d.comb += [
-        #     ## Ricoh mirror motor
-        #     laserheadpins.pwm.eq(laserhead.pwm),
-        #     laserheadpins.en.eq(laserhead.enable_prism | enable_prism),
-        #     ## Ricoh mirror motor
-        #     laserheadpins.laser0.eq(laserhead.lasers[0] | lasers[0]),
-        #     laserheadpins.laser1.eq(laserhead.lasers[1] | lasers[1]),
-        # ]
-        # # connect Parser
-        # m.d.comb += [
-        #     self.read_data.eq(parser.read_data),
-        #     laserhead.read_data.eq(parser.read_data),
-        #     laserhead.empty.eq(parser.empty),
-        #     self.empty.eq(parser.empty),
-        #     parser.read_commit.eq(self.read_commit | laserhead.read_commit),
-        #     parser.read_en.eq(self.read_en | laserhead.read_en),
-        #     parser.read_discard.eq(self.read_discard | laserhead.read_discard),
-        # ]
-        # # connect motors
-        # for idx, stepper in enumerate(steppers):
-        #     step = polynomial.step[idx] & ((stepper.limit == 0) | stepper.dir)
-        #     if idx != (
-        #         list(platform.stepspermm.keys()).index(platform.laser_axis)
-        #     ):
-        #         direction = polynomial.dir[idx]
-        #         m.d.comb += [
-        #             stepper.step.eq(step),
-        #             stepper.dir.eq(direction),
-        #             parser.pinstate[idx].eq(stepper.limit),
-        #         ]
-        #     # connect the motor in which the laserhead moves to laser core
-        #     else:
-        #         m.d.comb += [
-        #             parser.pinstate[idx].eq(stepper.limit),
-        #             stepper.step.eq(
-        #                 (step & (~laserhead.process_lines))
-        #                 | (laserhead.step & (laserhead.process_lines))
-        #             ),
-        #             stepper.dir.eq(
-        #                 (polynomial.dir[idx] & (~laserhead.process_lines))
-        #                 | (laserhead.dir & (laserhead.process_lines))
-        #             ),
-        #         ]
-        # m.d.comb += parser.pinstate[len(steppers) :].eq(
-        #     Cat(laserhead.photodiode_t, laserhead.synchronized)
-        # )
+        if platform.settings.test:
+            self.spi = spi = SPIBus()
+            self.parser = parser
+            self.pol = polynomial
+            self.lh = lh = platform.laserhead
+            self.steppers = steppers = platform.steppers
+            self.busy = busy
+            lh_mod = m.submodules.laserhead = DiodeSimulator(
+                platform=platform, addfifo=False
+            )
+            self.laserhead = lh_mod
+            m.d.comb += [
+                lh_mod.enable_prism_in.eq(enable_prism | lh_mod.enable_prism),
+                lh_mod.laser0.eq(lasers[0] | lh_mod.lasers[0]),
+                lh_mod.laser1.eq(lasers[1] | lh_mod.lasers[1]),
+                lh.pwm.eq(lh_mod.pwm),
+                lh.en.eq(lh_mod.enable_prism | enable_prism),
+                lh.laser0.eq(lh_mod.lasers[0] | lasers[0]),
+                lh.laser1.eq(lh_mod.lasers[1] | lasers[1]),
+            ]
+        else:
+            spi = platform.request("debug_spi")
+            lh_mod = m.submodules.laserhead = Laserhead(platform)
+            lh = platform.request("laserscanner")
+            steppers = get_all_resources(platform, "stepper")
+            # bldc = platform.request("bldc")
+            # leds = [res.o for res in get_all_resources(platform, "led")]
+            assert steppers, "No stepper resources found"
 
-        # # update position
-        # stepper_d = Array(Signal() for _ in range(len(steppers)))
-        # for idx, stepper in enumerate(steppers):
-        #     pos = parser.position[idx]
-        #     m.d.sync += stepper_d[idx].eq(stepper.step)
-        #     with m.If(stepper.limit == 1):
-        #         m.d.sync += parser.position[idx].eq(0)
-        #     # assuming position is signed
-        #     # TODO: this might eat LUT, optimize
-        #     pos_max = pow(2, len(pos) - 1) - 2
-        #     with m.Elif((pos > pos_max) | (pos < -pos_max)):
-        #         m.d.sync += parser.position[idx].eq(0)
-        #     with m.Elif((stepper.step == 1) & (stepper_d[idx] == 0)):
-        #         with m.If(stepper.dir):
-        #             m.d.sync += pos.eq(pos + 1)
-        #         with m.Else():
-        #             m.d.sync += pos.eq(pos - 1)
+            m.d.comb += [
+                lh_mod.photodiode.eq(lh.photodiode.i),
+                lh.pwm.o.eq(lh_mod.pwm),
+                lh.en.o.eq(lh_mod.enable_prism | enable_prism),
+                lh.laser0.o.eq(lasers[0] | lh_mod.lasers[0]),
+                lh.laser1.o.eq(lasers[1] | lh_mod.lasers[1]),
+            ]
 
-        # # Busy signal
-        # m.d.comb += busy.eq(polynomial.busy | laserhead.process_lines)
-        # # connect spi
-        # connect_synchronized_spi(m, spi, parser)
+        # polynomial iterates over count
+        coeffcnt = Signal(range(len(polynomial.coeff) + 1))
 
-        # # pins you can write to
-        # pins = Cat(lasers, enable_prism, laserhead.synchronize, laserhead.singlefacet)
-        # with m.FSM(init="RESET", name="dispatcher"):
-        #     with m.State("RESET"):
-        #         m.next = "WAIT_INSTRUCTION"
-        #         m.d.sync += pins.eq(0)
-        #     with m.State("WAIT_INSTRUCTION"):
-        #         m.d.sync += [self.read_commit.eq(0), polynomial.start.eq(0)]
-        #         with m.If((self.empty == 0) & parser.parse & (busy == 0)):
-        #             m.d.sync += self.read_en.eq(1)
-        #             m.next = "PARSEHEAD"
-        #     # check which instruction we r handling
-        #     with m.State("PARSEHEAD"):
-        #         byte0 = self.read_data[:8]
-        #         m.d.sync += self.read_en.eq(0)
-        #         with m.If(byte0 == INSTRUCTIONS.MOVE):
-        #             m.d.sync += [
-        #                 polynomial.ticklimit.eq(self.read_data[8:]),
-        #                 coeffcnt.eq(0),
-        #             ]
-        #             m.next = "MOVE_POLYNOMIAL"
-        #         with m.Elif(byte0 == INSTRUCTIONS.WRITEPIN):
-        #             m.d.sync += [
-        #                 pins.eq(self.read_data[8:]),
-        #                 self.read_commit.eq(1),
-        #             ]
-        #             m.next = "WAIT"
-        #         with m.Elif(
-        #             (byte0 == INSTRUCTIONS.SCANLINE)
-        #             | (byte0 == INSTRUCTIONS.LASTSCANLINE)
-        #         ):
-        #             m.d.sync += [
-        #                 self.read_discard.eq(1),
-        #                 laserhead.synchronize.eq(1),
-        #                 laserhead.expose_start.eq(1),
-        #             ]
-        #             m.next = "SCANLINE"
-        #         with m.Else():
-        #             m.next = "ERROR"
-        #             m.d.sync += parser.dispatcherror.eq(1)
-        #     with m.State("MOVE_POLYNOMIAL"):
-        #         with m.If(coeffcnt < len(polynomial.coeff)):
-        #             with m.If(self.read_en == 0):
-        #                 m.d.sync += self.read_en.eq(1)
-        #             with m.Else():
-        #                 m.d.sync += [
-        #                     polynomial.coeff[coeffcnt].eq(self.read_data),
-        #                     coeffcnt.eq(coeffcnt + 1),
-        #                     self.read_en.eq(0),
-        #                 ]
-        #         with m.Else():
-        #             m.next = "WAIT"
-        #             m.d.sync += [polynomial.start.eq(1), self.read_commit.eq(1)]
-        #     with m.State("SCANLINE"):
-        #         m.d.sync += [
-        #             self.read_discard.eq(0),
-        #             laserhead.expose_start.eq(0),
-        #         ]
-        #         m.next = "WAIT"
-        #     # NOTE: you need to wait for busy to be raised
-        #     #       in time
-        #     with m.State("WAIT"):
-        #         m.d.sync += polynomial.start.eq(0)
-        #         m.next = "WAIT_INSTRUCTION"
-        #     # NOTE: system never recovers user must reset
-        #     with m.State("ERROR"):
-        #         m.next = "ERROR"
+        # connect Parser
+        m.d.comb += [
+            self.read_data.eq(parser.read_data),
+            lh_mod.read_data.eq(parser.read_data),
+            lh_mod.empty.eq(parser.empty),
+            self.empty.eq(parser.empty),
+            parser.read_commit.eq(self.read_commit | lh_mod.read_commit),
+            parser.read_en.eq(self.read_en | lh_mod.read_en),
+            parser.read_discard.eq(self.read_discard | lh_mod.read_discard),
+        ]
+        # connect motors
+        for idx, stepper in enumerate(steppers):
+            if not platform.settings.test:
+                stepper.dir = stepper.dir.o
+                stepper.limit = stepper.limit.i
+                stepper.step = stepper.step.o
+
+            step = polynomial.step[idx] & ((stepper.limit == 0) | stepper.dir)
+            if idx != (
+                list(platform.settings.motor_cfg["steps_mm"].keys()).index(
+                    platform.settings.motor_cfg["orth2lsrline"]
+                )
+            ):
+                direction = polynomial.dir[idx]
+                m.d.comb += [
+                    stepper.step.eq(step),
+                    stepper.dir.eq(direction),
+                    parser.pin_state[idx].eq(stepper.limit),
+                ]
+            # connect the motor in which the laserhead moves to laser core
+            else:
+                m.d.comb += [
+                    parser.pin_state[idx].eq(stepper.limit),
+                    stepper.step.eq(
+                        (step & (~lh_mod.process_lines))
+                        | (lh_mod.step & (lh_mod.process_lines))
+                    ),
+                    stepper.dir.eq(
+                        (polynomial.dir[idx] & (~lh_mod.process_lines))
+                        | (lh_mod.dir & (lh_mod.process_lines))
+                    ),
+                ]
+        m.d.comb += parser.pin_state[len(steppers) :].eq(
+            Cat(lh_mod.photodiode_t, lh_mod.synchronized)
+        )
+
+        # update position
+        stepper_d = Array(Signal() for _ in range(len(steppers)))
+        for idx, stepper in enumerate(steppers):
+            pos = parser.position[idx]
+            m.d.sync += stepper_d[idx].eq(stepper.step)
+            with m.If(stepper.limit == 1):
+                m.d.sync += parser.position[idx].eq(0)
+            # assuming position is signed
+            # TODO: this might eat LUT, optimize
+            pos_max = pow(2, len(pos) - 1) - 2
+            with m.Elif((pos > pos_max) | (pos < -pos_max)):
+                m.d.sync += parser.position[idx].eq(0)
+            with m.Elif((stepper.step == 1) & (stepper_d[idx] == 0)):
+                with m.If(stepper.dir):
+                    m.d.sync += pos.eq(pos + 1)
+                with m.Else():
+                    m.d.sync += pos.eq(pos - 1)
+
+        # Busy signal
+        m.d.comb += busy.eq(polynomial.busy | lh_mod.process_lines)
+        # connect spi
+        connect_synchronized_spi(m, spi, parser)
+
+        # pins you can write to
+        pins = Cat(lasers, enable_prism, lh_mod.synchronize, lh_mod.singlefacet)
+        with m.FSM(init="RESET", name="dispatcher"):
+            with m.State("RESET"):
+                m.d.sync += pins.eq(0)
+                m.next = "WAIT_INSTRUCTION"
+
+            with m.State("WAIT_INSTRUCTION"):
+                m.d.sync += [self.read_commit.eq(0), polynomial.start.eq(0)]
+                with m.If(
+                    (~self.empty)
+                    & parser.parse
+                    & (~(polynomial.busy | lh_mod.process_lines))
+                ):
+                    m.d.sync += self.read_en.eq(1)
+                    m.next = "PARSEHEAD"
+            # check which instruction we r handling
+            with m.State("PARSEHEAD"):
+                byte0 = self.read_data[:8]
+                m.d.sync += self.read_en.eq(0)
+                with m.If(byte0 == Spi.Instructions.move):
+                    m.d.sync += [
+                        polynomial.tick_limit.eq(self.read_data[8:]),
+                        coeffcnt.eq(0),
+                    ]
+                    m.next = "MOVE_POLYNOMIAL"
+                with m.Elif(byte0 == Spi.Instructions.write_pin):
+                    m.d.sync += [
+                        pins.eq(self.read_data[8:]),
+                        self.read_commit.eq(1),
+                    ]
+                    m.next = "WAIT"
+                with m.Elif(
+                    (byte0 == Spi.Instructions.scanline)
+                    | (byte0 == Spi.Instructions.last_scanline)
+                ):
+                    m.d.sync += [
+                        self.read_discard.eq(1),
+                        lh_mod.synchronize.eq(1),
+                        lh_mod.expose_start.eq(1),
+                    ]
+                    m.next = "SCANLINE"
+                with m.Else():
+                    m.next = "ERROR"
+                    m.d.sync += parser.error_dispatch.eq(1)
+            with m.State("MOVE_POLYNOMIAL"):
+                with m.If(coeffcnt < len(polynomial.coeff)):
+                    with m.If(self.read_en == 0):
+                        m.d.sync += self.read_en.eq(1)
+                    with m.Else():
+                        m.d.sync += [
+                            polynomial.coeff[coeffcnt].eq(self.read_data),
+                            coeffcnt.eq(coeffcnt + 1),
+                            self.read_en.eq(0),
+                        ]
+                with m.Else():
+                    m.next = "WAIT"
+                    m.d.sync += [polynomial.start.eq(1), self.read_commit.eq(1)]
+            with m.State("SCANLINE"):
+                m.d.sync += [
+                    self.read_discard.eq(0),
+                    lh_mod.expose_start.eq(0),
+                ]
+                m.next = "WAIT"
+            # NOTE: you need to wait for busy to be raised
+            #       in time
+            with m.State("WAIT"):
+                m.d.sync += polynomial.start.eq(0)
+                m.next = "WAIT_INSTRUCTION"
+            # NOTE: system never recovers user must reset
+            with m.State("ERROR"):
+                m.next = "ERROR"
         return m
 
 

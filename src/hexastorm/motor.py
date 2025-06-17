@@ -410,3 +410,36 @@ class Driver(Elaboratable):
             raise Exception(f"{motorstate} not supported")
 
         return m
+
+
+## Statement present in core
+## PCB motor, disabled
+# # Prism motor
+# prism_driver = Driver(platform)
+# m.submodules.prism_driver = prism_driver
+# # connect prism motor
+# for idx in range(len(leds)):
+#     m.d.comb += leds[idx].eq(prism_driver.leds[idx])
+
+# m.d.comb += [
+#     prism_driver.enable_prism.eq(enable_prism | laserhead.enable_prism),
+#     parser.word_to_send.eq(prism_driver.debugword),
+# ]
+# m.d.comb += [
+#     bldc.uL.eq(prism_driver.uL),
+#     bldc.uH.eq(prism_driver.uH),
+#     bldc.vL.eq(prism_driver.vL),
+#     bldc.vH.eq(prism_driver.vH),
+#     bldc.wL.eq(prism_driver.wL),
+#     bldc.wH.eq(prism_driver.wH),
+# ]
+# m.d.comb += [
+#     prism_driver.hall[0].eq(bldc.sensor0),
+#     prism_driver.hall[1].eq(bldc.sensor1),
+#     prism_driver.hall[2].eq(bldc.sensor2),
+# ]
+# # connect laser module to prism motor
+# m.d.comb += [
+#     prism_driver.ticksinfacet.eq(laserhead.ticksinfacet),
+#     prism_driver.synchronized.eq(laserhead.synchronized),
+# ]

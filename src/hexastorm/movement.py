@@ -58,7 +58,7 @@ class Polynomial(Elaboratable):
         self.motors = cfg.motors
         self.max_steps = int(cfg.move_ticks / 2)  # Nyquist
         self.bit_shift = cfg.bit_shift
-        self.divider = platform.clks[platform.hfosc_div]
+        self.divider = platform.settings.ice40_cfg["clks"][platform.hfosc_div]
 
         # Input
         self.coeff = Array()
@@ -96,8 +96,8 @@ class Polynomial(Elaboratable):
             assert steppers, "No stepper resources found"
             for i, stepper in enumerate(steppers):
                 m.d.comb += [
-                    stepper.step.eq(self.step[i]),
-                    stepper.dir.eq(self.dir[i]),
+                    stepper.step.eq(self.step[i].o),
+                    stepper.dir.eq(self.dir[i].o),
                 ]
         else:
             # Expose internals for simulation

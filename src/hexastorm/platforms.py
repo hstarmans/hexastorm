@@ -13,6 +13,7 @@ from .resources import (
     # BLDCResource,
     LaserscannerRecord,
     LaserscannerResource,
+    StepperRecord,
     StepperResource,
 )
 
@@ -21,11 +22,13 @@ class TestPlatform:
     clks = {0: 1}  # dictionary to determine clock divider, e.g. movement.py
     hfosc_div = 0  # selects clock speed on UP5K and clk divider
     laserhead = LaserscannerRecord()
+
     # bldc = BLDCRecord()
 
     def __init__(self):
         self.settings = PlatformConfig(test=True)
         self.hdl_cfg = self.settings.hdl_cfg
+        self.steppers = [StepperRecord()] * self.settings.hdl_cfg.motors
 
 
 class Firestarter(LatticeICE40Platform):

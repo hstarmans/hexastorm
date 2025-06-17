@@ -2,7 +2,7 @@ import unittest
 
 from hexastorm.core import Dispatcher, SPIParser
 
-# from hexastorm.movement import Polynomial
+from hexastorm.movement import Polynomial
 from hexastorm.platforms import Firestarter
 
 
