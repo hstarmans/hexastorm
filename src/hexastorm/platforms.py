@@ -46,10 +46,10 @@ class Firestarter(LatticeICE40Platform):
         Resource(
             "debug_spi",
             0,
-            Subsignal("sck", Pins("19", dir="i")),
-            Subsignal("sdi", Pins("13", dir="i")),
-            Subsignal("sdo", Pins("18", dir="o")),
-            Subsignal("cs", PinsN("25", dir="i")),
+            Subsignal("sck", Pins("19")),
+            Subsignal("sdi", Pins("13")),
+            Subsignal("sdo", Pins("18")),
+            Subsignal("cs", PinsN("25")),
             Attrs(IO_STANDARD="SB_LVCMOS"),
         ),
         # Laserscanner resource
@@ -98,8 +98,9 @@ class Firestarter(LatticeICE40Platform):
     ]
     connectors = []
 
-    def __init__(self):
+    def __init__(self, test=False):
         LatticeICE40Platform.__init__(self)
+        self.settings = PlatformConfig(test=test)
         self.hdl_cfg = self.settings.hdl_cfg
 
     def build(self, *args, **kwargs):

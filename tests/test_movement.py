@@ -1,11 +1,11 @@
 from hexastorm.utils import LunaGatewareTestCase, async_test_case
 from hexastorm.controller import TestHost
-from hexastorm.platforms import TestPlatform
+from hexastorm.platforms import Firestarter
 from hexastorm.movement import Polynomial
 
 
 class TestPolynomial(LunaGatewareTestCase):
-    platform = TestPlatform()
+    platform = Firestarter(test=True)
     FRAGMENT_UNDER_TEST = Polynomial
     FRAGMENT_ARGUMENTS = {"platform": platform}
 
