@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from amaranth import Cat, Elaboratable, Module, Signal, signed, Mux
 from amaranth.hdl import Array
 from luna.gateware.interface.spi import (
@@ -34,7 +36,7 @@ class SPIParser(Elaboratable):
             - positions   : Array of stepper motor positions
             - pin_state   : External pin state to report
             - read_commit, read_en, read_discard : FIFO control
-            - dispatcherror : Error detected in dispatcher
+            - error_dispatch : Error detected in dispatcher
             - word_to_send  : Debug word to send
         Outputs:
             - parse        : Processing FIFO
@@ -42,17 +44,16 @@ class SPIParser(Elaboratable):
             - empty        : FIFO empty flag
     """
 
-    def __init__(self, platform, top=False):
+    def __init__(self, hdl_cfg):
         """
-        platform  -- pass test platform
-        top       -- trigger synthesis of module
+        hdl_cfg  -- Hardware defined language configuration (dictionary)
         """
-        self.platform = platform
-        self.top = top
-        cfg = platform.hdl_cfg
+        self.hdl_cfg = hdl_cfg
 
-        self.spi = SPIBus()
-        self.position = Array(Signal(signed(64)) for _ in range(cfg.motors))
+        self.spi_command = SPICommandInterface(
+            command_size=Spi.command_bytes * 8, word_size=Spi.word_bytes * 8
+        )
+        self.position = Array(Signal(signed(64)) for _ in range(hdl_cfg.motors))
         self.pin_state = Signal(8)
 
         # FIFO interaction
@@ -61,32 +62,28 @@ class SPIParser(Elaboratable):
         self.read_discard = Signal()
 
         self.error_dispatch = Signal()
-        self.debug_word = Signal(cfg.mem_width)
+        self.debug_word = Signal(hdl_cfg.mem_width)
         self.parse = Signal()
-        self.read_data = Signal(cfg.mem_width)
+        self.read_data = Signal(hdl_cfg.mem_width)
         self.empty = Signal()
 
     def elaborate(self, platform):
         m = Module()
+        hdl_cfg = self.hdl_cfg
 
-        plf = self.platform or platform
-        cfg = plf.hdl_cfg
-
-        if plf and self.top:
-            board_spi = plf.request("debug_spi")
-            connect_synchronized_spi(m, board_spi, self)
-
-        interf = SPICommandInterface(
-            command_size=Spi.command_bytes * 8, word_size=Spi.word_bytes * 8
-        )
+        interf = self.spi_command
         m.submodules.interf = interf
-        connect_synchronized_spi(m, self.spi, interf)
+        self.interf = interf
 
         # FIFO instantation
-        fifo = TransactionalizedFIFO(width=cfg.mem_width, depth=cfg.mem_depth)
-        if cfg.test:
-            self.fifo = fifo
+        fifo = TransactionalizedFIFO(width=hdl_cfg.mem_width, depth=hdl_cfg.mem_depth)
         m.submodules.fifo = fifo
+
+        if platform is not None:  # Building module
+            board_spi = platform.request("debug_spi", dir="-")
+            connect_synchronized_spi(m, board_spi, interf)
+        else:  # Expose for testing
+            self.fifo = fifo
 
         # Connect FIFO control and status
         m.d.comb += [
@@ -99,13 +96,13 @@ class SPIParser(Elaboratable):
 
         # Internal state
         state = Signal(8)
-        mtr_idx = Signal(range(cfg.motors))
+        mtr_idx = Signal(range(hdl_cfg.motors))
 
         words_rec = Signal(
             range(
                 max(
-                    cfg.words_move,
-                    cfg.words_scanline + 1,
+                    hdl_cfg.words_move,
+                    hdl_cfg.words_scanline + 1,
                 )
             )
         )
@@ -158,7 +155,7 @@ class SPIParser(Elaboratable):
                                 interf.word_to_send.eq(self.position[mtr_idx]),
                                 mtr_idx.eq(
                                     Mux(
-                                        mtr_idx < cfg.motors - 1,
+                                        mtr_idx < hdl_cfg.motors - 1,
                                         mtr_idx + 1,
                                         0,
                                     )
@@ -198,10 +195,10 @@ class SPIParser(Elaboratable):
 
                 instr = Spi.Instructions
                 m.d.comb += ready_to_commit.eq(
-                    ((instr_rec == instr.move) & (words_rec >= cfg.words_move))
+                    ((instr_rec == instr.move) & (words_rec >= hdl_cfg.words_move))
                     | (
                         (instr_rec == instr.scanline)
-                        & (words_rec >= cfg.words_scanline)
+                        & (words_rec >= hdl_cfg.words_scanline)
                     )
                     | (instr_rec == instr.write_pin)
                     | (instr_rec == instr.last_scanline)
@@ -302,36 +299,45 @@ class Dispatcher(Elaboratable):
             parser.read_en.eq(self.read_en | lh_mod.read_en),
             parser.read_discard.eq(self.read_discard | lh_mod.read_discard),
         ]
-        # connect motors
-        for idx, stepper in enumerate(steppers):
-            if not platform.settings.test:
-                stepper.dir = stepper.dir.o
-                stepper.limit = stepper.limit.i
-                stepper.step = stepper.step.o
 
-            step = polynomial.step[idx] & ((stepper.limit == 0) | stepper.dir)
-            if idx != (
-                list(platform.settings.motor_cfg["steps_mm"].keys()).index(
-                    platform.settings.motor_cfg["orth2lsrline"]
+        normalized_steppers = []
+        # Normalize stepper IOs
+        for idx, stepper in enumerate(steppers):
+            if platform.settings.test:
+                norm = SimpleNamespace(
+                    step=stepper.step, dir=stepper.dir, limit=stepper.limit
                 )
-            ):
+            else:
+                norm = SimpleNamespace(
+                    step=stepper.step.o, dir=stepper.dir.o, limit=stepper.limit.i
+                )
+            normalized_steppers.append(norm)
+
+        # Connect logic
+        for idx, norm in enumerate(normalized_steppers):
+            step = polynomial.step[idx] & ((norm.limit == 0) | norm.dir)
+
+            is_laser_motor = idx == list(
+                platform.settings.motor_cfg["steps_mm"].keys()
+            ).index(platform.settings.motor_cfg["orth2lsrline"])
+
+            if not is_laser_motor:
                 direction = polynomial.dir[idx]
                 m.d.comb += [
-                    stepper.step.eq(step),
-                    stepper.dir.eq(direction),
-                    parser.pin_state[idx].eq(stepper.limit),
+                    norm.step.eq(step),
+                    norm.dir.eq(direction),
+                    parser.pin_state[idx].eq(norm.limit),
                 ]
-            # connect the motor in which the laserhead moves to laser core
             else:
                 m.d.comb += [
-                    parser.pin_state[idx].eq(stepper.limit),
-                    stepper.step.eq(
+                    parser.pin_state[idx].eq(norm.limit),
+                    norm.step.eq(
                         (step & (~lh_mod.process_lines))
-                        | (lh_mod.step & (lh_mod.process_lines))
+                        | (lh_mod.step & lh_mod.process_lines)
                     ),
-                    stepper.dir.eq(
+                    norm.dir.eq(
                         (polynomial.dir[idx] & (~lh_mod.process_lines))
-                        | (lh_mod.dir & (lh_mod.process_lines))
+                        | (lh_mod.dir & lh_mod.process_lines)
                     ),
                 ]
         m.d.comb += parser.pin_state[len(steppers) :].eq(
@@ -340,7 +346,7 @@ class Dispatcher(Elaboratable):
 
         # update position
         stepper_d = Array(Signal() for _ in range(len(steppers)))
-        for idx, stepper in enumerate(steppers):
+        for idx, stepper in enumerate(normalized_steppers):
             pos = parser.position[idx]
             m.d.sync += stepper_d[idx].eq(stepper.step)
             with m.If(stepper.limit == 1):

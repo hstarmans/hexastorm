@@ -1,18 +1,18 @@
 from hexastorm.utils import LunaGatewareTestCase, async_test_case
 from hexastorm.controller import TestHost
-from hexastorm.platforms import Firestarter
+from hexastorm.config import PlatformConfig
 from hexastorm.movement import Polynomial
 
 
 class TestPolynomial(LunaGatewareTestCase):
-    platform = Firestarter(test=True)
+    plf_cfg = PlatformConfig(test=True)
     FRAGMENT_UNDER_TEST = Polynomial
-    FRAGMENT_ARGUMENTS = {"platform": platform}
+    FRAGMENT_ARGUMENTS = {"plf_cfg": plf_cfg}
 
     async def initialize_signals(self, sim) -> None:
         """Initialize simulation environment and signals."""
         self.host = TestHost()
-        self.move_ticks = self.platform.hdl_cfg.move_ticks
+        self.move_ticks = self.plf_cfg.hdl_cfg.move_ticks
         self.sim = sim
         sim.set(self.dut.tick_limit, self.move_ticks)
         await sim.tick()
@@ -40,7 +40,7 @@ class TestPolynomial(LunaGatewareTestCase):
         Coefficients are for: c·x³ + b·x² + a·x
         """
         coeffs = [a, b, c]
-        for _ in range(self.platform.hdl_cfg.motors):
+        for _ in range(self.plf_cfg.hdl_cfg.motors):
             for idx in range(self.dut.order):
                 self.sim.set(self.dut.coeff[idx], coeffs[idx])
         await self.pulse(self.dut.start)

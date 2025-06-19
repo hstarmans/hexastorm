@@ -8,36 +8,42 @@ from amaranth.hdl.rec import Layout
 __all__ = ["StepperResource", "LaserscannerResource", "BLDCResource"]
 
 
-def get_all_resources(platform, name):
-    """Helper function to get multiple resources by name
+def get_all_resources(platform, name, **kwargs):
+    """
+    Retrieve all available numbered instances of a resource from the platform.
 
-    If you request stepper you would end up with a list of
-    steppers if there are multiple of such resources
-    in your board.
+    This function repeatedly requests resources of the given name from the platform,
+    incrementing the resource number starting from 0, until a ResourceError is raised.
+    It is useful for collecting all resources of a given type (e.g., multiple steppers).
+
+    Parameters:
+        platform: The Amaranth platform instance.
+        name (str): The base name of the resource to request (e.g., "stepper").
+        **kwargs: Optional keyword arguments to pass to `platform.request()`,
+                  such as `dir="-"` for RFC 55 compliance.
+
+    Returns:
+        List of requested resources, one for each numbered instance found.
     """
     resources = []
     for number in itertools.count():
         try:
-            resources.append(platform.request(name, number))
+            resources.append(platform.request(name, number, **kwargs))
         except ResourceError:
             break
     return resources
 
 
-class StepperLayout(Layout):
-    """Layout to test stepper motor"""
-
-    def __init__(self):
-        super().__init__(
-            [("step", unsigned(8)), ("dir", unsigned(16)), ("limit", 1)]
-        )
-
-
 class StepperRecord(Record):
-    """Record to test stepper motor"""
+    """Record representing a stepper motor interface for simulation or test."""
 
     def __init__(self):
-        super().__init__(StepperLayout())
+        layout = [
+            ("step", unsigned(8)),
+            ("dir", unsigned(16)),
+            ("limit", 1),
+        ]
+        super().__init__(layout)
 
 
 def StepperResource(*args, step_pin, dir_pin, limit_pin, number=None, conn=None):
@@ -45,18 +51,19 @@ def StepperResource(*args, step_pin, dir_pin, limit_pin, number=None, conn=None)
     Stepper motor resource.
 
     I/O signals:
-        step_pin     -- Output step pulse
-        dir_pin      -- Output direction control
-        limit_pin    -- Input limit switch
+        step_pin     -- Step pulse (output)
+        dir_pin      -- Direction control (output)
+        limit_pin    -- Limit switch (input)
     """
     ios = [
-        Subsignal("step", Pins(step_pin, dir="o", conn=conn, assert_width=1)),
-        Subsignal("dir", Pins(dir_pin, dir="o", conn=conn, assert_width=1)),
-        Subsignal("limit", Pins(limit_pin, dir="i", conn=conn, assert_width=1)),
+        Subsignal("step", Pins(step_pin, conn=conn, assert_width=1)),
+        Subsignal("dir", Pins(dir_pin, conn=conn, assert_width=1)),
+        Subsignal("limit", Pins(limit_pin, conn=conn, assert_width=1)),
+        Attrs(IO_STANDARD="SB_LVCMOS"),
     ]
-    ios.append(Attrs(IO_STANDARD="SB_LVCMOS"))
 
     return Resource.family(*args, number, default_name="stepper", ios=ios)
+
 
 class BLDCLayout(Layout):
     """Signal layout for a 3-phase BLDC motor."""
@@ -86,9 +93,17 @@ class BLDCRecord(Record):
 
 def BLDCResource(
     *args,
-    uL, uH, vL, vH, wL, wH,
-    sensor0, sensor1, sensor2,
-    number=None, conn=None,
+    uL,
+    uH,
+    vL,
+    vH,
+    wL,
+    wH,
+    sensor0,
+    sensor1,
+    sensor2,
+    number=None,
+    conn=None,
 ):
     """
     BLDC motor resource.
@@ -115,14 +130,18 @@ def BLDCResource(
 
 class LaserScannerLayout(Layout):
     """Signal layout for a laser scanner head."""
+
     def __init__(self):
-        super().__init__([
-            ("laser0", 1),
-            ("laser1", 1),
-            ("photodiode", 1),
-            ("pwm", 1),
-            ("en", 1),
-        ])
+        super().__init__(
+            [
+                ("laser0", 1),
+                ("laser1", 1),
+                ("photodiode", 1),
+                ("pwm", 1),
+                ("en", 1),
+            ]
+        )
+
 
 class LaserscannerRecord(Record):
     """Record to test stepper motor"""
@@ -133,8 +152,13 @@ class LaserscannerRecord(Record):
 
 def LaserscannerResource(
     *args,
-    laser0, laser1, photodiode, pwm, enable,
-    number=None, conn=None,
+    laser0,
+    laser1,
+    photodiode,
+    pwm,
+    enable,
+    number=None,
+    conn=None,
 ):
     """
     Laser scanner resource.

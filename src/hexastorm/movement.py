@@ -1,4 +1,5 @@
 from amaranth import Elaboratable, Module, Signal, signed
+from amaranth.lib.io import Buffer
 from amaranth.hdl import Array
 
 from .resources import get_all_resources
@@ -45,20 +46,17 @@ class Polynomial(Elaboratable):
         busy        - Active while polynomial is being evaluated
     """
 
-    def __init__(self, platform, top=False):
+    def __init__(self, plf_cfg):
         """
-        platform  -- pass test platform
-        top       -- trigger synthesis of module
+        plf_cfg  -- platform configuration
         """
-        self.top = top
-        self.platform = platform
-
-        cfg = platform.hdl_cfg
-        self.order = cfg.pol_degree
-        self.motors = cfg.motors
-        self.max_steps = int(cfg.move_ticks / 2)  # Nyquist
-        self.bit_shift = cfg.bit_shift
-        self.divider = platform.settings.ice40_cfg["clks"][platform.hfosc_div]
+        self.hdl_cfg = hdl_cfg = plf_cfg.hdl_cfg
+        self.order = hdl_cfg.pol_degree
+        self.motors = hdl_cfg.motors
+        self.max_steps = int(hdl_cfg.move_ticks / 2)  # Nyquist
+        self.bit_shift = hdl_cfg.bit_shift
+        ice40_cfg = plf_cfg.ice40_cfg
+        self.divider = ice40_cfg["clks"][ice40_cfg["hfosc_div"]]
 
         # Input
         self.coeff = Array()
@@ -69,7 +67,7 @@ class Polynomial(Elaboratable):
             ]
         )
         self.start = Signal()
-        self.tick_limit = Signal(cfg.move_ticks.bit_length())
+        self.tick_limit = Signal(hdl_cfg.move_ticks.bit_length())
 
         # Output
         self.busy = Signal()
@@ -78,11 +76,10 @@ class Polynomial(Elaboratable):
 
     def elaborate(self, platform):
         m = Module()
-        platform = self.platform or platform
 
         # Timing counters
         cntr = Signal(range(self.divider))
-        ticks = Signal(platform.hdl_cfg.move_ticks.bit_length())
+        ticks = Signal(self.hdl_cfg.move_ticks.bit_length())
 
         # Internal signed counters per motor per order
         max_bits = (self.max_steps << self.bit_shift).bit_length()
@@ -90,19 +87,23 @@ class Polynomial(Elaboratable):
         prev = Array(Signal(signed(max_bits + 1)) for _ in range(self.motors))
         assert max_bits <= 64
 
-        if self.top:
-            # Connect to platform stepper resources
-            steppers = get_all_resources(platform, "stepper")
-            assert steppers, "No stepper resources found"
-            for i, stepper in enumerate(steppers):
-                m.d.comb += [
-                    stepper.step.eq(self.step[i].o),
-                    stepper.dir.eq(self.dir[i].o),
-                ]
-        else:
+        if platform is None:
             # Expose internals for simulation
             self.ticks = ticks
             self.cntrs = cntrs
+        else:
+            # Connect to platform stepper resources
+            steppers = get_all_resources(platform, "stepper", dir="-")
+            assert steppers, "No stepper resources found"
+            for i, stepper in enumerate(steppers):
+                m.submodules += [
+                    step_buf := Buffer("o", stepper.step),
+                    dir_buf := Buffer("o", stepper.dir),
+                ]
+                m.d.comb += [
+                    step_buf.o.eq(self.step[i]),
+                    dir_buf.o.eq(self.dir[i]),
+                ]
 
         # Generate step pulse based on toggling specific bit
         for motor in range(self.motors):

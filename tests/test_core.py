@@ -3,22 +3,23 @@ from random import randint
 import numpy as np
 from numpy.testing import assert_array_almost_equal, assert_array_equal
 
-from hexastorm.config import Spi
+from hexastorm.config import Spi, PlatformConfig
 from hexastorm.utils import async_test_case
 from hexastorm.spi import SPIGatewareTestCase
 from hexastorm.controller import TestHost, Memfull
 from hexastorm.core import SPIParser, Dispatcher
-from hexastorm.platforms import TestPlatform
+from hexastorm.platforms import Firestarter
 
 
 class TestParser(SPIGatewareTestCase):
-    platform = TestPlatform()
+    hdl_cfg = PlatformConfig(test=True).hdl_cfg
     FRAGMENT_UNDER_TEST = SPIParser
-    FRAGMENT_ARGUMENTS = {"platform": platform}
+    FRAGMENT_ARGUMENTS = {"hdl_cfg": hdl_cfg}
 
     async def initialize_signals(self, sim):
         self.host = TestHost()
         self.sim = sim
+        self.dut.spi = self.dut.spi_command.spi
         self.host.spi_exchange_data = self.spi_exchange_data
         sim.set(self.dut.spi.cs, 0)
         await sim.tick()
@@ -37,7 +38,7 @@ class TestParser(SPIGatewareTestCase):
         self.assertEqual(sim.get(self.dut.empty), 0)
         self.assertEqual(
             sim.get(self.dut.fifo.space_available),
-            self.platform.hdl_cfg.mem_depth - check,
+            self.hdl_cfg.mem_depth - check,
         )
 
     @async_test_case
@@ -46,7 +47,7 @@ class TestParser(SPIGatewareTestCase):
         Checks that host-reported motor positions match values set on FPGA accounting for mm conversion.
         """
         decimals = 3
-        position = [randint(-2000, 2000) for _ in range(self.platform.hdl_cfg.motors)]
+        position = [randint(-2000, 2000) for _ in range(self.hdl_cfg.motors)]
         for idx, pos in enumerate(self.dut.position):
             sim.set(pos, position[idx])
         await sim.tick()
@@ -63,7 +64,7 @@ class TestParser(SPIGatewareTestCase):
         await self.host.write_line([1] * laser_timing["scanline_length"])
         while sim.get(self.dut.empty) == 1:
             await sim.tick()
-        await self.assert_fifo_written(self.platform.hdl_cfg.words_scanline)
+        await self.assert_fifo_written(self.hdl_cfg.words_scanline)
 
     @async_test_case
     async def test_scanline_empty_to_fifo(self, sim):
@@ -86,7 +87,7 @@ class TestParser(SPIGatewareTestCase):
     async def test_fifo_not_empty_after_spline_move(self, sim):
         "Check spline move instruction writes the expected number of words to the FIFO"
         self.assertEqual(sim.get(self.dut.empty), 1)
-        cfg = self.platform.hdl_cfg
+        cfg = self.hdl_cfg
         coeff = [randint(0, 10)] * cfg.motors * cfg.pol_degree
         await self.host.spline_move(1000, coeff)
         await self.assert_fifo_written(cfg.words_move)
@@ -151,64 +152,62 @@ class TestParser(SPIGatewareTestCase):
         state = await self.host.fpga_state
         self.assertFalse(state["mem_full"])
 
-        cfg = self.platform.hdl_cfg
-
         try:
-            for _ in range(cfg.mem_depth):
-                await self.host.spline_move(1000, [1] * cfg.motors)
+            for _ in range(self.hdl_cfg.mem_depth):
+                await self.host.spline_move(1000, [1] * self.hdl_cfg.motors)
         except Memfull:
             pass
 
         state = await self.host.fpga_state
         self.assertTrue(state["mem_full"])
 
+        # class TestDispatcher(SPIGatewareTestCase):
+        #     platform = TestPlatform()
+        #     FRAGMENT_UNDER_TEST = Dispatcher
+        #     FRAGMENT_ARGUMENTS = {"platform": platform}
 
-# class TestDispatcher(SPIGatewareTestCase):
-#     platform = TestPlatform()
-#     FRAGMENT_UNDER_TEST = Dispatcher
-#     FRAGMENT_ARGUMENTS = {"platform": platform, "simdiode": True}
+        #     async def initialize_signals(self, sim):
+        #         self.sim = sim
+        #         self.host = TestHost()
+        #         self.host.spi_exchange_data = lambda data: self.spi_exchange_data(data=data)
+        #         sim.set(self.dut.spi.cs, 0)
+        #         await sim.tick()
 
-#     async def initialize_signals(self, sim):
-#         self.host = Host(self.platform)
-#         self.host.spi_exchange_data = lambda data: self.spi_exchange_data(
-#             sim=sim, data=data
-#         )
-#         sim.set(self.dut.spi.cs, 0)
-#         await sim.tick()
+        #     async def wait_complete(self):
+        #         """helper method to completion"""
+        #         cntr = 0
+        #         sim = self.sim
+        #         while sim.get(self.dut.busy) or cntr < 100:
+        #             if sim.get(self.dut.pol.busy):
+        #                 cntr = 0
+        #             else:
+        #                 cntr += 1
+        #             await sim.tick()
 
-#     async def wait_complete(self, sim):
-#         """helper method to wait for completion"""
-#         cntr = 0
-#         while sim.get(self.dut.busy) or cntr < 100:
-#             if sim.get(self.dut.pol.busy):
-#                 cntr = 0
-#             else:
-#                 cntr += 1
-#             await sim.tick()
+        #     @async_test_case
+        #     async def test_memfull(self, sim):
+        #         """write move instruction until memory is full, enable parser
+        #         and ensure there is no parser error.
+        #         """
+        #         # should fill the memory as move instruction is
+        #         # larger than the memdepth
+        #         self.assertEqual((await self.host.fpga_state)["mem_full"], False)
+        #         await self.host.set_parsing(False)
+        #         try:
+        #             for _ in range(self.platform.hdl_cfg.mem_depth):
+        #                 await self.host.spline_move(1000, [1] * self.platform.hdl_cfg.motors)
+        #         except Memfull:
+        #             pass
+        #         self.assertEqual((await self.host.fpga_state)["mem_full"], True)
+        #         await self.host.set_parsing(True)
+        #         # data should now be processed from sram and empty become 1
+        #         while sim.get(self.dut.parser.empty) == 0:
+        #             await sim.tick()
+        #         # 2 clocks needed for error to propagate
+        #         await sim.tick()
+        #         await sim.tick()
+        self.assertEqual((await self.host.fpga_state)["error"], False)
 
-#     @async_test_case
-#     async def test_memfull(self, sim):
-#         """write move instruction until memory is full, enable parser
-#         and ensure there is no parser error.
-#         """
-#         # should fill the memory as move instruction is
-#         # larger than the memdepth
-#         self.assertEqual((await self.host.get_state())["mem_full"], False)
-#         await self.host.set_parsing(False)
-#         try:
-#             for _ in range(self.platform.memdepth):
-#                 await self.host.spline_move(1000, [1] * self.platform.motors)
-#         except Memfull:
-#             pass
-#         self.assertEqual((await self.host.get_state())["mem_full"], True)
-#         await self.host.set_parsing(True)
-#         # data should now be processed from sram and empty become 1
-#         while sim.get(self.dut.parser.empty) == 0:
-#             await sim.tick()
-#         # 2 clocks needed for error to propagate
-#         await sim.tick()
-#         await sim.tick()
-#         self.assertEqual((await self.host.get_state())["error"], False)
 
 #     @async_test_case
 #     async def test_readdiode(self, sim):
@@ -218,15 +217,16 @@ class TestParser(SPIGatewareTestCase):
 #         has been triggered for each cycle.
 #         The photodiode is triggered by the simdiode.
 #         """
+#         facet_ticks = self.platform.settings.laser_timing["facet_ticks"]
 #         await self.host.set_parsing(False)
 #         await self.host.enable_comp(laser0=True, polygon=True)
-#         for _ in range(self.dut.laserhead.dct["TICKSINFACET"] * 2):
+#         for _ in range(facet_ticks * 2):
 #             await sim.tick()
 #         self.assertEqual(sim.get(self.dut.laserhead.photodiode_t), False)
 #         # not triggered as laser and polygon not on
 #         await self.host.set_parsing(True)
-#         val = (await self.host.get_state())["photodiode_trigger"]
-#         for _ in range(self.dut.laserhead.dct["TICKSINFACET"] * 2):
+#         val = (await self.host.fpga_state)["photodiode_trigger"]
+#         for _ in range(facet_ticks * 2):
 #             await sim.tick()
 #         self.assertEqual(sim.get(self.dut.laserhead.photodiode_t), True)
 #         self.assertEqual(val, True)
@@ -241,14 +241,16 @@ class TestParser(SPIGatewareTestCase):
 #         while sim.get(self.dut.parser.empty):
 #             await sim.tick()
 #         await sim.tick()
-#         self.assertEqual((await self.host.get_state())["error"], False)
-#         self.assertEqual(sim.get(self.dut.laserheadpins.laser0), 1)
-#         self.assertEqual(sim.get(self.dut.laserheadpins.laser1), 0)
-#         self.assertEqual(sim.get(self.dut.laserheadpins.en), 1)
+#         self.assertEqual((await self.host.fpga_state)["error"], False)
+#         self.assertEqual(sim.get(self.dut.lh.laser0), 1)
+#         self.assertEqual(sim.get(self.dut.lh.laser1), 0)
+#         self.assertEqual(sim.get(self.dut.lh.en), 1)
+
 #         # NOT tested, these signals are not physical and not exposed via
 #         # laserheadpins
 #         # self.assertEqual(sim.get(self.dut.laserheadpins.synchronize), 1)
 #         # self.assertEqual(sim.get(self.dut.laserheadpins.singlefacet), 1)
+
 
 #     @async_test_case
 #     async def test_home(self, sim):
