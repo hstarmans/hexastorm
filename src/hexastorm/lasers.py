@@ -34,10 +34,13 @@ class Laserhead(Elaboratable):
         dir             -- Stepper motor direction.
     """
 
-    def __init__(self, platform):
-        self.platform = platform
-        hdl_cfg = platform.hdl_cfg
-        laz_tim = platform.settings.laser_timing
+    def __init__(self, plf_cfg):
+        """
+        plf_cfg  -- platform configuration
+        """
+        self.plf_cfg = plf_cfg
+        hdl_cfg = plf_cfg.hdl_cfg
+        laz_tim = plf_cfg.laser_timing
 
         # Control and status signals
         self.synchronize = Signal()
@@ -76,9 +79,11 @@ class Laserhead(Elaboratable):
 
     def elaborate(self, platform):
         m = Module()
-        plf = self.platform or platform
-        laz_tim = plf.settings.laser_timing
-        hdl_cfg = plf.hdl_cfg
+        laz_tim = self.plf_cfg.laser_timing
+        hdl_cfg = self.plf_cfg.hdl_cfg
+
+        if platform is not None:
+            pass
 
         # Pulse generator for prism motor
         pwm_counter = Signal(range(laz_tim["motor_period"]))
@@ -368,7 +373,7 @@ class Laserhead(Elaboratable):
                     m.d.sync += self.write_commit_2.eq(0)
                     m.next = "STOP"
 
-        if self.platform.settings.test:
+        if self.plf_cfg.test:
             self.stephalfperiod = stephalfperiod
             self.tickcounter = tickcounter
             self.scanbit = byte_index
@@ -387,9 +392,13 @@ class DiodeSimulator(Laserhead):
     Optionally includes transactional FIFO buffers for scanline data emulation.
     """
 
-    def __init__(self, platform, addfifo=True):
-        hdl_cfg = platform.hdl_cfg
-        super().__init__(platform)
+    def __init__(self, plf_cfg, addfifo=True):
+        """
+        plf_cfg  -- platform configuration
+        """
+        super().__init__(plf_cfg)
+        hdl_cfg = plf_cfg.hdl_cfg
+        self.plf_cfg = plf_cfg
 
         self.addfifo = addfifo
         self.laser0 = Signal()
@@ -405,10 +414,9 @@ class DiodeSimulator(Laserhead):
             self.read_data_2 = Signal(hdl_cfg.mem_width)
 
     def elaborate(self, platform):
-        platform = self.platform or platform
         m = super().elaborate(platform)
-        hdl_cfg = platform.hdl_cfg
-        laz_tim = platform.settings.laser_timing
+        hdl_cfg = self.plf_cfg.hdl_cfg
+        laz_tim = self.plf_cfg.laser_timing
 
         diode_cnt = Signal(range(laz_tim["facet_ticks"]))
         self.diode_cnt = diode_cnt

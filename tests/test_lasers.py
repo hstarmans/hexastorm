@@ -3,17 +3,16 @@ from struct import unpack
 
 from hexastorm.lasers import Laserhead, DiodeSimulator
 from hexastorm.controller import TestHost
-from hexastorm.config import Spi
+from hexastorm.config import Spi, PlatformConfig
 from hexastorm.utils import LunaGatewareTestCase, async_test_case
-from hexastorm.platforms import TestPlatform
 
 
 class BaseTest(LunaGatewareTestCase):
-    "Base class for laserhead test"
+    "Base class for laserhead test."
 
-    platform = TestPlatform()
-    laz_tim = platform.settings.laser_timing
-    FRAGMENT_ARGUMENTS = {"platform": platform}
+    plf_cfg = PlatformConfig(test=True)
+    laz_tim = plf_cfg.laser_timing
+    FRAGMENT_ARGUMENTS = {"plf_cfg": plf_cfg}
 
     async def initialize_signals(self, sim):
         """Initialize signals and host configuration for simulation."""
@@ -79,7 +78,7 @@ class BaseTest(LunaGatewareTestCase):
         dut = self.dut
         laz_tim = self.laz_tim
 
-        if not self.platform.hdl_cfg.single_line:
+        if not self.plf_cfg.hdl_cfg.single_line:
             self.assertFalse(sim.get(dut.empty))
 
         await self.wait_until_state("READ_INSTRUCTION")
@@ -206,10 +205,10 @@ class LaserheadTest(BaseTest):
 class SinglelineTest(BaseTest):
     "Test laserhead while triggering photodiode and single line."
 
-    platform = TestPlatform()
-    platform.hdl_cfg.single_line = True
+    plf_cfg = PlatformConfig(test=True)
+    plf_cfg.hdl_cfg.single_line = True
     FRAGMENT_UNDER_TEST = DiodeSimulator
-    FRAGMENT_ARGUMENTS = {"platform": platform}
+    FRAGMENT_ARGUMENTS = {"plf_cfg": plf_cfg}
 
     @async_test_case
     async def test_single_line_exposure_sequence(self, sim):
@@ -253,14 +252,9 @@ class SinglelineTest(BaseTest):
         self.assertFalse(sim.get(dut.error))
 
 
-class SinglelinesinglefacetTest(BaseTest):
+class SinglelinesinglefacetTest(SinglelineTest):
     """Test laserhead in single-line, single-facet mode
     with photodiode triggering."""
-
-    platform = TestPlatform()
-    platform.hdl_cfg.single_line = True
-    FRAGMENT_UNDER_TEST = DiodeSimulator
-    FRAGMENT_ARGUMENTS = {"platform": platform}
 
     @async_test_case
     async def test_single_line_single_facet(self, sim):
@@ -426,27 +420,27 @@ class MultilineTest(BaseTest):
 class Loweredge(BaseTest):
     """Test Laserhead scanline exposure when scanline length equals memory word width."""
 
-    platform = TestPlatform()
-    laz_tim = platform.settings.laser_timing
+    plf_cfg = PlatformConfig(test=True)
+    laz_tim = plf_cfg.laser_timing
     laz_tim_backup = laz_tim
     laz_tim.update(
         {
             "facet_ticks": 500,
             "laser_ticks": 3,
-            "scanline_length": platform.hdl_cfg.mem_width,
+            "scanline_length": plf_cfg.hdl_cfg.mem_width,
         }
     )
-    platform.settings.laser_timing = laz_tim
-    platform.settings.update_laser_timing()
+    plf_cfg.laser_timing = laz_tim
+    plf_cfg.update_laser_timing()
 
     FRAGMENT_UNDER_TEST = DiodeSimulator
-    FRAGMENT_ARGUMENTS = {"platform": platform}
+    FRAGMENT_ARGUMENTS = {"plf_cfg": plf_cfg}
 
     async def initialize_signals(self, sim):
         """Initialize signals and host configuration for simulation."""
         self.sim = sim
         self.host = TestHost()
-        self.host.cfg.laser_timing = self.platform.settings.laser_timing
+        self.host.cfg.laser_timing = self.plf_cfg.laser_timing
         self.host.cfg.hdl_cfg.single_line = False
         sim.set(self.dut.photodiode, 1)
         await sim.tick()
@@ -464,21 +458,21 @@ class Loweredge(BaseTest):
 class Upperedge(Loweredge):
     """Test scanline exposure with length one bit longer than the memory word width."""
 
-    platform = TestPlatform()
-    laz_tim = platform.settings.laser_timing
+    plf_cfg = PlatformConfig(test=True)
+    laz_tim = plf_cfg.laser_timing
     laz_tim_backup = laz_tim
     laz_tim.update(
         {
             "facet_ticks": 500,
             "laser_ticks": 3,
-            "scanline_length": platform.hdl_cfg.mem_width + 1,
+            "scanline_length": plf_cfg.hdl_cfg.mem_width + 1,
         }
     )
-    platform.settings.laser_timing = laz_tim
-    platform.settings.update_laser_timing()
+    plf_cfg.laser_timing = laz_tim
+    plf_cfg.update_laser_timing()
 
     FRAGMENT_UNDER_TEST = DiodeSimulator
-    FRAGMENT_ARGUMENTS = {"platform": platform}
+    FRAGMENT_ARGUMENTS = {"plf_cfg": plf_cfg}
 
 
 # NOTE: new class is created to reset settings

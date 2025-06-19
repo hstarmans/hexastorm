@@ -83,6 +83,7 @@ class PlatformConfig:
             The final result is stored in `self.laser_var`, a flat dictionary of all configuration values.
         """
         self.test = test
+        self._hdl_cfg = None
         if test:
             self.laser_timing = dict(
                 rpm=1000,
@@ -147,6 +148,8 @@ class PlatformConfig:
     @property
     def hdl_cfg(self):
         """Required for amaranth synthesis."""
+        if self._hdl_cfg is not None:
+            return self._hdl_cfg
         if self.test:
             cfg = dict(test=True)
         else:
@@ -181,7 +184,8 @@ class PlatformConfig:
         if self.test:
             cfg["mem_depth"] = cfg["words_move"] * 2 + 1
 
-        return type("Hdl_cfg", (), cfg)()
+        self._hdl_cfg = type("Hdl_cfg", (), cfg)()
+        return self._hdl_cfg
 
     @property
     def motor_cfg(self):
