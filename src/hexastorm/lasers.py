@@ -82,9 +82,6 @@ class Laserhead(Elaboratable):
         laz_tim = self.plf_cfg.laser_timing
         hdl_cfg = self.plf_cfg.hdl_cfg
 
-        if platform is not None:
-            pass
-
         # Pulse generator for prism motor
         pwm_counter = Signal(range(laz_tim["motor_period"]))
         with m.If(pwm_counter == laz_tim["motor_period"] - 1):

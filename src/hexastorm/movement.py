@@ -46,10 +46,12 @@ class Polynomial(Elaboratable):
         busy        - Active while polynomial is being evaluated
     """
 
-    def __init__(self, plf_cfg):
+    def __init__(self, plf_cfg, top=False):
         """
         plf_cfg  -- platform configuration
+        top      -- trigger synthesis of module
         """
+        self.top = top
         self.hdl_cfg = hdl_cfg = plf_cfg.hdl_cfg
         self.order = hdl_cfg.pol_degree
         self.motors = hdl_cfg.motors
@@ -91,7 +93,7 @@ class Polynomial(Elaboratable):
             # Expose internals for simulation
             self.ticks = ticks
             self.cntrs = cntrs
-        else:
+        elif self.top:
             # Connect to platform stepper resources
             steppers = get_all_resources(platform, "stepper", dir="-")
             assert steppers, "No stepper resources found"

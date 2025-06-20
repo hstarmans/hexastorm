@@ -30,7 +30,9 @@ class TestBuild(unittest.TestCase):
     def polynomal(self):
         platform = Firestarter()
         platform.build(
-            Polynomial(PlatformConfig(test=False)), do_program=False, verbose=True
+            Polynomial(PlatformConfig(test=False), top=True),
+            do_program=False,
+            verbose=True,
         )
 
 

@@ -33,9 +33,9 @@ class TestParser(SPIGatewareTestCase):
             expected_bytes (int): Number of bytes expected to be in the FIFO.
         """
         sim = self.sim
-        while sim.get(self.dut.empty) == 1:
+        while sim.get(self.dut.fifo.empty) == 1:
             await sim.tick()
-        self.assertEqual(sim.get(self.dut.empty), 0)
+        self.assertEqual(sim.get(self.dut.fifo.empty), 0)
         self.assertEqual(
             sim.get(self.dut.fifo.space_available),
             self.hdl_cfg.mem_depth - check,
@@ -62,7 +62,7 @@ class TestParser(SPIGatewareTestCase):
         """
         laser_timing = self.host.cfg.laser_timing
         await self.host.write_line([1] * laser_timing["scanline_length"])
-        while sim.get(self.dut.empty) == 1:
+        while sim.get(self.dut.fifo.empty) == 1:
             await sim.tick()
         await self.assert_fifo_written(self.hdl_cfg.words_scanline)
 
@@ -79,14 +79,14 @@ class TestParser(SPIGatewareTestCase):
         """
         Checks that enable_comp sends a single write command to the FIFO.
         """
-        self.assertEqual(sim.get(self.dut.empty), 1)
+        self.assertEqual(sim.get(self.dut.fifo.empty), 1)
         await self.host.enable_comp(laser0=True, laser1=False, polygon=False)
         await self.assert_fifo_written(1)
 
     @async_test_case
     async def test_fifo_not_empty_after_spline_move(self, sim):
         "Check spline move instruction writes the expected number of words to the FIFO"
-        self.assertEqual(sim.get(self.dut.empty), 1)
+        self.assertEqual(sim.get(self.dut.fifo.empty), 1)
         cfg = self.hdl_cfg
         coeff = [randint(0, 10)] * cfg.motors * cfg.pol_degree
         await self.host.spline_move(1000, coeff)
@@ -147,7 +147,7 @@ class TestParser(SPIGatewareTestCase):
         """
         Fill instruction FIFO until full and verify mem_full flag is set.
         """
-        self.assertEqual(sim.get(self.dut.empty), 1)
+        self.assertEqual(sim.get(self.dut.fifo.empty), 1)
 
         state = await self.host.fpga_state
         self.assertFalse(state["mem_full"])

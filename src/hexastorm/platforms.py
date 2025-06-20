@@ -11,31 +11,15 @@ from .config import PlatformConfig
 from .resources import (
     # BLDCRecord,
     # BLDCResource,
-    LaserscannerRecord,
     LaserscannerResource,
-    StepperRecord,
     StepperResource,
 )
-
-
-class TestPlatform:
-    clks = {0: 1}  # dictionary to determine clock divider, e.g. movement.py
-    hfosc_div = 0  # selects clock speed on UP5K and clk divider
-    laserhead = LaserscannerRecord()
-
-    # bldc = BLDCRecord()
-
-    def __init__(self):
-        self.settings = PlatformConfig(test=True)
-        self.hdl_cfg = self.settings.hdl_cfg
-        self.steppers = [StepperRecord()] * self.settings.hdl_cfg.motors
 
 
 class Firestarter(LatticeICE40Platform):
     """Kicad board: https://github.com/hstarmans/firestarter/"""
 
-    settings = PlatformConfig(test=False)
-    cfg = settings.ice40_cfg
+    cfg = PlatformConfig(test=False).ice40_cfg
     device = cfg["device"]
     package = cfg["package"]
     default_clk = cfg["default_clk"]
@@ -98,10 +82,8 @@ class Firestarter(LatticeICE40Platform):
     ]
     connectors = []
 
-    def __init__(self, test=False):
+    def __init__(self):
         LatticeICE40Platform.__init__(self)
-        self.settings = PlatformConfig(test=test)
-        self.hdl_cfg = self.settings.hdl_cfg
 
     def build(self, *args, **kwargs):
         search_command = "where" if pltf.system() == "Windows" else "which"
