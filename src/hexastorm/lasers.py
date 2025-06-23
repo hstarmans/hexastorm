@@ -387,6 +387,8 @@ class DiodeSimulator(Laserhead):
     The photodiode goes low (active) only when the prism motor is enabled
     and at least one laser channel is on, mimicking real-world diode triggering.
     Optionally includes transactional FIFO buffers for scanline data emulation.
+    The lasers or prism are on if they are either turned on by an external process
+    or by the laserhead.
     """
 
     def __init__(self, plf_cfg, addfifo=True):
@@ -398,8 +400,7 @@ class DiodeSimulator(Laserhead):
         self.plf_cfg = plf_cfg
 
         self.addfifo = addfifo
-        self.laser0 = Signal()
-        self.laser1 = Signal()
+        self.lasers_in = Signal()
         self.enable_prism_in = Signal()
 
         if addfifo:
@@ -418,11 +419,17 @@ class DiodeSimulator(Laserhead):
         diode_cnt = Signal(range(laz_tim["facet_ticks"]))
         self.diode_cnt = diode_cnt
 
+        lasers_comb = Signal.like(self.lasers)
+        prism_comb = Signal.like(self.enable_prism)
+
+        m.d.comb += [
+            lasers_comb.eq(self.lasers_in | self.lasers),
+            prism_comb.eq(self.enable_prism_in | self.enable_prism),
+        ]
+
         if self.addfifo:
             m.d.comb += [
                 self.enable_prism_in.eq(self.enable_prism),
-                self.laser0.eq(self.lasers[0]),
-                self.laser1.eq(self.lasers[1]),
             ]
             # FIFO 1:
             fifo = TransactionalizedFIFO(
@@ -463,9 +470,7 @@ class DiodeSimulator(Laserhead):
             m.d.sync += diode_cnt.eq(0)
         with m.Elif(diode_cnt > (laz_tim["facet_ticks"] - laz_tim["facets"])):
             m.d.sync += [
-                self.photodiode.eq(
-                    ~(self.enable_prism_in & (self.laser0 | self.laser1))
-                ),
+                self.photodiode.eq(~(prism_comb & (lasers_comb.any()))),
                 diode_cnt.eq(diode_cnt + 1),
             ]
         with m.Else():

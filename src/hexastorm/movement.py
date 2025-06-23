@@ -96,7 +96,6 @@ class Polynomial(Elaboratable):
         elif self.top:
             # Connect to platform stepper resources
             steppers = get_all_resources(platform, "stepper", dir="-")
-            assert steppers, "No stepper resources found"
             for i, stepper in enumerate(steppers):
                 m.submodules += [
                     step_buf := Buffer("o", stepper.step),

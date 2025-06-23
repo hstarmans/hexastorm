@@ -1,10 +1,7 @@
-from types import SimpleNamespace
-
 from amaranth import Cat, Elaboratable, Module, Signal, signed, Mux
 from amaranth.hdl import Array
 from amaranth.lib.io import Buffer
 from luna.gateware.interface.spi import (
-    SPIBus,
     SPICommandInterface,
 )
 from luna.gateware.memory import TransactionalizedFIFO
@@ -13,7 +10,7 @@ from luna.gateware.memory import TransactionalizedFIFO
 from .config import Spi
 from .resources import get_all_resources
 from .spi_helpers import connect_synchronized_spi
-from .resources import LaserscannerRecord
+from .resources import LaserscannerRecord, StepperRecord
 from .lasers import DiodeSimulator, Laserhead
 
 # from .motor import Driver
@@ -65,7 +62,6 @@ class SPIParser(Elaboratable):
         self.error_dispatch = Signal()
         self.debug_word = Signal(hdl_cfg.mem_width)
         self.parse = Signal()
-        self.read_data = Signal(hdl_cfg.mem_width)
 
     def elaborate(self, platform):
         m = Module()
@@ -215,6 +211,7 @@ class Dispatcher(Elaboratable):
 
         # Shared output record for laserhead signals
         self.lh_rec = LaserscannerRecord()
+        self.steppers = [StepperRecord()] * plf_cfg.hdl_cfg.motors
 
     def elaborate(self, platform):
         m = Module()
@@ -234,9 +231,13 @@ class Dispatcher(Elaboratable):
         read_discard = Signal()
 
         if platform is None:
-            lh_mod = m.submodules.laserhead = DiodeSimulator(
+            self.lh_mod = lh_mod = m.submodules.laserhead = DiodeSimulator(
                 plf_cfg=self.plf_cfg, addfifo=False
             )
+            m.d.comb += [
+                lh_mod.enable_prism_in.eq(enable_prism),
+                lh_mod.lasers_in.eq(lasers),
+            ]
         else:
             lh_mod = m.submodules.laserhead = Laserhead(self.plf_cfg)
 
@@ -280,147 +281,149 @@ class Dispatcher(Elaboratable):
             parser.fifo.read_en.eq(read_en | lh_mod.read_en),
             parser.fifo.read_discard.eq(read_discard | lh_mod.read_discard),
         ]
+
+        # connect motors
+        steppers = self.steppers
+        for idx, stepper in enumerate(steppers):
+            step = polynomial.step[idx] & ((stepper.limit == 0) | stepper.dir)
+            if idx != (
+                list(self.plf_cfg.motor_cfg["steps_mm"].keys()).index(
+                    self.plf_cfg.motor_cfg["orth2lsrline"]
+                )
+            ):
+                m.d.comb += [
+                    stepper.step.eq(step),
+                    stepper.dir.eq(polynomial.dir[idx]),
+                    parser.pin_state[idx].eq(stepper.limit),
+                ]
+            # connect the motor in which the laserhead moves to laser core
+            else:
+                m.d.comb += [
+                    parser.pin_state[idx].eq(stepper.limit),
+                    stepper.step.eq(
+                        (step & (~lh_mod.process_lines))
+                        | (lh_mod.step & (lh_mod.process_lines))
+                    ),
+                    stepper.dir.eq(
+                        (polynomial.dir[idx] & (~lh_mod.process_lines))
+                        | (lh_mod.dir & (lh_mod.process_lines))
+                    ),
+                ]
+        m.d.comb += parser.pin_state[len(steppers) :].eq(
+            Cat(lh_mod.photodiode_t, lh_mod.synchronized)
+        )
+
+        if platform is not None:
+            # Connect to platform stepper resources
+            steppers_res = get_all_resources(platform, "stepper", dir="-")
+            for i, stepper in enumerate(steppers_res):
+                m.submodules += [
+                    step_buf := Buffer("o", stepper.step),
+                    dir_buf := Buffer("o", stepper.dir),
+                    lim_buf := Buffer("i", stepper.limit),
+                ]
+                m.d.comb += [
+                    step_buf.o.eq(steppers[i].step),
+                    dir_buf.o.eq(steppers[i].dir),
+                    steppers[i].limit.eq(lim_buf.i),
+                ]
+
+        # update position
+        stepper_d = Array(Signal() for _ in range(len(steppers)))
+        for idx, stepper in enumerate(steppers):
+            pos = parser.position[idx]
+            m.d.sync += stepper_d[idx].eq(stepper.step)
+            with m.If(stepper.limit == 1):
+                m.d.sync += parser.position[idx].eq(0)
+            # assuming position is signed
+            # TODO: this might eat LUT, optimize
+            pos_max = pow(2, len(pos) - 1) - 2
+            with m.Elif((pos > pos_max) | (pos < -pos_max)):
+                m.d.sync += parser.position[idx].eq(0)
+            with m.Elif((stepper.step == 1) & (stepper_d[idx] == 0)):
+                with m.If(stepper.dir):
+                    m.d.sync += pos.eq(pos + 1)
+                with m.Else():
+                    m.d.sync += pos.eq(pos - 1)
+
+        # Busy signal
+        m.d.comb += busy.eq(polynomial.busy | lh_mod.process_lines)
+
+        # pins you can write to
+        pins = Cat(lasers, enable_prism, lh_mod.synchronize, lh_mod.singlefacet)
+        self.pins = pins
+
+        with m.FSM(init="RESET", name="dispatcher"):
+            with m.State("RESET"):
+                m.d.sync += pins.eq(0)
+                m.next = "WAIT_INSTRUCTION"
+
+            with m.State("WAIT_INSTRUCTION"):
+                m.d.sync += [read_commit.eq(0), polynomial.start.eq(0)]
+                with m.If(
+                    (~parser.fifo.empty)
+                    & parser.parse
+                    & (~(polynomial.busy | lh_mod.process_lines))
+                ):
+                    m.d.sync += read_en.eq(1)
+                    m.next = "PARSEHEAD"
+            # check which instruction we r handling
+            with m.State("PARSEHEAD"):
+                byte0 = parser.fifo.read_data[:8]
+                m.d.sync += read_en.eq(0)
+                with m.If(byte0 == Spi.Instructions.move):
+                    m.d.sync += [
+                        polynomial.tick_limit.eq(parser.fifo.read_data[8:]),
+                        coeffcnt.eq(0),
+                    ]
+                    m.next = "MOVE_POLYNOMIAL"
+                with m.Elif(byte0 == Spi.Instructions.write_pin):
+                    m.d.sync += [
+                        pins.eq(parser.fifo.read_data[8:]),
+                        read_commit.eq(1),
+                    ]
+                    m.next = "WAIT"
+                with m.Elif(
+                    (byte0 == Spi.Instructions.scanline)
+                    | (byte0 == Spi.Instructions.last_scanline)
+                ):
+                    m.d.sync += [
+                        read_discard.eq(1),
+                        lh_mod.synchronize.eq(1),
+                        lh_mod.expose_start.eq(1),
+                    ]
+                    m.next = "SCANLINE"
+                with m.Else():
+                    m.next = "ERROR"
+                    m.d.sync += parser.error_dispatch.eq(1)
+            with m.State("MOVE_POLYNOMIAL"):
+                with m.If(coeffcnt < len(polynomial.coeff)):
+                    with m.If(read_en == 0):
+                        m.d.sync += read_en.eq(1)
+                    with m.Else():
+                        m.d.sync += [
+                            polynomial.coeff[coeffcnt].eq(parser.fifo.read_data),
+                            coeffcnt.eq(coeffcnt + 1),
+                            read_en.eq(0),
+                        ]
+                with m.Else():
+                    m.next = "WAIT"
+                    m.d.sync += [polynomial.start.eq(1), read_commit.eq(1)]
+            with m.State("SCANLINE"):
+                m.d.sync += [
+                    read_discard.eq(0),
+                    lh_mod.expose_start.eq(0),
+                ]
+                m.next = "WAIT"
+            # NOTE: you need to wait for busy to be raised
+            #       in time
+            with m.State("WAIT"):
+                m.d.sync += polynomial.start.eq(0)
+                m.next = "WAIT_INSTRUCTION"
+            # NOTE: system never recovers user must reset
+            with m.State("ERROR"):
+                m.next = "ERROR"
         return m
-        # normalized_steppers = []
-        # # Normalize stepper IOs
-        # for idx, stepper in enumerate(steppers):
-        #     if platform.settings.test:
-        #         norm = SimpleNamespace(
-        #             step=stepper.step, dir=stepper.dir, limit=stepper.limit
-        #         )
-        #     else:
-        #         norm = SimpleNamespace(
-        #             step=stepper.step.o, dir=stepper.dir.o, limit=stepper.limit.i
-        #         )
-        #     normalized_steppers.append(norm)
-
-        # # Connect logic
-        # for idx, norm in enumerate(normalized_steppers):
-        #     step = polynomial.step[idx] & ((norm.limit == 0) | norm.dir)
-
-        #     is_laser_motor = idx == list(
-        #         platform.settings.motor_cfg["steps_mm"].keys()
-        #     ).index(platform.settings.motor_cfg["orth2lsrline"])
-
-        #     if not is_laser_motor:
-        #         direction = polynomial.dir[idx]
-        #         m.d.comb += [
-        #             norm.step.eq(step),
-        #             norm.dir.eq(direction),
-        #             parser.pin_state[idx].eq(norm.limit),
-        #         ]
-        #     else:
-        #         m.d.comb += [
-        #             parser.pin_state[idx].eq(norm.limit),
-        #             norm.step.eq(
-        #                 (step & (~lh_mod.process_lines))
-        #                 | (lh_mod.step & lh_mod.process_lines)
-        #             ),
-        #             norm.dir.eq(
-        #                 (polynomial.dir[idx] & (~lh_mod.process_lines))
-        #                 | (lh_mod.dir & lh_mod.process_lines)
-        #             ),
-        #         ]
-        # m.d.comb += parser.pin_state[len(steppers) :].eq(
-        #     Cat(lh_mod.photodiode_t, lh_mod.synchronized)
-        # )
-
-        # # update position
-        # stepper_d = Array(Signal() for _ in range(len(steppers)))
-        # for idx, stepper in enumerate(normalized_steppers):
-        #     pos = parser.position[idx]
-        #     m.d.sync += stepper_d[idx].eq(stepper.step)
-        #     with m.If(stepper.limit == 1):
-        #         m.d.sync += parser.position[idx].eq(0)
-        #     # assuming position is signed
-        #     # TODO: this might eat LUT, optimize
-        #     pos_max = pow(2, len(pos) - 1) - 2
-        #     with m.Elif((pos > pos_max) | (pos < -pos_max)):
-        #         m.d.sync += parser.position[idx].eq(0)
-        #     with m.Elif((stepper.step == 1) & (stepper_d[idx] == 0)):
-        #         with m.If(stepper.dir):
-        #             m.d.sync += pos.eq(pos + 1)
-        #         with m.Else():
-        #             m.d.sync += pos.eq(pos - 1)
-
-        # # Busy signal
-        # m.d.comb += busy.eq(polynomial.busy | lh_mod.process_lines)
-        # # connect spi
-        # connect_synchronized_spi(m, spi, parser)
-
-        # # pins you can write to
-        # pins = Cat(lasers, enable_prism, lh_mod.synchronize, lh_mod.singlefacet)
-        # with m.FSM(init="RESET", name="dispatcher"):
-        #     with m.State("RESET"):
-        #         m.d.sync += pins.eq(0)
-        #         m.next = "WAIT_INSTRUCTION"
-
-        #     with m.State("WAIT_INSTRUCTION"):
-        #         m.d.sync += [self.read_commit.eq(0), polynomial.start.eq(0)]
-        #         with m.If(
-        #             (~self.empty)
-        #             & parser.parse
-        #             & (~(polynomial.busy | lh_mod.process_lines))
-        #         ):
-        #             m.d.sync += self.read_en.eq(1)
-        #             m.next = "PARSEHEAD"
-        #     # check which instruction we r handling
-        #     with m.State("PARSEHEAD"):
-        #         byte0 = self.read_data[:8]
-        #         m.d.sync += self.read_en.eq(0)
-        #         with m.If(byte0 == Spi.Instructions.move):
-        #             m.d.sync += [
-        #                 polynomial.tick_limit.eq(self.read_data[8:]),
-        #                 coeffcnt.eq(0),
-        #             ]
-        #             m.next = "MOVE_POLYNOMIAL"
-        #         with m.Elif(byte0 == Spi.Instructions.write_pin):
-        #             m.d.sync += [
-        #                 pins.eq(self.read_data[8:]),
-        #                 self.read_commit.eq(1),
-        #             ]
-        #             m.next = "WAIT"
-        #         with m.Elif(
-        #             (byte0 == Spi.Instructions.scanline)
-        #             | (byte0 == Spi.Instructions.last_scanline)
-        #         ):
-        #             m.d.sync += [
-        #                 self.read_discard.eq(1),
-        #                 lh_mod.synchronize.eq(1),
-        #                 lh_mod.expose_start.eq(1),
-        #             ]
-        #             m.next = "SCANLINE"
-        #         with m.Else():
-        #             m.next = "ERROR"
-        #             m.d.sync += parser.error_dispatch.eq(1)
-        #     with m.State("MOVE_POLYNOMIAL"):
-        #         with m.If(coeffcnt < len(polynomial.coeff)):
-        #             with m.If(self.read_en == 0):
-        #                 m.d.sync += self.read_en.eq(1)
-        #             with m.Else():
-        #                 m.d.sync += [
-        #                     polynomial.coeff[coeffcnt].eq(self.read_data),
-        #                     coeffcnt.eq(coeffcnt + 1),
-        #                     self.read_en.eq(0),
-        #                 ]
-        #         with m.Else():
-        #             m.next = "WAIT"
-        #             m.d.sync += [polynomial.start.eq(1), self.read_commit.eq(1)]
-        #     with m.State("SCANLINE"):
-        #         m.d.sync += [
-        #             self.read_discard.eq(0),
-        #             lh_mod.expose_start.eq(0),
-        #         ]
-        #         m.next = "WAIT"
-        #     # NOTE: you need to wait for busy to be raised
-        #     #       in time
-        #     with m.State("WAIT"):
-        #         m.d.sync += polynomial.start.eq(0)
-        #         m.next = "WAIT_INSTRUCTION"
-        #     # NOTE: system never recovers user must reset
-        #     with m.State("ERROR"):
-        #         m.next = "ERROR"
-        # return m
 
 
 # Overview:

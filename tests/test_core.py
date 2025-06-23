@@ -161,75 +161,77 @@ class TestParser(SPIGatewareTestCase):
         state = await self.host.fpga_state
         self.assertTrue(state["mem_full"])
 
-        # class TestDispatcher(SPIGatewareTestCase):
-        #     platform = TestPlatform()
-        #     FRAGMENT_UNDER_TEST = Dispatcher
-        #     FRAGMENT_ARGUMENTS = {"platform": platform}
 
-        #     async def initialize_signals(self, sim):
-        #         self.sim = sim
-        #         self.host = TestHost()
-        #         self.host.spi_exchange_data = lambda data: self.spi_exchange_data(data=data)
-        #         sim.set(self.dut.spi.cs, 0)
-        #         await sim.tick()
+class TestDispatcher(SPIGatewareTestCase):
+    plf_cfg = PlatformConfig(test=True)
+    FRAGMENT_UNDER_TEST = Dispatcher
+    FRAGMENT_ARGUMENTS = {"plf_cfg": plf_cfg}
 
-        #     async def wait_complete(self):
-        #         """helper method to completion"""
-        #         cntr = 0
-        #         sim = self.sim
-        #         while sim.get(self.dut.busy) or cntr < 100:
-        #             if sim.get(self.dut.pol.busy):
-        #                 cntr = 0
-        #             else:
-        #                 cntr += 1
-        #             await sim.tick()
+    async def initialize_signals(self, sim):
+        self.host = TestHost()
+        self.sim = sim
+        self.dut.spi = self.dut.parser.spi_command.spi
+        self.host.spi_exchange_data = self.spi_exchange_data
+        sim.set(self.dut.spi.cs, 0)
+        await sim.tick()
 
-        #     @async_test_case
-        #     async def test_memfull(self, sim):
-        #         """write move instruction until memory is full, enable parser
-        #         and ensure there is no parser error.
-        #         """
-        #         # should fill the memory as move instruction is
-        #         # larger than the memdepth
-        #         self.assertEqual((await self.host.fpga_state)["mem_full"], False)
-        #         await self.host.set_parsing(False)
-        #         try:
-        #             for _ in range(self.platform.hdl_cfg.mem_depth):
-        #                 await self.host.spline_move(1000, [1] * self.platform.hdl_cfg.motors)
-        #         except Memfull:
-        #             pass
-        #         self.assertEqual((await self.host.fpga_state)["mem_full"], True)
-        #         await self.host.set_parsing(True)
-        #         # data should now be processed from sram and empty become 1
-        #         while sim.get(self.dut.parser.empty) == 0:
-        #             await sim.tick()
-        #         # 2 clocks needed for error to propagate
-        #         await sim.tick()
-        #         await sim.tick()
+    async def wait_complete(self):
+        """helper method to completion"""
+        cntr = 0
+        sim = self.sim
+        while sim.get(self.dut.busy) or cntr < 100:
+            if sim.get(self.dut.pol.busy):
+                cntr = 0
+            else:
+                cntr += 1
+            await sim.tick()
+
+    @async_test_case
+    async def test_memfull(self, sim):
+        """write move instruction until memory is full, enable parser
+        and ensure there is no parser error.
+        """
+        # should fill the memory as move instruction is
+        # larger than the memdepth
+        self.assertEqual((await self.host.fpga_state)["mem_full"], False)
+        await self.host.set_parsing(False)
+        try:
+            for _ in range(self.plf_cfg.hdl_cfg.mem_depth):
+                await self.host.spline_move(1000, [1] * self.plf_cfg.hdl_cfg.motors)
+        except Memfull:
+            pass
+        self.assertEqual((await self.host.fpga_state)["mem_full"], True)
+        await self.host.set_parsing(True)
+        # data should now be processed from sram and empty become 1
+        while sim.get(self.dut.parser.fifo.empty) == 0:
+            await sim.tick()
+        # 2 clocks needed for error to propagate
+        await sim.tick()
+        await sim.tick()
         self.assertEqual((await self.host.fpga_state)["error"], False)
 
+    @async_test_case
+    async def test_readdiode(self, sim):
+        """verify you can receive photodiode trigger
 
-#     @async_test_case
-#     async def test_readdiode(self, sim):
-#         """verify you can receive photodiode trigger
+        Photodiode trigger simply checks wether the photodiode
+        has been triggered for each cycle.
+        The photodiode is triggered by the simdiode.
+        """
+        facet_ticks = self.plf_cfg.laser_timing["facet_ticks"]
+        await self.host.set_parsing(False)
+        await self.host.enable_comp(laser0=True, polygon=True)
+        for _ in range(facet_ticks * 2):
+            await sim.tick()
+        self.assertEqual(sim.get(self.dut.lh_mod.photodiode_t), False)
+        # not triggered as laser and polygon not on
+        await self.host.set_parsing(True)
+        val = (await self.host.fpga_state)["photodiode_trigger"]
+        for _ in range(facet_ticks * 2):
+            await sim.tick()
+        self.assertEqual(sim.get(self.dut.lh_mod.photodiode_t), True)
+        self.assertEqual(val, True)
 
-#         Photodiode trigger simply checks wether the photodiode
-#         has been triggered for each cycle.
-#         The photodiode is triggered by the simdiode.
-#         """
-#         facet_ticks = self.platform.settings.laser_timing["facet_ticks"]
-#         await self.host.set_parsing(False)
-#         await self.host.enable_comp(laser0=True, polygon=True)
-#         for _ in range(facet_ticks * 2):
-#             await sim.tick()
-#         self.assertEqual(sim.get(self.dut.laserhead.photodiode_t), False)
-#         # not triggered as laser and polygon not on
-#         await self.host.set_parsing(True)
-#         val = (await self.host.fpga_state)["photodiode_trigger"]
-#         for _ in range(facet_ticks * 2):
-#             await sim.tick()
-#         self.assertEqual(sim.get(self.dut.laserhead.photodiode_t), True)
-#         self.assertEqual(val, True)
 
 #     @async_test_case
 #     async def test_writepin(self, sim):
