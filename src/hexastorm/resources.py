@@ -134,8 +134,7 @@ class LaserScannerLayout(Layout):
     def __init__(self):
         super().__init__(
             [
-                ("laser0", 1),
-                ("laser1", 1),
+                ("lasers", 2),
                 ("photodiode", 1),
                 ("pwm", 1),
                 ("en", 1),
@@ -152,8 +151,7 @@ class LaserscannerRecord(Record):
 
 def LaserscannerResource(
     *args,
-    laser0,
-    laser1,
+    lasers,
     photodiode,
     pwm,
     enable,
@@ -164,14 +162,13 @@ def LaserscannerResource(
     Laser scanner resource.
 
     I/O signals:
-        laser0, laser1   -- Output to laser driver
+        lasers           -- 2-bit output to laser driver (MSB first), e.g. "12 11"
         photodiode       -- Input signal from scanner sensor
         pwm              -- Output PWM control
         enable           -- Output enable pin (active low)
     """
     ios = [
-        Subsignal("laser0", Pins(laser0, dir="o", conn=conn, assert_width=1)),
-        Subsignal("laser1", Pins(laser1, dir="o", conn=conn, assert_width=1)),
+        Subsignal("lasers", Pins(lasers, dir="o", conn=conn, assert_width=2)),
         Subsignal("photodiode", Pins(photodiode, dir="i", conn=conn, assert_width=1)),
         Subsignal("pwm", Pins(pwm, dir="o", conn=conn, assert_width=1)),
         Subsignal("en", PinsN(enable, dir="o", conn=conn, assert_width=1)),

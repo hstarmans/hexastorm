@@ -18,7 +18,7 @@ class BaseTest(LunaGatewareTestCase):
         """Initialize signals and host configuration for simulation."""
         self.host = TestHost()
         self.sim = sim
-        sim.set(self.dut.photodiode, 1)
+        sim.set(self.dut.lh_rec.photodiode, 1)
         await sim.tick()
 
     async def get_state(self, fsm=None):
@@ -99,7 +99,7 @@ class BaseTest(LunaGatewareTestCase):
                 self.assertEqual(sim.get(dut.scanbit), idx + 1)
 
                 for _ in range(laz_tim["laser_ticks"]):
-                    self.assertEqual(sim.get(dut.lasers[0]), bit)
+                    self.assertEqual(sim.get(dut.lh_rec.lasers[0]), bit)
                     await sim.tick()
         else:
             self.assertTrue(sim.get(dut.expose_finished))
@@ -132,10 +132,10 @@ class BaseTest(LunaGatewareTestCase):
         for i in range(0, len(byte_lst), Spi.word_bytes):
             lst = byte_lst[i : i + Spi.word_bytes]
             number = unpack("Q", bytearray(lst))[0]
-            sim.set(dut.write_data, number)
-            await self.pulse(dut.write_en)
+            sim.set(dut.fifo.write_data, number)
+            await self.pulse(dut.fifo.write_en)
 
-        await self.pulse(dut.write_commit)
+        await self.pulse(dut.fifo.write_commit)
 
     async def scanline_ring_buffer(self, numb_lines=3):
         """Write several scanlines to FIFO and validate playback."""
@@ -172,12 +172,12 @@ class LaserheadTest(BaseTest):
         motor_period = self.laz_tim["motor_period"]
 
         # Wait for rising edge of PWM
-        while sim.get(dut.pwm) == 0:
+        while sim.get(dut.lh_rec.pwm) == 0:
             await sim.tick()
 
         # Count number of cycles PWM stays high
         cnt = 0
-        while sim.get(dut.pwm) == 1:
+        while sim.get(dut.lh_rec.pwm) == 1:
             cnt += 1
             await sim.tick()
 
@@ -442,7 +442,7 @@ class Loweredge(BaseTest):
         self.host = TestHost()
         self.host.cfg.laser_timing = self.plf_cfg.laser_timing
         self.host.cfg.hdl_cfg.single_line = False
-        sim.set(self.dut.photodiode, 1)
+        sim.set(self.dut.lh_rec.photodiode, 1)
         await sim.tick()
 
     def tearDown(self):

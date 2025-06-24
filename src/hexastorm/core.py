@@ -210,7 +210,6 @@ class Dispatcher(Elaboratable):
         self.plf_cfg = plf_cfg
 
         # Shared output record for laserhead signals
-        self.lh_rec = LaserscannerRecord()
         self.steppers = [StepperRecord()] * plf_cfg.hdl_cfg.motors
 
     def elaborate(self, platform):
@@ -241,34 +240,10 @@ class Dispatcher(Elaboratable):
         else:
             lh_mod = m.submodules.laserhead = Laserhead(self.plf_cfg)
 
-        lh_rec = self.lh_rec
-        m.d.comb += [
-            lh_rec.pwm.eq(lh_mod.pwm),
-            lh_rec.en.eq(lh_mod.enable_prism | enable_prism),
-            lh_rec.laser0.eq(lh_mod.lasers[0] | lasers[0]),
-            lh_rec.laser1.eq(lh_mod.lasers[1] | lasers[1]),
-        ]
-
         if platform is None:
             self.parser = parser
             self.pol = polynomial
             self.busy = busy
-        else:
-            lh_pin = platform.request("laserscanner", dir="-")
-            m.submodules += [
-                laser0_buf := Buffer("o", lh_pin.laser0),
-                laser1_buf := Buffer("o", lh_pin.laser1),
-                phd_buf := Buffer("i", lh_pin.photodiode),
-                pwm_buf := Buffer("o", lh_pin.pwm),
-                en_buf := Buffer("o", lh_pin.en),
-            ]
-            m.d.comb += [
-                laser0_buf.o.eq(self.lh_rec.laser0),
-                laser1_buf.o.eq(self.lh_rec.laser1),
-                self.lh_rec.photodiode.eq(phd_buf.i),
-                pwm_buf.o.eq(self.lh_rec.pwm),
-                en_buf.o.eq(self.lh_rec.en),
-            ]
 
         # polynomial iterates over count
         coeffcnt = Signal(range(len(polynomial.coeff) + 1))

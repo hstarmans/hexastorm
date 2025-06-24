@@ -3,6 +3,7 @@ import unittest
 from hexastorm.core import Dispatcher, SPIParser
 
 from hexastorm.movement import Polynomial
+from hexastorm.lasers import Laserhead
 from hexastorm.platforms import Firestarter
 from hexastorm.config import PlatformConfig
 
@@ -23,6 +24,14 @@ class TestBuild(unittest.TestCase):
         platform = Firestarter()
         platform.build(
             SPIParser(PlatformConfig(test=False).hdl_cfg),
+            do_program=False,
+            verbose=True,
+        )
+
+    def lasers(self):
+        platform = Firestarter()
+        platform.build(
+            Laserhead(PlatformConfig(test=False)),
             do_program=False,
             verbose=True,
         )

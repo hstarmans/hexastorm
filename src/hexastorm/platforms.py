@@ -39,8 +39,7 @@ class Firestarter(LatticeICE40Platform):
         # Laserscanner resource
         LaserscannerResource(
             number=0,
-            laser0="11",
-            laser1="12",
+            lasers="12 11",  # bit 1, bit 0 !
             photodiode="46",
             pwm="6",
             enable="4",
