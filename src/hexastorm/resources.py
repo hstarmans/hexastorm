@@ -39,8 +39,8 @@ class StepperRecord(Record):
 
     def __init__(self):
         layout = [
-            ("step", unsigned(8)),
-            ("dir", unsigned(16)),
+            ("step", 1),
+            ("dir", 1),
             ("limit", 1),
         ]
         super().__init__(layout)

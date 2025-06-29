@@ -10,7 +10,7 @@ from luna.gateware.memory import TransactionalizedFIFO
 from .config import Spi
 from .resources import get_all_resources
 from .spi_helpers import connect_synchronized_spi
-from .resources import LaserscannerRecord, StepperRecord
+from .resources import StepperRecord
 from .lasers import DiodeSimulator, Laserhead
 
 # from .motor import Driver
@@ -257,55 +257,20 @@ class Dispatcher(Elaboratable):
             parser.fifo.read_discard.eq(read_discard | lh_mod.read_discard),
         ]
 
-        # connect motors
-        steppers = self.steppers
-        for idx, stepper in enumerate(steppers):
-            step = polynomial.step[idx] & ((stepper.limit == 0) | stepper.dir)
-            if idx != (
-                list(self.plf_cfg.motor_cfg["steps_mm"].keys()).index(
-                    self.plf_cfg.motor_cfg["orth2lsrline"]
-                )
-            ):
-                m.d.comb += [
-                    stepper.step.eq(step),
-                    stepper.dir.eq(polynomial.dir[idx]),
-                    parser.pin_state[idx].eq(stepper.limit),
-                ]
-            # connect the motor in which the laserhead moves to laser core
-            else:
-                m.d.comb += [
-                    parser.pin_state[idx].eq(stepper.limit),
-                    stepper.step.eq(
-                        (step & (~lh_mod.process_lines))
-                        | (lh_mod.step & (lh_mod.process_lines))
-                    ),
-                    stepper.dir.eq(
-                        (polynomial.dir[idx] & (~lh_mod.process_lines))
-                        | (lh_mod.dir & (lh_mod.process_lines))
-                    ),
-                ]
-        m.d.comb += parser.pin_state[len(steppers) :].eq(
+        # connect laser module to polynomial
+        m.d.comb += [
+            polynomial.step_laser.eq(lh_mod.step),
+            polynomial.dir_laser.eq(lh_mod.dir),
+            polynomial.override_laser.eq(lh_mod.process_lines),
+        ]
+
+        m.d.comb += parser.pin_state[len(polynomial.steppers) :].eq(
             Cat(lh_mod.photodiode_t, lh_mod.synchronized)
         )
 
-        if platform is not None:
-            # Connect to platform stepper resources
-            steppers_res = get_all_resources(platform, "stepper", dir="-")
-            for i, stepper in enumerate(steppers_res):
-                m.submodules += [
-                    step_buf := Buffer("o", stepper.step),
-                    dir_buf := Buffer("o", stepper.dir),
-                    lim_buf := Buffer("i", stepper.limit),
-                ]
-                m.d.comb += [
-                    step_buf.o.eq(steppers[i].step),
-                    dir_buf.o.eq(steppers[i].dir),
-                    steppers[i].limit.eq(lim_buf.i),
-                ]
-
         # update position
-        stepper_d = Array(Signal() for _ in range(len(steppers)))
-        for idx, stepper in enumerate(steppers):
+        stepper_d = Array(Signal() for _ in range(len(polynomial.steppers)))
+        for idx, stepper in enumerate(polynomial.steppers):
             pos = parser.position[idx]
             m.d.sync += stepper_d[idx].eq(stepper.step)
             with m.If(stepper.limit == 1):

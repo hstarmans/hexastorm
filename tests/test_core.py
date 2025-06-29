@@ -232,26 +232,25 @@ class TestDispatcher(SPIGatewareTestCase):
         self.assertEqual(sim.get(self.dut.lh_mod.photodiode_t), True)
         self.assertEqual(val, True)
 
+    @async_test_case
+    async def test_writepin(self, sim):
+        """verify homing procedure works correctly"""
+        await self.host.enable_comp(
+            laser0=True, laser1=False, polygon=True, synchronize=1, singlefacet=1
+        )
+        # wait till instruction is received
+        while sim.get(self.dut.parser.fifo.empty):
+            await sim.tick()
+        await sim.tick()
+        self.assertEqual((await self.host.fpga_state)["error"], False)
+        self.assertEqual(sim.get(self.dut.lh_mod.lh_rec.lasers[0]), 1)
+        self.assertEqual(sim.get(self.dut.lh_mod.lh_rec.lasers[1]), 0)
+        self.assertEqual(sim.get(self.dut.lh_mod.lh_rec.en), 1)
 
-#     @async_test_case
-#     async def test_writepin(self, sim):
-#         """verify homing procedure works correctly"""
-#         await self.host.enable_comp(
-#             laser0=True, laser1=False, polygon=True, synchronize=1, singlefacet=1
-#         )
-#         # wait till instruction is received
-#         while sim.get(self.dut.parser.empty):
-#             await sim.tick()
-#         await sim.tick()
-#         self.assertEqual((await self.host.fpga_state)["error"], False)
-#         self.assertEqual(sim.get(self.dut.lh.laser0), 1)
-#         self.assertEqual(sim.get(self.dut.lh.laser1), 0)
-#         self.assertEqual(sim.get(self.dut.lh.en), 1)
-
-#         # NOT tested, these signals are not physical and not exposed via
-#         # laserheadpins
-#         # self.assertEqual(sim.get(self.dut.laserheadpins.synchronize), 1)
-#         # self.assertEqual(sim.get(self.dut.laserheadpins.singlefacet), 1)
+        # NOT tested, these signals are not physical and not exposed via
+        # laserheadpins
+        # self.assertEqual(sim.get(self.dut.laserheadpins.synchronize), 1)
+        # self.assertEqual(sim.get(self.dut.laserheadpins.singlefacet), 1)
 
 
 #     @async_test_case

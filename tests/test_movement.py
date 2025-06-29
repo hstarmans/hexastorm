@@ -22,12 +22,13 @@ class TestPolynomial(LunaGatewareTestCase):
         Count motor steps based on direction while DUT is busy.
         """
         sim = self.sim
+        stepper = self.dut.steppers[motor]
         count = 0
         while sim.get(self.dut.busy):
-            old = sim.get(self.dut.step[motor])
+            old = sim.get(stepper.step)
             await sim.tick()
-            if old and sim.get(self.dut.step[motor]) == 0:
-                if sim.get(self.dut.dir[motor]):
+            if old and sim.get(stepper.step) == 0:
+                if sim.get(stepper.dir):
                     count += 1
                 else:
                     count -= 1

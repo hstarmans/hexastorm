@@ -2,7 +2,7 @@ from amaranth import Elaboratable, Module, Signal, signed
 from amaranth.lib.io import Buffer
 from amaranth.hdl import Array
 
-from .resources import get_all_resources
+from .resources import get_all_resources, StepperRecord
 
 
 class Polynomial(Elaboratable):
@@ -39,6 +39,9 @@ class Polynomial(Elaboratable):
         coeff       - Array of polynomial coefficients [a, b, c] per motor
         start       - Start evaluation
         ticklimit   - Number of ticks to evaluate the polynomial
+        step_laser  - step signal for laser axis
+        dir_laser   - dir signal for laser axis
+        override_laser -- override laser axis
 
     Outputs:
         step        - Step signal per motor (Array)
@@ -53,6 +56,9 @@ class Polynomial(Elaboratable):
         """
         self.top = top
         self.hdl_cfg = hdl_cfg = plf_cfg.hdl_cfg
+        self.laser_idx = list(plf_cfg.motor_cfg["steps_mm"].keys()).index(
+            plf_cfg.motor_cfg["orth2lsrline"]
+        )
         self.order = hdl_cfg.pol_degree
         self.motors = hdl_cfg.motors
         self.max_steps = int(hdl_cfg.move_ticks / 2)  # Nyquist
@@ -70,14 +76,18 @@ class Polynomial(Elaboratable):
         )
         self.start = Signal()
         self.tick_limit = Signal(hdl_cfg.move_ticks.bit_length())
+        self.step_laser = Signal()
+        self.dir_laser = Signal()
+        self.override_laser = Signal()
 
         # Output
         self.busy = Signal()
-        self.dir = Array(Signal() for _ in range(self.motors))
-        self.step = Array(Signal() for _ in range(self.motors))
+
+        self.steppers = [StepperRecord() for _ in range(self.motors)]
 
     def elaborate(self, platform):
         m = Module()
+        steppers = self.steppers
 
         # Timing counters
         cntr = Signal(range(self.divider))
@@ -95,30 +105,42 @@ class Polynomial(Elaboratable):
             self.cntrs = cntrs
         elif self.top:
             # Connect to platform stepper resources
-            steppers = get_all_resources(platform, "stepper", dir="-")
-            for i, stepper in enumerate(steppers):
+            steppers_res = get_all_resources(platform, "stepper", dir="-")
+            for i, stepper in enumerate(steppers_res):
                 m.submodules += [
                     step_buf := Buffer("o", stepper.step),
                     dir_buf := Buffer("o", stepper.dir),
+                    lim_buf := Buffer("i", stepper.limit),
                 ]
                 m.d.comb += [
-                    step_buf.o.eq(self.step[i]),
-                    dir_buf.o.eq(self.dir[i]),
+                    step_buf.o.eq(steppers[i].step),
+                    dir_buf.o.eq(steppers[i].dir),
+                    steppers[i].limit.eq(lim_buf.i),
                 ]
 
         # Generate step pulse based on toggling specific bit
         for motor in range(self.motors):
             idx = motor * self.order
-            m.d.comb += self.step[motor].eq(cntrs[idx][self.bit_shift])
+            step_res = cntrs[idx][self.bit_shift]
+
+            with m.If((motor == self.laser_idx) & self.override_laser):
+                m.d.comb += steppers[motor].step.eq(self.step_laser)
+            with m.Else():
+                m.d.comb += steppers[motor].step.eq(step_res)
 
         # Direction signal based on delta between ticks
         for motor in range(self.motors):
             idx = motor * self.order
             m.d.sync += prev[motor].eq(cntrs[idx])
-            with m.If(prev[motor] > cntrs[idx]):
-                m.d.sync += self.dir[motor].eq(0)  # Negative move
-            with m.Elif(prev[motor] < cntrs[idx]):
-                m.d.sync += self.dir[motor].eq(1)  # Positive move
+
+            with m.If((motor == self.laser_idx) & self.override_laser):
+                # Override active for laser motor – use external dir
+                m.d.sync += steppers[motor].dir.eq(self.dir_laser)
+            with m.Else():
+                with m.If(prev[motor] > cntrs[idx]):
+                    m.d.sync += steppers[motor].dir.eq(0)  # Negative move
+                with m.Elif(prev[motor] < cntrs[idx]):
+                    m.d.sync += steppers[motor].dir.eq(1)  # Positive move
 
         # State machine for execution
         with m.FSM(init="RESET", name="polynomial_fsm"):
