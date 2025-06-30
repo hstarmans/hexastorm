@@ -252,121 +252,130 @@ class TestDispatcher(SPIGatewareTestCase):
         # self.assertEqual(sim.get(self.dut.laserheadpins.synchronize), 1)
         # self.assertEqual(sim.get(self.dut.laserheadpins.singlefacet), 1)
 
+    @async_test_case
+    async def test_invalidwrite(self, sim):
+        """write invalid instruction and verify error is raised"""
+        fifo = self.dut.parser.fifo
+        self.assertEqual((await self.host.fpga_state)["error"], False)
+        # write illegal byte to queue and commit
+        sim.set(fifo.write_data, 0xAA)
+        await self.pulse(fifo.write_en)
+        await self.pulse(fifo.write_commit)
+        self.assertEqual(sim.get(fifo.empty), 0)
+        # data should now be processed from sram and empty become 1
+        while sim.get(fifo.empty) == 0:
+            await sim.tick()
+        # 2 clocks needed for error to propagate
+        await sim.tick()
+        await sim.tick()
+        self.assertEqual((await self.host.fpga_state)["error"], True)
 
-#     @async_test_case
-#     async def test_home(self, sim):
-#         """verify homing procedure works correctly"""
-#         self.host._position = np.array([0.1] * self.platform.motors)
-#         for i in range(self.platform.motors):
-#             sim.set(self.dut.steppers[i].limit, 1)
-#         await sim.tick()
-#         self.assertEqual(sim.get(self.dut.parser.pinstate[0]), 1)
-#         await self.host.home_axes(
-#             axes=np.array([1] * self.platform.motors),
-#             speed=None,
-#             displacement=-0.1,
-#         )
-#         assert_array_equal(self.host._position, np.array([0] * self.platform.motors))
+    @async_test_case
+    async def test_movereceipt(self, sim, ticks=10_000):
+        "verify move instruction send over with spline move"
+        hdl_cfg = self.plf_cfg.hdl_cfg
+        motors = hdl_cfg.motors
+        pol_degree = hdl_cfg.pol_degree
+        coeff = [randint(-10, 10)] * motors * pol_degree
+        await self.host.spline_move(ticks, coeff)
+        # wait till instruction is received
+        while sim.get(self.dut.pol.start) == 0:
+            await sim.tick()
+        await sim.tick()
+        while sim.get(self.dut.pol.busy):
+            await sim.tick()
 
-#     @async_test_case
-#     async def test_invalidwrite(self, sim):
-#         """write invalid instruction and verify error is raised"""
-#         fifo = self.dut.parser.fifo
-#         self.assertEqual((await self.host.get_state())["error"], False)
-#         # write illegal byte to queue and commit
-#         sim.set(fifo.write_data, 0xAA)
-#         await self.pulse(sim, fifo.write_en)
-#         await self.pulse(sim, fifo.write_commit)
-#         self.assertEqual(sim.get(self.dut.parser.empty), 0)
-#         # data should now be processed from sram and empty become 1
-#         while sim.get(self.dut.parser.empty) == 0:
-#             await sim.tick()
-#         # 2 clocks needed for error to propagate
-#         await sim.tick()
-#         await sim.tick()
-#         self.assertEqual((await self.host.get_state())["error"], True)
+        # confirm receipt tick limit of segment
+        self.assertEqual(sim.get(self.dut.pol.tick_limit), ticks)
 
-#     @async_test_case
-#     async def test_ptpmove(self, sim, steps=None, ticks=30_000):
-#         """verify point to point move
+        # confirm receipt coefficients
+        for motor in range(motors):
+            for coef in range(pol_degree):
+                indx = motor * pol_degree + coef
+                self.assertEqual(sim.get(self.dut.pol.coeff[indx]), coeff[indx])
 
-#         If ticks is longer than tick limit the moves is broken up.
-#         If the number of instruction is larger than memdepth it
-#         also test blocking behaviour.
-#         """
-#         # TODO: remove this fix
-#         if steps is None:
-#             steps = [800] * self.platform.motors
-#         mm = -np.array(steps) / np.array(list(self.platform.stepspermm.values()))
-#         time = ticks / MOTORFREQ
-#         speed = np.abs(mm / time)
-#         await self.host.gotopoint(mm.tolist(), speed.tolist())
-#         await self.wait_complete(sim)
-#         # if 76.3 steps per mm then 1/76.3 = 0.013 is max resolution
-#         assert_array_almost_equal(await self.host.position, mm, decimal=1)
+        for motor in range(motors):
+            cnt = 0
+            for degree in range(pol_degree):
+                indx = motor * pol_degree + degree
+                cnt += ticks ** (degree + 1) * coeff[indx]
+            self.assertEqual(sim.get(self.dut.pol.cntrs[motor * pol_degree]), cnt)
 
-#         # TODO: they are not symmetric! if start with mm does not work
-#         mm = -mm
-#         await self.host.gotopoint(mm.tolist(), speed.tolist(), absolute=False)
-#         await self.wait_complete(sim)
-#         assert_array_almost_equal(
-#             await self.host.position, np.zeros(self.platform.motors), decimal=1
-#         )
+    @async_test_case
+    async def test_home(self, sim):
+        """verify homing procedure works correctly"""
+        motors = self.plf_cfg.hdl_cfg.motors
+        self.host._position = np.array([0.1] * motors)
+        for i in range(motors):
+            sim.set(self.dut.pol.steppers[i].limit, 1)
+        await sim.tick()
+        self.assertEqual(sim.get(self.dut.parser.pin_state[0]), 1)
+        await self.host.home_axes(
+            axes=np.array([1] * motors),
+            speed=None,
+            displacement=-0.1,
+        )
+        assert_array_equal(self.host._position, np.array([0] * motors))
 
-#     @async_test_case
-#     async def test_movereceipt(self, sim, ticks=10_000):
-#         "verify move instruction send over with spline move"
-#         coeff = [randint(-10, 10)] * self.platform.motors * self.platform.poldegree
-#         await self.host.spline_move(ticks, coeff)
-#         # wait till instruction is received
-#         while sim.get(self.dut.pol.start) == 0:
-#             await sim.tick()
-#         await sim.tick()
-#         while sim.get(self.dut.pol.busy):
-#             await sim.tick()
-#         # confirm receipt tick limit and coefficients
-#         self.assertEqual(sim.get(self.dut.pol.ticklimit), ticks)
-#         for motor in range(self.platform.motors):
-#             for coef in range(self.platform.poldegree):
-#                 indx = motor * self.platform.poldegree + coef
-#                 self.assertEqual(sim.get(self.dut.pol.coeff[indx]), coeff[indx])
-#         for motor in range(self.platform.motors):
-#             cnt = 0
-#             for degree in range(self.platform.poldegree):
-#                 indx = motor * self.platform.poldegree + degree
-#                 cnt += ticks ** (degree + 1) * coeff[indx]
-#             self.assertEqual(
-#                 sim.get(self.dut.pol.cntrs[motor * self.platform.poldegree]), cnt
-#             )
+    @async_test_case
+    async def test_ptpmove(self, sim, steps=None, ticks=30_000):
+        """verify point to point move
 
-#     @async_test_case
-#     async def test_writeline(self, sim, numblines=20, stepsperline=0.5):
-#         "write line and see it is processed accordingly"
-#         host = self.host
-#         for _ in range(numblines):
-#             await host.writeline(
-#                 [1] * host.laser_params["BITSINSCANLINE"], stepsperline, 0
-#             )
-#         await host.writeline([])
-#         self.assertEqual((await host.get_state())["synchronized"], True)
-#         while sim.get(self.dut.parser.empty) == 0:
-#             await sim.tick()
-#         plat = host.platform
-#         stepspermm = plat.stepspermm[plat.laser_axis]
-#         decimals = int(np.log10(stepspermm))
-#         dist = numblines * stepsperline / stepspermm
-#         idx = list(plat.stepspermm.keys()).index(plat.laser_axis)
-#         # TODO: the x position changes as well!?
-#         assert_array_almost_equal(-dist, (await host.position)[idx], decimal=decimals)
-#         for _ in range(numblines):
-#             await host.writeline(
-#                 [1] * host.laser_params["BITSINSCANLINE"], stepsperline, 1
-#             )
-#         await host.writeline([])
-#         await host.enable_comp(synchronize=False)
-#         while sim.get(self.dut.parser.empty) == 0:
-#             await sim.tick()
-#         # TODO: the engine should return to same position
-#         assert_array_almost_equal(0, (await host.position)[idx], decimal=decimals)
-#         self.assertEqual((await host.get_state())["synchronized"], False)
-#         self.assertEqual((await host.get_state())["error"], False)
+        If ticks is longer than tick limit the moves is broken up.
+        If the number of instruction is larger than memdepth it
+        also test blocking behaviour.
+        """
+        hdl_cfg = self.plf_cfg.hdl_cfg
+        # TODO: remove this fix
+        if steps is None:
+            steps = [800] * hdl_cfg.motors
+
+        mm = -np.array(steps) / np.array(
+            list(self.plf_cfg.motor_cfg["steps_mm"].values())
+        )
+        time = ticks / hdl_cfg.motor_freq
+        speed = np.abs(mm / time)
+        await self.host.gotopoint(mm.tolist(), speed.tolist())
+        # TODO: FOUT HIER!?
+        await self.wait_complete()
+        # if 76.3 steps per mm then 1/76.3 = 0.013 is max resolution
+        assert_array_almost_equal(await self.host.position, mm, decimal=1)
+
+        # TODO: they are not symmetric! if start with mm does not work
+        mm = -mm
+        await self.host.gotopoint(mm.tolist(), speed.tolist(), absolute=False)
+        await self.wait_complete()
+        assert_array_almost_equal(
+            await self.host.position, np.zeros(hdl_cfg.motors), decimal=1
+        )
+
+    @async_test_case
+    async def test_writeline(self, sim, numblines=20, stepsperline=0.5):
+        "write line and see it is processed accordingly"
+        host = self.host
+        laz_tim = self.plf_cfg.laser_timing
+        for _ in range(numblines):
+            await host.write_line([1] * laz_tim["scanline_length"], stepsperline, 0)
+        await host.write_line([])
+        self.assertEqual((await self.host.fpga_state)["synchronized"], True)
+        while sim.get(self.dut.parser.fifo.empty) == 0:
+            await sim.tick()
+
+        motor_cfg = self.plf_cfg.motor_cfg
+
+        stepspermm = motor_cfg["steps_mm"][motor_cfg["orth2lsrline"]]
+        decimals = int(np.log10(stepspermm))
+        dist = numblines * stepsperline / stepspermm
+        idx = list(motor_cfg["steps_mm"].keys()).index(motor_cfg["orth2lsrline"])
+        # TODO: the x position changes as well!?
+        assert_array_almost_equal(-dist, (await host.position)[idx], decimal=decimals)
+        for _ in range(numblines):
+            await host.write_line([1] * laz_tim["scanline_length"], stepsperline, 1)
+        await host.write_line([])
+        await host.enable_comp(synchronize=False)
+        while sim.get(self.dut.parser.fifo.empty) == 0:
+            await sim.tick()
+        # TODO: the engine should return to same position
+        assert_array_almost_equal(0, (await host.position)[idx], decimal=decimals)
+        self.assertEqual((await self.host.fpga_state)["synchronized"], False)
+        self.assertEqual((await self.host.fpga_state)["error"], False)

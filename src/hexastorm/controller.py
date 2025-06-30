@@ -417,12 +417,135 @@ class BaseHost:
         command = [cmd] + [0] * Spi.word_bytes
         return await self.send_command(command)
 
+    async def home_axes(self, axes, speed=None, displacement=-200):
+        """home given axes, i.e. [1,0,1] homes x, z and not y
+
+        axes         -- list with axes to home
+        speed        -- speed in mm/s used to home
+        displacement -- displacement used to touch home switch
+        """
+        mtrs = self.cfg.hdl_cfg.motors
+        assert len(axes) == mtrs
+        dist = np.array(axes) * np.array([displacement] * mtrs)
+        await self.gotopoint(position=dist.tolist(), speed=speed, absolute=False)
+
+    async def gotopoint(self, position, speed=None, absolute=True):
+        """move machine to position or with displacement at constant speed
+
+        Axes are moved independently to simplify the calculation.
+        The move is carried out as a first order spline, i.e. only velocity.
+
+        position     -- list with position or displacement in mm for each motor
+        speed        -- list with speed in mm/s, if None default speeds used
+        absolute     -- True if position, False if displacement
+        """
+        (await self.set_parsing(True))
+        hdl_cfg = self.cfg.hdl_cfg
+        mtrs = hdl_cfg.motors
+        assert len(position) == mtrs
+        if speed is not None:
+            assert len(speed) == mtrs
+        else:
+            speed = [10] * mtrs
+        # conversions to steps / count gives rounding errors
+        # minimized by setting speed to integer
+        speed = abs(np.array(speed))
+        displacement = np.array(position)
+        if absolute:
+            # TODO: position machine should be in line with self._position
+            #       which to pick?
+            displacement -= self._position
+
+        homeswitches_hit = [0] * len(position)
+        for idx, disp in enumerate(displacement):
+            if disp == 0:
+                # no displacement, go to next axis
+                continue
+            # Time needed for move
+            #    unit oscillator ticks (times motor position is updated)
+            time = abs(disp / speed[idx])
+            ticks_total = round(time * hdl_cfg.motor_freq)
+            # mm -> steps
+            steps_per_mm = list(self.cfg.motor_cfg["steps_mm"].values())[idx]
+            speed_steps = int(round(speed[idx] * steps_per_mm * ulabext.sign(disp)))
+            velocity = [0] * len(speed)
+            velocity[idx] = self.steps_to_count(speed_steps) // hdl_cfg.motor_freq
+            (await self.set_parsing(True))
+
+            while ticks_total > 0:
+                ticks_move = (
+                    hdl_cfg.move_ticks
+                    if ticks_total >= hdl_cfg.move_ticks
+                    else ticks_total
+                )
+                # execute move and retrieve if switch is hit
+                switches_hit = await self.spline_move(int(ticks_move), velocity)
+                ticks_total -= ticks_move
+                # move is aborted if home switch is hit and
+                # velocity is negative
+                cond = (switches_hit[idx] == 1) & (ulabext.sign(disp) < 0)
+                if cond:
+                    break
+        # update internally stored position
+        self._position += displacement
+        # set position to zero if home switch hit
+        self._position[homeswitches_hit == 1] = 0
+        # TODO: you enable parsing but don't disable it
+        #       this would require a wait or maybe it should be enabled on
+
+    # async def get_motordebug(self, blocking=False):
+    #     """retrieves the motor debug word
+
+    #     This is used to debug the PI controller and
+    #     set the correct setting for the Hall interpolation
+
+    #     blocking   -- checks if memory is full, only needed for
+    #                   a build with all modules
+    #     """
+    #     command = [COMMANDS.DEBUG] + WORD_BYTES * [0]
+    #     response = (await self.send_command(command, blocking=blocking))[1:]
+
+    #     clock = int(self.platform.clks[self.platform.hfosc_div] * 1e6)
+    #     mode = self.platform.laser_timing["MOTORDEBUG"]
+
+    #     def cntcnv(cnt):
+    #         if cnt != 0:
+    #             speed = (
+    #                 clock / (cnt * 4 * self.platform.laser_timing["MOTORDIVIDER"]) * 60
+    #             )
+    #         else:
+    #             speed = 0
+    #         return speed
+
+    #     if (mode == "cycletime") & (response != 0):
+    #         response = int.from_bytes(response, "big")
+    #         # you measure 180 degrees
+    #         if response != 0:
+    #             response = round((clock / (response * 2) * 60))
+    #     elif mode == "PIcontrol":
+    #         cnt = int.from_bytes(response[(WORD_BYTES - 2) :], "big", signed=False)
+    #         speed = cntcnv(cnt)
+    #         duty = int.from_bytes(response[: (WORD_BYTES - 2)], "big", signed=True)
+    #         response = [speed, duty]
+    #     elif mode == "ticksinfacet":
+    #         cnt = int.from_bytes(response[(WORD_BYTES - 2) :], "big", signed=False)
+    #         speed = cntcnv(cnt)
+    #         cntdiode = int.from_bytes(response[: (WORD_BYTES - 2)], "big", signed=False)
+    #         speedd = cntcnv(cntdiode)
+    #         response = [speed, speedd]
+    #     else:
+    #         response = int.from_bytes(response, "big")
+
+    #     if not isinstance(response, list):
+    #         return [response]
+    #     else:
+    #         return response
+
 
 class TestHost(BaseHost):
     def __init__(self):
         super().__init__(test=True)
-        self.spi_tries = 1
-        self.fifo_tries = 10
+        self.spi_tries = 100
         self._position = np.array([0] * self.cfg.hdl_cfg.motors, dtype=float)
 
     def build(self, do_program=False, verbose=True, mod="all"):
@@ -461,8 +584,7 @@ class MicropythonHost(BaseHost):
     def __init__(self, test=False):
         super().__init__(test=False)
         self.steppers_init = False
-        self.spi_tries = 3
-        self.fifo_tries = 1e5
+        self.spi_tries = 1e5
         self._position = np.array([0] * self.cfg.hdl_cfg.motors, dtype=np.float)
         self.init_micropython()
 
@@ -588,54 +710,6 @@ class MicropythonHost(BaseHost):
         command = bytearray(length)
         await self.send_command(command, blocking=False)
 
-    # async def get_motordebug(self, blocking=False):
-    #     """retrieves the motor debug word
-
-    #     This is used to debug the PI controller and
-    #     set the correct setting for the Hall interpolation
-
-    #     blocking   -- checks if memory is full, only needed for
-    #                   a build with all modules
-    #     """
-    #     command = [COMMANDS.DEBUG] + WORD_BYTES * [0]
-    #     response = (await self.send_command(command, blocking=blocking))[1:]
-
-    #     clock = int(self.platform.clks[self.platform.hfosc_div] * 1e6)
-    #     mode = self.platform.laser_timing["MOTORDEBUG"]
-
-    #     def cntcnv(cnt):
-    #         if cnt != 0:
-    #             speed = (
-    #                 clock / (cnt * 4 * self.platform.laser_timing["MOTORDIVIDER"]) * 60
-    #             )
-    #         else:
-    #             speed = 0
-    #         return speed
-
-    #     if (mode == "cycletime") & (response != 0):
-    #         response = int.from_bytes(response, "big")
-    #         # you measure 180 degrees
-    #         if response != 0:
-    #             response = round((clock / (response * 2) * 60))
-    #     elif mode == "PIcontrol":
-    #         cnt = int.from_bytes(response[(WORD_BYTES - 2) :], "big", signed=False)
-    #         speed = cntcnv(cnt)
-    #         duty = int.from_bytes(response[: (WORD_BYTES - 2)], "big", signed=True)
-    #         response = [speed, duty]
-    #     elif mode == "ticksinfacet":
-    #         cnt = int.from_bytes(response[(WORD_BYTES - 2) :], "big", signed=False)
-    #         speed = cntcnv(cnt)
-    #         cntdiode = int.from_bytes(response[: (WORD_BYTES - 2)], "big", signed=False)
-    #         speedd = cntcnv(cntdiode)
-    #         response = [speed, speedd]
-    #     else:
-    #         response = int.from_bytes(response, "big")
-
-    #     if not isinstance(response, list):
-    #         return [response]
-    #     else:
-    #         return response
-
     @property
     def enable_steppers(self):
         """
@@ -702,72 +776,3 @@ class MicropythonHost(BaseHost):
             )
 
         self.bus.writeto_mem(self.platform.ic_address, 0, bytes([val]))
-
-    # async def home_axes(self, axes, speed=None, displacement=-200):
-    #     """home given axes, i.e. [1,0,1] homes x, z and not y
-
-    #     axes         -- list with axes to home
-    #     speed        -- speed in mm/s used to home
-    #     displacement -- displacement used to touch home switch
-    #     """
-    #     assert len(axes) == self.platform.motors
-    #     dist = np.array(axes) * np.array([displacement] * self.platform.motors)
-    #     await self.gotopoint(position=dist.tolist(), speed=speed, absolute=False)
-
-    # async def gotopoint(self, position, speed=None, absolute=True):
-    #     """move machine to position or with displacement at constant speed
-
-    #     Axes are moved independently to simplify the calculation.
-    #     The move is carried out as a first order spline, i.e. only velocity.
-
-    #     position     -- list with position or displacement in mm for each motor
-    #     speed        -- list with speed in mm/s, if None default speeds used
-    #     absolute     -- True if position, False if displacement
-    #     """
-    #     (await self.set_parsing(True))
-    #     assert len(position) == self.platform.motors
-    #     if speed is not None:
-    #         assert len(speed) == self.platform.motors
-    #     else:
-    #         speed = [10] * self.platform.motors
-    #     # conversions to steps / count gives rounding errors
-    #     # minimized by setting speed to integer
-    #     speed = abs(np.array(speed))
-    #     displacement = np.array(position)
-    #     if absolute:
-    #         # TODO: position machine should be in line with self._position
-    #         #       which to pick?
-    #         displacement -= self._position
-
-    #     homeswitches_hit = [0] * len(position)
-    #     for idx, disp in enumerate(displacement):
-    #         if disp == 0:
-    #             # no displacement, go to next axis
-    #             continue
-    #         # Time needed for move
-    #         #    unit oscillator ticks (times motor position is updated)
-    #         time = abs(disp / speed[idx])
-    #         ticks_total = round(time * MOTORFREQ)
-    #         # mm -> steps
-    #         steps_per_mm = list(self.platform.stepspermm.values())[idx]
-    #         speed_steps = int(round(speed[idx] * steps_per_mm * ulabext.sign(disp)))
-    #         velocity = [0] * len(speed)
-    #         velocity[idx] = self.steps_to_count(speed_steps) // MOTORFREQ
-    #         (await self.set_parsing(True))
-
-    #         while ticks_total > 0:
-    #             ticks_move = MOVE_TICKS if ticks_total >= MOVE_TICKS else ticks_total
-    #             # execute move and retrieve if switch is hit
-    #             switches_hit = await self.spline_move(int(ticks_move), velocity)
-    #             ticks_total -= ticks_move
-    #             # move is aborted if home switch is hit and
-    #             # velocity is negative
-    #             cond = (switches_hit[idx] == 1) & (ulabext.sign(disp) < 0)
-    #             if cond:
-    #                 break
-    #     # update internally stored position
-    #     self._position += displacement
-    #     # set position to zero if home switch hit
-    #     self._position[homeswitches_hit == 1] = 0
-    #     # TODO: you enable parsing but don't disable it
-    #     #       this would require a wait or maybe it should be enabled on

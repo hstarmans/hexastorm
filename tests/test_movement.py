@@ -41,8 +41,10 @@ class TestPolynomial(LunaGatewareTestCase):
         Coefficients are for: c·x³ + b·x² + a·x
         """
         coeffs = [a, b, c]
-        for _ in range(self.plf_cfg.hdl_cfg.motors):
-            for idx in range(self.dut.order):
+        hdl_cfg = self.plf_cfg.hdl_cfg
+
+        for _ in range(hdl_cfg.motors):
+            for idx in range(hdl_cfg.pol_degree):
                 self.sim.set(self.dut.coeff[idx], coeffs[idx])
         await self.pulse(self.dut.start)
 
@@ -64,9 +66,11 @@ class TestPolynomial(LunaGatewareTestCase):
     @async_test_case
     async def test_calculation(self, sim, a: int = 2, b: int = 3, c: int = 1) -> None:
         """Test basic polynomial evaluation: c·x³ + b·x² + a·x."""
-        if self.dut.order < 3:
+        degr = self.plf_cfg.hdl_cfg.pol_degree
+
+        if degr < 3:
             c = 0
-        if self.dut.order < 2:
+        if degr < 2:
             b = 0
 
         await self.send_coefficients(a, b, c)
@@ -86,11 +90,12 @@ class TestPolynomial(LunaGatewareTestCase):
         results in exactly one step.
         """
         steps = 1
+        degr = self.plf_cfg.hdl_cfg.pol_degree
         x = self.move_ticks
-        coef = round(self.host.steps_to_count(steps) / (x**self.dut.order))
+        coef = round(self.host.steps_to_count(steps) / (x**degr))
 
         coeffs = [0] * 3
-        coeffs[self.dut.order - 1] = coef
+        coeffs[degr - 1] = coef
 
         await self.send_coefficients(*coeffs)
         actual_steps = await self.count_steps(0)

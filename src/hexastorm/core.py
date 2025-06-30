@@ -209,9 +209,6 @@ class Dispatcher(Elaboratable):
         """
         self.plf_cfg = plf_cfg
 
-        # Shared output record for laserhead signals
-        self.steppers = [StepperRecord()] * plf_cfg.hdl_cfg.motors
-
     def elaborate(self, platform):
         m = Module()
 
@@ -257,34 +254,21 @@ class Dispatcher(Elaboratable):
             parser.fifo.read_discard.eq(read_discard | lh_mod.read_discard),
         ]
 
-        # connect laser module to polynomial
+        # connect polynomial module
         m.d.comb += [
             polynomial.step_laser.eq(lh_mod.step),
             polynomial.dir_laser.eq(lh_mod.dir),
             polynomial.override_laser.eq(lh_mod.process_lines),
         ]
+        for i in range(len(polynomial.position)):
+            m.d.comb += [
+                parser.position[i].eq(polynomial.position[i]),
+                parser.pin_state[i].eq(polynomial.steppers[i].limit),
+            ]
 
         m.d.comb += parser.pin_state[len(polynomial.steppers) :].eq(
             Cat(lh_mod.photodiode_t, lh_mod.synchronized)
         )
-
-        # update position
-        stepper_d = Array(Signal() for _ in range(len(polynomial.steppers)))
-        for idx, stepper in enumerate(polynomial.steppers):
-            pos = parser.position[idx]
-            m.d.sync += stepper_d[idx].eq(stepper.step)
-            with m.If(stepper.limit == 1):
-                m.d.sync += parser.position[idx].eq(0)
-            # assuming position is signed
-            # TODO: this might eat LUT, optimize
-            pos_max = pow(2, len(pos) - 1) - 2
-            with m.Elif((pos > pos_max) | (pos < -pos_max)):
-                m.d.sync += parser.position[idx].eq(0)
-            with m.Elif((stepper.step == 1) & (stepper_d[idx] == 0)):
-                with m.If(stepper.dir):
-                    m.d.sync += pos.eq(pos + 1)
-                with m.Else():
-                    m.d.sync += pos.eq(pos - 1)
 
         # Busy signal
         m.d.comb += busy.eq(polynomial.busy | lh_mod.process_lines)
