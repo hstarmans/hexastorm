@@ -140,9 +140,9 @@ class PlatformConfig:
             device="iCE40UP5K",
             package="SG48",
             default_clk="SB_HFOSC",
-            hfosc_div=2,
+            hfosc_div="test" if self.test else 2,
             # Not required
-            clks={0: 48, 1: 24, 2: 12, 3: 6},
+            clks={0: 48, 1: 24, 2: 12, 3: 6, "test": 1},
         )
 
     @property

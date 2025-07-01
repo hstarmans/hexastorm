@@ -200,7 +200,7 @@ class TestDispatcher(SPIGatewareTestCase):
         self.assertTrue((await self.host.fpga_state)["mem_full"])
         await self.host.set_parsing(True)
         # data should now be processed from sram and empty become 1
-        await self.wait_until(~self.dut.parser.fifo.empty)
+        await self.wait_until(self.dut.parser.fifo.empty)
         # 2 clocks needed for error to propagate
         await self.advance_cycles(2)
         self.assertFalse((await self.host.fpga_state)["error"])
@@ -324,37 +324,36 @@ class TestDispatcher(SPIGatewareTestCase):
             err_msg="All axes should read position 0 after homing",
         )
 
-    # @async_test_case
-    # async def test_ptpmove(self, sim, steps=None, ticks=30_000):
-    #     """verify point to point move
+    @async_test_case
+    async def test_ptpmove(self, sim, steps=None, ticks=30_000):
+        """verify point to point move
 
-    #     If ticks is longer than tick limit the moves is broken up.
-    #     If the number of instruction is larger than memdepth it
-    #     also test blocking behaviour.
-    #     """
-    #     hdl_cfg = self.plf_cfg.hdl_cfg
-    #     # TODO: remove this fix
-    #     if steps is None:
-    #         steps = [800] * hdl_cfg.motors
+        If ticks is longer than tick limit the moves is broken up.
+        If the number of instruction is larger than memdepth it
+        also test blocking behaviour.
+        """
+        hdl_cfg = self.plf_cfg.hdl_cfg
+        # TODO: remove this fix
+        if steps is None:
+            steps = [800] * hdl_cfg.motors
 
-    #     mm = -np.array(steps) / np.array(
-    #         list(self.plf_cfg.motor_cfg["steps_mm"].values())
-    #     )
-    #     time = ticks / hdl_cfg.motor_freq
-    #     speed = np.abs(mm / time)
-    #     await self.host.gotopoint(mm.tolist(), speed.tolist())
-    #     # TODO: FOUT HIER!?
-    #     await self.wait_complete()
-    #     # if 76.3 steps per mm then 1/76.3 = 0.013 is max resolution
-    #     assert_array_almost_equal(await self.host.position, mm, decimal=1)
+        mm = -np.array(steps) / np.array(
+            list(self.plf_cfg.motor_cfg["steps_mm"].values())
+        )
+        time = ticks / hdl_cfg.motor_freq
+        speed = np.abs(mm / time)
+        await self.host.gotopoint(mm.tolist(), speed.tolist())
+        await self.wait_complete()
+        # if 76.3 steps per mm then 1/76.3 = 0.013 is max resolution
+        assert_array_almost_equal(await self.host.position, mm, decimal=1)
 
-    #     # TODO: they are not symmetric! if start with mm does not work
-    #     mm = -mm
-    #     await self.host.gotopoint(mm.tolist(), speed.tolist(), absolute=False)
-    #     await self.wait_complete()
-    #     assert_array_almost_equal(
-    #         await self.host.position, np.zeros(hdl_cfg.motors), decimal=1
-    #     )
+        # TODO: they are not symmetric! if start with mm does not work
+        mm = -mm
+        await self.host.gotopoint(mm.tolist(), speed.tolist(), absolute=False)
+        await self.wait_complete()
+        assert_array_almost_equal(
+            await self.host.position, np.zeros(hdl_cfg.motors), decimal=1
+        )
 
     @async_test_case
     async def test_writeline(self, sim, num_lines=20, steps_line=0.5):

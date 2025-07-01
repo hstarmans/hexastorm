@@ -545,7 +545,7 @@ class BaseHost:
 class TestHost(BaseHost):
     def __init__(self):
         super().__init__(test=True)
-        self.spi_tries = 100
+        self.spi_tries = 10
         self._position = np.array([0] * self.cfg.hdl_cfg.motors, dtype=float)
 
     def build(self, do_program=False, verbose=True, mod="all"):
