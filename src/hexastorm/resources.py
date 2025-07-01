@@ -2,7 +2,6 @@ import itertools
 
 from amaranth import Record
 from amaranth.build import Pins, PinsN, Resource, ResourceError, Subsignal, Attrs
-from amaranth.hdl.ast import unsigned
 from amaranth.hdl.rec import Layout
 
 __all__ = ["StepperResource", "LaserscannerResource", "BLDCResource"]

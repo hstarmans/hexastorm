@@ -1,6 +1,5 @@
 from amaranth import Cat, Elaboratable, Module, Signal, signed, Mux
 from amaranth.hdl import Array
-from amaranth.lib.io import Buffer
 from luna.gateware.interface.spi import (
     SPICommandInterface,
 )
@@ -8,9 +7,7 @@ from luna.gateware.memory import TransactionalizedFIFO
 
 
 from .config import Spi
-from .resources import get_all_resources
 from .spi_helpers import connect_synchronized_spi
-from .resources import StepperRecord
 from .lasers import DiodeSimulator, Laserhead
 
 # from .motor import Driver
@@ -196,11 +193,9 @@ class SPIParser(Elaboratable):
 
 
 class Dispatcher(Elaboratable):
-    """Dispatches instructions to right submodule
-
-    Instructions are buffered in SRAM. This module checks the buffer
-    and dispatches the instructions to the corresponding module.
-    This is the top module
+    """
+    Top-level unit that *parses* the instruction FIFO and *dispatches* the work
+    either to the laser-head or to the polynomial motion controller.
     """
 
     def __init__(self, plf_cfg):
@@ -208,16 +203,10 @@ class Dispatcher(Elaboratable):
         plf_cfg  -- platform configuration
         """
         self.plf_cfg = plf_cfg
+        self.busy = Signal()
 
     def elaborate(self, platform):
         m = Module()
-
-        parser = m.submodules.parser = SPIParser(self.plf_cfg.hdl_cfg)
-        polynomial = m.submodules.polynomial = Polynomial(self.plf_cfg)
-
-        # Busy used to detect move or scanline in action
-        # disabled "dispatching"
-        busy = Signal()
 
         # shared signals
         enable_prism = Signal()
@@ -225,57 +214,57 @@ class Dispatcher(Elaboratable):
         read_commit = Signal()
         read_en = Signal()
         read_discard = Signal()
+        busy = self.busy  # poly busy or lh processing lines
 
-        if platform is None:
-            self.lh_mod = lh_mod = m.submodules.laserhead = DiodeSimulator(
-                plf_cfg=self.plf_cfg, addfifo=False
-            )
-            m.d.comb += [
-                lh_mod.enable_prism_in.eq(enable_prism),
-                lh_mod.lasers_in.eq(lasers),
-            ]
-        else:
-            lh_mod = m.submodules.laserhead = Laserhead(self.plf_cfg)
+        # submodules
+        m.submodules.parser = parser = SPIParser(self.plf_cfg.hdl_cfg)
+        m.submodules.polynomial = poly = Polynomial(self.plf_cfg)
 
         if platform is None:
             self.parser = parser
-            self.pol = polynomial
-            self.busy = busy
-
-        # polynomial iterates over count
-        coeffcnt = Signal(range(len(polynomial.coeff) + 1))
+            self.pol = poly
+            self.lh = m.submodules.laserhead = lh = DiodeSimulator(
+                plf_cfg=self.plf_cfg, addfifo=False
+            )
+            m.d.comb += [
+                lh.enable_prism_in.eq(enable_prism),
+                lh.lasers_in.eq(lasers),
+            ]
+        else:
+            m.submodules.laserhead = lh = Laserhead(self.plf_cfg)
 
         # connect Parser
         m.d.comb += [
-            lh_mod.read_data.eq(parser.fifo.read_data),
-            lh_mod.empty.eq(parser.fifo.empty),
-            parser.fifo.read_commit.eq(read_commit | lh_mod.read_commit),
-            parser.fifo.read_en.eq(read_en | lh_mod.read_en),
-            parser.fifo.read_discard.eq(read_discard | lh_mod.read_discard),
+            lh.read_data.eq(parser.fifo.read_data),
+            lh.empty.eq(parser.fifo.empty),
+            parser.fifo.read_commit.eq(read_commit | lh.read_commit),
+            parser.fifo.read_en.eq(read_en | lh.read_en),
+            parser.fifo.read_discard.eq(read_discard | lh.read_discard),
         ]
 
         # connect polynomial module
         m.d.comb += [
-            polynomial.step_laser.eq(lh_mod.step),
-            polynomial.dir_laser.eq(lh_mod.dir),
-            polynomial.override_laser.eq(lh_mod.process_lines),
+            poly.step_laser.eq(lh.step),
+            poly.dir_laser.eq(lh.dir),
+            poly.override_laser.eq(lh.process_lines),
         ]
-        for i in range(len(polynomial.position)):
+        for i in range(len(poly.position)):
             m.d.comb += [
-                parser.position[i].eq(polynomial.position[i]),
-                parser.pin_state[i].eq(polynomial.steppers[i].limit),
+                parser.position[i].eq(poly.position[i]),
+                parser.pin_state[i].eq(poly.steppers[i].limit),
             ]
-
-        m.d.comb += parser.pin_state[len(polynomial.steppers) :].eq(
-            Cat(lh_mod.photodiode_t, lh_mod.synchronized)
-        )
-
-        # Busy signal
-        m.d.comb += busy.eq(polynomial.busy | lh_mod.process_lines)
+        # parser pin state & busy signal
+        m.d.comb += [
+            parser.pin_state[len(poly.steppers) :].eq(
+                Cat(lh.photodiode_t, lh.synchronized)
+            ),
+            busy.eq(poly.busy | lh.process_lines),
+        ]
 
         # pins you can write to
-        pins = Cat(lasers, enable_prism, lh_mod.synchronize, lh_mod.singlefacet)
-        self.pins = pins
+        self.pins = pins = Cat(lasers, enable_prism, lh.synchronize, lh.singlefacet)
+        # poly coeff currently processed
+        poly_coeff = Signal(range(len(poly.coeff) + 1))
 
         with m.FSM(init="RESET", name="dispatcher"):
             with m.State("RESET"):
@@ -283,66 +272,62 @@ class Dispatcher(Elaboratable):
                 m.next = "WAIT_INSTRUCTION"
 
             with m.State("WAIT_INSTRUCTION"):
-                m.d.sync += [read_commit.eq(0), polynomial.start.eq(0)]
-                with m.If(
-                    (~parser.fifo.empty)
-                    & parser.parse
-                    & (~(polynomial.busy | lh_mod.process_lines))
-                ):
+                m.d.sync += [read_commit.eq(0), poly.start.eq(0)]
+                with m.If(~parser.fifo.empty & parser.parse & ~busy):
                     m.d.sync += read_en.eq(1)
-                    m.next = "PARSEHEAD"
+                    m.next = "PARSE_HEAD"
             # check which instruction we r handling
-            with m.State("PARSEHEAD"):
-                byte0 = parser.fifo.read_data[:8]
+            with m.State("PARSE_HEAD"):
+                instruction = parser.fifo.read_data[:8]
+                payload = parser.fifo.read_data[8:]
                 m.d.sync += read_en.eq(0)
-                with m.If(byte0 == Spi.Instructions.move):
-                    m.d.sync += [
-                        polynomial.tick_limit.eq(parser.fifo.read_data[8:]),
-                        coeffcnt.eq(0),
-                    ]
-                    m.next = "MOVE_POLYNOMIAL"
-                with m.Elif(byte0 == Spi.Instructions.write_pin):
-                    m.d.sync += [
-                        pins.eq(parser.fifo.read_data[8:]),
-                        read_commit.eq(1),
-                    ]
-                    m.next = "WAIT"
-                with m.Elif(
-                    (byte0 == Spi.Instructions.scanline)
-                    | (byte0 == Spi.Instructions.last_scanline)
-                ):
-                    m.d.sync += [
-                        read_discard.eq(1),
-                        lh_mod.synchronize.eq(1),
-                        lh_mod.expose_start.eq(1),
-                    ]
-                    m.next = "SCANLINE"
-                with m.Else():
-                    m.next = "ERROR"
-                    m.d.sync += parser.error_dispatch.eq(1)
+                with m.Switch(instruction):
+                    instr = Spi.Instructions
+                    with m.Case(instr.move):
+                        m.d.sync += [
+                            poly.tick_limit.eq(payload),
+                            poly_coeff.eq(0),
+                        ]
+                        m.next = "MOVE_POLYNOMIAL"
+                    with m.Case(instr.write_pin):
+                        m.d.sync += [
+                            pins.eq(payload),
+                            read_commit.eq(1),
+                        ]
+                        m.next = "WAIT"
+                    with m.Case(instr.scanline, instr.last_scanline):
+                        m.d.sync += [
+                            read_discard.eq(1),
+                            lh.synchronize.eq(1),
+                            lh.expose_start.eq(1),
+                        ]
+                        m.next = "SCANLINE"
+                    with m.Default():
+                        m.d.sync += parser.error_dispatch.eq(1)
+                        m.next = "ERROR"
             with m.State("MOVE_POLYNOMIAL"):
-                with m.If(coeffcnt < len(polynomial.coeff)):
+                with m.If(poly_coeff < len(poly.coeff)):
                     with m.If(read_en == 0):
                         m.d.sync += read_en.eq(1)
                     with m.Else():
                         m.d.sync += [
-                            polynomial.coeff[coeffcnt].eq(parser.fifo.read_data),
-                            coeffcnt.eq(coeffcnt + 1),
+                            poly.coeff[poly_coeff].eq(parser.fifo.read_data),
+                            poly_coeff.eq(poly_coeff + 1),
                             read_en.eq(0),
                         ]
                 with m.Else():
+                    m.d.sync += [poly.start.eq(1), read_commit.eq(1)]
                     m.next = "WAIT"
-                    m.d.sync += [polynomial.start.eq(1), read_commit.eq(1)]
             with m.State("SCANLINE"):
                 m.d.sync += [
                     read_discard.eq(0),
-                    lh_mod.expose_start.eq(0),
+                    lh.expose_start.eq(0),
                 ]
                 m.next = "WAIT"
             # NOTE: you need to wait for busy to be raised
             #       in time
             with m.State("WAIT"):
-                m.d.sync += polynomial.start.eq(0)
+                m.d.sync += poly.start.eq(0)
                 m.next = "WAIT_INSTRUCTION"
             # NOTE: system never recovers user must reset
             with m.State("ERROR"):
