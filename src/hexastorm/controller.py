@@ -270,10 +270,6 @@ class BaseHost:
         )
         await self.send_command(data, blocking=True)
 
-    # TODO: this is strange, should it be here
-    #       on the board steps and count is stored
-    #       you could move this to spline_coefficients
-    #       the flow over method of a certain bit comes from beagleg
     def steps_to_count(self, steps):
         """Convert a number of motor steps to the corresponding count value.
 
@@ -418,8 +414,9 @@ class BaseHost:
         return await self.send_command(command)
 
     async def home_axes(self, axes, speed=None, displacement=-200):
-        """home given axes, i.e. [1,0,1] homes x, z and not y
+        """Home given axes, i.e. [1,0,1] homes x, z and not y.
 
+        Args:
         axes         -- list with axes to home
         speed        -- speed in mm/s used to home
         displacement -- displacement used to touch home switch
@@ -430,68 +427,64 @@ class BaseHost:
         await self.gotopoint(position=dist.tolist(), speed=speed, absolute=False)
 
     async def gotopoint(self, position, speed=None, absolute=True):
-        """move machine to position or with displacement at constant speed
+        """Move machine to position by a displacement at constant speed.
 
-        Axes are moved independently to simplify the calculation.
-        The move is carried out as a first order spline, i.e. only velocity.
+        The motion profile is first-order (constant velocity) and each axis
+        is driven independently, simplifying timing calculations.
 
-        position     -- list with position or displacement in mm for each motor
+        Args:
+        position     --
+            • If *absolute* is True,  absolute position (mm) for every axis.
+            • If *absolute* is False, relative displacement (mm) for every axis.
         speed        -- list with speed in mm/s, if None default speeds used
-        absolute     -- True if position, False if displacement
+        absolute     -- Position interpreted as absolute (True) or
+                        a displacement (False).
         """
-        (await self.set_parsing(True))
+        await self.set_parsing(True)
         hdl_cfg = self.cfg.hdl_cfg
-        mtrs = hdl_cfg.motors
-        assert len(position) == mtrs
-        if speed is not None:
-            assert len(speed) == mtrs
+        num_axes = hdl_cfg.motors
+        steps_per_mm = list(self.cfg.motor_cfg["steps_mm"].values())
+
+        #  validation
+        assert len(position) == num_axes
+        if speed is None:
+            speed = [10] * num_axes
         else:
-            speed = [10] * mtrs
+            assert len(speed) == num_axes
+
+        # precompute
         # conversions to steps / count gives rounding errors
         # minimized by setting speed to integer
+        position = np.array(position)
         speed = abs(np.array(speed))
-        displacement = np.array(position)
-        if absolute:
-            # TODO: position machine should be in line with self._position
-            #       which to pick?
-            displacement -= self._position
+        displacement = position - self._position if absolute else position
 
-        homeswitches_hit = [0] * len(position)
-        for idx, disp in enumerate(displacement):
-            if disp == 0:
-                # no displacement, go to next axis
+        homeswitches_hit = [0] * num_axes
+        for axis, disp_mm in enumerate(displacement):
+            if disp_mm == 0:
                 continue
-            # Time needed for move
-            #    unit oscillator ticks (times motor position is updated)
-            time = abs(disp / speed[idx])
-            ticks_total = round(time * hdl_cfg.motor_freq)
-            # mm -> steps
-            steps_per_mm = list(self.cfg.motor_cfg["steps_mm"].values())[idx]
-            speed_steps = int(round(speed[idx] * steps_per_mm * ulabext.sign(disp)))
-            velocity = [0] * len(speed)
-            velocity[idx] = self.steps_to_count(speed_steps) // hdl_cfg.motor_freq
-            (await self.set_parsing(True))
 
-            while ticks_total > 0:
-                ticks_move = (
-                    hdl_cfg.move_ticks
-                    if ticks_total >= hdl_cfg.move_ticks
-                    else ticks_total
-                )
-                # execute move and retrieve if switch is hit
-                switches_hit = await self.spline_move(int(ticks_move), velocity)
-                ticks_total -= ticks_move
-                # move is aborted if home switch is hit and
-                # velocity is negative
-                cond = (switches_hit[idx] == 1) & (ulabext.sign(disp) < 0)
-                if cond:
+            duration_s = abs(disp_mm / speed[axis])
+            ticks_remaining = int(round(duration_s * hdl_cfg.motor_freq))
+
+            speed_steps = int(
+                round(speed[axis] * steps_per_mm[axis] * ulabext.sign(disp_mm))
+            )
+            velocity = [0] * num_axes
+            velocity[axis] = self.steps_to_count(speed_steps) // hdl_cfg.motor_freq
+
+            while ticks_remaining > 0:
+                ticks_chunk = min(ticks_remaining, hdl_cfg.move_ticks)
+                switches = await self.spline_move(int(ticks_chunk), velocity)
+                ticks_remaining -= ticks_chunk
+                # abort home switch hit and speed negative
+                if switches[axis] & (ulabext.sign(disp_mm) < 0):
+                    homeswitches_hit[axis] = 1
                     break
-        # update internally stored position
+
         self._position += displacement
-        # set position to zero if home switch hit
         self._position[homeswitches_hit == 1] = 0
-        # TODO: you enable parsing but don't disable it
-        #       this would require a wait or maybe it should be enabled on
+        # parsing not disabled !
 
     # async def get_motordebug(self, blocking=False):
     #     """retrieves the motor debug word
