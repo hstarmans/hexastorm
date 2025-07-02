@@ -564,7 +564,7 @@ class TestHost(BaseHost):
         )
 
 
-class MicropythonHost(BaseHost):
+class MpyHost(BaseHost):
     """
     Host interface to interact with the FPGA.
 
