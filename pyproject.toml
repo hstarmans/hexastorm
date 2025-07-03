@@ -26,10 +26,9 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "black>=25.1.0",
     "nbqa>=1.9.1",
     "pdm>=2.24.2",
-    "ruff>=0.11.5",
+    "ruff>=0.11.12",
 ]
 plot = [
     "ipykernel>=6.29.5",
@@ -39,8 +38,11 @@ raspberry = [
     "opencv-python>=4.5.3.56",
 ]
 
-[tool.black]
-line-length = 79
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.format]
+quote-style = "double"
 
 [tool.pdm.scripts]
 test = "python -m unittest discover -t . -s tests -v"

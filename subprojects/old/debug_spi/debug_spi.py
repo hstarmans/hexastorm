@@ -15,7 +15,7 @@ class DebugSPIExample(Elaboratable):
 
     def elaborate(self, platform):
         m = Module()
-        board_spi = platform.request("debug_spi")
+        board_spi = platform.request("debug_spi", dir="-")
 
         # Use command interface.
         m.submodules.interface = self.interface
@@ -33,5 +33,5 @@ class DebugSPIExample(Elaboratable):
 
 
 if __name__ == "__main__":
-    platform = Firestarter(micropython=True)
+    platform = Firestarter()
     platform.build(DebugSPIExample(), do_program=False, verbose=True)

@@ -1,35 +1,46 @@
 from amaranth import Elaboratable, Module, Signal, Cat
+from amaranth.lib.io import Buffer
 from luna.gateware.memory import TransactionalizedFIFO
 
-from .constants import INSTRUCTIONS, MEMWIDTH, params
+from .config import Spi
+from .resources import LaserscannerRecord
 
 
 class Laserhead(Elaboratable):
-    """Controller of laser scanner with rotating mirror or prism
+    """
+    Controller for laser scanning systems using a rotating mirror or prism.
 
-    I/O signals:
-    O: synchronized   -- if true, laser is in sync and prism is rotating
-    I: synchronize    -- activate synchronization
-    I: singlefacet    -- activate single facet
-    I: expose_start   -- start reading lines and exposing
-    O: expose_finish  -- exposure is finished
-    O: error          -- error signal
-    O: lasers         -- laser pin
-    O: pwm            -- pulse for scanner motor
-    O: enable_prism   -- enable pin scanner motor
-    I: photodiode     -- trigger for photodiode
-    O: photodiode_t   -- high if photodiode triggered in this cycle
-    O: read_commit    -- finalize read transactionalizedfifo
-    O: read_en        -- enable read transactionalizedfifo
-    I: read_data      -- read data from transactionalizedfifo, AKA busy
-    I: empty          -- signal wether fifo is empty
-    O: step           -- step signal
-    O: direction      -- direction signal
+    This module manages synchronization with a photodiode, precise timing of laser
+    exposure, scanline processing from FIFO, and motor stepping logic. It supports
+    single-facet and multi-facet scanning modes.
+
+    Inputs:
+        synchronize     -- Start/enable synchronization process.
+        singlefacet     -- Limit operation to a single facet.
+        expose_start    -- Start exposing scanlines.
+        read_data       -- Data from scanline FIFO.
+        empty           -- FIFO empty flag.
+        enable_prism_in -- Enable signal for motor driver.
+        lasers_in       -- 2-bit input to laser driver
+
+    Outputs:
+        synchronized    -- High when synchronized with photodiode signal.
+        expose_finished -- High when all scanlines have been exposed.
+        error           -- Indicates synchronization or data error.
+        photodiode_t    -- High if photodiode triggered this cycle.
+        read_en         -- Read enable signal for FIFO.
+        read_commit     -- Commit current line in FIFO.
+        step            -- Step signal for motor.
+        dir             -- Stepper motor direction.
     """
 
-    def __init__(self, platform):
-        self.platform = platform
-        self.dct = params(platform)
+    def __init__(self, plf_cfg):
+        """
+        plf_cfg  -- platform configuration
+        """
+        self.plf_cfg = plf_cfg
+        hdl_cfg = plf_cfg.hdl_cfg
+        laz_tim = plf_cfg.laser_timing
 
         # Control and status signals
         self.synchronize = Signal()
@@ -39,58 +50,85 @@ class Laserhead(Elaboratable):
         self.expose_finished = Signal()
         self.error = Signal()
         self.process_lines = Signal()
-        self.ticksinfacet = Signal(range(self.dct["TICKSINFACET"] * 2))
+        self.facet_ticks = Signal(range(laz_tim["facet_ticks"] * 2))
 
         # Motor and laser control
-        self.lasers = Signal(2)
-        self.pwm = Signal()
-        self.enable_prism = Signal()
+        self.enable_prism_in = Signal()
+        self.lasers_in = Signal(2)
         self.step = Signal()
         self.dir = Signal()
 
         # Photodiode signals
-        self.photodiode = Signal()
         self.photodiode_t = Signal()
 
         # FIFO memory interface (read)
         self.read_commit = Signal()
         self.read_en = Signal()
-        self.read_data = Signal(MEMWIDTH)
+        self.read_data = Signal(hdl_cfg.mem_width)
         self.read_discard = Signal()
         self.empty = Signal()
-        
+
         # FIFO memory interface (write)
         self.write_commit_2 = Signal()
         self.write_en_2 = Signal()
-        self.write_data_2 = Signal(MEMWIDTH)
+        self.write_data_2 = Signal(hdl_cfg.mem_width)
         self.write_discard_2 = Signal()
         self.full = Signal()
 
+        self.lh_rec = LaserscannerRecord()
+
     def elaborate(self, platform):
         m = Module()
-        dct = self.dct
+        laz_tim = self.plf_cfg.laser_timing
+        hdl_cfg = self.plf_cfg.hdl_cfg
+        lh_rec = self.lh_rec
+
+        enable_prism = Signal()
+        lasers = Signal(2)
+
+        m.d.comb += [
+            lh_rec.en.eq(self.enable_prism_in | enable_prism),
+            lh_rec.lasers.eq(self.lasers_in | lasers),
+        ]
+
+        if platform is not None:
+            lh_pin = platform.request("laserscanner", dir="-")
+            m.submodules += [
+                lasers_buf := Buffer("o", lh_pin.lasers),
+                phd_buf := Buffer("i", lh_pin.photodiode),
+                pwm_buf := Buffer("o", lh_pin.pwm),
+                en_buf := Buffer("o", lh_pin.en),
+            ]
+            m.d.comb += [
+                lasers_buf.o.eq(self.lh_rec.lasers),
+                self.lh_rec.photodiode.eq(phd_buf.i),
+                pwm_buf.o.eq(self.lh_rec.pwm),
+                en_buf.o.eq(self.lh_rec.en),
+            ]
 
         # Pulse generator for prism motor
-        pwm_counter = Signal(range(dct["POLYPERIOD"]))
-        with m.If(pwm_counter == dct["POLYPERIOD"] - 1):
+        pwm_counter = Signal(range(laz_tim["motor_period"]))
+        with m.If(pwm_counter == laz_tim["motor_period"] - 1):
             m.d.sync += [
-                self.pwm.eq(~self.pwm),
+                lh_rec.pwm.eq(~lh_rec.pwm),
                 pwm_counter.eq(0),
             ]
         with m.Else():
             m.d.sync += pwm_counter.eq(pwm_counter + 1)
 
         # Photodiode edge detector:
-        # Sets `photodiode_t` high if the photodiode 
+        # Sets `photodiode_t` high if the photodiode
         # was low at any point during a tick window.
         # Used for photodiode test validation.
-        phtd_cnt_max = (dct["TICKSINFACET"] * 2)
+        phtd_cnt_max = laz_tim["facet_ticks"] * 2
         phtd_cnt = Signal(range(phtd_cnt_max))
         phtd_triggered = Signal()
 
         with m.If(phtd_cnt < (phtd_cnt_max - 1)):
-            m.d.sync += [phtd_cnt.eq(phtd_cnt + 1),
-                         phtd_triggered.eq(phtd_triggered|~self.photodiode),]
+            m.d.sync += [
+                phtd_cnt.eq(phtd_cnt + 1),
+                phtd_triggered.eq(phtd_triggered | ~lh_rec.photodiode),
+            ]
         with m.Else():
             m.d.sync += [
                 self.photodiode_t.eq(phtd_triggered),
@@ -110,43 +148,41 @@ class Laserhead(Elaboratable):
             ]
 
         # step generator, i.e. slowest speed is 1/(2^4-1)
-        stephalfperiod = Signal(dct["BITSINSCANLINE"].bit_length() + 4)
+        stephalfperiod = Signal(laz_tim["scanline_length"].bit_length() + 4)
         stepcnt = Signal.like(stephalfperiod)
 
         # Laser FSM
         # syncfailed is lowered once synchronized
-        syncfailed_cnt = Signal(range(dct["STABLETICKS"]))
-        facetcnt = Signal(range(dct["FACETS"]))
-        lasercnt = Signal(range(dct["LASERTICKS"]))
-        byte_index = Signal(range(dct["BITSINSCANLINE"] + 1))
+        syncfailed_cnt = Signal(range(laz_tim["stable_ticks"]))
+        facetcnt = Signal(range(laz_tim["facets"]))
+        lasercnt = Signal(range(laz_tim["laser_ticks"]))
+        byte_index = Signal(range(laz_tim["scanline_length"] + 1))
         tickcounter = Signal(
-            range(max(dct["SPINUPTICKS"], dct["STABLETICKS"]))
+            range(max(laz_tim["spinup_ticks"], laz_tim["stable_ticks"]))
         )
-        
-        photodiode = self.photodiode
+
         read_data = self.read_data
         read_old = Signal.like(read_data)
-        bit_index = Signal(range(MEMWIDTH))
+        bit_index = Signal(range(hdl_cfg.mem_width))
         photodiode_d = Signal()
-        lasers = self.lasers
 
         with m.FSM(init="RESET") as laserfsm:
             with m.State("RESET"):
                 m.d.sync += [
                     self.error.eq(0),
                     self.synchronized.eq(0),
-                    self.enable_prism.eq(0),
-                    self.lasers.eq(0),
+                    enable_prism.eq(0),
+                    lasers.eq(0),
                 ]
                 m.next = "STOP"
-            
+
             with m.State("STOP"):
                 m.d.sync += [
-                    syncfailed_cnt.eq(dct["STABLETICKS"] - 1),
+                    syncfailed_cnt.eq(laz_tim["stable_ticks"] - 1),
                     tickcounter.eq(0),
                     facetcnt.eq(0),
                     self.synchronized.eq(0),
-                    self.enable_prism.eq(0),
+                    enable_prism.eq(0),
                     bit_index.eq(0),
                     byte_index.eq(0),
                     lasercnt.eq(0),
@@ -154,18 +190,17 @@ class Laserhead(Elaboratable):
                 ]
                 with m.If(self.synchronize & (~self.error)):
                     # Error: photodiode cannot be high without active laser
-                    with m.If(self.photodiode == 0):
+                    with m.If(lh_rec.photodiode == 0):
                         m.d.sync += self.error.eq(1)
                     with m.Else():
-                        m.d.sync += [self.error.eq(0), 
-                                     self.enable_prism.eq(1)]
+                        m.d.sync += [self.error.eq(0), enable_prism.eq(1)]
                         m.next = "SPINUP"
 
             with m.State("SPINUP"):
-                with m.If(tickcounter > dct["SPINUPTICKS"] - 1):
+                with m.If(tickcounter > laz_tim["spinup_ticks"] - 1):
                     # turn on single channel
                     m.d.sync += [
-                        self.lasers.eq(0b10),
+                        lasers.eq(0b10),
                         tickcounter.eq(0),
                     ]
                     m.next = "WAIT_STABLE"
@@ -174,37 +209,36 @@ class Laserhead(Elaboratable):
 
             with m.State("WAIT_STABLE"):
                 # Store previous photodiode value
-                m.d.sync += [photodiode_d.eq(photodiode),
-                             self.write_en_2.eq(1)]
+                m.d.sync += [photodiode_d.eq(lh_rec.photodiode), self.write_en_2.eq(1)]
 
                 # Timeout: photodiode didn't fall in time
                 with m.If(tickcounter >= syncfailed_cnt):
-                    m.d.sync += [self.error.eq(1),
-                                 self.write_en_2.eq(0)]
+                    m.d.sync += [self.error.eq(1), self.write_en_2.eq(0)]
                     m.next = "STOP"
 
                 # Falling edge detected (photodiode: 1 → 0)
-                with m.Elif(~photodiode & ~photodiode_d):
-                    m.d.sync += [tickcounter.eq(0), 
-                                 lasers.eq(0),
+                with m.Elif(~lh_rec.photodiode & ~photodiode_d):
+                    m.d.sync += [
+                        tickcounter.eq(0),
+                        lasers.eq(0),
                     ]
 
                     # Check if synchronization timing is within expected range
-                    sync_margin = (dct["TICKSINFACET"] - 1) - dct["JITTERTICKS"]
+                    sync_margin = (laz_tim["facet_ticks"] - 1) - laz_tim["jitter_ticks"]
                     with m.If(tickcounter > sync_margin):
                         m.d.sync += [
                             self.synchronized.eq(1),
-                            self.ticksinfacet.eq(tickcounter),
+                            self.facet_ticks.eq(tickcounter),
                             self.write_data_2.eq(Cat(facetcnt, tickcounter)),
-                            self.write_en_2.eq(0)
+                            self.write_en_2.eq(0),
                         ]
 
                         # Increment or reset facet counter
-                        with m.If(facetcnt == dct["FACETS"] - 1):
+                        with m.If(facetcnt == laz_tim["facets"] - 1):
                             m.d.sync += facetcnt.eq(0)
                         with m.Else():
                             m.d.sync += facetcnt.eq(facetcnt + 1)
-                        
+
                         # Exit early if only a single facet should be scanned
                         with m.If(self.singlefacet & (facetcnt > 0)):
                             m.next = "WAIT_END"
@@ -215,8 +249,8 @@ class Laserhead(Elaboratable):
                         with m.Else():
                             # TODO: 10 is too high, should be lower
                             syncfailed_sync_max = min(
-                                round(10.1 * dct["TICKSINFACET"]),
-                                dct["STABLETICKS"],
+                                round(10.1 * laz_tim["facet_ticks"]),
+                                laz_tim["stable_ticks"],
                             )
                             m.d.sync += [
                                 syncfailed_cnt.eq(syncfailed_sync_max),
@@ -225,8 +259,7 @@ class Laserhead(Elaboratable):
                             m.next = "READ_INSTRUCTION"
                     # Not synchronized — too early
                     with m.Else():
-                        m.d.sync += [self.synchronized.eq(0),
-                                     self.write_en_2.eq(0)]
+                        m.d.sync += [self.synchronized.eq(0), self.write_en_2.eq(0)]
                         m.next = "WAIT_END"
                 # No event yet, just increment tick counter
                 with m.Else():
@@ -239,13 +272,13 @@ class Laserhead(Elaboratable):
                 ]
                 instruction = read_data[:8]
                 with m.Switch(instruction):
-                    with m.Case(INSTRUCTIONS.SCANLINE):
+                    with m.Case(Spi.Instructions.scanline):
                         m.d.sync += [
                             self.dir.eq(read_data[8]),
                             stephalfperiod.eq(read_data[9:]),
                         ]
                         m.next = "WAIT_FOR_DATA_RUN"
-                    with m.Case(INSTRUCTIONS.LASTSCANLINE):
+                    with m.Case(Spi.Instructions.last_scanline):
                         m.d.sync += [
                             self.expose_finished.eq(1),
                             self.read_commit.eq(1),
@@ -263,7 +296,7 @@ class Laserhead(Elaboratable):
                     byte_index.eq(0),
                     lasercnt.eq(0),
                 ]
-                start_threshold = int(dct["START%"] * dct["TICKSINFACET"])
+                start_threshold = int(laz_tim["start_frac"] * laz_tim["facet_ticks"])
                 assert start_threshold > 0
                 with m.If(tickcounter >= start_threshold):
                     m.d.sync += self.read_en.eq(1)
@@ -272,46 +305,43 @@ class Laserhead(Elaboratable):
             with m.State("DATA_RUN"):
                 m.d.sync += [
                     tickcounter.eq(tickcounter + 1),
-                    self.lasers[1].eq(self.lasers[0])
+                    lasers[1].eq(lasers[0]),
                 ]
                 # NOTE:
                 #      lasercnt used to pulse laser at certain freq
                 with m.If(lasercnt == 0):
                     # Handle motor stepping
                     with m.If(stepcnt >= stephalfperiod):
-                        m.d.sync += [
-                            self.step.eq(~self.step), 
-                            stepcnt.eq(0)
-                        ]
+                        m.d.sync += [self.step.eq(~self.step), stepcnt.eq(0)]
                     with m.Else():
                         m.d.sync += stepcnt.eq(stepcnt + 1)
 
                     # End of scanline reached
-                    with m.If(byte_index >= dct["BITSINSCANLINE"]):
-                        m.d.sync += self.lasers[0].eq(0),
+                    with m.If(byte_index >= laz_tim["scanline_length"]):
+                        m.d.sync += (lasers[0].eq(0),)
 
                         # Commit or discard based on configuration and FIFO status
-                        with m.If(dct["SINGLE_LINE"] & self.empty):
+                        with m.If(hdl_cfg.single_line & self.empty):
                             m.d.sync += self.read_discard.eq(1)
                         with m.Else():
                             m.d.sync += self.read_commit.eq(1)
-                        
+
                         m.next = "WAIT_END"
 
                     # Still scanning — advance and output laser bit
                     with m.Else():
                         m.d.sync += [
-                            lasercnt.eq(dct["LASERTICKS"] - 1),
+                            lasercnt.eq(laz_tim["laser_ticks"] - 1),
                             byte_index.eq(byte_index + 1),
                         ]
                         with m.If(bit_index == 0):
                             m.d.sync += [
-                                self.lasers[0].eq(read_data[0]),
+                                lasers[0].eq(read_data[0]),
                                 read_old.eq(read_data >> 1),
                                 self.read_en.eq(0),
                             ]
                         with m.Else():
-                            m.d.sync += self.lasers[0].eq(read_old[0])
+                            m.d.sync += lasers[0].eq(read_old[0])
                 with m.Else():
                     m.d.sync += lasercnt.eq(lasercnt - 1)
                     # NOTE: read enable can only be high for 1 cycle
@@ -321,13 +351,13 @@ class Laserhead(Elaboratable):
                         with m.If(bit_index == 0):
                             m.d.sync += [bit_index.eq(bit_index + 1)]
                         # Last bit in word — fetch next byte if needed
-                        with m.Elif(bit_index == MEMWIDTH - 1):
+                        with m.Elif(bit_index == hdl_cfg.mem_width - 1):
                             # If fifo is empty it will give errors later
                             # so it can be ignored here
                             # Only grab a new line if more than current
                             # is needed
                             # -1 as counting in python is different
-                            with m.If(byte_index < (dct["BITSINSCANLINE"])):
+                            with m.If(byte_index < (laz_tim["scanline_length"])):
                                 m.d.sync += self.read_en.eq(1)
                             m.d.sync += bit_index.eq(0)
                         with m.Else():
@@ -340,28 +370,29 @@ class Laserhead(Elaboratable):
                     tickcounter.eq(tickcounter + 1),
                     self.write_commit_2.eq(1),
                 ]
-                 # Decide whether to commit or discard the current line
-                with m.If(dct["SINGLE_LINE"] & self.empty):
+                # Decide whether to commit or discard the current line
+                with m.If(hdl_cfg.single_line & self.empty):
                     m.d.sync += self.read_discard.eq(0)
                 with m.Else():
                     m.d.sync += self.read_commit.eq(0)
-                
+
                 # -1 as you count till range-1 in python
                 # -2 as you need 1 tick to process
-                exposure_end = round(dct["TICKSINFACET"] - dct["JITTERTICKS"] - 2)
+                exposure_end = round(
+                    laz_tim["facet_ticks"] - laz_tim["jitter_ticks"] - 2
+                )
                 with m.If(tickcounter >= exposure_end):
-                    m.d.sync += [lasers.eq(0b10),
-                                 self.write_commit_2.eq(0)]
+                    m.d.sync += [lasers.eq(0b10), self.write_commit_2.eq(0)]
                     m.next = "WAIT_STABLE"
                 with m.Else():
                     m.d.sync += lasers.eq(0b00)
-                
+
                 # If user disables synchronization, stop immediately
                 with m.If(~self.synchronize):
                     m.d.sync += self.write_commit_2.eq(0)
                     m.next = "STOP"
 
-        if self.platform.name == "Test":
+        if self.plf_cfg.test:
             self.stephalfperiod = stephalfperiod
             self.tickcounter = tickcounter
             self.scanbit = byte_index
@@ -370,56 +401,46 @@ class Laserhead(Elaboratable):
             self.laserfsm = laserfsm
         return m
 
-class DiodeSimulator(Laserhead):
-    """Laserhead wrapper for simulating a photodiode in test environments.
 
-    The simulated photodiode goes low (active) only when the prism motor 
-    is enabled and the laser is on so the diode
-    can be triggered.
+class DiodeSimulator(Laserhead):
+    """
+    Simulates a photodiode signal for testing laserhead behavior in a controlled environment.
+
+    The photodiode goes low (active) only when the prism motor is enabled
+    and at least one laser channel is on, mimicking real-world diode triggering.
+    Optionally includes transactional FIFO buffers for scanline data emulation.
+    The lasers or prism are on if they are either turned on by an external process
+    or by the laserhead.
     """
 
-    def __init__(self, platform, laser_var=None, addfifo=True):
-        if laser_var is not None:
-            platform.laser_var = laser_var
-        super().__init__(platform)
+    def __init__(self, plf_cfg, addfifo=True):
+        """
+        plf_cfg  -- platform configuration
+        """
+        super().__init__(plf_cfg)
+        self.plf_cfg = plf_cfg
 
         self.addfifo = addfifo
-        self.laser0in = Signal()
-        self.laser1in = Signal()
-        self.enable_prism_in = Signal()
-
-        if addfifo:
-            self.write_en = Signal()
-            self.write_commit = Signal()
-            self.write_data = Signal(MEMWIDTH)
-            self.read_en_2 = Signal()
-            self.read_commit_2 = Signal()
-            self.read_data_2 = Signal(MEMWIDTH)
 
     def elaborate(self, platform):
-        if self.platform is not None:
-            platform = self.platform
         m = super().elaborate(platform)
+        hdl_cfg = self.plf_cfg.hdl_cfg
+        laz_tim = self.plf_cfg.laser_timing
 
-        dct = self.dct
-        diodecounter = Signal(range(dct["TICKSINFACET"]))
-        self.diodecounter = diodecounter
+        lh_rec = self.lh_rec
+
+        diode_cnt = Signal(range(laz_tim["facet_ticks"]))
+        self.diode_cnt = diode_cnt
 
         if self.addfifo:
-            m.d.comb += [
-                self.enable_prism_in.eq(self.enable_prism),
-                self.laser0in.eq(self.lasers[0]),
-                self.laser1in.eq(self.lasers[1]),
-            ]
             # FIFO 1:
-            fifo = TransactionalizedFIFO(width=MEMWIDTH, depth=platform.memdepth)
+            fifo = TransactionalizedFIFO(
+                width=hdl_cfg.mem_width, depth=hdl_cfg.mem_depth
+            )
             m.submodules.fifo = fifo
             self.fifo = fifo
 
             m.d.comb += [
-                fifo.write_data.eq(self.write_data),
-                fifo.write_commit.eq(self.write_commit),
-                fifo.write_en.eq(self.write_en),
                 fifo.read_commit.eq(self.read_commit),
                 fifo.read_en.eq(self.read_en),
                 fifo.read_discard.eq(self.read_discard),
@@ -427,7 +448,9 @@ class DiodeSimulator(Laserhead):
                 self.read_data.eq(fifo.read_data),
             ]
             # FIFO 2:
-            fifo2 = TransactionalizedFIFO(width=MEMWIDTH, depth=platform.memdepth)
+            fifo2 = TransactionalizedFIFO(
+                width=hdl_cfg.mem_width, depth=hdl_cfg.mem_depth
+            )
             m.submodules.fifo2 = fifo2
             self.fifo2 = fifo2
 
@@ -436,25 +459,19 @@ class DiodeSimulator(Laserhead):
                 fifo2.write_commit.eq(self.write_commit_2),
                 fifo2.write_discard.eq(self.write_discard_2),
                 fifo2.write_en.eq(self.write_en_2),
-                fifo2.read_commit.eq(self.read_commit_2),
-                fifo2.read_en.eq(self.read_en_2),
                 self.full.eq(fifo2.full),
-                self.read_data_2.eq(fifo2.read_data),
             ]
 
-        with m.If(diodecounter == (dct["TICKSINFACET"] - 1)):
-            m.d.sync += diodecounter.eq(0)
-        with m.Elif(diodecounter > (dct["TICKSINFACET"] - 4)):
+        with m.If(diode_cnt == (laz_tim["facet_ticks"] - 1)):
+            m.d.sync += diode_cnt.eq(0)
+        with m.Elif(diode_cnt > (laz_tim["facet_ticks"] - laz_tim["facets"])):
             m.d.sync += [
-                self.photodiode.eq(
-                    ~(self.enable_prism_in & (self.laser0in | self.laser1in))
-                ),
-                diodecounter.eq(diodecounter + 1),
+                lh_rec.photodiode.eq(~(lh_rec.en & (lh_rec.lasers.any()))),
+                diode_cnt.eq(diode_cnt + 1),
             ]
         with m.Else():
             m.d.sync += [
-                diodecounter.eq(diodecounter + 1),
-                self.photodiode.eq(1),
+                diode_cnt.eq(diode_cnt + 1),
+                lh_rec.photodiode.eq(1),
             ]
         return m
-
