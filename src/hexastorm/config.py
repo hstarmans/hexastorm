@@ -112,8 +112,8 @@ class PlatformConfig:
             # sda pin digipot TODO: should be 4, hotfix to 46
             i2c=dict(
                 scl=5,
-                sda=4,
-                laserdriver_address=0x28,
+                sda=46,
+                digipot_addr=0x28,
             ),
             spi=dict(
                 sck=12,

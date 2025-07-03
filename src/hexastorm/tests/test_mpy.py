@@ -37,13 +37,14 @@ class StaticTest(Base):
     async def test_memfull(self):
         """Fill FIFO to the brim and make sure it empties again."""
         host = self.host
+        hdl_cfg = host.cfg.hdl_cfg
         await host.set_parsing(False)
         host.enable_steppers = False
         host.spi_tries = 10
-        for _ in range(host.platform.memdepth):
-            coeff = [3] * host.cfg.hdl_cfg.motors
+        for _ in range(hdl_cfg.mem_depth):
+            coeff = [3] * hdl_cfg.motors
             try:
-                await host.spline_move(host.cfg.hdl_cfg.move_ticks, coeff)
+                await host.spline_move(hdl_cfg.move_ticks, coeff)
             except Memfull:
                 pass
         host.spi_tries = 100_000
@@ -152,7 +153,9 @@ class LaserheadTest(Base):
             indx = indx.index(mt_cfg["orth2lsrline"])
             # assume y axis is 1
             start_pos[indx] += dist if direction else -dist
-            assert_array_almost_equal((await host.position), start_pos, decimal=1)
+            assert_array_almost_equal(
+                (await host.position), start_pos, decimal=1
+            )
         await host.write_line([])
         print(f"Wait for stopline to execute, {time_out} seconds")
         await sleep(time_out)
@@ -163,7 +166,9 @@ class LaserheadTest(Base):
         # (yield from self.host.set_parsing(False))
 
     @async_test
-    async def test_scanline(self, numb_lines=1_000, repeat=True, singlefacet=False):
+    async def test_scanline(
+        self, numb_lines=1_000, repeat=True, singlefacet=False
+    ):
         """Send *numb_lines* scanlines and compare measured line rate."""
         host = self.host
         laz_tim = host.cfg.laser_timing
@@ -235,7 +240,9 @@ class MoveTest(Base):
             self.host.enable_steppers = True
             start_move_pos = (await self.host.position).copy()
             disp = delta * direction
-            await self.host.gotopoint(position=disp, speed=[1] * motors, absolute=False)
+            await self.host.gotopoint(
+                position=disp, speed=[1] * motors, absolute=False
+            )
             await sleep(3)
             assert_array_almost_equal(
                 await self.host.position,

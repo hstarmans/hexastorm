@@ -1,6 +1,6 @@
 from struct import unpack
 import sys
-from time import sleep
+from asyncio import sleep
 import logging
 
 from . import ulabext
@@ -47,6 +47,8 @@ class BaseHost:
     def __init__(self, test=False):
         self.test = test
         self.cfg = PlatformConfig(self.test)
+        # mpy requires np.float
+        self._position = np.array([0] * self.cfg.hdl_cfg.motors, dtype=np.float)
 
     @property
     async def position(self):
@@ -104,9 +106,9 @@ class BaseHost:
                 # function is created in Amaranth HDL
                 response[:] = await self.spi_exchange_data(command)
             else:
-                self.fpga_select.value(0)
+                self.fpga_cs.value(0)
                 self.spi.write_readinto(command, response)
-                self.fpga_select.value(1)
+                self.fpga_cs.value(1)
             if not blocking:
                 break
 
@@ -539,7 +541,6 @@ class TestHost(BaseHost):
     def __init__(self):
         super().__init__(test=True)
         self.spi_tries = 10
-        self._position = np.array([0] * self.cfg.hdl_cfg.motors, dtype=float)
 
     def build(self, do_program=False, verbose=True, mod="all"):
         """
@@ -567,18 +568,12 @@ class TestHost(BaseHost):
 class MpyHost(BaseHost):
     """
     Host interface to interact with the FPGA.
-
-    Args:
-        test (bool): If True, runs in test mode with virtual FPGA platform.
-
-    In test mode, the object uses mock settings and disables MicroPython-specific code.
     """
 
-    def __init__(self, test=False):
+    def __init__(self):
         super().__init__(test=False)
         self.steppers_init = False
         self.spi_tries = 1e5
-        self._position = np.array([0] * self.cfg.hdl_cfg.motors, dtype=np.float)
         self.init_micropython()
 
     def init_micropython(self):
@@ -654,7 +649,7 @@ class MpyHost(BaseHost):
         """
         cfg = self.cfg.esp32_cfg
         self.fpga_reset.value(0)
-        self.fpga_cs.value(1)
+        self.flash_cs.value(1)
         await sleep(1)
         # can't get hardware spi working with memory
         spi = SoftSPI(
@@ -669,7 +664,7 @@ class MpyHost(BaseHost):
 
         f = W25QFlash(
             spi=spi,
-            cs=cfg["fpga_cs"],
+            cs=self.flash_cs,
             baud=cfg["spi"]["baudrate"],
             software_reset=True,
         )
@@ -692,7 +687,7 @@ class MpyHost(BaseHost):
         "restart the FPGA by toggling the reset pin and initializing communication"
         # free all lines
         self.spi.deinit()
-        self.flash_cs.mode(Pin.IN)
+        self.flash_cs.init(Pin.IN)
 
         self.fpga_reset.value(0)
         await sleep(1)
@@ -742,7 +737,8 @@ class MpyHost(BaseHost):
         - Both channels share the same current setting.
         - 0 represents no current; 255 represents full driver current.
         """
-        return list(self.bus.readfrom_mem(self.platform.ic_address, 0, 1))[0]
+        adr = self.cfg.esp32_cfg["i2c"]["digipot_addr"]
+        return list(self.i2c.readfrom_mem(adr, 0, 1))[0]
 
     @laser_current.setter
     def laser_current(self, val):
@@ -767,5 +763,5 @@ class MpyHost(BaseHost):
             raise ValueError(
                 f"Laser current must be between 0 and {MAX_SAFE_CURRENT} (inclusive)"
             )
-
-        self.bus.writeto_mem(self.platform.ic_address, 0, bytes([val]))
+        adr = self.cfg.esp32_cfg["i2c"]["digipot_addr"]
+        self.i2c.writeto_mem(adr, 0, bytes([val]))
