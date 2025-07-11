@@ -1,5 +1,5 @@
 from hexastorm.utils import LunaGatewareTestCase, async_test_case
-from hexastorm.controller import TestHost
+from hexastorm.fpga_host.mock import TestHost
 from hexastorm.config import PlatformConfig
 from hexastorm.movement import Polynomial
 

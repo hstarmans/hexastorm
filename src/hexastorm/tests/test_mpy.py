@@ -6,7 +6,8 @@ from asyncio import sleep, run
 from ulab import numpy as np
 
 from hexastorm.config import Spi
-from hexastorm.controller import MpyHost, Memfull
+from hexastorm.fpga_host.interface import Memfull
+from hexastorm.fpga_host.micropython import ESP32Host
 from hexastorm.ulabext import assert_array_almost_equal
 
 
@@ -24,7 +25,7 @@ class Base(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.host = MpyHost()
+        cls.host = ESP32Host()
         cls.host.reset()
 
     @classmethod
@@ -153,9 +154,7 @@ class LaserheadTest(Base):
             indx = indx.index(mt_cfg["orth2lsrline"])
             # assume y axis is 1
             start_pos[indx] += dist if direction else -dist
-            assert_array_almost_equal(
-                (await host.position), start_pos, decimal=1
-            )
+            assert_array_almost_equal((await host.position), start_pos, decimal=1)
         await host.write_line([])
         print(f"Wait for stopline to execute, {time_out} seconds")
         await sleep(time_out)
@@ -166,9 +165,7 @@ class LaserheadTest(Base):
         # (yield from self.host.set_parsing(False))
 
     @async_test
-    async def test_scanline(
-        self, numb_lines=1_000, repeat=True, singlefacet=False
-    ):
+    async def test_scanline(self, numb_lines=1_000, repeat=True, singlefacet=False):
         """Send *numb_lines* scanlines and compare measured line rate."""
         host = self.host
         laz_tim = host.cfg.laser_timing
@@ -240,9 +237,7 @@ class MoveTest(Base):
             self.host.enable_steppers = True
             start_move_pos = (await self.host.position).copy()
             disp = delta * direction
-            await self.host.gotopoint(
-                position=disp, speed=[1] * motors, absolute=False
-            )
+            await self.host.gotopoint(position=disp, speed=[1] * motors, absolute=False)
             await sleep(3)
             assert_array_almost_equal(
                 await self.host.position,

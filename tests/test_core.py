@@ -6,7 +6,8 @@ from numpy.testing import assert_array_almost_equal, assert_array_equal
 from hexastorm.config import Spi, PlatformConfig
 from hexastorm.utils import async_test_case
 from hexastorm.spi import SPIGatewareTestCase
-from hexastorm.controller import TestHost, Memfull
+from hexastorm.fpga_host.mock import TestHost
+from hexastorm.fpga_host.interface import Memfull
 from hexastorm.core import SPIParser, Dispatcher
 
 

@@ -2,7 +2,7 @@ from random import randint
 from struct import unpack
 
 from hexastorm.lasers import Laserhead, DiodeSimulator
-from hexastorm.controller import TestHost
+from hexastorm.fpga_host.mock import TestHost
 from hexastorm.config import Spi, PlatformConfig
 from hexastorm.utils import LunaGatewareTestCase, async_test_case
 
