@@ -84,9 +84,7 @@ class ESP32Host(BaseHost):
                     tmc.setMotorEnabled(False)
                 except ConnectionFail:
                     failed = True
-                    logging.debug(
-                        f"Cannot connect to stepper motor {key} axis"
-                    )
+                    logging.debug(f"Cannot connect to stepper motor {key} axis")
             self.steppers_init = not failed
 
     async def flash_fpga(self, filename):
@@ -174,9 +172,7 @@ class ESP32Host(BaseHost):
         val (bool): True to enable steppers (active-low), False to disable.
         """
         if not isinstance(val, bool):
-            raise ValueError(
-                "enable_steppers must be a boolean value (True or False)"
-            )
+            raise ValueError("enable_steppers must be a boolean value (True or False)")
 
         # Assuming 'enable' is active-low: 0 = enabled, 1 = disabled
         self.stepper_cs.value(0 if val else 1)

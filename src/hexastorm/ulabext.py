@@ -53,15 +53,15 @@ def packbits(bitlst, bitorder="big"):
             else:  # little-endian
                 byte_val |= bit << i
         if bitorder == "big":
-            byte_val <<= (8 - min(8, bitlst_len - byte_index * 8))
+            byte_val <<= 8 - min(8, bitlst_len - byte_index * 8)
         byte_arr[byte_index] = byte_val
 
     return np.array(byte_arr, dtype=np.uint8)
 
 
-
 def assert_array_almost_equal(x, y, decimal=6, err_msg="", verbose=True):
     """Assert that two arrays are almost equal up to a given decimal precision."""
+
     def convert(arr):
         arr = np.array(arr)
         return np.array([0 if math.isnan(v) else v for v in arr])
@@ -70,10 +70,12 @@ def assert_array_almost_equal(x, y, decimal=6, err_msg="", verbose=True):
     y_arr = convert(y)
 
     tolerance = 1.5 * 10**-decimal
-    diffs = np.abs(x_arr - y_arr)
+    # np.abs does not exist in micropython
+    diffs = abs(x_arr - y_arr)
 
     if not all(d < tolerance for d in diffs):
         message = (
-            err_msg or f"Arrays not almost equal to {decimal} decimals:\n{x_arr}\n!=\n{y_arr}"
+            err_msg
+            or f"Arrays not almost equal to {decimal} decimals:\n{x_arr}\n!=\n{y_arr}"
         )
         raise AssertionError(message)

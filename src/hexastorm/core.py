@@ -226,12 +226,14 @@ class Dispatcher(Elaboratable):
             self.lh = m.submodules.laserhead = lh = DiodeSimulator(
                 plf_cfg=self.plf_cfg, addfifo=False
             )
-            m.d.comb += [
-                lh.enable_prism_in.eq(enable_prism),
-                lh.lasers_in.eq(lasers),
-            ]
         else:
             m.submodules.laserhead = lh = Laserhead(self.plf_cfg)
+
+        # connect laser
+        m.d.comb += [
+            lh.enable_prism_in.eq(enable_prism),
+            lh.lasers_in.eq(lasers),
+        ]
 
         # connect Parser
         m.d.comb += [

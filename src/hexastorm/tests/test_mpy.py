@@ -26,11 +26,11 @@ class Base(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.host = ESP32Host()
-        cls.host.reset()
+        run(cls.host.reset())
 
     @classmethod
     def tearDownClass(cls):
-        cls.host.reset()
+        run(cls.host.reset())
 
 
 class StaticTest(Base):
@@ -122,7 +122,7 @@ class LaserheadTest(Base):
         await sleep(timeout)
         self.assertTrue((await host.fpga_state)["photodiode_trigger"])
         await host.enable_comp(synchronize=False)
-        self.assertFalse(await host.fpga_state["error"])
+        self.assertFalse((await host.fpga_state)["error"])
 
     @async_test
     async def test_move(self, dist=10, steps_line=1, time_out=3):

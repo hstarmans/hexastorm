@@ -6,7 +6,7 @@ from ..config import Spi, PlatformConfig
 
 try:
     import numpy as np
-except ModuleNotFoundError:
+except ImportError:
     from ulab import numpy as np
 
 
@@ -51,19 +51,14 @@ class BaseHost:
         """
         cmd = [Spi.Commands.position] + [0] * Spi.word_bytes
         num_motors = self.cfg.hdl_cfg.motors
-
+        steps_per_mm = np.array(list(self.cfg.motor_cfg["steps_mm"].values()))
         for motor in range(num_motors):
             read_data = await self.send_command(cmd)
-            self._position[motor] = unpack("!q", read_data[1:])[0]
-            # code below is not portable between python and micropython
-            # python requires signed=True, micropython does not accep this
-            # overflow error can be generated, if you go below 0
-            # overflow is created during the division,
-            # it's assumed position cannot be negative.
-            # self._position[i] = int.from_bytes(read_data[1:9], 'big', True)
-        # Convert steps to mm
-        steps_per_mm = np.array(list(self.cfg.motor_cfg["steps_mm"].values()))
-        self._position = self._position / steps_per_mm
+            # Convert steps to mm
+            self._position[motor] = (
+                float(unpack("!q", read_data[1:])[0]) / steps_per_mm[motor]
+            )
+
         return self._position
 
     async def send_command(self, command, blocking=False):
