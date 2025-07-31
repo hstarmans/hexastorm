@@ -385,7 +385,7 @@ class TestDispatcher(SPIGatewareTestCase):
         await host.write_line([])
         await host.enable_comp(synchronize=False)
         await self.wait_until(self.dut.parser.fifo.empty)
-        # TODO: the engine should return to same position
+        # TODO: y is still lightly positive 0.001
         assert_array_almost_equal(0, (await host.position)[idx], decimal=decimals)
         fpga_state = await host.fpga_state
         self.assertFalse(fpga_state["synchronized"])

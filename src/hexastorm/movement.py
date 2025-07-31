@@ -1,4 +1,4 @@
-from amaranth import Elaboratable, Module, Signal, signed
+from amaranth import Elaboratable, Module, Mux, Signal, signed
 from amaranth.lib.io import Buffer
 from amaranth.hdl import Array
 
@@ -70,7 +70,7 @@ class Polynomial(Elaboratable):
 
         # Output
         self.busy = Signal()
-        self.position = Array(Signal(signed(64)) for _ in range(hdl_cfg.motors))
+        self.position = Array(Signal(signed(32)) for _ in range(hdl_cfg.motors))
 
         # Mixed
         self.steppers = [StepperRecord() for _ in range(hdl_cfg.motors)]
@@ -117,7 +117,7 @@ class Polynomial(Elaboratable):
         # update position
         stepper_d = Array(Signal() for _ in range(hdl_cfg.motors))
         # assuming position is signed and 64 bits signals
-        pos_max = pow(2, 64 - 1) - 2
+        pos_max = pow(2, 32 - 1) - 2
         for idx, stepper in enumerate(self.steppers):
             pos = self.position[idx]
             m.d.sync += stepper_d[idx].eq(stepper.step)
@@ -137,12 +137,34 @@ class Polynomial(Elaboratable):
         )
         for motor in range(hdl_cfg.motors):
             idx = motor * hdl_cfg.pol_degree
-            step_res = cntrs[idx][hdl_cfg.bit_shift]
+            step_motor = cntrs[idx][hdl_cfg.bit_shift]
 
-            with m.If((motor == laser_idx) & self.override_laser):
-                m.d.comb += steppers[motor].step.eq(self.step_laser)
+            with m.If(motor == laser_idx):
+                # When you switch between sources, there should not be a pulse
+                # 1. Create previous value registers
+                step_motor_d = Signal()
+                step_laser_d = Signal()
+
+                m.d.sync += [
+                    step_motor_d.eq(step_motor),
+                    step_laser_d.eq(self.step_laser),
+                ]
+
+                # 2. Edge detect for each source
+                edge_motor = Signal()
+                edge_laser = Signal()
+
+                m.d.sync += [
+                    edge_motor.eq((step_motor == 1) & (step_motor_d == 0)),
+                    edge_laser.eq((self.step_laser == 1) & (step_laser_d == 0)),
+                ]
+
+                # 3. Mux the *edges*, not the raw step signal
+                m.d.sync += steppers[motor].step.eq(
+                    Mux(self.override_laser, edge_laser, edge_motor)
+                )
             with m.Else():
-                m.d.comb += steppers[motor].step.eq(step_res)
+                m.d.sync += steppers[motor].step.eq(step_motor)
 
         # Direction signal based on delta between ticks
         for motor in range(hdl_cfg.motors):

@@ -56,7 +56,7 @@ class BaseHost:
             read_data = await self.send_command(cmd)
             # Convert steps to mm
             self._position[motor] = (
-                float(unpack("!q", read_data[1:])[0]) / steps_per_mm[motor]
+                float(unpack("!i", read_data[-4:])[0]) / steps_per_mm[motor]
             )
 
         return self._position
@@ -462,7 +462,7 @@ class BaseHost:
                 switches = await self.spline_move(int(ticks_chunk), velocity)
                 ticks_remaining -= ticks_chunk
                 # abort home switch hit and speed negative
-                if switches[axis] & (ulabext.sign(disp_mm) < 0):
+                if switches[axis] and (ulabext.sign(disp_mm) < 0):
                     homeswitches_hit[axis] = 1
                     break
 

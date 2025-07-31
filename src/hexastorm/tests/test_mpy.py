@@ -149,7 +149,7 @@ class LaserheadTest(Base):
             for _ in range(numb_lines):
                 await host.write_line(line, steps_line, direction)
             print(f"Wait for move to complete, {time_out} seconds.")
-            sleep(time_out)
+            await sleep(time_out)
             indx = list(mt_cfg["steps_mm"].keys())
             indx = indx.index(mt_cfg["orth2lsrline"])
             # assume y axis is 1
@@ -228,7 +228,7 @@ class MoveTest(Base):
     @async_test
     async def test_multiple_move(self, decimals=1):
         """Jog ±10 mm twice and verify final position is unchanged."""
-        motors = self.host.platform.motors
+        motors = self.host.cfg.hdl_cfg.motors
         delta = np.array([10, 10, 0])
         start_pos = (await self.host.position).copy()
         # does not work with -1, 1

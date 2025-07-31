@@ -49,7 +49,7 @@ class SPIParser(Elaboratable):
         self.spi_command = SPICommandInterface(
             command_size=Spi.command_bytes * 8, word_size=Spi.word_bytes * 8
         )
-        self.position = Array(Signal(signed(64)) for _ in range(hdl_cfg.motors))
+        self.positions_in = Array(Signal(signed(32)) for _ in range(hdl_cfg.motors))
         self.pin_state = Signal(8)
 
         self.fifo = TransactionalizedFIFO(
@@ -129,7 +129,7 @@ class SPIParser(Elaboratable):
                         with m.Case(cmd.position):
                             # Position requested multiple times
                             m.d.sync += [
-                                spi_cmd.word_to_send.eq(self.position[mtr_idx]),
+                                spi_cmd.word_to_send.eq(self.positions_in[mtr_idx]),
                                 mtr_idx.eq(
                                     Mux(
                                         mtr_idx < hdl_cfg.motors - 1,
@@ -252,7 +252,7 @@ class Dispatcher(Elaboratable):
         ]
         for i in range(len(poly.position)):
             m.d.comb += [
-                parser.position[i].eq(poly.position[i]),
+                parser.positions_in[i].eq(poly.position[i]),
                 parser.pin_state[i].eq(poly.steppers[i].limit),
             ]
         # parser pin state & busy signal

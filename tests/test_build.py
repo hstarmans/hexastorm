@@ -39,7 +39,7 @@ class TestBuild(unittest.TestCase):
     def polynomial(self):
         platform = Firestarter()
         platform.build(
-            Polynomial(PlatformConfig(test=False), top=True),
+            Polynomial(PlatformConfig(test=False)),
             do_program=False,
             verbose=True,
         )
