@@ -231,8 +231,7 @@ class MoveTest(Base):
         motors = self.host.cfg.hdl_cfg.motors
         delta = np.array([10, 10, 0])
         start_pos = (await self.host.position).copy()
-        # does not work with -1, 1
-        for direction in [1, -1]:
+        for direction in [-1, 1]:
             self.assertFalse((await self.host.fpga_state)["error"])
             self.host.enable_steppers = True
             start_move_pos = (await self.host.position).copy()

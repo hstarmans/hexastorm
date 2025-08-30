@@ -107,8 +107,34 @@ class PlatformConfig:
     def esp32_cfg(self):
         """Connections to esp32S3."""
         return dict(
-            stepper_cs=38,  # enable pin stepper motors
-            tmc2209_uart_ids=dict(x=0, y=1, z=2),
+            tmc2209=dict(
+                mtr_ids=dict(x=0, y=1, z=2),
+                uart=dict(
+                    id=2,
+                    ctor=dict(
+                        baudrate=115200,
+                        tx=43,
+                        rx=44,
+                    ),
+                    init=dict(
+                        bits=8,
+                        parity=None,
+                        stop=1,
+                    ),
+                ),
+                # ensures settings are applied in correct order
+                settings=[
+                    ("direction_inverted", False),
+                    ("vsense", True),
+                    ("current", 100),
+                    ("iscale_analog", True),
+                    ("interpolation", True),
+                    ("spread_cycle", False),
+                    ("microstep_resolution", 16),
+                    ("internal_rsense", False),
+                    ("motor_enabled", False),
+                ],
+            ),
             # sda pin digipot TODO: should be 4, hotfix to 46
             i2c=dict(
                 scl=5,
@@ -124,6 +150,7 @@ class PlatformConfig:
                 # higher, i.e. 3 doesn't work
                 baudrate=int(2.9e6),
             ),
+            stepper_cs=38,  # enable pin stepper motors
             fpga_cs=9,
             fpga_reset=47,
             flash_cs=10,
@@ -239,7 +266,7 @@ class PlatformConfig:
         spinup_ticks = round(spinup_time * crystal_hz)
         stable_ticks = round(stable_time * crystal_hz)
 
-        jitter_ticks = round(0.5 * laser_ticks)
+        jitter_ticks = round(0.1 * facet_ticks)
         scanline_length = round(facet_ticks * (end_frac - start_frac) / laser_ticks)
         motor_period = int(crystal_hz / (poly_hz * 6 * 2))
 

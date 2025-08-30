@@ -57,34 +57,31 @@ class ESP32Host(BaseHost):
         self.stepper_cs = Pin(cfg["stepper_cs"], Pin.OUT)
         self.init_steppers()
 
-    def init_steppers(self, current=100):
+    def init_steppers(self):
         """Configure TMC2209 stepper drivers over UART.
 
         Sets current, interpolation, and microstepping parameters for each stepper motor.
         Logs failures if drivers are not detected. Only runs once per session.
-
-        Args:
-            current (int): Desired motor current in mA (default: 100).
         """
-        cfg = self.cfg.esp32_cfg
+        esp32_cfg = self.cfg.esp32_cfg
 
         if not self.steppers_init:
+            tmc_cfg = esp32_cfg["tmc2209"]
             failed = False
-            for key, value in cfg["tmc2209_uart_ids"].items():
+            for ax_name, mtr_id in tmc_cfg["mtr_ids"].items():
                 try:
-                    tmc = TMC_2209(pin_en=cfg["stepper_cs"], mtr_id=value)
-                    tmc.setDirection_reg(False)
-                    tmc.setVSense(True)
-                    tmc.setCurrent(current)
-                    tmc.setIScaleAnalog(True)
-                    tmc.setInterpolation(True)
-                    tmc.setSpreadCycle(False)
-                    tmc.setMicrosteppingResolution(16)
-                    tmc.setInternalRSense(False)
-                    tmc.setMotorEnabled(False)
+                    tmc = TMC_2209(
+                        pin_en=esp32_cfg["stepper_cs"],
+                        mtr_id=mtr_id,
+                        uart_dct=tmc_cfg["uart"],
+                    )
+                    for key, value in tmc_cfg["settings"]:
+                        setattr(tmc, key, value)
                 except ConnectionFail:
+                    logging.error(
+                        f"Failed to initialize TMC2209 for {ax_name} (ID {mtr_id})."
+                    )
                     failed = True
-                    logging.debug(f"Cannot connect to stepper motor {key} axis")
             self.steppers_init = not failed
 
     async def flash_fpga(self, filename):
@@ -172,7 +169,9 @@ class ESP32Host(BaseHost):
         val (bool): True to enable steppers (active-low), False to disable.
         """
         if not isinstance(val, bool):
-            raise ValueError("enable_steppers must be a boolean value (True or False)")
+            raise ValueError(
+                "enable_steppers must be a boolean value (True or False)"
+            )
 
         # Assuming 'enable' is active-low: 0 = enabled, 1 = disabled
         self.stepper_cs.value(0 if val else 1)
