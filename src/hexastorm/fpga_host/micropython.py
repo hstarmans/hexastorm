@@ -7,13 +7,16 @@ from machine import Pin, SPI, I2C, SoftSPI
 from tmc.uart import ConnectionFail
 from tmc.stepperdriver import TMC_2209
 
+from .syncwrap import syncable
 from .interface import BaseHost
 from ..config import Spi
+
 
 if sys.implementation.name == "micropython":
     from winbond import W25QFlash
 
 
+@syncable
 class ESP32Host(BaseHost):
     """
     Host interface to interact with the FPGA using micropython.
@@ -169,9 +172,7 @@ class ESP32Host(BaseHost):
         val (bool): True to enable steppers (active-low), False to disable.
         """
         if not isinstance(val, bool):
-            raise ValueError(
-                "enable_steppers must be a boolean value (True or False)"
-            )
+            raise ValueError("enable_steppers must be a boolean value (True or False)")
 
         # Assuming 'enable' is active-low: 0 = enabled, 1 = disabled
         self.stepper_cs.value(0 if val else 1)

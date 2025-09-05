@@ -46,7 +46,7 @@ class TestParser(SPIGatewareTestCase):
         """
         decimals = 3
         position = [randint(-2000, 2000) for _ in range(self.hdl_cfg.motors)]
-        for idx, pos in enumerate(self.dut.position):
+        for idx, pos in enumerate(self.dut.positions_in):
             sim.set(pos, position[idx])
         await sim.tick()
         lst = (await self.host.position).round(decimals)
@@ -390,3 +390,19 @@ class TestDispatcher(SPIGatewareTestCase):
         fpga_state = await host.fpga_state
         self.assertFalse(fpga_state["synchronized"])
         self.assertFalse(fpga_state["error"])
+
+    @async_test_case
+    async def test_facetticksperiod(self, sim, facet=2, ticksperiod=1200):
+        """
+        Turn on synchronization and polygon, then verify that facet number and ticks
+        in facet can be received correctly.
+        """
+        host = self.host
+        ticks_facet = self.plf_cfg.laser_timing["facet_ticks"]
+        await host.enable_comp(synchronize=True)
+        await self.wait_until(~self.dut.parser.fifo.empty)
+        for facet in [1, 3, 2]:
+            await self.advance_cycles(ticks_facet)
+            [ticksperiod_rec, facet_rec] = await host.get_facetticksperiod()
+            self.assertEqual(facet_rec, facet)
+            self.assertAlmostEqual(ticksperiod_rec, ticks_facet, delta=1)

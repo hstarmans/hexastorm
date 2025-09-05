@@ -233,6 +233,7 @@ class Dispatcher(Elaboratable):
         m.d.comb += [
             lh.enable_prism_in.eq(enable_prism),
             lh.lasers_in.eq(lasers),
+            parser.debug_word.eq(lh.facet_period_ticks),
         ]
 
         # connect Parser

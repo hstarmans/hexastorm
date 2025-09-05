@@ -35,7 +35,9 @@ class BaseHost:
         self.test = test
         self.cfg = PlatformConfig(self.test)
         # mpy requires np.float
-        self._position = np.array([0] * self.cfg.hdl_cfg.motors, dtype=np.float)
+        self._position = np.array(
+            [0] * self.cfg.hdl_cfg.motors, dtype=np.float
+        )
 
     @property
     async def position(self):
@@ -94,7 +96,9 @@ class BaseHost:
             if not blocking:
                 break
 
-            status_byte = response[-1]  # can't rely on self.get_state (needs speed!)
+            status_byte = response[
+                -1
+            ]  # can't rely on self.get_state (needs speed!)
             if self._bitflag(status_byte, Spi.State.error):
                 if not self.test:
                     self.reset()  # SPI speed or protocol mismatch → unrecoverable
@@ -178,7 +182,9 @@ class BaseHost:
         assert len(half_period_bits) < 56
         byte_lst.extend(
             list(
-                ulabext.packbits(direction_byte + half_period_bits, bitorder=bit_order)
+                ulabext.packbits(
+                    direction_byte + half_period_bits, bitorder=bit_order
+                )
             )
         )
         pad_to_word_boundary(byte_lst)
@@ -195,7 +201,9 @@ class BaseHost:
         pad_to_word_boundary(byte_lst)
         return byte_lst
 
-    async def write_line(self, bit_lst, steps_line=1, direction=0, repetitions=1):
+    async def write_line(
+        self, bit_lst, steps_line=1, direction=0, repetitions=1
+    ):
         """
         Projects a scanline to the substrate using the laser system.
 
@@ -408,7 +416,9 @@ class BaseHost:
         mtrs = self.cfg.hdl_cfg.motors
         assert len(axes) == mtrs
         dist = np.array(axes) * np.array([displacement] * mtrs)
-        await self.gotopoint(position=dist.tolist(), speed=speed, absolute=False)
+        await self.gotopoint(
+            position=dist.tolist(), speed=speed, absolute=False
+        )
 
     async def gotopoint(self, position, speed=None, absolute=True):
         """Move machine to position by a displacement at constant speed.
@@ -455,7 +465,9 @@ class BaseHost:
                 round(speed[axis] * steps_per_mm[axis] * ulabext.sign(disp_mm))
             )
             velocity = [0] * num_axes
-            velocity[axis] = self.steps_to_count(speed_steps) // hdl_cfg.motor_freq
+            velocity[axis] = (
+                self.steps_to_count(speed_steps) // hdl_cfg.motor_freq
+            )
 
             while ticks_remaining > 0:
                 ticks_chunk = min(ticks_remaining, hdl_cfg.move_ticks)
@@ -470,50 +482,19 @@ class BaseHost:
         self._position[homeswitches_hit == 1] = 0
         # parsing not disabled !
 
-    # async def get_motordebug(self, blocking=False):
-    #     """retrieves the motor debug word
+    async def get_facetticksperiod(self, blocking=False):
+        """
+        Retrieves facet number and ticks in period.
 
-    #     This is used to debug the PI controller and
-    #     set the correct setting for the Hall interpolation
+        Always returns a list [ticks_per_facet, facet_count].
+        """
+        word_size = Spi.word_bytes
+        command = [Spi.Commands.debug] + [0] * word_size
+        raw = await self.send_command(command, blocking=blocking)
 
-    #     blocking   -- checks if memory is full, only needed for
-    #                   a build with all modules
-    #     """
-    #     command = [COMMANDS.DEBUG] + WORD_BYTES * [0]
-    #     response = (await self.send_command(command, blocking=blocking))[1:]
-
-    #     clock = int(self.platform.clks[self.platform.hfosc_div] * 1e6)
-    #     mode = self.platform.laser_timing["MOTORDEBUG"]
-
-    #     def cntcnv(cnt):
-    #         if cnt != 0:
-    #             speed = (
-    #                 clock / (cnt * 4 * self.platform.laser_timing["MOTORDIVIDER"]) * 60
-    #             )
-    #         else:
-    #             speed = 0
-    #         return speed
-
-    #     if (mode == "cycletime") & (response != 0):
-    #         response = int.from_bytes(response, "big")
-    #         # you measure 180 degrees
-    #         if response != 0:
-    #             response = round((clock / (response * 2) * 60))
-    #     elif mode == "PIcontrol":
-    #         cnt = int.from_bytes(response[(WORD_BYTES - 2) :], "big", signed=False)
-    #         speed = cntcnv(cnt)
-    #         duty = int.from_bytes(response[: (WORD_BYTES - 2)], "big", signed=True)
-    #         response = [speed, duty]
-    #     elif mode == "ticksinfacet":
-    #         cnt = int.from_bytes(response[(WORD_BYTES - 2) :], "big", signed=False)
-    #         speed = cntcnv(cnt)
-    #         cntdiode = int.from_bytes(response[: (WORD_BYTES - 2)], "big", signed=False)
-    #         speedd = cntcnv(cntdiode)
-    #         response = [speed, speedd]
-    #     else:
-    #         response = int.from_bytes(response, "big")
-
-    #     if not isinstance(response, list):
-    #         return [response]
-    #     else:
-    #         return response
+        # strip command echo; normalize to bytes
+        payload = bytes(raw[1:])
+        # last 1 byte: facet count, first 7 bytes: ticks per facet (both unsigned)
+        facet_cnt = int.from_bytes(payload[word_size - 1 :], "big")
+        ticks_facet = int.from_bytes(payload[: word_size - 1], "big")
+        return [ticks_facet, facet_cnt]

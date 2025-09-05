@@ -266,7 +266,7 @@ class PlatformConfig:
         spinup_ticks = round(spinup_time * crystal_hz)
         stable_ticks = round(stable_time * crystal_hz)
 
-        jitter_ticks = round(0.1 * facet_ticks)
+        jitter_ticks = round(0.5 * laser_ticks)
         scanline_length = round(facet_ticks * (end_frac - start_frac) / laser_ticks)
         motor_period = int(crystal_hz / (poly_hz * 6 * 2))
 
