@@ -348,7 +348,7 @@ class MultilineTest(BaseTest):
             thresh = sim.get(dut.stephalfperiod) * 2
 
         current = sim.get(dut.step)
-        for count in range(thresh + 1):
+        for _ in range(thresh + 1):
             if sim.get(dut.step) != current:
                 break
             await sim.tick()
