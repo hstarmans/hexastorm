@@ -28,6 +28,10 @@ class PhotodiodeDebounce(Elaboratable):
         m = Module()
 
         # 2FF synchronizer
+        # probability that metastability (photodiode hit at edge window)
+        # input stuck in a inbetween
+        # state lasts across two full
+        # clock periods is astronomically low.
         meta = Signal()
         m.d.sync += [
             meta.eq(self.raw),
