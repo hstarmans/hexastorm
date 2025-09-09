@@ -34,14 +34,14 @@ class PhotodiodeDebounceTest(LunaGatewareTestCase):
     async def test_noise_shorter_than_n_low_does_not_trigger(self, sim):
         dut = self.dut
 
-        # idle high for a bit
         await sim.tick()
         sim.set(dut.raw, 1)
+        # set and pass 2FF
         await self.advance_cycles(3)
 
-        # inject brief low burst: 3 < n_low (4)
+        # inject brief low burst: n_low-1
         sim.set(dut.raw, 0)
-        await self.advance_cycles(3)
+        await self.advance_cycles(dut.n_low - 1)
         sim.set(dut.raw, 1)
         await sim.tick()
 
@@ -53,15 +53,14 @@ class PhotodiodeDebounceTest(LunaGatewareTestCase):
     async def test_exact_n_low_produces_one_cycle_pulse(self, sim):
         dut = self.dut
 
-        # Go low for exactly n_low cycles (4)
+        # Go low for exactly n_low cycles
         sim.set(dut.raw, 0)
         await sim.tick()
-        # first 3 cycles: no pulse yet
-        for _ in range(3):
-            await sim.tick()
-            self.assertEqual(sim.get(dut.valid_pulse), 0)
+        # first n_low-1 cycles: no pulse yet
+        await self.advance_cycles(dut.n_low - 1)
+        self.assertEqual(sim.get(dut.valid_pulse), 0)
 
-        # On the 4th low, pulse should assert and refractory should latch
+        # On the nth low, pulse should assert and refractory should latch
         await sim.tick()
         self.assertEqual(sim.get(dut.valid_pulse), 1)
         self.assertEqual(sim.get(dut.in_refractory), 1)
@@ -77,10 +76,9 @@ class PhotodiodeDebounceTest(LunaGatewareTestCase):
         # Hold low for much longer than n_low; should still only see 1 pulse.
         sim.set(dut.raw, 0)
         pulses = 0
-        for _ in range(12):
+        for _ in range(dut.n_low + 10):
             await sim.tick()
             pulses += sim.get(dut.valid_pulse)
-
         self.assertEqual(pulses, 1)
         self.assertEqual(sim.get(dut.in_refractory), 1)
 
@@ -91,29 +89,33 @@ class PhotodiodeDebounceTest(LunaGatewareTestCase):
         # First valid event
         sim.set(dut.raw, 0)
         await sim.tick()
-        for _ in range(4):  # reach n_low
-            await sim.tick()
+        await self.advance_cycles(dut.n_low)
         self.assertEqual(sim.get(dut.valid_pulse), 1)
         self.assertEqual(sim.get(dut.in_refractory), 1)
 
         # Go high for less than n_high -> still refractory
         sim.set(dut.raw, 1)
         await sim.tick()
+        # two ticks to propagate through 2FF sync
+        await sim.tick()
+        await sim.tick()
+        await self.advance_cycles(dut.n_high - 1)
         self.assertEqual(sim.get(dut.in_refractory), 1)
 
-        # One more high to reach n_high=2 -> re-armed
+        # One more high to reach n_high -> re-armed
         await sim.tick()
-        # TODO: fix
-        # self.assertEqual(sim.get(dut.in_refractory), 0)
+        self.assertEqual(sim.get(dut.in_refractory), 0)
 
-        # # Now another valid low burst should fire a second pulse
-        # sim.set(dut.raw, 0)
-        # for _ in range(3):
-        #     await sim.tick()
-        #     self.assertEqual(sim.get(dut.valid_pulse), 0)
-        # await sim.tick()
-        # self.assertEqual(sim.get(dut.valid_pulse), 1)
-        # self.assertEqual(sim.get(dut.in_refractory), 1)
+        # Now another valid low burst should fire a second pulse
+        sim.set(dut.raw, 0)
+        await sim.tick()
+        await sim.tick()
+        await sim.tick()
+        await self.advance_cycles(dut.n_low - 1)
+        self.assertEqual(sim.get(dut.valid_pulse), 0)
+        await sim.tick()
+        self.assertEqual(sim.get(dut.valid_pulse), 1)
+        self.assertEqual(sim.get(dut.in_refractory), 1)
 
     @async_test_case
     async def test_sync_level_tracks_raw_with_two_ff(self, sim):
