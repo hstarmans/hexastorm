@@ -36,8 +36,7 @@ class PhotodiodeDebounceTest(LunaGatewareTestCase):
 
         await sim.tick()
         sim.set(dut.raw, 1)
-        # set and pass 2FF
-        await self.advance_cycles(3)
+        await sim.tick()
 
         # inject brief low burst: n_low-1
         sim.set(dut.raw, 0)
@@ -96,9 +95,6 @@ class PhotodiodeDebounceTest(LunaGatewareTestCase):
         # Go high for less than n_high -> still refractory
         sim.set(dut.raw, 1)
         await sim.tick()
-        # two ticks to propagate through 2FF sync
-        await sim.tick()
-        await sim.tick()
         await self.advance_cycles(dut.n_high - 1)
         self.assertEqual(sim.get(dut.in_refractory), 1)
 
@@ -108,8 +104,6 @@ class PhotodiodeDebounceTest(LunaGatewareTestCase):
 
         # Now another valid low burst should fire a second pulse
         sim.set(dut.raw, 0)
-        await sim.tick()
-        await sim.tick()
         await sim.tick()
         await self.advance_cycles(dut.n_low - 1)
         self.assertEqual(sim.get(dut.valid_pulse), 0)

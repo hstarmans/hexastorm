@@ -40,9 +40,14 @@ class Firestarter(LatticeICE40Platform):
         LaserscannerResource(
             number=0,
             lasers="12 11",  # bit 1, bit 0 !
-            photodiode="46",
             pwm="6",
             enable="4",
+        ),
+        Resource(
+            "photodiode",
+            0,
+            Subsignal("photodiode", Pins("46", dir="i")),
+            Attrs(IO_STANDARD="SB_LVCMOS"),
         ),
         # # BLDC driver
         # BLDCResource(

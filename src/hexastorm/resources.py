@@ -134,7 +134,6 @@ class LaserScannerLayout(Layout):
         super().__init__(
             [
                 ("lasers", 2),
-                ("photodiode", 1),
                 ("pwm", 1),
                 ("en", 1),
             ]
@@ -151,7 +150,6 @@ class LaserscannerRecord(Record):
 def LaserscannerResource(
     *args,
     lasers,
-    photodiode,
     pwm,
     enable,
     number=None,
@@ -168,7 +166,6 @@ def LaserscannerResource(
     """
     ios = [
         Subsignal("lasers", Pins(lasers, dir="o", conn=conn, assert_width=2)),
-        Subsignal("photodiode", Pins(photodiode, dir="i", conn=conn, assert_width=1)),
         Subsignal("pwm", Pins(pwm, dir="o", conn=conn, assert_width=1)),
         Subsignal("en", PinsN(enable, dir="o", conn=conn, assert_width=1)),
     ]

@@ -252,6 +252,8 @@ class PlatformConfig:
             start_frac = 2 / facet_ticks
             end_frac = (laser_ticks * scanline_length) / facet_ticks + start_frac
             assert facet_ticks == round(crystal_hz / (poly_hz * facets))
+            pd_trigger_ticks = 1
+            pd_rearm_ticks = 2
         else:
             spinup_time = self.laser_timing["spinup_time"]
             stable_time = self.laser_timing["stable_time"]
@@ -262,6 +264,8 @@ class PlatformConfig:
             facet_ticks = round(crystal_hz / (poly_hz * facets))
             laser_hz = self.laser_timing["laser_hz"]
             laser_ticks = int(crystal_hz / laser_hz)
+            pd_trigger_ticks = 5
+            pd_rearm_ticks = 30
 
         spinup_ticks = round(spinup_time * crystal_hz)
         stable_ticks = round(stable_time * crystal_hz)
@@ -297,6 +301,8 @@ class PlatformConfig:
                 "jitter_ticks": jitter_ticks,
                 "scanline_length": scanline_length,
                 "motor_period": motor_period,
+                "photodiode_trigger_ticks": pd_trigger_ticks,
+                "photodiode_rearm_ticks": pd_rearm_ticks,
             }
         )
 

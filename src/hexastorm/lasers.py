@@ -4,6 +4,7 @@ from luna.gateware.memory import TransactionalizedFIFO
 
 from .config import Spi
 from .resources import LaserscannerRecord
+from .blocks.photodiode_debounce import PhotodiodeDebounce
 
 
 class Laserhead(Elaboratable):
@@ -40,6 +41,7 @@ class Laserhead(Elaboratable):
         """
         self.plf_cfg = plf_cfg
         hdl_cfg = plf_cfg.hdl_cfg
+        laz_tim = self.plf_cfg.laser_timing
 
         # Control and status signals
         self.synchronize = Signal()
@@ -68,6 +70,10 @@ class Laserhead(Elaboratable):
         self.empty = Signal()
 
         self.lh_rec = LaserscannerRecord()
+        self.pd_db = PhotodiodeDebounce(
+            n_low=laz_tim["photodiode_trigger_ticks"],
+            n_high=laz_tim["photodiode_rearm_ticks"],
+        )
 
     def elaborate(self, platform):
         m = Module()
@@ -87,16 +93,17 @@ class Laserhead(Elaboratable):
             lh_pin = platform.request("laserscanner", dir="-")
             m.submodules += [
                 lasers_buf := Buffer("o", lh_pin.lasers),
-                phd_buf := Buffer("i", lh_pin.photodiode),
                 pwm_buf := Buffer("o", lh_pin.pwm),
                 en_buf := Buffer("o", lh_pin.en),
             ]
             m.d.comb += [
                 lasers_buf.o.eq(self.lh_rec.lasers),
-                self.lh_rec.photodiode.eq(phd_buf.i),
                 pwm_buf.o.eq(self.lh_rec.pwm),
                 en_buf.o.eq(self.lh_rec.en),
             ]
+
+        # Photodiode debounce
+        m.submodules.pd_db = pd_db = self.pd_db
 
         # Pulse generator for prism motor
         pwm_counter = Signal(range(laz_tim["motor_period"]))
@@ -119,7 +126,7 @@ class Laserhead(Elaboratable):
         with m.If(phtd_cnt < (phtd_cnt_max - 1)):
             m.d.sync += [
                 phtd_cnt.eq(phtd_cnt + 1),
-                phtd_triggered.eq(phtd_triggered | ~lh_rec.photodiode),
+                phtd_triggered.eq(phtd_triggered | ~pd_db.sync_level),
             ]
         with m.Else():
             m.d.sync += [
@@ -158,7 +165,6 @@ class Laserhead(Elaboratable):
         read_data = self.read_data
         read_old = Signal.like(read_data)
         bit_index = Signal(range(hdl_cfg.mem_width))
-        photodiode_d = Signal()
 
         with m.FSM(init="RESET") as laserfsm:
             with m.State("RESET"):
@@ -184,7 +190,7 @@ class Laserhead(Elaboratable):
                 ]
                 with m.If(self.synchronize & (~self.error)):
                     # Error: photodiode cannot be high without active laser
-                    with m.If(lh_rec.photodiode == 0):
+                    with m.If(pd_db.sync_level == 0):
                         m.d.sync += self.error.eq(1)
                     with m.Else():
                         m.d.sync += [self.error.eq(0), enable_prism.eq(1)]
@@ -202,26 +208,23 @@ class Laserhead(Elaboratable):
                     m.d.sync += tickcounter.eq(tickcounter + 1)
 
             with m.State("WAIT_STABLE"):
-                # Store previous photodiode value
-                m.d.sync += [
-                    photodiode_d.eq(lh_rec.photodiode),
-                ]
-
                 # Timeout: photodiode didn't fall in time
                 with m.If(tickcounter >= syncfailed_cnt):
                     m.d.sync += self.error.eq(1)
                     m.next = "STOP"
 
                 # Laser triggers photodiode means 0
-                with m.Elif(~lh_rec.photodiode & ~photodiode_d):
+                with m.Elif(pd_db.valid_pulse):
                     m.d.sync += [
                         tickcounter.eq(0),
                         lasers.eq(0),
                     ]
 
                     # Check if synchronization timing is within expected range
-                    sync_margin = (laz_tim["facet_ticks"] - 1) - laz_tim["jitter_ticks"]
-                    with m.If(tickcounter > sync_margin):
+                    min_ticks = laz_tim["facet_ticks"] - laz_tim["jitter_ticks"]
+                    max_ticks = laz_tim["facet_ticks"] + laz_tim["jitter_ticks"]
+                    within = (tickcounter >= min_ticks) & (tickcounter <= max_ticks)
+                    with m.If(within):
                         m.d.sync += [
                             self.synchronized.eq(1),
                             self.facet_period_ticks.eq(Cat(facetcnt, tickcounter)),
@@ -422,6 +425,7 @@ class DiodeSimulator(Laserhead):
         laz_tim = self.plf_cfg.laser_timing
 
         lh_rec = self.lh_rec
+        pd_db = self.pd_db
 
         diode_cnt = Signal(range(laz_tim["facet_ticks"]))
         self.diode_cnt = diode_cnt
@@ -446,12 +450,12 @@ class DiodeSimulator(Laserhead):
             m.d.sync += diode_cnt.eq(0)
         with m.Elif(diode_cnt > (laz_tim["facet_ticks"] - laz_tim["facets"])):
             m.d.sync += [
-                lh_rec.photodiode.eq(~(lh_rec.en & (lh_rec.lasers.any()))),
+                pd_db.raw.eq(~(lh_rec.en & (lh_rec.lasers.any()))),
                 diode_cnt.eq(diode_cnt + 1),
             ]
         with m.Else():
             m.d.sync += [
                 diode_cnt.eq(diode_cnt + 1),
-                lh_rec.photodiode.eq(1),
+                pd_db.raw.eq(1),
             ]
         return m

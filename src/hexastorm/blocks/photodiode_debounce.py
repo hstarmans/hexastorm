@@ -1,9 +1,12 @@
 from amaranth import Elaboratable, Module, Signal
+from amaranth.lib.io import Buffer
 
 
 class PhotodiodeDebounce(Elaboratable):
     """
     Debounce + one-shot for an active-low photodiode.
+    Photodiode signal is 2FF-synchronized to the FPGA clock.
+    This is not done during testing (platform=None).
 
     Params:
       n_low  : consecutive lows required to fire
@@ -24,19 +27,29 @@ class PhotodiodeDebounce(Elaboratable):
         self.low_streak = Signal(range(self.n_low + 1))
         self.high_streak = Signal(range(self.n_high + 1))
 
-    def elaborate(self, _):
+    def elaborate(self, platform):
         m = Module()
 
-        # 2FF synchronizer
-        # probability that metastability (photodiode hit at edge window)
-        # input stuck in a inbetween
-        # state lasts across two full
-        # clock periods is astronomically low.
         meta = Signal()
-        m.d.sync += [
-            meta.eq(self.raw),
-            self.sync_level.eq(meta),
-        ]
+        if platform is not None:
+            # Ensure the photodiode pin is set as input
+            pd = platform.request("photodiode", dir="-")
+            m.submodules += [
+                phd_buf := Buffer("i", pd.photodiode),
+            ]
+            m.d.comb += self.raw.eq(phd_buf.i)
+            # 2FF synchronizer
+            # probability that metastability (photodiode hit at edge window)
+            # input stuck in a inbetween
+            # state lasts across two full
+            # clock periods is astronomically low.
+            m.d.sync += [
+                meta.eq(self.raw),
+                self.sync_level.eq(meta),
+            ]
+        else:
+            # 2FF synchronizer disabled for testing
+            m.d.comb += self.sync_level.eq(self.raw)
 
         # streak counters (saturating)
         with m.If(~self.sync_level):  # active-low light detected

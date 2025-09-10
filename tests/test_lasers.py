@@ -18,7 +18,7 @@ class BaseTest(LunaGatewareTestCase):
         """Initialize signals and host configuration for simulation."""
         self.host = TestHost()
         self.sim = sim
-        sim.set(self.dut.lh_rec.photodiode, 1)
+        sim.set(self.dut.pd_db.raw, 1)
         await sim.tick()
 
     async def get_state(self, fsm=None):
@@ -442,7 +442,7 @@ class Loweredge(BaseTest):
         self.host = TestHost()
         self.host.cfg.laser_timing = self.plf_cfg.laser_timing
         self.host.cfg.hdl_cfg.single_line = False
-        sim.set(self.dut.lh_rec.photodiode, 1)
+        sim.set(self.dut.pd_db.raw, 1)
         await sim.tick()
 
     def tearDown(self):
