@@ -35,12 +35,15 @@ class BaseTest(LunaGatewareTestCase):
             self.laz_tim["stable_ticks"],
             self.laz_tim["spinup_ticks"],
         )
-        for tick in range(timeout):
-            if await self.get_state(fsm) == target_state:
+        for _ in range(timeout):
+            reached_state = await self.get_state(fsm)
+            if reached_state == target_state:
                 return
             await sim.tick()
 
-        self.fail(f"Did not reach state '{target_state}' within {timeout} ticks")
+        self.fail(
+            f"Did not reach state '{target_state}' but {reached_state} within {timeout} ticks"
+        )
 
     async def assert_state(self, expected_state: str, fsm=None):
         """Assert that the FSM is in the expected symbolic state."""
@@ -271,16 +274,16 @@ class SinglelinesinglefacetTest(SinglelineTest):
         await sim.tick()
         await self.pulse(dut.expose_start)
 
-        # Cycle through all non-final facets
+        # facet counter changes
         for facet in range(self.laz_tim["facets"] - 1):
             self.assertEqual(facet, sim.get(dut.facetcnt))
             await self.wait_until_state("WAIT_STABLE")
             await self.wait_until_state("WAIT_END")
 
-        # Final line exposure
+        # Exposure still happens on spefic count, i.e. 1
         for _ in range(self.laz_tim["facets"] - 1):
             await self.check_line(scanline)
-            self.assertTrue(sim.get(dut.facetcnt))
+            self.assertEqual(sim.get(dut.facetcnt), 1)
 
         self.assertFalse(sim.get(dut.error))
 

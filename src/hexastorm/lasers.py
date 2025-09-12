@@ -214,6 +214,7 @@ class Laserhead(Elaboratable):
                     m.next = "STOP"
 
                 # Laser triggers photodiode means 0
+                # OLD: with m.Elif(~pd_db.raw & ~pd_db.meta):
                 with m.Elif(pd_db.valid_pulse):
                     m.d.sync += [
                         tickcounter.eq(0),
@@ -448,7 +449,7 @@ class DiodeSimulator(Laserhead):
 
         with m.If(diode_cnt == (laz_tim["facet_ticks"] - 1)):
             m.d.sync += diode_cnt.eq(0)
-        with m.Elif(diode_cnt > (laz_tim["facet_ticks"] - laz_tim["facets"])):
+        with m.Elif(diode_cnt > (laz_tim["facet_ticks"] - 5)):
             m.d.sync += [
                 pd_db.raw.eq(~(lh_rec.en & (lh_rec.lasers.any()))),
                 diode_cnt.eq(diode_cnt + 1),
