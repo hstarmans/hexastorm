@@ -254,6 +254,7 @@ class PlatformConfig:
             assert facet_ticks == round(crystal_hz / (poly_hz * facets))
             pd_trigger_ticks = 1
             pd_rearm_ticks = 2
+            jitter_sync_ticks = round(0.5 * laser_ticks)
         else:
             spinup_time = self.laser_timing["spinup_time"]
             stable_time = self.laser_timing["stable_time"]
@@ -264,19 +265,22 @@ class PlatformConfig:
             facet_ticks = round(crystal_hz / (poly_hz * facets))
             laser_hz = self.laser_timing["laser_hz"]
             laser_ticks = int(crystal_hz / laser_hz)
-            pd_trigger_ticks = 5
-            pd_rearm_ticks = 30
+            pd_trigger_ticks = laser_ticks * 8
+            pd_rearm_ticks = laser_ticks * 8
+            # jitter allowed for synchronization 1% is larger than
+            # jitter allowed for exposure 0.2%
+            jitter_sync_ticks = round(0.01 * facet_ticks)
 
+        jitter_exp_perc = 0.2
         spinup_ticks = round(spinup_time * crystal_hz)
         stable_ticks = round(stable_time * crystal_hz)
 
-        jitter_ticks = round(0.5 * laser_ticks)
         scanline_length = round(facet_ticks * (end_frac - start_frac) / laser_ticks)
         motor_period = int(crystal_hz / (poly_hz * 6 * 2))
 
         # Sanity checks
         assert laser_ticks > 2
-        if end_frac > round(1 - (jitter_ticks + 1) / facet_ticks):
+        if end_frac > round(1 - (jitter_sync_ticks + 1) / facet_ticks):
             raise Exception("Invalid settings, end_frac too high")
 
         if self.test:
@@ -298,7 +302,8 @@ class PlatformConfig:
                 "laser_ticks": laser_ticks,
                 "spinup_ticks": spinup_ticks,
                 "stable_ticks": stable_ticks,
-                "jitter_ticks": jitter_ticks,
+                "jitter_sync_ticks": jitter_sync_ticks,
+                "jitter_exp_perc": jitter_exp_perc,
                 "scanline_length": scanline_length,
                 "motor_period": motor_period,
                 "photodiode_trigger_ticks": pd_trigger_ticks,

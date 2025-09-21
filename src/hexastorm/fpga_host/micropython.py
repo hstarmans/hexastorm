@@ -1,9 +1,9 @@
-from asyncio import sleep
+from asyncio import sleep, sleep_ms
 import logging
 import sys
 from machine import Pin, SPI, I2C, SoftSPI
 
-
+from ulab import numpy as np
 from tmc.uart import ConnectionFail
 from tmc.stepperdriver import TMC_2209
 
@@ -14,6 +14,8 @@ from ..config import Spi
 
 if sys.implementation.name == "micropython":
     from winbond import W25QFlash
+
+logger = logging.getLogger(__name__)
 
 
 @syncable
@@ -81,7 +83,7 @@ class ESP32Host(BaseHost):
                     for key, value in tmc_cfg["settings"]:
                         setattr(tmc, key, value)
                 except ConnectionFail:
-                    logging.error(
+                    logger.error(
                         f"Failed to initialize TMC2209 for {ax_name} (ID {mtr_id})."
                     )
                     failed = True
@@ -123,14 +125,15 @@ class ESP32Host(BaseHost):
             blocknum = 0
             while True:
                 buf = infile.read(buffsize)
-                logging.info(f"Writing block {blocknum}.")
+                if blocknum % 10 == 0:
+                    logger.info(f"Writing block {blocknum}.")
                 f.writeblocks(blocknum, buf)
                 if len(buf) < buffsize:
-                    logging.info(f"Final block {blocknum}")
+                    logger.info(f"Final block {blocknum}")
                     break
                 blocknum += 1
         self.reset()
-        logging.info("Flashed fpga.")
+        logger.info("Flashed fpga.")
 
     async def reset(self):
         "restart the FPGA by toggling the reset pin and initializing communication"
@@ -172,7 +175,9 @@ class ESP32Host(BaseHost):
         val (bool): True to enable steppers (active-low), False to disable.
         """
         if not isinstance(val, bool):
-            raise ValueError("enable_steppers must be a boolean value (True or False)")
+            raise ValueError(
+                "enable_steppers must be a boolean value (True or False)"
+            )
 
         # Assuming 'enable' is active-low: 0 = enabled, 1 = disabled
         self.stepper_cs.value(0 if val else 1)
@@ -214,3 +219,100 @@ class ESP32Host(BaseHost):
             )
         adr = self.cfg.esp32_cfg["i2c"]["digipot_addr"]
         self.i2c.writeto_mem(adr, 0, bytes([val]))
+
+    async def measure_facet_period_ms(self, n_samples=1000):
+        """
+        Measure the facet period in milliseconds and facet ID n_samples times.
+
+        Returns: (facet_ms, facet_ids) both lists of length n_samples
+        - facet_ms: each entry is period in ms for given facet_id
+        - facet_id: each entry is facet ID
+        """
+
+        laz_tim = self.cfg.laser_timing
+
+        # Sampling cadence to prevent oversampling
+        dt_facet_ms = 60 / (laz_tim["rpm"] * laz_tim["facets"] / 1000)
+        facet_ms = np.zeros(n_samples)
+        facet_id = np.zeros(n_samples)
+
+        for sample in range(n_samples):
+            (
+                ticks_facet,
+                facet_id[sample],
+            ) = await self.read_facet_ticks_and_id()
+            facet_ms[sample] = ticks_facet / (laz_tim["crystal_hz"] / 1000)
+            await sleep_ms(int(dt_facet_ms))
+        return facet_ms, facet_id
+
+    async def facet_mean(
+        self,
+        n_samples=1000,
+    ):
+        """
+        Compute the mean period per facet in milliseconds using n_samples measurements.
+
+        Returns:
+        - means_ms: list of length n_facets; each entry is mean period in ms or None if no samples
+        """
+        facet_ms, facet_id = await self.measure_facet_period_ms(n_samples)
+        facets = self.cfg.laser_timing["facets"]
+
+        mean_ms = [0] * facets
+
+        for facet in range(facets):
+            facet_ms_id = facet_ms[facet_id == facet]
+            if len(facet_ms_id) > 0:
+                mean_ms[facet] = np.mean(facet_ms_id)
+                logger.info(
+                    f"Facet {facet}: n={facet_ms_id.size}, mean={mean_ms[facet]:.5f}, std={np.std(facet_ms_id):.5f}"
+                )
+            else:
+                mean_ms[facet] = None
+                logger.info(f"Facet {facet}: n=0, mean=None, std=None")
+        return mean_ms
+
+    async def test_laserhead(self):
+        """
+        Test laserhead by comparing jitter percentage of each facet period against expected configuration.
+
+        Measures the period for each facet multiple times, computes the jitter
+        and compares against the expected jitter percentage from configuration.
+
+        Returns:
+           - True if jitter is within expected limits.
+           - False if jitter exceeds expected limits.
+
+        Notes:
+        - If facet period is below half the expected period, test fails.
+        """
+        laz_tim = self.cfg.laser_timing
+
+        exp_facet_ms = 60 / (laz_tim["rpm"] * laz_tim["facets"] / 1000)
+
+        facet_ms, _ = await self.measure_facet_period_ms(n_samples=1000)
+
+        if np.min(facet_ms) < (0.5 * exp_facet_ms):
+            logger.error(
+                f"Facet period {np.min(facet_ms)} ms is less than half the expected {exp_facet_ms} ms."
+            )
+            return False
+        else:
+            mean_facet_ms = np.mean(facet_ms)
+            min_frac_perc = (
+                (mean_facet_ms - np.min(facet_ms)) / mean_facet_ms * 100
+            )
+            max_frac_perc = (
+                (np.max(facet_ms) - mean_facet_ms) / mean_facet_ms * 100
+            )
+            total_frac_perc = min_frac_perc + max_frac_perc
+            if total_frac_perc > laz_tim["jitter_exp_perc"]:
+                logger.error(
+                    f"Jitter % not compliant {total_frac_perc:.3f} > {laz_tim['jitter_exp_perc']}"
+                )
+                return False
+            else:
+                logger.info(
+                    f"Jitter [lower, upper] % is [{min_frac_perc:.3f}, {max_frac_perc:.3f}]"
+                )
+                return True

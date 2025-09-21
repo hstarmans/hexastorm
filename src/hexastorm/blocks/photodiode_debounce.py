@@ -16,7 +16,6 @@ class PhotodiodeDebounce(Elaboratable):
     def __init__(self, n_low=10, n_high=4):
         self.n_low = int(n_low)
         self.n_high = int(n_high)
-
         # Inputs
         self.raw = Signal()  # asynchronous / noisy (active-high == no light)
 

@@ -222,8 +222,8 @@ class Laserhead(Elaboratable):
                     ]
 
                     # Check if synchronization timing is within expected range
-                    min_ticks = laz_tim["facet_ticks"] - laz_tim["jitter_ticks"]
-                    max_ticks = laz_tim["facet_ticks"] + laz_tim["jitter_ticks"]
+                    min_ticks = laz_tim["facet_ticks"] - laz_tim["jitter_sync_ticks"]
+                    max_ticks = laz_tim["facet_ticks"] + laz_tim["jitter_sync_ticks"]
                     within = (tickcounter >= min_ticks) & (tickcounter <= max_ticks)
                     with m.If(within):
                         m.d.sync += [
@@ -378,7 +378,7 @@ class Laserhead(Elaboratable):
                 # -1 as you count till range-1 in python
                 # -2 as you need 1 tick to process
                 exposure_end = round(
-                    laz_tim["facet_ticks"] - laz_tim["jitter_ticks"] - 2
+                    laz_tim["facet_ticks"] - laz_tim["jitter_sync_ticks"] - 2
                 )
                 with m.If(tickcounter >= exposure_end):
                     m.d.sync += lasers.eq(0b10)

@@ -408,6 +408,6 @@ class TestDispatcher(SPIGatewareTestCase):
                 await self.advance_cycles(ticks_facet + 5)
             else:
                 await self.advance_cycles(ticks_facet)
-            [ticksperiod_rec, facet_rec] = await host.get_facetticksperiod()
+            [ticksperiod_rec, facet_rec] = await host.read_facet_ticks_and_id()
             self.assertEqual(facet_rec, facet)
             self.assertAlmostEqual(ticksperiod_rec, ticks_facet, delta=1)

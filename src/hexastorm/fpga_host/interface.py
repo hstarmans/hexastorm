@@ -1,6 +1,7 @@
 from struct import unpack
 import sys
 
+
 from .. import ulabext
 from ..config import Spi, PlatformConfig
 
@@ -35,9 +36,7 @@ class BaseHost:
         self.test = test
         self.cfg = PlatformConfig(self.test)
         # mpy requires np.float
-        self._position = np.array(
-            [0] * self.cfg.hdl_cfg.motors, dtype=np.float
-        )
+        self._position = np.array([0] * self.cfg.hdl_cfg.motors, dtype=np.float)
 
     @property
     async def position(self):
@@ -96,9 +95,7 @@ class BaseHost:
             if not blocking:
                 break
 
-            status_byte = response[
-                -1
-            ]  # can't rely on self.get_state (needs speed!)
+            status_byte = response[-1]  # can't rely on self.get_state (needs speed!)
             if self._bitflag(status_byte, Spi.State.error):
                 if not self.test:
                     self.reset()  # SPI speed or protocol mismatch → unrecoverable
@@ -182,9 +179,7 @@ class BaseHost:
         assert len(half_period_bits) < 56
         byte_lst.extend(
             list(
-                ulabext.packbits(
-                    direction_byte + half_period_bits, bitorder=bit_order
-                )
+                ulabext.packbits(direction_byte + half_period_bits, bitorder=bit_order)
             )
         )
         pad_to_word_boundary(byte_lst)
@@ -201,9 +196,7 @@ class BaseHost:
         pad_to_word_boundary(byte_lst)
         return byte_lst
 
-    async def write_line(
-        self, bit_lst, steps_line=1, direction=0, repetitions=1
-    ):
+    async def write_line(self, bit_lst, steps_line=1, direction=0, repetitions=1):
         """
         Projects a scanline to the substrate using the laser system.
 
@@ -416,9 +409,7 @@ class BaseHost:
         mtrs = self.cfg.hdl_cfg.motors
         assert len(axes) == mtrs
         dist = np.array(axes) * np.array([displacement] * mtrs)
-        await self.gotopoint(
-            position=dist.tolist(), speed=speed, absolute=False
-        )
+        await self.gotopoint(position=dist.tolist(), speed=speed, absolute=False)
 
     async def gotopoint(self, position, speed=None, absolute=True):
         """Move machine to position by a displacement at constant speed.
@@ -465,9 +456,7 @@ class BaseHost:
                 round(speed[axis] * steps_per_mm[axis] * ulabext.sign(disp_mm))
             )
             velocity = [0] * num_axes
-            velocity[axis] = (
-                self.steps_to_count(speed_steps) // hdl_cfg.motor_freq
-            )
+            velocity[axis] = self.steps_to_count(speed_steps) // hdl_cfg.motor_freq
 
             while ticks_remaining > 0:
                 ticks_chunk = min(ticks_remaining, hdl_cfg.move_ticks)
@@ -482,7 +471,7 @@ class BaseHost:
         self._position[homeswitches_hit == 1] = 0
         # parsing not disabled !
 
-    async def get_facetticksperiod(self, blocking=False):
+    async def read_facet_ticks_and_id(self, blocking=False):
         """
         Retrieves facet number and ticks in period.
 
