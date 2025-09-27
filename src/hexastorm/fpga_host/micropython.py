@@ -1,7 +1,8 @@
-from asyncio import sleep, sleep_ms
+from asyncio import sleep, sleep_ms, run
 import logging
 import sys
 from machine import Pin, SPI, I2C, SoftSPI
+
 
 from ulab import numpy as np
 from tmc.uart import ConnectionFail
@@ -29,6 +30,7 @@ class ESP32Host(BaseHost):
         self.steppers_init = False
         self.spi_tries = 1e5
         self.init_micropython()
+        run(self.reset())
 
     def init_micropython(self):
         """Initialize hardware peripherals in a MicroPython environment.
@@ -237,12 +239,15 @@ class ESP32Host(BaseHost):
         facet_id = np.zeros(n_samples)
 
         for sample in range(n_samples):
+            # improve distribution of samples
+            if sample % 25 == 0:
+                await sleep_ms(150)
             (
                 ticks_facet,
                 facet_id[sample],
             ) = await self.read_facet_ticks_and_id()
             facet_ms[sample] = ticks_facet / (laz_tim["crystal_hz"] / 1000)
-            await sleep_ms(int(dt_facet_ms))
+            await sleep_ms(int(dt_facet_ms / 2))
         return facet_ms, facet_id
 
     async def facet_mean(
