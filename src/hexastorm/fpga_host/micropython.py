@@ -1,6 +1,7 @@
 from asyncio import sleep, sleep_ms, run
 import logging
 import sys
+from random import randint
 from machine import Pin, SPI, I2C, SoftSPI
 
 
@@ -31,6 +32,7 @@ class ESP32Host(BaseHost):
         self.spi_tries = 1e5
         self.init_micropython()
         run(self.reset())
+        self.init_steppers()
 
     def init_micropython(self):
         """Initialize hardware peripherals in a MicroPython environment.
@@ -62,7 +64,6 @@ class ESP32Host(BaseHost):
         self.flash_cs.value(1)
         self.fpga_cs = Pin(cfg["fpga_cs"], Pin.OUT)
         self.stepper_cs = Pin(cfg["stepper_cs"], Pin.OUT)
-        self.init_steppers()
 
     def init_steppers(self):
         """Configure TMC2209 stepper drivers over UART.
@@ -177,9 +178,7 @@ class ESP32Host(BaseHost):
         val (bool): True to enable steppers (active-low), False to disable.
         """
         if not isinstance(val, bool):
-            raise ValueError(
-                "enable_steppers must be a boolean value (True or False)"
-            )
+            raise ValueError("enable_steppers must be a boolean value (True or False)")
 
         # Assuming 'enable' is active-low: 0 = enabled, 1 = disabled
         self.stepper_cs.value(0 if val else 1)
@@ -222,11 +221,16 @@ class ESP32Host(BaseHost):
         adr = self.cfg.esp32_cfg["i2c"]["digipot_addr"]
         self.i2c.writeto_mem(adr, 0, bytes([val]))
 
-    async def measure_facet_period_ms(self, n_samples=1000):
+    async def measure_facet_period_ms(self, samples=30, max_trials=10_000):
         """
         Measure the facet period in milliseconds and facet ID n_samples times.
 
+        Parameters:
+          samples: target samples per facet
+          max_trials: maximum number of samples to reach target
+
         Returns: (facet_ms, facet_ids) both lists of length n_samples
+
         - facet_ms: each entry is period in ms for given facet_id
         - facet_id: each entry is facet ID
         """
@@ -234,33 +238,44 @@ class ESP32Host(BaseHost):
         laz_tim = self.cfg.laser_timing
 
         # Sampling cadence to prevent oversampling
-        dt_facet_ms = 60 / (laz_tim["rpm"] * laz_tim["facets"] / 1000)
-        facet_ms = np.zeros(n_samples)
-        facet_id = np.zeros(n_samples)
+        dt_facet_ms = int(60 / (laz_tim["rpm"] * laz_tim["facets"] / 1000))
+        facet_ms = np.zeros(max_trials)
+        facet_id = np.zeros(max_trials)
 
-        for sample in range(n_samples):
+        counts = np.zeros(laz_tim["facets"])
+
+        for sample in range(max_trials):
             # improve distribution of samples
             if sample % 25 == 0:
-                await sleep_ms(150)
-            (
-                ticks_facet,
-                facet_id[sample],
-            ) = await self.read_facet_ticks_and_id()
-            facet_ms[sample] = ticks_facet / (laz_tim["crystal_hz"] / 1000)
-            await sleep_ms(int(dt_facet_ms / 2))
+                if np.min(counts) < samples:
+                    delay = randint(0, 4 * dt_facet_ms)
+                    await sleep_ms(delay)
+                else:
+                    return facet_ms[:sample], facet_id[:sample]
+            f_ticks, f_id = await self.read_facet_ticks_and_id()
+            counts[f_id] += 1
+            facet_id[sample] = f_id
+            facet_ms[sample] = f_ticks / (laz_tim["crystal_hz"] / 1000)
+            delay = randint(int(0.5 * dt_facet_ms), dt_facet_ms)
+            await sleep_ms(dt_facet_ms)
+        logging.error("Measurement fails")
         return facet_ms, facet_id
 
     async def facet_mean(
         self,
-        n_samples=1000,
+        samples=30,
+        max_trials=10_000,
     ):
         """
         Compute the mean period per facet in milliseconds using n_samples measurements.
 
+          samples: target samples per facet
+          max_trials: maximum number of samples to reach target
+
         Returns:
         - means_ms: list of length n_facets; each entry is mean period in ms or None if no samples
         """
-        facet_ms, facet_id = await self.measure_facet_period_ms(n_samples)
+        facet_ms, facet_id = await self.measure_facet_period_ms(samples, max_trials)
         facets = self.cfg.laser_timing["facets"]
 
         mean_ms = [0] * facets
@@ -295,7 +310,7 @@ class ESP32Host(BaseHost):
 
         exp_facet_ms = 60 / (laz_tim["rpm"] * laz_tim["facets"] / 1000)
 
-        facet_ms, _ = await self.measure_facet_period_ms(n_samples=1000)
+        facet_ms, _ = await self.measure_facet_period_ms()
 
         if np.min(facet_ms) < (0.5 * exp_facet_ms):
             logger.error(
@@ -304,12 +319,8 @@ class ESP32Host(BaseHost):
             return False
         else:
             mean_facet_ms = np.mean(facet_ms)
-            min_frac_perc = (
-                (mean_facet_ms - np.min(facet_ms)) / mean_facet_ms * 100
-            )
-            max_frac_perc = (
-                (np.max(facet_ms) - mean_facet_ms) / mean_facet_ms * 100
-            )
+            min_frac_perc = (mean_facet_ms - np.min(facet_ms)) / mean_facet_ms * 100
+            max_frac_perc = (np.max(facet_ms) - mean_facet_ms) / mean_facet_ms * 100
             total_frac_perc = min_frac_perc + max_frac_perc
             if total_frac_perc > laz_tim["jitter_exp_perc"]:
                 logger.error(

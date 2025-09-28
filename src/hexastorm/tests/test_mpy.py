@@ -206,9 +206,7 @@ class MoveTest(Base):
     def motor_enable(self):
         """Toggle `enable_steppers` and ask the user to feel the brake."""
         self.host.enable_steppers = True
-        logger.info(
-            "Axes should be locked now — press <Enter> when confirmed."
-        )
+        logger.info("Axes should be locked now — press <Enter> when confirmed.")
         input()
         self.host.enable_steppers = False
 
@@ -222,18 +220,14 @@ class MoveTest(Base):
             self.host.enable_steppers = True
             start_move_pos = (self.host.position).copy()
             disp = delta * direction
-            self.host.gotopoint(
-                position=disp, speed=[1] * motors, absolute=False
-            )
+            self.host.gotopoint(position=disp, speed=[1] * motors, absolute=False)
             sleep(3)
             assert_array_almost_equal(
                 self.host.position,
                 start_move_pos + disp,
                 decimal=decimals,
             )
-        assert_array_almost_equal(
-            self.host.position, start_pos, decimal=decimals
-        )
+        assert_array_almost_equal(self.host.position, start_pos, decimal=decimals)
         self.host.enable_steppers = False
 
 
@@ -245,9 +239,7 @@ class SyncTest(Base):
         sleep(2)
         self.assertTrue(host.test_laserhead())
 
-    def test_sync_persistence(
-        self, samples=1000, trials=3, timeout=5, withreset=False
-    ):
+    def test_sync_persistence(self, samples=30, trials=3, timeout=5, withreset=False):
         """Test laserhead synchronization persistence.
 
         The mean facet vector should not shift over time.
@@ -256,7 +248,7 @@ class SyncTest(Base):
         host = self.host
         host.enable_comp(synchronize=True)
         sleep(2)
-        base_vector = host.facet_mean(n_samples=samples)
+        base_vector = host.facet_mean(samples=samples)
         for _ in range(trials):
             logger.info(f"Executing trial {_ + 1} of {trials}")
             if withreset:
@@ -266,6 +258,6 @@ class SyncTest(Base):
                 sleep(2)
             else:
                 sleep(timeout)
-            mean_vector = host.facet_mean(n_samples=samples)
+            mean_vector = host.facet_mean(samples=samples)
             s, _, _ = find_shift(base_vector, mean_vector)
             self.assertEqual(s, 0)
