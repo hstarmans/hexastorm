@@ -1,4 +1,5 @@
 from asyncio import sleep, sleep_ms, run
+import time
 import logging
 import sys
 from random import randint
@@ -26,12 +27,12 @@ class ESP32Host(BaseHost):
     Host interface to interact with the FPGA using micropython.
     """
 
-    def __init__(self):
+    def __init__(self, sync=True):
         super().__init__(test=False)
         self.steppers_init = False
         self.spi_tries = 1e5
         self.init_micropython()
-        run(self.reset())
+        self.reset()
         self.init_steppers()
 
     def init_micropython(self):
@@ -138,20 +139,23 @@ class ESP32Host(BaseHost):
         self.reset()
         logger.info("Flashed fpga.")
 
-    async def reset(self):
+    def reset(self):
         "restart the FPGA by toggling the reset pin and initializing communication"
         # free all lines
         self.spi.deinit()
         self.flash_cs.init(Pin.IN)
 
         self.fpga_reset.value(0)
-        await sleep(1)
+        time.sleep(1)
         self.fpga_reset.value(1)
-        await sleep(1)
+        time.sleep(1)
         self.init_micropython()
         length = Spi.word_bytes + Spi.command_bytes
         command = bytearray(length)
-        await self.send_command(command, blocking=False)
+        response = bytearray(length)
+        self.fpga_cs.value(0)
+        self.spi.write_readinto(command, response)
+        self.fpga_cs.value(1)
 
     @property
     def enable_steppers(self):
@@ -178,7 +182,9 @@ class ESP32Host(BaseHost):
         val (bool): True to enable steppers (active-low), False to disable.
         """
         if not isinstance(val, bool):
-            raise ValueError("enable_steppers must be a boolean value (True or False)")
+            raise ValueError(
+                "enable_steppers must be a boolean value (True or False)"
+            )
 
         # Assuming 'enable' is active-low: 0 = enabled, 1 = disabled
         self.stepper_cs.value(0 if val else 1)
@@ -275,7 +281,9 @@ class ESP32Host(BaseHost):
         Returns:
         - means_ms: list of length n_facets; each entry is mean period in ms or None if no samples
         """
-        facet_ms, facet_id = await self.measure_facet_period_ms(samples, max_trials)
+        facet_ms, facet_id = await self.measure_facet_period_ms(
+            samples, max_trials
+        )
         facets = self.cfg.laser_timing["facets"]
 
         mean_ms = [0] * facets
@@ -319,8 +327,12 @@ class ESP32Host(BaseHost):
             return False
         else:
             mean_facet_ms = np.mean(facet_ms)
-            min_frac_perc = (mean_facet_ms - np.min(facet_ms)) / mean_facet_ms * 100
-            max_frac_perc = (np.max(facet_ms) - mean_facet_ms) / mean_facet_ms * 100
+            min_frac_perc = (
+                (mean_facet_ms - np.min(facet_ms)) / mean_facet_ms * 100
+            )
+            max_frac_perc = (
+                (np.max(facet_ms) - mean_facet_ms) / mean_facet_ms * 100
+            )
             total_frac_perc = min_frac_perc + max_frac_perc
             if total_frac_perc > laz_tim["jitter_exp_perc"]:
                 logger.error(
