@@ -19,11 +19,11 @@ from .resources import (
 class Firestarter(LatticeICE40Platform):
     """Kicad board: https://github.com/hstarmans/firestarter/"""
 
-    cfg = PlatformConfig(test=False).ice40_cfg
-    device = cfg["device"]
-    package = cfg["package"]
-    default_clk = cfg["default_clk"]
-    hfosc_div = cfg["hfosc_div"]
+    ice40_cfg = PlatformConfig(test=False).ice40_cfg
+    device = ice40_cfg["device"]
+    package = ice40_cfg["package"]
+    default_clk = ice40_cfg["default_clk"]
+    hfosc_div = ice40_cfg["hfosc_div"]
 
     resources = [
         *LEDResources(pins="39", invert=True, attrs=Attrs(IO_STANDARD="SB_LVCMOS")),
@@ -34,6 +34,15 @@ class Firestarter(LatticeICE40Platform):
             Subsignal("sdi", Pins("13")),
             Subsignal("sdo", Pins("18")),
             Subsignal("cs", PinsN("25")),
+            Attrs(IO_STANDARD="SB_LVCMOS"),
+        ),
+        Resource(
+            "flash_spi",
+            0,
+            Subsignal("sck", Pins("15")),
+            Subsignal("sdi", Pins("17")),
+            Subsignal("sdo", Pins("14")),
+            Subsignal("cs", PinsN("16")),
             Attrs(IO_STANDARD="SB_LVCMOS"),
         ),
         # Laserscanner resource
@@ -88,6 +97,7 @@ class Firestarter(LatticeICE40Platform):
 
     def __init__(self):
         LatticeICE40Platform.__init__(self)
+        self.esp32_cfg = PlatformConfig(test=False).esp32_cfg
 
     def build(self, *args, **kwargs):
         search_command = "where" if pltf.system() == "Windows" else "which"
@@ -98,13 +108,14 @@ class Firestarter(LatticeICE40Platform):
         super().build(*args, **kwargs)
 
     def toolchain_program(self, products, name, **kwargs):
+        device = self.esp32_cfg["device"]
         with products.extract(f"{name}.bin") as bitstream_filename:
             subprocess.check_call(
                 [
                     "mpremote",
                     "resume",
                     "connect",
-                    self.micropython,
+                    device,
                     "fs",
                     "cp",
                     bitstream_filename,
@@ -112,18 +123,18 @@ class Firestarter(LatticeICE40Platform):
                 ]
             )
             for cmd in [
-                "from hexastorm.controller import Host",
-                "hst = Host(micropython=True)",
+                "from hexastorm.fpga_host.micropython import ESP32Host",
+                "hst = ESP32Host()",
                 'hst.flash_fpga("sd/fpga/fpga.bit")',
             ]:
                 subprocess.check_call(
-                    ["mpremote", "resume", "connect", self.micropython, "exec", cmd]
+                    ["mpremote", "resume", "connect", device, "exec", cmd]
                 )
 
 
 if __name__ == "__main__":
-    Firestarter(micropython="/dev/ttyACM0").build(
+    Firestarter().build(
         Blinky(),
-        do_program=False,
+        do_program=True,
         verbose=True,
     )
