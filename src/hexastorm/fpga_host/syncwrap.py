@@ -53,17 +53,38 @@ def _run_sync(coro):
     If a loop is running, close the coroutine to avoid 'never awaited' warnings,
     then raise RuntimeError.
     """
-    if _loop_is_running():
-        try:
-            # Prevent 'coroutine was never awaited' warnings
-            closer = getattr(coro, "close", None)
-            if callable(closer):
-                closer()
-        finally:
-            raise RuntimeError(
-                "Cannot run synchronously while an event loop is running."
-            )
-    return asyncio.run(coro)
+    if not _loop_is_running():
+        # Case 1: No loop is running (e.g., in REPL or simple sync function).
+        # Use asyncio.run, which handles loop creation and cleanup.
+        return asyncio.run(coro)
+
+    # Case 2: A loop is already running (e.g., inside an async test or task).
+    # We MUST NOT call asyncio.run() or it will raise the error.
+    # Instead, we get the active loop and use its run_until_complete.
+    # This is generally acceptable in test contexts where you block a thread
+    # to wait for an async result.
+    try:
+        # Get the running loop. get_event_loop() is used here for broadest compatibility.
+        loop = asyncio.get_event_loop()
+
+        # NOTE: loop.is_running() should be True at this point based on the check above,
+        # but using get_event_loop() is the most reliable way to get a loop object
+        # that *might* be running if current_task/get_running_loop failed.
+
+        # Run the coroutine to completion, blocking the current thread.
+        return loop.run_until_complete(coro)
+
+    except RuntimeError as e:
+        # If get_event_loop() raises a RuntimeError (e.g., "no current event loop"),
+        # or if run_until_complete fails in a nested context, re-raise it.
+        # Ensure coroutine closure to prevent 'never awaited' warning.
+        closer = getattr(coro, "close", None)
+        if callable(closer):
+            closer()
+        raise RuntimeError(
+            "Cannot run synchronously while an event loop is running. "
+            "If inside an async function, use 'await' directly."
+        ) from e
 
 
 class SyncProxy:

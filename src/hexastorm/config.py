@@ -154,6 +154,7 @@ class PlatformConfig:
             fpga_cs=9,
             fpga_reset=47,
             flash_cs=10,
+            mem_full=15,
             device="/dev/ttyACM0",
             leds=dict(
                 blue=18,

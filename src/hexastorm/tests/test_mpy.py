@@ -34,17 +34,17 @@ class StaticTest(Base):
         hdl_cfg = host.cfg.hdl_cfg
         host.set_parsing(False)
         host.enable_steppers = False
-        host.spi_tries = 10
         for _ in range(hdl_cfg.mem_depth):
             coeff = [3] * hdl_cfg.motors
             try:
                 host.spline_move(hdl_cfg.move_ticks, coeff)
             except Memfull:
-                pass
-        host.spi_tries = 100_000
+                break
         self.assertTrue((host.fpga_state)["mem_full"])
+        self.assertTrue((host.mem_full))
         host.set_parsing(True)
         fpga_state = host.fpga_state
+        self.assertFalse((host.mem_full))
         self.assertFalse(fpga_state["mem_full"])
         self.assertFalse(fpga_state["error"])
 

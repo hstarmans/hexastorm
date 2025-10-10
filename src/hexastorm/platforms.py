@@ -34,6 +34,7 @@ class Firestarter(LatticeICE40Platform):
             Subsignal("sdi", Pins("13")),
             Subsignal("sdo", Pins("18")),
             Subsignal("cs", PinsN("25")),
+            Subsignal("fifo_full", Pins("31")),
             Attrs(IO_STANDARD="SB_LVCMOS"),
         ),
         Resource(

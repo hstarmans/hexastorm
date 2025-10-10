@@ -1,4 +1,5 @@
 from amaranth import Cat, Elaboratable, Module, Signal, signed, Mux
+from amaranth.lib.io import Buffer
 from amaranth.hdl import Array
 from luna.gateware.interface.spi import (
     SPICommandInterface,
@@ -31,6 +32,7 @@ class SPIParser(Elaboratable):
             - spi         : SPIBus interface
             - positions   : Array of stepper motor positions
             - pin_state   : External pin state to report
+            - fifo_full   : FIFO full flag
             - read_commit, read_en, read_discard : FIFO control
             - error_dispatch : Error detected in dispatcher
             - word_to_send  : Debug word to send
@@ -51,7 +53,7 @@ class SPIParser(Elaboratable):
         )
         self.positions_in = Array(Signal(signed(32)) for _ in range(hdl_cfg.motors))
         self.pin_state = Signal(8)
-
+        self.fifo_full = Signal()
         self.fifo = TransactionalizedFIFO(
             width=hdl_cfg.mem_width, depth=hdl_cfg.mem_depth
         )
@@ -70,6 +72,12 @@ class SPIParser(Elaboratable):
         if platform is not None:  # Building module
             board_spi = platform.request("debug_spi", dir="-")
             connect_synchronized_spi(m, board_spi, spi_cmd)
+            m.submodules += [
+                fifo_full_buf := Buffer("o", board_spi.fifo_full),
+            ]
+            m.d.comb += [
+                fifo_full_buf.o.eq(self.fifo_full),
+            ]
 
         # Internal state
         state = Signal(8)
@@ -91,6 +99,7 @@ class SPIParser(Elaboratable):
             state[status.parsing].eq(self.parse),
             state[status.full].eq(fifo.space_available <= 1),
             state[status.error].eq(self.error_dispatch | word_error),
+            self.fifo_full.eq(fifo.space_available <= 1),
         ]
 
         with m.FSM(name="parser", init="RESET"):

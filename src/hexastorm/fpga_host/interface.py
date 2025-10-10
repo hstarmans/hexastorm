@@ -1,6 +1,6 @@
 from struct import unpack
 import sys
-
+from asyncio import wait_for, TimeoutError
 
 from .. import ulabext
 from ..config import Spi, PlatformConfig
@@ -62,13 +62,13 @@ class BaseHost:
 
         return self._position
 
-    async def send_command(self, command, blocking=False):
+    async def send_command(self, command, timeout=0):
         """
         Send a command to the FPGA via SPI and return the response.
 
         Args:
             command (list[int] or bytearray): Full command consisting of command byte + data bytes.
-            blocking (bool): If True, retry sending if the FPGA's memory is full.
+            timeout (boolean): Whether to use a timeout for the command.
 
         Returns:
             bytearray: Response from the FPGA, same length as the input command.
@@ -82,29 +82,31 @@ class BaseHost:
         command = bytearray(command)
         response = bytearray(command)
 
-        trials = 0
-        while True:
-            trials += 1
-            if self.test:
-                # function is created in Amaranth HDL
+        if self.test:
+            # function is created in Amaranth HDL
+            for trial in range(self.spi_tries):
                 response[:] = await self.spi_exchange_data(command)
-            else:
-                self.fpga_cs.value(0)
-                self.spi.write_readinto(command, response)
-                self.fpga_cs.value(1)
-            if not blocking:
-                break
-
-            status_byte = response[-1]  # can't rely on self.get_state (needs speed!)
-            if self._bitflag(status_byte, Spi.State.error):
-                if not self.test:
-                    self.reset()  # SPI speed or protocol mismatch → unrecoverable
-                raise Exception("Error detected on FPGA")
-            if not self._bitflag(status_byte, Spi.State.full):
-                break  # FIFO has space, continue
-            if trials > self.spi_tries:
-                raise Memfull(f"Too many retries ({trials}) due to full FIFO")
-
+                if timeout < 1:
+                    break
+                # can't rely on self.get_state (needs speed!)
+                status_byte = response[-1]
+                if self._bitflag(status_byte, Spi.State.error):
+                    raise Exception("Error detected on FPGA")
+                if not self._bitflag(status_byte, Spi.State.full):
+                    break  # FIFO has space, continue
+                if trial == self.spi_tries - 1:
+                    raise Memfull(
+                        f"Too many retries ({self.spi_tries}) due to full FIFO"
+                    )
+        else:
+            if timeout:
+                try:
+                    await wait_for(self.await_mem_empty(), timeout=5)
+                except TimeoutError:
+                    raise Memfull("Timeout waiting for FIFO to empty")
+            self.fpga_cs.value(0)
+            self.spi.write_readinto(command, response)
+            self.fpga_cs.value(1)
         return response
 
     def _bitflag(self, byte, index):
@@ -216,7 +218,7 @@ class BaseHost:
         for _ in range(repetitions):
             cmd_lst = self.byte_to_cmd_list(byte_lst)
             for cmd in cmd_lst:
-                (await self.send_command(cmd, blocking=True))
+                (await self.send_command(cmd, timeout=True))
 
     async def enable_comp(
         self,
@@ -253,7 +255,7 @@ class BaseHost:
             + [flags]
             + [Spi.Instructions.write_pin]
         )
-        await self.send_command(data, blocking=True)
+        await self.send_command(data)
 
     def steps_to_count(self, steps):
         """Convert a number of motor steps to the corresponding count value.
@@ -323,7 +325,7 @@ class BaseHost:
 
         # Send each command and track final response
         for command in commands:
-            data_out = await self.send_command(command, blocking=True)
+            data_out = await self.send_command(command, timeout=True)
 
         # Decode the home switch state after the move
         state = await self._read_fpga_state(data_out)
@@ -471,7 +473,7 @@ class BaseHost:
         self._position[homeswitches_hit == 1] = 0
         # parsing not disabled !
 
-    async def read_facet_ticks_and_id(self, blocking=False):
+    async def read_facet_ticks_and_id(self):
         """
         Retrieves facet number and ticks in period.
 
@@ -479,7 +481,7 @@ class BaseHost:
         """
         word_size = Spi.word_bytes
         command = [Spi.Commands.debug] + [0] * word_size
-        raw = await self.send_command(command, blocking=blocking)
+        raw = await self.send_command(command)
 
         # strip command echo; normalize to bytes
         payload = bytes(raw[1:])
