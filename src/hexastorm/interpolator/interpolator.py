@@ -9,10 +9,8 @@ from numba import jit, typed, types
 from PIL import Image
 from scipy import ndimage
 
-from hexastorm.lasers import params as paramsfunc
-from hexastorm.platforms import Firestarter
-from hexastorm.config import wordsinscanline
-from hexastorm.controller import Host
+from hexastorm.config import PlatformConfig, Spi
+from hexastorm.fpga_host.interface import BaseHost
 
 
 # numba.jit decorated functions cannot be defined with self
@@ -102,6 +100,7 @@ class Interpolator:
     """
 
     def __init__(self, stepsperline=1):
+        self.cfg = PlatformConfig(test=False)
         self.params = self.parameters(stepsperline)
         self.params = self.downsample(self.params)
         currentdir = os.path.dirname(os.path.realpath(__file__))
@@ -119,8 +118,8 @@ class Interpolator:
                         line can be exposed multiple times per line
                         during exposure
         """
-        platform = Firestarter(micropython=True)
-        var = paramsfunc(platform)
+        laz_tim = self.cfg.laser_timing
+        mtr_cfg = self.cfg.motor_cfg
         # TODO: slicer should account for direction
         # bytes are read using little but finally direction is flipped!
         # as such packing is here in big
@@ -132,11 +131,11 @@ class Interpolator:
             # angle [radians], for a definition see figure 7
             # https://reprap.org/wiki/Open_hardware_fast_high_resolution_LASER
             "tiltangle": np.radians(90),
-            "LASER_HZ": var["LASER_HZ"],  # Hz
+            "LASER_HZ": laz_tim["laser_hz"],  # Hz
             # rotation frequency polygon [Hz]
-            "rotationfrequency": var["RPM"] / 60,
+            "rotationfrequency": laz_tim["rpm"] / 60,
             # number of facets
-            "FACETS": var["FACETS"],
+            "FACETS": laz_tim["facets"],
             # inradius polygon [mm]
             "inradius": 15,
             # refractive index
@@ -158,16 +157,20 @@ class Interpolator:
             "facetsinlane": 0,  # set when file is parsed
             # mm/s
             "stagespeed": (
-                (stepsperline / platform.stepspermm[platform.laser_axis])
-                * (var["RPM"] / 60)
-                * var["FACETS"]
+                (stepsperline / mtr_cfg["steps_mm"][mtr_cfg["orth2lsrline"]])
+                * (laz_tim["rpm"] / 60)
+                * laz_tim["facets"]
             ),
             # first calculates all bits in scanline and then the start
             "startpixel": (
-                (var["BITSINSCANLINE"] / (var["END%"] - var["START%"])) * var["START%"]
+                (
+                    laz_tim["scanline_length"]
+                    / (laz_tim["end_frac"] - laz_tim["start_frac"])
+                )
+                * laz_tim["start_frac"]
             ),
             # number of pixels in a line [new 785]
-            "bitsinscanline": var["BITSINSCANLINE"],
+            "bitsinscanline": laz_tim["scanline_length"],
             # each can be repeated, to speed up interpolation
             # this was used on the beaglebone
             "downsamplefactor": 1,
@@ -469,8 +472,9 @@ class Interpolator:
         file_path = os.path.join(self.debug_folder, filename)
         bitsinline = int(self.params["bitsinscanline"])
         bytesinline = int(np.ceil(self.params["bitsinscanline"] // 8))
-        words_in_line = wordsinscanline(int(self.params["bitsinscanline"]))
+        words_in_line = Spi.words_scanline(self.cfg.laser_timing)
         pixeldata = []
+
         with open(file_path, "rb") as f:
             # 1. Header
             lanewidth = struct.unpack("<f", f.read(4))[0]
@@ -533,7 +537,7 @@ class Interpolator:
         lanes = int(np.ceil(self.params["samplexsize"] / self.params["lanewidth"]))
         facetsinlane = int(self.params["facetsinlane"])
         pixeldata = pixeldata.astype(np.uint8)
-        host = Host(platform=Firestarter(micropython=True))
+        host = BaseHost(test=False)
         reconstructed = []
         with open(os.path.join(self.debug_folder, filename), "wb") as f:
             # 1. Header:
@@ -560,10 +564,10 @@ class Interpolator:
                     bits = np.unpackbits(linedata)[:bitsinline]
                     # reverse, clockwise exposure
                     bits = bits[::-1]
-                    bytelst = host.bittobytelist(
+                    bytelst = host.bit_to_byte_list(
                         bits, self.params["stepsperline"], direction
                     )
-                    cmdlst = host.bytetocmdlist(bytelst)
+                    cmdlst = host.byte_to_cmd_list(bytelst)
                     # cmd lst has lenth of 6, there are 9 bytes in a cmd
                     for cmd in cmdlst:
                         f.write(cmd)
@@ -581,6 +585,7 @@ if __name__ == "__main__":
     # url = os.path.join(dir_path, "test-patterns", "hexastorm.png")
     # ptrn = interpolator.patternfile(url, pixelsize=0.035)
     print("This can take up to 30 seconds")
+    # TODO: zlib can compress the data with a factor over 20
     interpolator.writebin(ptrn, f"{fname}.bin")
     facetsinlane, lanes, lanewidth, arr = interpolator.readbin(f"{fname}.bin")
     assert np.allclose(interpolator.params["lanewidth"], lanewidth, 1e-3)
