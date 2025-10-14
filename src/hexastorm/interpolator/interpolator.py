@@ -2,6 +2,7 @@ import math
 import os
 from io import BytesIO
 import struct
+import zlib
 
 import numpy as np
 from cairosvg import svg2png
@@ -475,11 +476,56 @@ class Interpolator:
         words_in_line = Spi.words_scanline(self.cfg.laser_timing)
         pixeldata = []
 
+        decompressor = zlib.decompressobj()
+
+        # The global buffer that holds decompressed bytes waiting to be consumed
+        decompressed_buffer = b""
+
+        def get_next_decompressed_chunk(f):
+            """Reads a chunk of compressed data, decompresses it, and appends the result to the global buffer."""
+            nonlocal decompressed_buffer
+            # Read a reasonable chunk size, e.g., 4096 bytes of compressed data
+            compressed_data = f.read(4096)
+            if not compressed_data:
+                # End of file: Flush the decompressor to get the last bytes (trailer)
+                decompressed_data = decompressor.flush()
+            else:
+                # Decompress the chunk
+                decompressed_data = decompressor.decompress(compressed_data)
+
+            decompressed_buffer += decompressed_data
+            return len(decompressed_data)
+
+        def z_read(f, num):
+            """
+            Reads exactly 'num' decompressed bytes, reading more from the file as needed.
+            Returns: The 'num' bytes or raises an EOFError if not enough data is available.
+            """
+            nonlocal decompressed_buffer
+            # Keep reading and decompressing from the file until the buffer has enough bytes
+            while len(decompressed_buffer) < num:
+                # If we can't get any more decompressed data, it's an EOF
+                if (
+                    get_next_decompressed_chunk(f) == 0
+                    and len(decompressed_buffer) < num
+                ):
+                    raise EOFError(
+                        f"Premature end of file: Requested {num} bytes but only found {len(decompressed_buffer)}."
+                    )
+
+            # Extract the requested number of bytes from the front of the buffer
+            result = decompressed_buffer[:num]
+
+            # Remove the extracted bytes from the buffer (consume them)
+            decompressed_buffer = decompressed_buffer[num:]
+
+            return result
+
         with open(file_path, "rb") as f:
             # 1. Header
-            lanewidth = struct.unpack("<f", f.read(4))[0]
-            facetsinlane = struct.unpack("<I", f.read(4))[0]
-            lanes = struct.unpack("<I", f.read(4))[0]
+            lanewidth = struct.unpack("<f", z_read(f, 4))[0]
+            facetsinlane = struct.unpack("<I", z_read(f, 4))[0]
+            lanes = struct.unpack("<I", z_read(f, 4))[0]
             for lane in range(lanes):
                 if lane % 2 == 1:
                     direction = 0
@@ -489,7 +535,7 @@ class Interpolator:
                     # cmd lst has lenth of 6, there are 9 bytes in a cmd
                     cmdlst = []
                     for _ in range(words_in_line):
-                        cmdlst.append(f.read(9))
+                        cmdlst.append(z_read(f, 9))
                     # let's unpack the cmds, all 6 commands start with write
                     # first command has the scanline command
                     # contains direction and steps per line
@@ -519,7 +565,7 @@ class Interpolator:
                     pixeldata.extend(bitlst)
         return facetsinlane, lanes, lanewidth, np.packbits(pixeldata)
 
-    def writebin(self, pixeldata, filename="test.bin"):
+    def writebin(self, pixeldata, filename="test.bin", compression_level=9):
         """writes pixeldata with parameters to parquet file
 
         header contains stepsperline, facetsinlane and number of lane
@@ -528,6 +574,7 @@ class Interpolator:
 
         pixeldata  -- must have uneven length
         filename   -- name of binary file to write laserinformation to
+        compression_level      -- compression level
         """
         if not os.path.exists(self.debug_folder):
             os.makedirs(self.debug_folder)
@@ -539,13 +586,20 @@ class Interpolator:
         pixeldata = pixeldata.astype(np.uint8)
         host = BaseHost(test=False)
         reconstructed = []
+        compressor = zlib.compressobj(level=compression_level)
+
         with open(os.path.join(self.debug_folder, filename), "wb") as f:
+
+            def z_write(data):
+                compressed = compressor.compress(data)
+                f.write(compressed)
+
             # 1. Header:
-            f.write(struct.pack("<f", self.params["lanewidth"]))
-            f.write(
+            z_write(struct.pack("<f", self.params["lanewidth"]))
+            z_write(
                 struct.pack("<I", int(self.params["facetsinlane"]))
             )  # unsigned int (4 bytes)
-            f.write(struct.pack("<I", lanes))  # unsigned int (4 bytes)
+            z_write(struct.pack("<I", lanes))  # unsigned int (4 bytes)
             # Overtime packing changed significantly
             bitsinline = int(self.params["bitsinscanline"])
             bytesinline = int(np.ceil(self.params["bitsinscanline"] // 8))
@@ -570,7 +624,8 @@ class Interpolator:
                     cmdlst = host.byte_to_cmd_list(bytelst)
                     # cmd lst has lenth of 6, there are 9 bytes in a cmd
                     for cmd in cmdlst:
-                        f.write(cmd)
+                        z_write(cmd)
+            f.write(compressor.flush())
 
 
 if __name__ == "__main__":
