@@ -69,9 +69,9 @@ class BaseTest(LunaGatewareTestCase):
         while (sim.get(dut.empty) == 0) or (ticks < thresh):
             if single or sim.get(dut.empty) == 1:
                 ticks += 1
-            old = sim.get(dut.step)
+            prev_step = sim.get(dut.step)
             await sim.tick()
-            if old and sim.get(dut.step) == 0:
+            if prev_step and sim.get(dut.step) == 0:
                 count += 1 if sim.get(dut.dir) else -1
         return count
 
@@ -86,7 +86,10 @@ class BaseTest(LunaGatewareTestCase):
 
         await self.wait_until_state("READ_INSTRUCTION")
         await sim.tick()
-
+        # single facet mode; linecnt not equal to facet
+        # stopline reset the line cnt
+        if not sim.get(dut.singlefacet) and len(bit_lst) > 0:
+            self.assertEqual(sim.get(dut.facetcnt), sim.get(dut.linecnt))
         self.assertEqual(sim.get(dut.dir), direction)
         self.assertFalse(sim.get(dut.error))
 
@@ -127,10 +130,19 @@ class BaseTest(LunaGatewareTestCase):
         return data_out
 
     async def write_line(self, bit_list, steps_per_line=1, direction=0):
-        """Writes a scanline into FIFO manually (no dispatcher/parser)."""
+        """Writes a scanline into FIFO manually (no dispatcher/parser).
+
+        If you write to the FIFO, the space available reduces. The write /
+        read commit signals moves the block pointer.
+        If you keep reading you move to the next block, if you discard
+        you move back within the last block you read.
+        """
         byte_lst = self.host.bit_to_byte_list(bit_list, steps_per_line, direction)
         dut = self.dut
         sim = self.sim
+
+        if sim.get(dut.fifo.space_available) < (len(byte_lst) / Spi.word_bytes):
+            raise Exception("Memory full")
 
         for i in range(0, len(byte_lst), Spi.word_bytes):
             lst = byte_lst[i : i + Spi.word_bytes]
@@ -220,7 +232,10 @@ class SinglelineTest(BaseTest):
         scanline_length = self.laz_tim["scanline_length"]
 
         # Write full-on scanline and synchronize
-        lines = [[1] * scanline_length]
+        one_line = [1] * scanline_length
+        zero_line = [0] * scanline_length
+        random_line = [randint(0, 1) for _ in range(scanline_length)]
+        lines = [one_line, zero_line, random_line]
         for line in lines:
             await self.write_line(line)
 
@@ -229,8 +244,14 @@ class SinglelineTest(BaseTest):
 
         await self.pulse(dut.expose_start)
 
-        for _ in range(2):
-            await self.check_line(line)
+        # In single line mode reads are not committed
+        # if the FIFO is empty so the last line is always repeated!
+        for check in range(10):
+            if check > len(random_line) - 1:
+                idx = len(random_line) - 1
+            else:
+                idx = check
+            await self.check_line(lines[idx])
 
         self.assertTrue(sim.get(dut.synchronized))
 

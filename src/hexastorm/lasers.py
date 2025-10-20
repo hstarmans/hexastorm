@@ -154,7 +154,8 @@ class Laserhead(Elaboratable):
         # syncfailed is lowered once synchronized
         syncfailed_cnt = Signal(range(laz_tim["stable_ticks"]))
         assert laz_tim["facets"] < 2**8, "too many facets"
-        facetcnt = Signal(8)
+        facetcnt = Signal(8)  # 1 byte, is sent back
+        linecnt = Signal.like(facetcnt)
         lasercnt = Signal(range(laz_tim["laser_ticks"]))
         byte_index = Signal(range(laz_tim["scanline_length"] + 1))
         tickcounter_max = max(laz_tim["spinup_ticks"], laz_tim["stable_ticks"])
@@ -173,6 +174,7 @@ class Laserhead(Elaboratable):
                     self.synchronized.eq(0),
                     enable_prism.eq(0),
                     lasers.eq(0),
+                    linecnt.eq(0),
                 ]
                 m.next = "STOP"
 
@@ -181,6 +183,7 @@ class Laserhead(Elaboratable):
                     syncfailed_cnt.eq(laz_tim["stable_ticks"] - 1),
                     tickcounter.eq(0),
                     facetcnt.eq(0),
+                    linecnt.eq(0),
                     self.synchronized.eq(0),
                     enable_prism.eq(0),
                     bit_index.eq(0),
@@ -213,8 +216,6 @@ class Laserhead(Elaboratable):
                     m.d.sync += self.error.eq(1)
                     m.next = "STOP"
 
-                # Laser triggers photodiode means 0
-                # OLD: with m.Elif(~pd_db.raw & ~pd_db.meta):
                 with m.Elif(pd_db.valid_pulse):
                     m.d.sync += [
                         tickcounter.eq(0),
@@ -244,7 +245,7 @@ class Laserhead(Elaboratable):
                         with m.Elif(self.empty | ~self.process_lines):
                             m.next = "WAIT_END"
                         # Proceed to read instruction
-                        with m.Else():
+                        with m.Elif((linecnt == facetcnt) | self.singlefacet):
                             # TODO: 10 is too high, should be lower
                             syncfailed_sync_max = min(
                                 round(10.1 * laz_tim["facet_ticks"]),
@@ -255,6 +256,8 @@ class Laserhead(Elaboratable):
                                 self.read_en.eq(1),
                             ]
                             m.next = "READ_INSTRUCTION"
+                        with m.Else():
+                            m.next = "WAIT_END"
                     # Not synchronized — too early
                     with m.Else():
                         m.d.sync += [
@@ -269,6 +272,7 @@ class Laserhead(Elaboratable):
                 m.d.sync += [
                     self.read_en.eq(0),
                     tickcounter.eq(tickcounter + 1),
+                    linecnt.eq(facetcnt),
                 ]
                 instruction = read_data[:8]
                 with m.Switch(instruction):
@@ -283,12 +287,12 @@ class Laserhead(Elaboratable):
                             self.expose_finished.eq(1),
                             self.read_commit.eq(1),
                             self.process_lines.eq(0),
+                            linecnt.eq(0),
                         ]
                         m.next = "WAIT_END"
                     with m.Default():
                         m.d.sync += self.error.eq(1)
                         m.next = "READ_INSTRUCTION"
-
             with m.State("WAIT_FOR_DATA_RUN"):
                 m.d.sync += [
                     tickcounter.eq(tickcounter + 1),
@@ -370,6 +374,15 @@ class Laserhead(Elaboratable):
                     tickcounter.eq(tickcounter + 1),
                 ]
                 # Decide whether to commit or discard the current line
+                # 1. Assume: The transactionalFIFO holds three committed blocks sequentially:
+                #    [random line, empty line, full line].
+                # 2. Read Cycle: The consuming logic reads all blocks in order.
+                # 3. Loop Trigger: If 'single_line' is active, the logic prevents the official
+                #    read pointer from advancing permanently. When the consumer hits the
+                #    FIFO-Empty status (immediately after reading the 'full' line), the system
+                #    automatically forces the read pointer to roll back to the start of the
+                #    last successfully read block.
+                # Result: The 'full' line repeats indefinitely until 'single_line' is deactivated.
                 with m.If(hdl_cfg.single_line & self.empty):
                     m.d.sync += self.read_discard.eq(0)
                 with m.Else():
@@ -396,6 +409,7 @@ class Laserhead(Elaboratable):
             self.scanbit = byte_index
             self.lasercnt = lasercnt
             self.facetcnt = facetcnt
+            self.linecnt = linecnt
             self.laserfsm = laserfsm
         return m
 

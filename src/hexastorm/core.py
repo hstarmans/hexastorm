@@ -95,6 +95,11 @@ class SPIParser(Elaboratable):
         word_error = Signal()
 
         status = Spi.State
+        # You could expect space available equal to words in laserline
+        # but then what would you do for words in move. If for some reason
+        # you are not able to fill the rest of the words in time
+        # there will be an error.
+        # NOTE: don't get why it is <=1 and not == 0
         m.d.sync += [
             state[status.parsing].eq(self.parse),
             state[status.full].eq(fifo.space_available <= 1),
