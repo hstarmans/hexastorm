@@ -1,5 +1,5 @@
 from amaranth import Elaboratable, Module
-from luna.gateware.interface.spi import SPIDeviceInterface
+from spi_interface_fast import SPIDeviceInterfaceFast
 
 from hexastorm.platforms import Firestarter
 from hexastorm.spi_helpers import connect_synchronized_spi
@@ -11,7 +11,7 @@ class DebugSPIExample(Elaboratable):
 
     def __init__(self):
         # Base ourselves around an SPI command interface.
-        self.interface = SPIDeviceInterface(clock_phase=1)
+        self.interface = SPIDeviceInterfaceFast(clock_phase=1)
 
     def elaborate(self, platform):
         m = Module()
