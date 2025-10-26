@@ -20,7 +20,7 @@ class DebugSPIExample(Elaboratable):
         # Use command interface.
         m.submodules.interface = self.interface
 
-        connect_synchronized_spi(m, board_spi, self.interface)
+        connect_synchronized_spi(m, board_spi, self.interface, singlestage_sync=True)
 
         # Turn on a single LED, to show something's running.
         led = platform.request("led", 0)
@@ -34,4 +34,4 @@ class DebugSPIExample(Elaboratable):
 
 if __name__ == "__main__":
     platform = Firestarter()
-    platform.build(DebugSPIExample(), do_program=False, verbose=True)
+    platform.build(DebugSPIExample(), do_program=True, verbose=True)

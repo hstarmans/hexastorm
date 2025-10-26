@@ -1,20 +1,29 @@
 import machine
 import time
 import random
-from hexastorm.controller import Host 
+from hexastorm.controller import Host
 
 # Configuration
 TEST_DURATION_SECONDS = 15 * 60  # 15 minutes
 PROGRESS_UPDATE_INTERVAL_SECONDS = 30
 SPI_BUS = 2
-SPI_BAUDRATE = int(3e6)
+# typically, 1/4 of clock rate with 2 stage synchronization
+# but we are using single stage synchronization for speed
+# then ou go up to 0.375 of clock rate
+SPI_BAUDRATE = int(9e6)
 SPI_SCK_PIN = 12
 SPI_MOSI_PIN = 13
 SPI_MISO_PIN = 11
 FPGA_SELECT_PIN = 9
-DATA_LENGTH = 12  # Number of bytes to send.  Important: changed from len(bts) to a constant
+DATA_LENGTH = (
+    12  # Number of bytes to send.  Important: changed from len(bts) to a constant
+)
 
-def run_spi_test(duration_seconds=TEST_DURATION_SECONDS, update_interval_seconds=PROGRESS_UPDATE_INTERVAL_SECONDS):
+
+def run_spi_test(
+    duration_seconds=TEST_DURATION_SECONDS,
+    update_interval_seconds=PROGRESS_UPDATE_INTERVAL_SECONDS,
+):
     """
     Runs an SPI test for a specified duration, sending random data and checking the response.
 
@@ -22,16 +31,18 @@ def run_spi_test(duration_seconds=TEST_DURATION_SECONDS, update_interval_seconds
         duration_seconds: The duration of the test in seconds.
         update_interval_seconds: The interval for printing progress updates in seconds.
     """
-    hst = Host(micropython=True) 
-    hst.reset() 
+    hst = Host(micropython=True)
+    hst.reset()
     # Initialize SPI
-    spi = machine.SPI(SPI_BUS,
-                    baudrate=SPI_BAUDRATE,
-                    polarity=0,
-                    phase=1,
-                    sck=machine.Pin(SPI_SCK_PIN),
-                    mosi=machine.Pin(SPI_MOSI_PIN),
-                    miso=machine.Pin(SPI_MISO_PIN))
+    spi = machine.SPI(
+        SPI_BUS,
+        baudrate=SPI_BAUDRATE,
+        polarity=0,
+        phase=1,
+        sck=machine.Pin(SPI_SCK_PIN),
+        mosi=machine.Pin(SPI_MOSI_PIN),
+        miso=machine.Pin(SPI_MISO_PIN),
+    )
 
     fpga_select = machine.Pin(FPGA_SELECT_PIN, machine.Pin.OUT)
     fpga_select.value(1)  # Start with FPGA deselected
@@ -73,7 +84,9 @@ def run_spi_test(duration_seconds=TEST_DURATION_SECONDS, update_interval_seconds
         if time.time() >= next_update_time:
             elapsed_time = time.time() - start_time
             remaining_time = duration_seconds - elapsed_time
-            print(f"Elapsed: {elapsed_time:.0f}s, Remaining: {remaining_time:.0f}s, Iterations: {iteration_count}, Errors: {error_count}")
+            print(
+                f"Elapsed: {elapsed_time:.0f}s, Remaining: {remaining_time:.0f}s, Iterations: {iteration_count}, Errors: {error_count}"
+            )
             next_update_time = time.time() + update_interval_seconds
 
     # Test finished. Print summary.
@@ -81,6 +94,4 @@ def run_spi_test(duration_seconds=TEST_DURATION_SECONDS, update_interval_seconds
     print(f"\nSPI test finished after {elapsed_time:.0f} seconds.")
     print(f"Total iterations: {iteration_count}")
     print(f"Total errors: {error_count}")
-    spi.deinit() # Clean up the SPI bus.
-
-
+    spi.deinit()  # Clean up the SPI bus.
