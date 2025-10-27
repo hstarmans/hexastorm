@@ -1,4 +1,4 @@
-from asyncio import sleep, sleep_ms
+from asyncio import sleep, sleep_ms, Event
 import time
 import logging
 import sys
@@ -64,7 +64,17 @@ class ESP32Host(BaseHost):
         self.flash_cs.value(1)
         self.fpga_cs = Pin(cfg["fpga_cs"], Pin.OUT)
         self.stepper_cs = Pin(cfg["stepper_cs"], Pin.OUT)
+        self._mem_full_event = Event()
         self._mem_full = Pin(cfg["mem_full"], Pin.IN)
+
+        # initialize event based on current pin state
+        if not self._mem_full.value():
+            self._mem_full_event.set()
+
+        # attach an interrupt handler
+        self._mem_full.irq(
+            trigger=Pin.IRQ_FALLING | Pin.IRQ_RISING, handler=self._mem_full_callback
+        )
 
     def init_steppers(self):
         """Configure TMC2209 stepper drivers over UART.
@@ -157,6 +167,13 @@ class ESP32Host(BaseHost):
         self.spi.write_readinto(command, response)
         self.fpga_cs.value(1)
 
+    def _mem_full_callback(self, pin):
+        # Pin changed: if memory not full, set event; if full, clear event
+        if not pin.value():  # assuming 0 = not full
+            self._mem_full_event.set()
+        else:
+            self._mem_full_event.clear()
+
     @property
     def mem_full(self):
         """
@@ -168,8 +185,8 @@ class ESP32Host(BaseHost):
         """
         Wait until the memory buffer is empty.
         """
-        while self.mem_full:
-            await sleep(0)
+        # Wait until event is set (memory not full)
+        await self._mem_full_event.wait()
 
     @property
     def enable_steppers(self):

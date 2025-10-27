@@ -34,12 +34,19 @@ class StaticTest(Base):
         hdl_cfg = host.cfg.hdl_cfg
         host.set_parsing(False)
         host.enable_steppers = False
-        for _ in range(hdl_cfg.mem_depth):
+        # We'll use a flag to track if the exception was caught.
+        memfull_raised = False
+        # Iterate one past the memory depth to force the overflow
+        for _ in range(hdl_cfg.mem_depth + 1):
             coeff = [3] * hdl_cfg.motors
             try:
                 host.spline_move(hdl_cfg.move_ticks, coeff)
             except Memfull:
+                memfull_raised = True
                 break
+        self.assertTrue(
+            memfull_raised, "Memfull exception was not raised when FIFO was full."
+        )
         self.assertTrue((host.fpga_state)["mem_full"])
         self.assertTrue((host.mem_full))
         host.set_parsing(True)
