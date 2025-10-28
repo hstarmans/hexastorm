@@ -99,8 +99,9 @@ class BaseHost:
                         f"Too many retries ({self.spi_tries}) due to full FIFO"
                     )
         else:
-            if timeout:
+            if timeout and self.mem_full:
                 try:
+                    # wait_for creates overhead via the scheduler
                     await wait_for(self.await_mem_empty(), timeout=5)
                 except TimeoutError:
                     raise Memfull("Timeout waiting for FIFO to empty")
