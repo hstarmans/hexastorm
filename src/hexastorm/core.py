@@ -102,9 +102,9 @@ class SPIParser(Elaboratable):
         # NOTE: don't get why it is <=1 and not == 0
         m.d.sync += [
             state[status.parsing].eq(self.parse),
-            state[status.full].eq(fifo.space_available <= 1),
+            state[status.full].eq(fifo.space_available <= hdl_cfg.space_available),
             state[status.error].eq(self.error_dispatch | word_error),
-            self.fifo_full.eq(fifo.space_available <= 1),
+            self.fifo_full.eq(fifo.space_available <= hdl_cfg.space_available),
         ]
 
         with m.FSM(name="parser", init="RESET"):

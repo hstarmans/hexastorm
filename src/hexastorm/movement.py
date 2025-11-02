@@ -83,7 +83,7 @@ class Polynomial(Elaboratable):
         ice40_cfg = plf_cfg.ice40_cfg
 
         # Timing counters
-        divider = ice40_cfg["clks"][ice40_cfg["hfosc_div"]]
+        divider = int(ice40_cfg["clks"][ice40_cfg["hfosc_div"]])
         cntr = Signal(range(divider))
         ticks = Signal(hdl_cfg.move_ticks.bit_length())
 

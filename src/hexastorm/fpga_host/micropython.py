@@ -3,7 +3,7 @@ import time
 import logging
 import sys
 from random import randint
-from machine import Pin, SPI, I2C, SoftSPI
+from machine import Pin, SPI, I2C, SoftSPI, PWM
 
 
 from ulab import numpy as np
@@ -41,7 +41,13 @@ class ESP32Host(BaseHost):
         with the FPGA, flash, and stepper drivers. Also triggers init_steppers.
         """
         cfg = self.cfg.esp32_cfg
-
+        ice40_cfg = self.cfg.ice40_cfg
+        if ice40_cfg["hfosc_div"] == "esp32s3":
+            self.clock = PWM(
+                Pin(cfg["clk"]["pin"], Pin.OUT),
+                freq=int(ice40_cfg["clks"][ice40_cfg["hfosc_div"]] * 1e6),
+                duty=cfg["clk"]["duty"],
+            )
         self.fpga_reset = Pin(cfg["fpga_reset"], Pin.OUT)
         self.fpga_reset.value(1)
         self.i2c = I2C(scl=cfg["i2c"]["scl"], sda=cfg["i2c"]["sda"])

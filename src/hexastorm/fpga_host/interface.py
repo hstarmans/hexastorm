@@ -1,6 +1,8 @@
 from struct import unpack
 import sys
 from asyncio import wait_for, TimeoutError
+from time import time
+import logging
 
 from .. import ulabext
 from ..config import Spi, PlatformConfig
@@ -9,6 +11,9 @@ try:
     import numpy as np
 except ImportError:
     from ulab import numpy as np
+
+
+logger = logging.getLogger(__name__)
 
 
 class Memfull(Exception):
@@ -62,7 +67,7 @@ class BaseHost:
 
         return self._position
 
-    async def send_command(self, command, timeout=0):
+    async def send_command(self, command, timeout=0, debug=False):
         """
         Send a command to the FPGA via SPI and return the response.
 
@@ -101,8 +106,14 @@ class BaseHost:
         else:
             if timeout and self.mem_full:
                 try:
+                    if debug:
+                        logger.info("Memory full, waiting for FIFO to empty")
+                        start_time = time()
                     # wait_for creates overhead via the scheduler
                     await wait_for(self.await_mem_empty(), timeout=5)
+                    if debug:
+                        elapsed = time() - start_time
+                        logger.info(f"Waited {elapsed:.2f} seconds for FIFO to empty")
                 except TimeoutError:
                     raise Memfull("Timeout waiting for FIFO to empty")
             self.fpga_cs.value(0)

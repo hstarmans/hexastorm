@@ -158,7 +158,7 @@ class LaserheadTest(Base):
         # Note: parsing is left open
         # (yield from self.host.set_parsing(False))
 
-    def test_scanline(self, numb_lines=1_000, repeat=True, singlefacet=False):
+    def test_scanline(self, numb_lines=10_000, repeat=True, singlefacet=False):
         """Send *numb_lines* scanlines and compare measured line rate."""
         host = self.host
         laz_tim = host.cfg.laser_timing

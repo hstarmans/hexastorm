@@ -147,10 +147,13 @@ class PlatformConfig:
                 mosi=13,
                 phase=1,
                 polarity=0,
-                # higher, i.e. 3 doesn't work
-                baudrate=int(2.9e6),
+                baudrate=int(5e6),
             ),
             stepper_cs=38,  # enable pin stepper motors
+            clk=dict(
+                pin=16,
+                duty=512,  # 50 percent
+            ),
             fpga_cs=9,
             fpga_reset=47,
             flash_cs=10,
@@ -169,10 +172,8 @@ class PlatformConfig:
             device="iCE40UP5K",
             package="SG48",
             default_clk="SB_HFOSC",
-            # can be compiled with 1 but does pass all tests
-            hfosc_div="test" if self.test else 2,
-            # Not required
-            clks={0: 48, 1: 24, 2: 12, 3: 6, "test": 1},
+            hfosc_div="test" if self.test else 1,
+            clks={0: 48, 1: 24, 2: 12, 3: 6, "esp32s3": 27.978142, "test": 1},
         )
 
     @property
@@ -181,11 +182,15 @@ class PlatformConfig:
         if self._hdl_cfg is not None:
             return self._hdl_cfg
         if self.test:
-            cfg = dict(test=True)
+            cfg = dict(test=True, space_available=1)
         else:
+            mem_depth = int((114 * 1000) / (Spi.word_bytes * 8))
             cfg = dict(
                 test=False,
-                mem_depth=256,
+                # listed max 120 kbit, practical 114 kbit
+                # you use EBR / sysMEM (Block RAM) 120 kbit
+                mem_depth=mem_depth,
+                space_available=int(mem_depth / 2),
             )
         cfg.update(
             dict(

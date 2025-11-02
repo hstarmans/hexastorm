@@ -1,16 +1,21 @@
 import machine
+from machine import Pin, PWM
 import time
 import random
-from hexastorm.controller import Host
+from hexastorm.fpga_host.micropython import ESP32Host
 
 # Configuration
 TEST_DURATION_SECONDS = 15 * 60  # 15 minutes
 PROGRESS_UPDATE_INTERVAL_SECONDS = 30
 SPI_BUS = 2
-# typically, 1/4 of clock rate with 2 stage synchronization
-# but we are using single stage synchronization for speed
-# then ou go up to 0.375 of clock rate
-SPI_BAUDRATE = int(9e6)
+# Nyquist rate sampling says max is half the clock rate
+# In practice, 1/4 clock rate is more reliable
+# If you use single stage synchronization and the oscillator from the ESP32S3
+# maxed out you can go up to 12MHz.
+# Currently, the biggest speed blocker is that data is sent in chunks not continuous.
+# 12 MHz onboard / with 2.9 MHz baudrate,
+# 24 MHz onboard with 5 MHz baudrate (does not work with 2.9 MHz)
+SPI_BAUDRATE = int(5e6)
 SPI_SCK_PIN = 12
 SPI_MOSI_PIN = 13
 SPI_MISO_PIN = 11
@@ -31,8 +36,9 @@ def run_spi_test(
         duration_seconds: The duration of the test in seconds.
         update_interval_seconds: The interval for printing progress updates in seconds.
     """
-    hst = Host(micropython=True)
+    hst = ESP32Host()
     hst.reset()
+
     # Initialize SPI
     spi = machine.SPI(
         SPI_BUS,

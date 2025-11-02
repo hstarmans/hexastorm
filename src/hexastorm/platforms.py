@@ -2,7 +2,7 @@ import os
 import platform as pltf
 import subprocess
 
-from amaranth.build import Attrs, Pins, PinsN, Resource, Subsignal
+from amaranth.build import Attrs, Pins, PinsN, Resource, Subsignal, Clock
 from amaranth.vendor import LatticeICE40Platform
 from amaranth_boards.resources import LEDResources
 from amaranth_boards.test.blinky import Blinky
@@ -22,11 +22,17 @@ class Firestarter(LatticeICE40Platform):
     ice40_cfg = PlatformConfig(test=False).ice40_cfg
     device = ice40_cfg["device"]
     package = ice40_cfg["package"]
-    default_clk = ice40_cfg["default_clk"]
+    default_clk = ice40_cfg["default_clk"]  # or "clk" for the esp32s3 external clock
     hfosc_div = ice40_cfg["hfosc_div"]
-
     resources = [
         *LEDResources(pins="39", invert=True, attrs=Attrs(IO_STANDARD="SB_LVCMOS")),
+        Resource(
+            "clk",
+            0,
+            Pins("32", dir="i"),
+            Clock(ice40_cfg["clks"][ice40_cfg["hfosc_div"]] * 1e6),
+            Attrs(IO_STANDARD="SB_LVCMOS"),
+        ),
         Resource(
             "debug_spi",
             0,
