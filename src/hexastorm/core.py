@@ -1,15 +1,12 @@
 from amaranth import Cat, Elaboratable, Module, Signal, signed, Mux
 from amaranth.lib.io import Buffer
 from amaranth.hdl import Array
-from luna.gateware.interface.spi import (
-    SPICommandInterface,
-)
 from luna.gateware.memory import TransactionalizedFIFO
-
 
 from .config import Spi
 from .spi_helpers import connect_synchronized_spi
 from .lasers import DiodeSimulator, Laserhead
+from .luna.spi import SPICommandInterface
 
 # from .motor import Driver
 from .movement import Polynomial
@@ -58,7 +55,7 @@ class SPIParser(Elaboratable):
             width=hdl_cfg.mem_width, depth=hdl_cfg.mem_depth
         )
 
-        self.error_dispatch = Signal()
+        self.error_other = Signal()
         self.debug_word = Signal(hdl_cfg.mem_width)
         self.parse = Signal()
 
@@ -92,18 +89,14 @@ class SPIParser(Elaboratable):
             )
         )
         instr_rec = Signal(8)
-        word_error = Signal()
+        error_word = Signal()
 
         status = Spi.State
-        # You could expect space available equal to words in laserline
-        # but then what would you do for words in move. If for some reason
-        # you are not able to fill the rest of the words in time
-        # there will be an error.
-        # NOTE: don't get why it is <=1 and not == 0
+        # space available equals the max chunk of lines, i.e. data, you are allowed to send
         m.d.sync += [
             state[status.parsing].eq(self.parse),
             state[status.full].eq(fifo.space_available <= hdl_cfg.space_available),
-            state[status.error].eq(self.error_dispatch | word_error),
+            state[status.error].eq(self.error_other | error_word),
             self.fifo_full.eq(fifo.space_available <= hdl_cfg.space_available),
         ]
 
@@ -112,7 +105,7 @@ class SPIParser(Elaboratable):
                 m.d.sync += [
                     self.parse.eq(1),
                     words_rec.eq(0),
-                    word_error.eq(0),
+                    error_word.eq(0),
                 ]
                 m.next = "WAIT_COMMAND"
             with m.State("WAIT_COMMAND"):
@@ -130,10 +123,7 @@ class SPIParser(Elaboratable):
                             m.next = "WAIT_COMMAND"
                         with m.Case(cmd.write):
                             m.d.sync += spi_cmd.word_to_send.eq(state_word)
-                            with m.If(state[status.full] == 0):
-                                m.next = "WAIT_WORD"
-                            with m.Else():
-                                m.next = "WAIT_COMMAND"
+                            m.next = "WAIT_WORD"
                         with m.Case(cmd.read):
                             m.d.sync += spi_cmd.word_to_send.eq(state_word)
                             m.next = "WAIT_COMMAND"
@@ -168,7 +158,7 @@ class SPIParser(Elaboratable):
                             m.next = "WRITE"
                         with m.Else():
                             # Invalid instruction → mark error and discard
-                            m.d.sync += word_error.eq(1)
+                            m.d.sync += error_word.eq(1)
                             m.next = "WAIT_COMMAND"
                     with m.Else():
                         # Additional words for multi-word instructions
@@ -229,6 +219,7 @@ class Dispatcher(Elaboratable):
         read_en = Signal()
         read_discard = Signal()
         busy = self.busy  # poly busy or lh processing lines
+        error_instruction = Signal()
 
         # submodules
         m.submodules.parser = parser = SPIParser(self.plf_cfg.hdl_cfg)
@@ -257,6 +248,7 @@ class Dispatcher(Elaboratable):
             parser.fifo.read_commit.eq(read_commit | lh.read_commit),
             parser.fifo.read_en.eq(read_en | lh.read_en),
             parser.fifo.read_discard.eq(read_discard | lh.read_discard),
+            parser.error_other.eq(error_instruction | lh.error),
         ]
 
         # connect polynomial module
@@ -320,7 +312,7 @@ class Dispatcher(Elaboratable):
                         ]
                         m.next = "SCANLINE"
                     with m.Default():
-                        m.d.sync += parser.error_dispatch.eq(1)
+                        m.d.sync += error_instruction.eq(1)
                         m.next = "ERROR"
             with m.State("MOVE_POLYNOMIAL"):
                 with m.If(poly_coeff < len(poly.coeff)):
@@ -350,25 +342,3 @@ class Dispatcher(Elaboratable):
             with m.State("ERROR"):
                 m.next = "ERROR"
         return m
-
-
-# Overview:
-#  the hardware consists out of the following elements
-#  -- SPI command interface
-#  -- transactionalized FIFO
-#  -- SPI parser (basically an extension of SPI command interface)
-#  -- Dispatcher --> dispatches signals to actual hardware
-#  -- Polynomial integrator --> determines position via integrating counters
-
-# TODO:
-#   -- in practice, position is not reached with small differences like 0.02 mm
-#   -- test exucution speed to ensure the right PLL is propagated
-#   -- use CRC packet for tranmission failure (it is in litex but not luna)
-#   -- try to replace value == 0 with ~value
-#   -- xfer3 is faster in transaction
-#   -- if you chip select is released parsers should return to initial state
-#      now you get an error if you abort the transaction
-#   -- number of ticks per motor is uniform
-#   -- yosys does not give an error if you try to synthesize invalid memory
-#   -- read / write commit is not perfect
-#   -- add example of simulating in yosys / chisel

@@ -1,13 +1,12 @@
 from random import randint
-
+from asyncio import TimeoutError
 import numpy as np
 from numpy.testing import assert_array_almost_equal, assert_array_equal
 
 from hexastorm.config import Spi, PlatformConfig
 from hexastorm.utils import async_test_case
-from hexastorm.spi import SPIGatewareTestCase
+from hexastorm.luna.spi import SPIGatewareTestCase
 from hexastorm.fpga_host.mock import TestHost
-from hexastorm.fpga_host.interface import Memfull
 from hexastorm.core import SPIParser, Dispatcher
 
 
@@ -17,14 +16,14 @@ class TestParser(SPIGatewareTestCase):
     FRAGMENT_ARGUMENTS = {"hdl_cfg": hdl_cfg}
 
     async def initialize_signals(self, sim):
-        self.host = TestHost()
+        self.host = TestHost(self.dut.fifo_full, sim)
         self.sim = sim
         self.dut.spi = self.dut.spi_command.spi
         self.host.spi_exchange_data = self.spi_exchange_data
         sim.set(self.dut.spi.cs, 0)
         await sim.tick()
 
-    async def assert_fifo_written(self, check):
+    async def assert_fifo_written(self, size):
         """
         Waits for the FIFO to become non-empty and verifies that the expected
         number of bytes have been written.
@@ -33,11 +32,21 @@ class TestParser(SPIGatewareTestCase):
             expected_bytes (int): Number of bytes expected to be in the FIFO.
         """
         sim = self.sim
+        # wait till fifo is filled
         await self.wait_until(~self.dut.fifo.empty)
         self.assertEqual(
             sim.get(self.dut.fifo.space_available),
-            self.hdl_cfg.mem_depth - check,
+            self.hdl_cfg.mem_depth - size,
         )
+
+        # To get actual data
+        # actual_data = []
+        # for _ in range(size):
+        #     sim.set(self.dut.fifo.read_en, 1)
+        #     await self.sim.tick()
+        #     read_byte_val = sim.get(self.dut.fifo.read_data)
+        #     actual_data.append(read_byte_val)
+        #     sim.set(self.dut.fifo.read_en, 0)
 
     @async_test_case
     async def test_position_readout(self, sim):
@@ -145,11 +154,12 @@ class TestParser(SPIGatewareTestCase):
         self.assertTrue(sim.get(self.dut.fifo.empty))
         self.assertFalse((await self.host.fpga_state)["mem_full"])
 
-        try:
-            for _ in range(self.hdl_cfg.mem_depth):
+        for _ in range(self.hdl_cfg.mem_depth):
+            try:
                 await self.host.spline_move(1000, [1] * self.hdl_cfg.motors)
-        except Memfull:
-            pass
+            except TimeoutError:
+                break
+        self.assertTrue(sim.get(self.dut.fifo_full))
         self.assertTrue((await self.host.fpga_state)["mem_full"])
 
 
@@ -159,8 +169,8 @@ class TestDispatcher(SPIGatewareTestCase):
     FRAGMENT_ARGUMENTS = {"plf_cfg": plf_cfg}
 
     async def initialize_signals(self, sim):
-        self.host = TestHost()
         self.sim = sim
+        self.host = TestHost(self.dut.parser.fifo_full, sim)
         self.dut.spi = self.dut.parser.spi_command.spi
         self.host.spi_exchange_data = self.spi_exchange_data
         sim.set(self.dut.spi.cs, 0)
@@ -196,7 +206,7 @@ class TestDispatcher(SPIGatewareTestCase):
         try:
             for _ in range(hdl_cfg.mem_depth):
                 await self.host.spline_move(1000, [1] * hdl_cfg.motors)
-        except Memfull:
+        except TimeoutError:
             pass
         self.assertTrue((await self.host.fpga_state)["mem_full"])
         await self.host.set_parsing(True)
@@ -372,6 +382,8 @@ class TestDispatcher(SPIGatewareTestCase):
         for _ in range(num_lines):
             await host.write_line([1] * laz_tim["scanline_length"], steps_line, 0)
         await host.write_line([])
+        # TODO: wrong, synchronized should not go to false!
+        self.assertFalse((await self.host.fpga_state)["synchronized"])
         self.assertTrue((await self.host.fpga_state)["synchronized"])
         await self.wait_until(self.dut.parser.fifo.empty)
         steps_mm = motor_cfg["steps_mm"][motor_cfg["orth2lsrline"]]

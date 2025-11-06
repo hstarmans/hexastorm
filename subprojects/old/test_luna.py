@@ -7,7 +7,7 @@ from luna.gateware.interface.spi import (
 )
 from luna.gateware.memory import TransactionalizedFIFO
 
-from hexastorm.spi import SPIGatewareTestCase
+from hexastorm.luna.spi import SPIGatewareTestCase
 from hexastorm.utils import async_test_case, LunaGatewareTestCase
 
 

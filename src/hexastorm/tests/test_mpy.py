@@ -1,4 +1,5 @@
 import unittest
+from asyncio import TimeoutError
 from time import ticks_ms, sleep
 from math import isclose
 import logging
@@ -6,7 +7,6 @@ import logging
 from ulab import numpy as np
 
 from hexastorm.config import Spi
-from hexastorm.fpga_host.interface import Memfull
 from hexastorm.fpga_host.micropython import ESP32Host
 from hexastorm.ulabext import assert_array_almost_equal
 from hexastorm.fpga_host.tools import find_shift
@@ -35,17 +35,18 @@ class StaticTest(Base):
         host.set_parsing(False)
         host.enable_steppers = False
         # We'll use a flag to track if the exception was caught.
-        memfull_raised = False
+        timeout_raised = False
         # Iterate one past the memory depth to force the overflow
         for _ in range(hdl_cfg.mem_depth + 1):
             coeff = [3] * hdl_cfg.motors
             try:
                 host.spline_move(hdl_cfg.move_ticks, coeff)
-            except Memfull:
-                memfull_raised = True
+            except TimeoutError:
+                timeout_raised = True
                 break
         self.assertTrue(
-            memfull_raised, "Memfull exception was not raised when FIFO was full."
+            timeout_raised,
+            "Timeout exception was not raised when FIFO was full.",
         )
         self.assertTrue((host.fpga_state)["mem_full"])
         self.assertTrue((host.mem_full))

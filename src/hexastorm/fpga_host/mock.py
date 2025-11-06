@@ -1,7 +1,6 @@
+from asyncio import TimeoutError
+
 from .interface import BaseHost
-from ..core import Dispatcher
-from ..platforms import Firestarter
-# from ..motor import Driver
 
 
 class TestHost(BaseHost):
@@ -9,28 +8,23 @@ class TestHost(BaseHost):
     Host interface to interact with the FPGA for Amaranth HDL tests.
     """
 
-    def __init__(self):
+    def __init__(self, fifo_full, sim):
         super().__init__(test=True)
         self.spi_tries = 10
+        self.fifo_full = fifo_full
+        self.sim = sim
 
-    def build(self, do_program=False, verbose=True, mod="all"):
-        """
-        Builds the FPGA code using Amaranth HDL, Yosys, Nextpnr, and Icepack.
+    async def send_command(self, command, timeout=0):
+        command = bytearray(command)
+        response = bytearray(command)
 
-        Parameters:
-        - do_program (bool): If True, flashes the FPGA using fomu-flash and resets afterwards.
-        - verbose (bool): If True, prints output of Yosys, Nextpnr, and Icepack.
-        - mod (str): Specifies which module to build. Options: 'all', 'motor'.
-        """
-        platform = Firestarter()
-        if mod == "all":
-            module = Dispatcher(platform)
-        # elif mod == "motor":
-        #     module = Driver(platform, top=True)
-        else:
-            raise Exception(f"Print building {mod} is not supported.")
-        platform.build(
-            module,
-            do_program=do_program,
-            verbose=verbose,
-        )
+        if timeout and self.sim.get(self.fifo_full):
+            trial = 0
+            while self.sim.get(self.fifo_full):
+                trial += 1
+                await self.fpga_state
+                if trial >= self.spi_tries - 1:
+                    raise TimeoutError
+        # function is created in Amaranth HDL
+        response[:] = await self.spi_exchange_data(command)
+        return response

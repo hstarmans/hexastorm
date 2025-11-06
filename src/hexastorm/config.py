@@ -179,34 +179,46 @@ class PlatformConfig:
     @property
     def hdl_cfg(self):
         """Required for amaranth synthesis."""
+        laz_tim = self.laser_timing
         if self._hdl_cfg is not None:
             return self._hdl_cfg
+
+        cfg = dict(
+            single_line=False,
+            motor_freq=1e6,  # motor move interpolation freq in Hz
+            move_ticks=10_000,  # maximum ticks in move segment
+            direction=0,  # axis parallel to laser, here x
+            motors=len(self.motor_cfg["steps_mm"]),
+            motor_divider=pow(2, 8),
+            pol_degree=2,
+            mem_width=Spi.word_bytes * 8,
+            words_scanline=Spi.words_scanline(laz_tim),
+            motor_debug="ticks_in_facet",
+        )
         if self.test:
-            cfg = dict(test=True, space_available=1)
+            cfg.update(
+                dict(
+                    test=True,
+                    lines_chunk=2,
+                )
+            )
         else:
             mem_depth = int((114 * 1000) / (Spi.word_bytes * 8))
-            cfg = dict(
-                test=False,
-                # listed max 120 kbit, practical 114 kbit
-                # you use EBR / sysMEM (Block RAM) 120 kbit
-                mem_depth=mem_depth,
-                space_available=int(mem_depth / 2),
+            cfg.update(
+                dict(
+                    test=False,
+                    # listed max 120 kbit, practical 114 kbit
+                    # you use EBR / sysMEM (Block RAM) 120 kbit
+                    mem_depth=mem_depth,
+                )
             )
-        cfg.update(
-            dict(
-                single_line=False,
-                motor_freq=1e6,  # motor move interpolation freq in Hz
-                move_ticks=10_000,  # maximum ticks in move segment
-                direction=0,  # axis parallel to laser, here x
-                motors=len(self.motor_cfg["steps_mm"]),
-                motor_divider=pow(2, 8),
-                pol_degree=2,
-                mem_width=Spi.word_bytes * 8,
-                words_scanline=Spi.words_scanline(self.laser_timing),
-                motor_debug="ticks_in_facet",
-            )
-        )
-
+            lines_in_mem = int(cfg["mem_depth"] / cfg["words_scanline"])
+            lines_per_sec = laz_tim["rpm"] * laz_tim["facets"] / 60
+            cfg["lines_chunk"] = 50
+            lines_left_in_mem = lines_in_mem - cfg["lines_chunk"]
+            # assert you have 0.5 seconds to react
+            assert lines_left_in_mem / lines_per_sec > 0.48
+        cfg["space_available"] = int(cfg["lines_chunk"] * cfg["words_scanline"])
         # Choose bit used for stepping
         if cfg["pol_degree"] == 3:
             cfg["bit_shift"] = 40

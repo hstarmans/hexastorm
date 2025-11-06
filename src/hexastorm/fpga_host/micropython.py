@@ -1,10 +1,9 @@
-from asyncio import sleep, sleep_ms, Event
+from asyncio import sleep, sleep_ms, wait_for
 import time
 import logging
 import sys
 from random import randint
 from machine import Pin, SPI, I2C, SoftSPI, PWM
-
 
 from ulab import numpy as np
 from tmc.uart import ConnectionFail
@@ -70,17 +69,56 @@ class ESP32Host(BaseHost):
         self.flash_cs.value(1)
         self.fpga_cs = Pin(cfg["fpga_cs"], Pin.OUT)
         self.stepper_cs = Pin(cfg["stepper_cs"], Pin.OUT)
-        self._mem_full_event = Event()
         self._mem_full = Pin(cfg["mem_full"], Pin.IN)
 
-        # initialize event based on current pin state
-        if not self._mem_full.value():
-            self._mem_full_event.set()
+    @property
+    def mem_full(self):
+        """
+        Returns whether the memory buffer is full (boolean).
+        """
+        return self._mem_full.value()
 
-        # attach an interrupt handler
-        self._mem_full.irq(
-            trigger=Pin.IRQ_FALLING | Pin.IRQ_RISING, handler=self._mem_full_callback
-        )
+    async def wait_mem_empty(self):
+        """
+        Simulates a task waiting for memory to be cleared.
+        This will loop indefinitely in this example.
+        """
+        while self.mem_full:
+            await sleep(0)
+
+    async def send_command(self, command, timeout=0, debug=False):
+        """
+        Send a command to the FPGA via SPI and return the response.
+
+        Args:
+            command (list[int] or bytearray): Full command consisting of command byte + data bytes.
+            timeout (boolean): Whether to use a timeout for the command.
+
+        Returns:
+            bytearray: Response from the FPGA, same length as the input command.
+
+        Raises:
+            TimeoutError: If too much time is needed due to a full FIFO.
+            Exception: If an error is reported by the FPGA.
+        """
+        command = bytearray(command)
+        response = bytearray(command)
+
+        if timeout and self.mem_full:
+            if debug:
+                logger.info("Memory full, waiting for FIFO to empty")
+                start_time = time.ticks_ms()
+            # tried IRQ call back with await for --> cannot get it working
+            # the call back never propagates even with micropython.schedule
+            await wait_for(self.wait_mem_empty(), timeout=5)
+            if debug:
+                elapsed = (time.ticks_ms() - start_time) / 1000
+                logger.info(f"Waited for mem_empty {elapsed} seconds")
+        self.fpga_cs.value(0)
+        self.spi.write_readinto(command, response)
+        self.fpga_cs.value(1)
+
+        return response
 
     def init_steppers(self):
         """Configure TMC2209 stepper drivers over UART.
@@ -172,27 +210,6 @@ class ESP32Host(BaseHost):
         self.fpga_cs.value(0)
         self.spi.write_readinto(command, response)
         self.fpga_cs.value(1)
-
-    def _mem_full_callback(self, pin):
-        # Pin changed: if memory not full, set event; if full, clear event
-        if not pin.value():  # assuming 0 = not full
-            self._mem_full_event.set()
-        else:
-            self._mem_full_event.clear()
-
-    @property
-    def mem_full(self):
-        """
-        Returns whether the memory buffer is full (boolean).
-        """
-        return self._mem_full.value()
-
-    async def await_mem_empty(self):
-        """
-        Wait until the memory buffer is empty.
-        """
-        # Wait until event is set (memory not full)
-        await self._mem_full_event.wait()
 
     @property
     def enable_steppers(self):

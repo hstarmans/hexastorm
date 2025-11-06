@@ -1,7 +1,5 @@
 from struct import unpack
 import sys
-from asyncio import wait_for, TimeoutError
-from time import time
 import logging
 
 from .. import ulabext
@@ -14,15 +12,6 @@ except ImportError:
 
 
 logger = logging.getLogger(__name__)
-
-
-class Memfull(Exception):
-    """Raised when the FPGA SRAM (e.g. FIFO) is full.
-
-    Exception is raised when the memory cannot accept more data.
-    """
-
-    pass
 
 
 class BaseHost:
@@ -67,7 +56,7 @@ class BaseHost:
 
         return self._position
 
-    async def send_command(self, command, timeout=0, debug=False):
+    async def send_command(self, command, timeout=0):
         """
         Send a command to the FPGA via SPI and return the response.
 
@@ -77,49 +66,8 @@ class BaseHost:
 
         Returns:
             bytearray: Response from the FPGA, same length as the input command.
-
-        Raises:
-            Memfull: If too many retries are needed due to a full FIFO.
-            Exception: If an error is reported by the FPGA.
         """
-        assert len(command) == Spi.word_bytes + Spi.command_bytes
-
-        command = bytearray(command)
-        response = bytearray(command)
-
-        if self.test:
-            # function is created in Amaranth HDL
-            for trial in range(self.spi_tries):
-                response[:] = await self.spi_exchange_data(command)
-                if timeout < 1:
-                    break
-                # can't rely on self.get_state (needs speed!)
-                status_byte = response[-1]
-                if self._bitflag(status_byte, Spi.State.error):
-                    raise Exception("Error detected on FPGA")
-                if not self._bitflag(status_byte, Spi.State.full):
-                    break  # FIFO has space, continue
-                if trial == self.spi_tries - 1:
-                    raise Memfull(
-                        f"Too many retries ({self.spi_tries}) due to full FIFO"
-                    )
-        else:
-            if timeout and self.mem_full:
-                try:
-                    if debug:
-                        logger.info("Memory full, waiting for FIFO to empty")
-                        start_time = time()
-                    # wait_for creates overhead via the scheduler
-                    await wait_for(self.await_mem_empty(), timeout=5)
-                    if debug:
-                        elapsed = time() - start_time
-                        logger.info(f"Waited {elapsed:.2f} seconds for FIFO to empty")
-                except TimeoutError:
-                    raise Memfull("Timeout waiting for FIFO to empty")
-            self.fpga_cs.value(0)
-            self.spi.write_readinto(command, response)
-            self.fpga_cs.value(1)
-        return response
+        pass  # implemented in subclasses
 
     def _bitflag(self, byte, index):
         """Return True if the bit at 'index' in 'byte' is set (0 = LSB)."""
@@ -227,10 +175,13 @@ class BaseHost:
             for the specified number of repetitions.
         """
         byte_lst = self.bit_to_byte_list(bit_lst, steps_line, direction)
-        for _ in range(repetitions):
-            cmd_lst = self.byte_to_cmd_list(byte_lst)
-            for cmd in cmd_lst:
-                (await self.send_command(cmd, timeout=True))
+        cmd_lst = self.byte_to_cmd_list(byte_lst)
+        cmd_bytes = b"".join(cmd_lst)
+        packet_size = self.cfg.hdl_cfg.lines_chunk
+        for i in range(0, repetitions, packet_size):
+            last_index = min(i + packet_size, repetitions)
+            repeat = last_index - i
+            await self.send_command(cmd_bytes * repeat, timeout=True)
 
     async def enable_comp(
         self,

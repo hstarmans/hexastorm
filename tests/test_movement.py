@@ -11,7 +11,7 @@ class TestPolynomial(LunaGatewareTestCase):
 
     async def initialize_signals(self, sim) -> None:
         """Initialize simulation environment and signals."""
-        self.host = TestHost()
+        self.host = TestHost(fifo_full=None, sim=None)
         self.move_ticks = self.plf_cfg.hdl_cfg.move_ticks
         self.sim = sim
         sim.set(self.dut.tick_limit, self.move_ticks)
