@@ -131,7 +131,7 @@ class Firestarter(LatticeICE40Platform):
             )
             for cmd in [
                 "from hexastorm.fpga_host.micropython import ESP32Host",
-                "hst = ESP32Host()",
+                "hst = ESP32HostSync()",
                 'hst.flash_fpga("sd/fpga/fpga.bit")',
             ]:
                 subprocess.check_call(

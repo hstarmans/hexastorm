@@ -7,7 +7,7 @@ import logging
 from ulab import numpy as np
 
 from hexastorm.config import Spi
-from hexastorm.fpga_host.micropython import ESP32Host
+from hexastorm.fpga_host.micropython import ESP32HostSync
 from hexastorm.ulabext import assert_array_almost_equal
 from hexastorm.fpga_host.tools import find_shift
 
@@ -20,7 +20,7 @@ class Base(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.host = ESP32Host(sync=True)
+        cls.host = ESP32HostSync(sync=True)
 
     @classmethod
     def tearDownClass(cls):

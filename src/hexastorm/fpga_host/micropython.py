@@ -20,13 +20,12 @@ if sys.implementation.name == "micropython":
 logger = logging.getLogger(__name__)
 
 
-@syncable
 class ESP32Host(BaseHost):
     """
     Host interface to interact with the FPGA using micropython.
     """
 
-    def __init__(self, sync=True):
+    def __init__(self):
         super().__init__(test=False)
         self.steppers_init = False
         self.init_micropython()
@@ -390,3 +389,9 @@ class ESP32Host(BaseHost):
                     f"Jitter [lower, upper] % is [{min_frac_perc:.3f}, {max_frac_perc:.3f}]"
                 )
                 return True
+
+
+@syncable
+class ESP32HostSync(ESP32Host):
+    def __init__(self, sync=True):
+        super().__init__()
