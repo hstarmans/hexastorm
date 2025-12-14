@@ -366,29 +366,36 @@ class ESP32Host(BaseHost):
         laz_tim = self.cfg.laser_timing
 
         exp_facet_ms = 60 / (laz_tim["rpm"] * laz_tim["facets"] / 1000)
-
-        facet_ms, _ = await self.measure_facet_period_ms()
-
-        if np.min(facet_ms) < (0.5 * exp_facet_ms):
-            logger.error(
-                f"Facet period {np.min(facet_ms)} ms is less than half the expected {exp_facet_ms} ms."
-            )
-            return False
+        await self.enable_comp(synchronize=True)
+        await sleep(2)
+        if not (await self.fpga_state)["synchronized"]:
+            logger.info("Laser not synchronized, cannot perform laserhead test.")
+            result = False
         else:
-            mean_facet_ms = np.mean(facet_ms)
-            min_frac_perc = (mean_facet_ms - np.min(facet_ms)) / mean_facet_ms * 100
-            max_frac_perc = (np.max(facet_ms) - mean_facet_ms) / mean_facet_ms * 100
-            total_frac_perc = min_frac_perc + max_frac_perc
-            if total_frac_perc > laz_tim["jitter_exp_perc"]:
+            facet_ms, _ = await self.measure_facet_period_ms()
+
+            if np.min(facet_ms) < (0.5 * exp_facet_ms):
                 logger.error(
-                    f"Jitter % not compliant {total_frac_perc:.3f} > {laz_tim['jitter_exp_perc']}"
+                    f"Facet period {np.min(facet_ms)} ms is less than half the expected {exp_facet_ms} ms."
                 )
-                return False
+                result = False
             else:
-                logger.info(
-                    f"Jitter [lower, upper] % is [{min_frac_perc:.3f}, {max_frac_perc:.3f}]"
-                )
-                return True
+                mean_facet_ms = np.mean(facet_ms)
+                min_frac_perc = (mean_facet_ms - np.min(facet_ms)) / mean_facet_ms * 100
+                max_frac_perc = (np.max(facet_ms) - mean_facet_ms) / mean_facet_ms * 100
+                total_frac_perc = min_frac_perc + max_frac_perc
+                if total_frac_perc > laz_tim["jitter_exp_perc"]:
+                    logger.error(
+                        f"Jitter % not compliant {total_frac_perc:.3f} > {laz_tim['jitter_exp_perc']}"
+                    )
+                    result = False
+                else:
+                    logger.info(
+                        f"Jitter [lower, upper] % is [{min_frac_perc:.3f}, {max_frac_perc:.3f}]"
+                    )
+                    result = True
+        await self.enable_comp(synchronize=False)
+        return result
 
 
 @syncable

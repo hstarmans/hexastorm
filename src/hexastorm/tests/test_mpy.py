@@ -243,8 +243,6 @@ class SyncTest(Base):
     def test_synchronization(self):
         """Test laserhead synchronization by looking at the photodiode jitter."""
         host = self.host
-        host.enable_comp(synchronize=True)
-        sleep(2)
         self.assertTrue(host.test_laserhead())
 
     def test_sync_persistence(self, samples=30, trials=3, timeout=5, withreset=False):
