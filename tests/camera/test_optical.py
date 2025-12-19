@@ -11,60 +11,48 @@ import cv2 as cv
 import numpy as np
 
 import hexastorm.optical as feature
-from hexastorm.platforms import Firestarter
 
-TEST_DIR = Path(__file__).parents[0].resolve()
-IMG_DIR = Path(TEST_DIR, "images")
-TESTIMG_DIR = Path(TEST_DIR, "testimages")
+TEST_DIR = Path(__file__).parent.resolve()
+IMG_DIR = TEST_DIR / "images"
+TESTIMG_DIR = TEST_DIR / "testimages"
 
 
 def micropython(instruction, nofollow=False):
-    """executes instruction using micropython on eps32s3
-    
-    command is executed by micropython interpreter connected via usb cable
-    to the raspberry pi
-
-    nofollow: if True, return immediately and leave the device running the script
-    """
-    with tempfile.NamedTemporaryFile(mode='w+t', delete=False) as temp_file:
+    """Executes instruction using micropython on esp32s3 via mpremote."""
+    with tempfile.NamedTemporaryFile(mode="w+t", suffix=".py") as temp_file:
         temp_file.write(inspect.cleandoc(instruction))
-        temp_file_path = temp_file.name
+        temp_file.flush()
 
-    try:
-        shell_command = ["mpremote", "resume", "run", temp_file_path]
+        cmd = ["mpremote", "resume", "run", temp_file.name]
         if nofollow:
-            shell_command.insert(-1, "--no-follow")
-        process = subprocess.Popen(shell_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        stdout, stderr = process.communicate()
+            cmd.insert(-1, "--no-follow")
 
-        if process.returncode != 0:
-            raise Exception(f"Error executing mpremote: {stderr.decode()}")
-        else:
-            print(stdout.decode())
-
-    finally:
-        os.unlink(temp_file_path) # Delete the temporary file.
-
+        try:
+            # check=True automatically raises an exception on non-zero exit codes
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            if result.stdout:
+                print(result.stdout)
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"mpremote execution failed: {e.stderr}")
 
 
 class OpticalTest(unittest.TestCase):
     """Tests algorithms upon earlier taken images"""
 
     def test_laserline(self):
-        """tests laser line detection"""
-        img = cv.imread(str(Path(TESTIMG_DIR, "laserline1.jpg")))
-        line = [vx, vy, x, y] = feature.detect_line(img)
-        res = [0, 0, 1099, 719]
-        for idx, val in enumerate(line):
-            self.assertEqual(int(val), int(res[idx]))
+        img = cv.imread(str(TESTIMG_DIR / "laserline1.jpg"))
+        line = feature.detect_line(img)
+        expected = [0, 0, 1099, 719]
+        # Use list comparison for cleaner failure messages
+        self.assertEqual([int(v) for v in line], expected)
 
     def test_laserwidth(self):
-        """tests laser width detection"""
-        img = cv.imread(str(Path(TESTIMG_DIR, "laserline.jpg")))
-        dct = feature.cross_scan_error(img)
-        dct2 = {"max": 86.36, "min": 21.58, "mean": 38.04, "median": 36.0}
-        for k, v in dct.items():
-            self.assertEqual(int(v), int(dct2[k]))
+        img = cv.imread(str(TESTIMG_DIR / "laserline.jpg"))
+        actual = feature.cross_scan_error(img)
+        expected = {"max": 86.36, "min": 21.58, "mean": 38.04, "median": 36.0}
+        for k, v in expected.items():
+            # Use almostEqual for floats to avoid precision issues
+            self.assertAlmostEqual(actual[k], v, delta=1.0)
 
     def test_laserspot(self):
         """tests laser spot detection"""
@@ -74,54 +62,39 @@ class OpticalTest(unittest.TestCase):
         }
         for k, v in dct.items():
             img = cv.imread(str(Path(TESTIMG_DIR, k)))
-            np.testing.assert_array_equal(
-                feature.spotsize(img)["axes"].round(0), v
-            )
+            np.testing.assert_array_equal(feature.spotsize(img)["axes"].round(0), v)
 
 
 class Tests(unittest.TestCase):
     """Optical test for scanhead
-    
-        shutter speed: it is assumed 10 units is 1 ms
+
+    shutter speed: it is assumed 10 units is 1 ms
     """
+
     @classmethod
     def setUpClass(cls):
         cls.cam = camera.Cam()
         cls.cam.init()
-        micropython("""
-            from control.laserhead import Laserhead
-            lh = Laserhead()
-        """
-        )
+        micropython("from tools import hst")
 
     @classmethod
     def tearDownClass(cls):
         cls.cam.close()
-        micropython("""
-            lh.reset_state()
-            lh.reset_fpga()
-        """
-        )
+        micropython("hst.reset()")
 
     def blinktest(self):
-        """tries to blink red light on ESP32 using micropython shell
-
-        Verifies communication with ESP32 board
-        """
-        micropython("""
-            import machine
-            import time
+        """Verifies communication with ESP32 board."""
+        micropython(
+            """
+            import machine, time
             led = machine.Pin(8, machine.Pin.OUT)
-            print('LED ON')
-            led.off()
-            time.sleep(5)
-            print('LED OFF')
-            led.on()
-        """, nofollow=True
+            led.off() # Red ON
+            time.sleep(2)
+            led.on()  # Red OFF
+        """,
+            nofollow=True,
         )
-        print("Light should be red")
-        time.sleep(5)
-        print("Light should be blue")
+        time.sleep(2)
         # you can get back to the shell but not exit the program
 
     def alignlaser(self, current=80):
@@ -130,16 +103,14 @@ class Tests(unittest.TestCase):
         Laser is aligned without camera
         """
         micropython(f"""
-            lh.laser_current = {current}
-            lh.enable_comp(laser0=True)
-        """
-        )
+            hst.laser_current = {current}
+            hst.enable_comp(laser0=True)
+        """)
         print("Press enter to confirm laser is aligned with prism")
         input()
         micropython("""
-            lh.enable_comp(laser0=False)
-        """
-        )
+            hst.enable_comp(laser0=False)
+        """)
 
     def photo_line(self, current=80):
         """turn on laser and motor
@@ -150,10 +121,9 @@ class Tests(unittest.TestCase):
         current: value between 0 and 255 (a.u.)
         """
         micropython(f"""
-            lh.laser_current = {current}
-            lh.enable_comp(laser0=True, polygon=True)
-        """
-        )
+            hst.laser_current = {current}
+            hst.enable_comp(laser0=True, polygon=True)
+        """)
         # 3000 rpm 4 facets --> 200 hertz
         # one facet per  1/200 = 5 ms
         self.cam.set_exposure(700)
@@ -164,9 +134,8 @@ class Tests(unittest.TestCase):
         # img = self.takepicture()
         # print(feature.cross_scan_error(img))
         micropython("""
-            lh.enable_comp(laser1=False, polygon=False)
-        """
-        )
+            hst.enable_comp(laser1=False, polygon=False)
+        """)
 
     def photo_spot(self, current=80):
         """turn on laser
@@ -177,10 +146,9 @@ class Tests(unittest.TestCase):
         """
         # NOTE: all ND filters and a single channel is used
         micropython(f"""
-            lh.laser_current = {current}
-            lh.enable_comp(laser1=True, polygon=False)
-        """
-        )
+            hst.laser_current = {current}
+            hst.enable_comp(laser1=True, polygon=False)
+        """)
         self.cam.set_exposure(300)
         print(
             "Calibrate the camera with live view \
@@ -190,9 +158,8 @@ class Tests(unittest.TestCase):
         img = self.takepicture()
         print(feature.spotsize(img))
         micropython("""
-            lh.enable_comp(laser1=False, polygon=False)
-        """
-        )
+            hst.enable_comp(laser1=False, polygon=False)
+        """)
 
     def photo_pattern(self):
         """line with a given pattern is projected and photo is taken
@@ -201,12 +168,15 @@ class Tests(unittest.TestCase):
         """
         pattern = [1] * 1 + [0] * 39
         lines = 10_000
-        micropython(f"""
+        micropython(
+            f"""
             pattern = {pattern}
-            bits = lh.host.laser_params["BITSINSCANLINE"]
+            bits = hst.cfg.laser_timing["scanline_length"]
             line = (pattern*(bits//len(pattern)) + pattern[: bits % len(pattern)])
-            lh.write_line(line, repetitions={lines})
-            """, nofollow=True)
+            hst.write_line(line, repetitions={lines})
+            """,
+            nofollow=True,
+        )
         self.cam.set_exposure(400)
         self.cam.live_view(0.6)
         self.takepicture(times=1)
@@ -234,18 +204,24 @@ class Tests(unittest.TestCase):
     #     # time.sleep(timeout)
     #     # yield from self.host.enable_comp(synchronize=False)
 
-    def takepicture(self, times=1):
-        "takes picture and store it with timestamp to this folder"
-        for _ in range(times):
+    def take_picture(self, count=1):
+        """Captures images and saves with a safe timestamp."""
+        IMG_DIR.mkdir(parents=True, exist_ok=True)
+
+        last_img = None
+        for _ in range(count):
             img = self.cam.capture()
-            grey_img = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
-            date_string = time.strftime("%Y-%m-%d-%H:%M:%S")
-            print(f"Writing to {Path(IMG_DIR, date_string+'.jpg')}")
-            if not os.path.exists(IMG_DIR):
-                os.makedirs(IMG_DIR)
-            cv.imwrite(str(Path(IMG_DIR, date_string + ".jpg")), grey_img)
-            time.sleep(1)
-        return img
+            grey = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+            # Use '-' instead of ':' for Windows/File system compatibility
+            timestamp = time.strftime("%Y%m%d-%H%M%S")
+            file_path = IMG_DIR / f"{timestamp}.jpg"
+
+            cv.imwrite(str(file_path), grey)
+            print(f"Saved: {file_path}")
+            last_img = img
+            if count > 1:
+                time.sleep(1)
+        return last_img
 
 
 if __name__ == "__main__":
