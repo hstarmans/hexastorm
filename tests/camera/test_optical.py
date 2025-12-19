@@ -75,12 +75,12 @@ class Tests(unittest.TestCase):
     def setUpClass(cls):
         cls.cam = camera.Cam()
         cls.cam.init()
-        micropython("from tools import hst")
+        micropython("from tools import host")
 
     @classmethod
     def tearDownClass(cls):
         cls.cam.close()
-        micropython("hst.reset()")
+        micropython("host.reset()")
 
     def blinktest(self):
         """Verifies communication with ESP32 board."""
@@ -103,13 +103,13 @@ class Tests(unittest.TestCase):
         Laser is aligned without camera
         """
         micropython(f"""
-            hst.laser_current = {current}
-            hst.enable_comp(laser0=True)
+            host.laser_current = {current}
+            host.enable_comp(laser0=True)
         """)
         print("Press enter to confirm laser is aligned with prism")
         input()
         micropython("""
-            hst.enable_comp(laser0=False)
+            host.enable_comp(laser0=False)
         """)
 
     def photo_line(self, current=80):
@@ -121,8 +121,8 @@ class Tests(unittest.TestCase):
         current: value between 0 and 255 (a.u.)
         """
         micropython(f"""
-            hst.laser_current = {current}
-            hst.enable_comp(laser0=True, polygon=True)
+            host.laser_current = {current}
+            host.enable_comp(laser0=True, polygon=True)
         """)
         # 3000 rpm 4 facets --> 200 hertz
         # one facet per  1/200 = 5 ms
@@ -130,11 +130,11 @@ class Tests(unittest.TestCase):
         print("This will open up a window")
         print("Press escape to quit live view")
         self.cam.live_view(0.6)
-        self.takepicture()
-        # img = self.takepicture()
+        self.take_picture()
+        # img = self.take_picture()
         # print(feature.cross_scan_error(img))
         micropython("""
-            hst.enable_comp(laser1=False, polygon=False)
+            host.enable_comp(laser1=False, polygon=False)
         """)
 
     def photo_spot(self, current=80):
@@ -146,8 +146,8 @@ class Tests(unittest.TestCase):
         """
         # NOTE: all ND filters and a single channel is used
         micropython(f"""
-            hst.laser_current = {current}
-            hst.enable_comp(laser1=True, polygon=False)
+            host.laser_current = {current}
+            host.enable_comp(laser1=True, polygon=False)
         """)
         self.cam.set_exposure(300)
         print(
@@ -155,10 +155,10 @@ class Tests(unittest.TestCase):
                and press escape to confirm spot in vision"
         )
         self.cam.live_view(scale=0.6)
-        img = self.takepicture()
+        img = self.take_picture()
         print(feature.spotsize(img))
         micropython("""
-            hst.enable_comp(laser1=False, polygon=False)
+            host.enable_comp(laser1=False, polygon=False)
         """)
 
     def photo_pattern(self):
@@ -171,9 +171,9 @@ class Tests(unittest.TestCase):
         micropython(
             f"""
             pattern = {pattern}
-            bits = hst.cfg.laser_timing["scanline_length"]
+            bits = host.cfg.laser_timing["scanline_length"]
             line = (pattern*(bits//len(pattern)) + pattern[: bits % len(pattern)])
-            hst.write_line(line, repetitions={lines})
+            host.write_line(line, repetitions={lines})
             """,
             nofollow=True,
         )
