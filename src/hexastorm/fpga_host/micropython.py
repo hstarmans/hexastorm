@@ -318,7 +318,7 @@ class ESP32Host(BaseHost):
         logging.error("Measurement fails")
         return facet_ms, facet_id
 
-    async def facet_mean(
+    async def measure_facet_mean(
         self,
         samples=30,
         max_trials=10_000,
@@ -349,53 +349,84 @@ class ESP32Host(BaseHost):
                 logger.info(f"Facet {facet}: n=0, mean=None, std=None")
         return mean_ms
 
-    async def test_laserhead(self):
+    async def test_laserhead(self, disable_sync=True):
         """
-        Test laserhead by comparing jitter percentage of each facet period against expected configuration.
+        Test laserhead by comparing jitter percentage of each facet against expected configuration.
 
         Measures the period for each facet multiple times, computes the jitter
         and compares against the expected jitter percentage from configuration.
 
         Returns:
-           - True if jitter is within expected limits.
-           - False if jitter exceeds expected limits.
+        - True if jitter is within expected limits.
+        - False if jitter exceeds expected limits.
 
         Notes:
         - If facet period is below half the expected period, test fails.
         """
         laz_tim = self.cfg.laser_timing
+        num_facets = laz_tim["facets"]
+        exp_facet_ms = 60 / (laz_tim["rpm"] * num_facets / 1000)
 
-        exp_facet_ms = 60 / (laz_tim["rpm"] * laz_tim["facets"] / 1000)
-        await self.enable_comp(synchronize=True)
-        await sleep(2)
         if not (await self.fpga_state)["synchronized"]:
-            logger.info("Laser not synchronized, cannot perform laserhead test.")
-            result = False
-        else:
-            facet_ms, _ = await self.measure_facet_period_ms()
+            await self.enable_comp(synchronize=True)
+            await sleep(2)
+            if not (await self.fpga_state)["synchronized"]:
+                logger.error("Laser cannot be synchronized.")
+                await self.enable_comp(synchronize=False)
+                return False
 
-            if np.min(facet_ms) < (0.5 * exp_facet_ms):
+        # facet_ms: timing values, facet_ids: indices 0-3
+        facet_ms, facet_ids = await self.measure_facet_period_ms()
+
+        # --- CASE 1: Global Mean Check (RPM Accuracy) ---
+        # We check if the motor is spinning at the right speed overall.
+        global_mean_ms = np.mean(facet_ms)
+        # Calculate percentage deviation from expected
+        global_deviation_perc = abs(global_mean_ms - exp_facet_ms) / exp_facet_ms * 100
+
+        if global_deviation_perc > 10.0:
+            logger.error(
+                f"Global timing failure: Mean period {global_mean_ms:.4f}ms "
+                f"deviates {global_deviation_perc:.2f}% from expected {exp_facet_ms:.4f}ms."
+            )
+            await self.enable_comp(synchronize=False)
+            return False
+
+        overall_result = True
+
+        # --- CASE 2: Per-Facet Jitter Check ---
+        for f_id in range(num_facets):
+            facet_data = facet_ms[facet_ids == f_id]
+
+            # Check for data presence
+            if len(facet_data) < 2:
+                logger.error(f"Facet {f_id}: Less than 2 data points.")
+                overall_result = False
+                break
+
+            min_val = np.min(facet_data)
+            max_val = np.max(facet_data)
+            mean_val = np.mean(facet_data)
+
+            # CASE 2: Jitter calculation
+            min_frac_perc = (mean_val - min_val) / mean_val * 100
+            max_frac_perc = (max_val - mean_val) / mean_val * 100
+            total_jitter_perc = min_frac_perc + max_frac_perc
+
+            if total_jitter_perc > laz_tim["jitter_exp_perc"]:
                 logger.error(
-                    f"Facet period {np.min(facet_ms)} ms is less than half the expected {exp_facet_ms} ms."
+                    f"Facet {f_id}: Jitter {total_jitter_perc:.4f}% exceeds limit of {laz_tim['jitter_exp_perc']}%."
                 )
-                result = False
-            else:
-                mean_facet_ms = np.mean(facet_ms)
-                min_frac_perc = (mean_facet_ms - np.min(facet_ms)) / mean_facet_ms * 100
-                max_frac_perc = (np.max(facet_ms) - mean_facet_ms) / mean_facet_ms * 100
-                total_frac_perc = min_frac_perc + max_frac_perc
-                if total_frac_perc > laz_tim["jitter_exp_perc"]:
-                    logger.error(
-                        f"Jitter % not compliant {total_frac_perc:.3f} > {laz_tim['jitter_exp_perc']}"
-                    )
-                    result = False
-                else:
-                    logger.info(
-                        f"Jitter [lower, upper] % is [{min_frac_perc:.3f}, {max_frac_perc:.3f}]"
-                    )
-                    result = True
-        await self.enable_comp(synchronize=False)
-        return result
+                overall_result = False
+                break
+
+            # If we reach here, this specific facet passed.
+            logger.info(f"Facet {f_id}: Passed (Jitter: {total_jitter_perc:.4f}%)")
+
+        # Finalize state
+        if disable_sync:
+            await self.enable_comp(synchronize=False)
+        return overall_result
 
 
 @syncable
