@@ -192,6 +192,21 @@ class ESP32Host(BaseHost):
         self.reset()
         logger.info("Flashed fpga.")
 
+    async def synchronize(self, value=True):
+        """Synchronize laser with phodiode.
+
+        Args:
+            value (bool): True to enable synchronization, False to disable.
+        """
+        if value:
+            if not (await self.fpga_state)["synchronized"]:
+                await self.enable_comp(synchronize=True)
+                await sleep(2)
+                if not (await self.fpga_state)["synchronized"]:
+                    raise Exception("Laser cannot be synchronized.")
+        else:
+            await self.enable_comp(synchronize=False)
+
     def reset(self):
         "restart the FPGA by toggling the reset pin and initializing communication"
         # free all lines
@@ -367,13 +382,7 @@ class ESP32Host(BaseHost):
         num_facets = laz_tim["facets"]
         exp_facet_ms = 60 / (laz_tim["rpm"] * num_facets / 1000)
 
-        if not (await self.fpga_state)["synchronized"]:
-            await self.enable_comp(synchronize=True)
-            await sleep(2)
-            if not (await self.fpga_state)["synchronized"]:
-                logger.error("Laser cannot be synchronized.")
-                await self.enable_comp(synchronize=False)
-                return False
+        self.synchronize(True)
 
         # facet_ms: timing values, facet_ids: indices 0-3
         facet_ms, facet_ids = await self.measure_facet_period_ms()
@@ -389,7 +398,7 @@ class ESP32Host(BaseHost):
                 f"Global timing failure: Mean period {global_mean_ms:.4f}ms "
                 f"deviates {global_deviation_perc:.2f}% from expected {exp_facet_ms:.4f}ms."
             )
-            await self.enable_comp(synchronize=False)
+            await self.synchronize(False)
             return False
 
         overall_result = True
@@ -425,7 +434,7 @@ class ESP32Host(BaseHost):
 
         # Finalize state
         if disable_sync:
-            await self.enable_comp(synchronize=False)
+            await self.synchronize(False)
         return overall_result
 
 

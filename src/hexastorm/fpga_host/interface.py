@@ -158,6 +158,55 @@ class BaseHost:
         pad_to_word_boundary(byte_lst)
         return byte_lst
 
+    async def write_facet_line(
+        self, bit_lst, steps_line=1, direction=0, facet_number=0, repetitions=1
+    ):
+        """
+        Projects a scanline to a specific facet while keeping other facets dark.
+
+        Args:
+            bit_lst (List[int]): Laser on/off bits for the active facet.
+            steps_line (int): Movement steps per line.
+            direction (int): 0 or 1.
+            facet_number (int): Which facet to target (0 to facets-1).
+            repetitions (int): Total number of full multi-facet cycles to run.
+        """
+        facets = self.cfg.laser_timing["facets"]
+
+        # 1. Create the active command bytes
+        active_byte_lst = self.bit_to_byte_list(bit_lst, steps_line, direction)
+        active_cmd_bytes = b"".join(self.byte_to_cmd_list(active_byte_lst))
+
+        # 2. Create the "silent" command bytes for the idle facets
+        # We create a bit list of 0s with the same length as the original
+        silent_bits = [0] * len(bit_lst)
+        silent_byte_lst = self.bit_to_byte_list(silent_bits, steps_line, direction)
+        silent_cmd_bytes = b"".join(self.byte_to_cmd_list(silent_byte_lst))
+
+        # 3. Construct the full rotation pattern
+        # Initialize all facets as silent
+        facet_cycle = [silent_cmd_bytes] * facets
+
+        # Replace only the target facet with active data
+        if 0 <= facet_number < facets:
+            facet_cycle[facet_number] = active_cmd_bytes
+        else:
+            raise ValueError(f"facet_number must be between 0 and {facets - 1}")
+
+        # Combine the facets into one full revolution block
+        full_cycle_payload = b"".join(facet_cycle)
+
+        # 4. Chunked Transmission
+        # packet_size is the number of full cycles (revolutions) per chunk
+        packet_size = self.cfg.hdl_cfg.lines_chunk
+
+        for i in range(0, repetitions, packet_size):
+            remaining = repetitions - i
+            repeat_count = min(packet_size, remaining)
+
+            # Send the block of cycles
+            await self.send_command(full_cycle_payload * repeat_count, timeout=True)
+
     async def write_line(self, bit_lst, steps_line=1, direction=0, repetitions=1):
         """
         Projects a scanline to the substrate using the laser system.
