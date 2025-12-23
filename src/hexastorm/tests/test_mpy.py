@@ -252,18 +252,15 @@ class SyncTest(Base):
         If the laserhead is reset, the facet vector may shift.
         """
         host = self.host
-        host.enable_comp(synchronize=True)
-        sleep(2)
-        base_vector = host.facet_mean(samples=samples)
+        host.synchronize(True)
+        base_vector = host.measure_facet_means(samples=samples)
         for _ in range(trials):
             logger.info(f"Executing trial {_ + 1} of {trials}")
             if withreset:
                 host.reset()
-                sleep(2)
-                host.enable_comp(synchronize=True)
-                sleep(2)
+                host.synchronize(True)
             else:
                 sleep(timeout)
-            mean_vector = host.facet_mean(samples=samples)
+            mean_vector = host.measure_facet_means(samples=samples)
             s, _, _ = find_shift(base_vector, mean_vector)
             self.assertEqual(s, 0)
