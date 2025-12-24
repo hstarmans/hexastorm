@@ -333,7 +333,7 @@ class ESP32Host(BaseHost):
         logging.error("Measurement fails")
         return facet_ms, facet_id
 
-    async def measure_facet_mean(
+    async def measure_facet_means(
         self,
         samples=30,
         max_trials=10_000,
@@ -347,6 +347,10 @@ class ESP32Host(BaseHost):
         Returns:
         - means_ms: list of length n_facets; each entry is mean period in ms or None if no samples
         """
+        cur_sync = (await self.fpga_state)["synchronized"]
+        if not cur_sync:
+            await self.synchronize(True)
+
         facet_ms, facet_id = await self.measure_facet_period_ms(samples, max_trials)
         facets = self.cfg.laser_timing["facets"]
 
@@ -362,9 +366,12 @@ class ESP32Host(BaseHost):
             else:
                 mean_ms[facet] = None
                 logger.info(f"Facet {facet}: n=0, mean=None, std=None")
+
+        if not cur_sync:
+            await self.synchronize(False)
         return mean_ms
 
-    async def test_laserhead(self, disable_sync=True):
+    async def test_laserhead(self):
         """
         Test laserhead by comparing jitter percentage of each facet against expected configuration.
 
@@ -378,11 +385,13 @@ class ESP32Host(BaseHost):
         Notes:
         - If facet period is below half the expected period, test fails.
         """
+        cur_sync = (await self.fpga_state)["synchronized"]
+        if not cur_sync:
+            await self.synchronize(True)
+
         laz_tim = self.cfg.laser_timing
         num_facets = laz_tim["facets"]
         exp_facet_ms = 60 / (laz_tim["rpm"] * num_facets / 1000)
-
-        self.synchronize(True)
 
         # facet_ms: timing values, facet_ids: indices 0-3
         facet_ms, facet_ids = await self.measure_facet_period_ms()
@@ -432,8 +441,7 @@ class ESP32Host(BaseHost):
             # If we reach here, this specific facet passed.
             logger.info(f"Facet {f_id}: Passed (Jitter: {total_jitter_perc:.4f}%)")
 
-        # Finalize state
-        if disable_sync:
+        if not cur_sync:
             await self.synchronize(False)
         return overall_result
 
