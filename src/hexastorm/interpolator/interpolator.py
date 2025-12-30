@@ -8,7 +8,6 @@ import numpy as np
 from cairosvg import svg2png
 from numba import jit, typed, types
 from PIL import Image
-from scipy import ndimage
 
 from hexastorm.config import PlatformConfig, Spi
 from hexastorm.fpga_host.interface import BaseHost
@@ -261,17 +260,19 @@ class Interpolator:
         return lanewidth
 
     def createcoordinates(self):
-        """returns the x, y position of the laserdiode
-        for each pixel, for all lanes
-
-        assumes the line starts at the positive plane
+        """
+        returns the x, y position of the laserdiode
+        for each pixel, for all lanes.
         """
         params = self.params
         if not params["sampleysize"] or not params["samplexsize"]:
             raise Exception("Sampleysize or samplexsize are set to zero.")
+
+        # Check if line positioning is valid
         if fxpos(0, params) < 0 or fxpos(params["bitsinscanline"] - 1, params) > 0:
             raise Exception("Line seems ill positioned")
-        # mm
+
+        # 1. Basic Geometry Calculation
         lanewidth = self.lanewidth()
         lanes = math.ceil(params["samplexsize"] / lanewidth)
         facets_inlane = math.ceil(
@@ -279,83 +280,63 @@ class Interpolator:
             * params["FACETS"]
             * (params["sampleysize"] / params["stagespeed"])
         )
+
         self.params["facetsinlane"] = facets_inlane
         self.params["lanewidth"] = lanewidth
-        print("The lanewidth is {:.2f} mm".format(lanewidth))
-        print("The facets in lane are {}".format(facets_inlane))
-        # single facet
 
-        def fxpos2(x, y=0):
-            return fxpos(x, params, y)
+        print(f"The lanewidth is {lanewidth:.2f} mm")
+        print(f"The facets in lane are {facets_inlane}")
 
-        def fypos2(x, y=0):
-            return fypos(x, params, y)
+        # 2. Base Facet Generation (Single scanline)
+        # We pass the entire range of pixels to the JIT functions at once
+        pixel_indices = np.arange(int(params["bitsinscanline"]))
 
-        vfxpos = np.vectorize(fxpos2, otypes=[np.int16])
-        vfypos = np.vectorize(fypos2, otypes=[np.int16])
-        xstart = abs(
-            fxpos2(int(params["bitsinscanline"]) - 1) * params["samplegridsize"]
+        # Calculate xstart (mm to pixel conversion)
+        xstart_val = abs(
+            fxpos(int(params["bitsinscanline"]) - 1, params) * params["samplegridsize"]
         )
-        xpos_facet = vfxpos(range(0, int(params["bitsinscanline"])), xstart)
-        # TODO: you still don't account for ystart
-        # (you are moving in the y, so if you start
-        #  at the edge you miss something)
-        ypos_forwardfacet = vfypos(range(0, int(params["bitsinscanline"])), True)
-        ypos_backwardfacet = vfypos(range(0, int(params["bitsinscanline"])), False)
-        # single lane
-        xpos_lane = np.tile(xpos_facet, facets_inlane)
-        # TODO: parallel not supported on 32 bit hardware
 
-        @jit(nopython=True, parallel=False)
-        def loop0(params):
-            forward = np.zeros((facets_inlane, int(params["bitsinscanline"])))
-            backward = np.zeros((facets_inlane, int(params["bitsinscanline"])))
-            for facet in range(0, facets_inlane):
-                ypos_forwardtemp = ypos_forwardfacet + round(
-                    (facet * params["stagespeed"])
-                    / (
-                        params["FACETS"]
-                        * params["rotationfrequency"]
-                        * params["samplegridsize"]
-                    )
-                )
-                ypos_backwardtemp = ypos_backwardfacet + round(
-                    ((facets_inlane - facet) * params["stagespeed"])
-                    / (
-                        params["FACETS"]
-                        * params["rotationfrequency"]
-                        * params["samplegridsize"]
-                    )
-                )
-                forward[facet] = ypos_forwardtemp
-                backward[facet] = ypos_backwardtemp
-            return forward.flatten(), backward.flatten()
+        # These calls work on arrays because the Numba functions are simple math
+        xpos_facet = fxpos(pixel_indices, params, xstart_val).astype(np.int16)
+        ypos_fwd_facet = fypos(pixel_indices, params, True)  # forward
+        ypos_bwd_facet = fypos(pixel_indices, params, False)
 
-        ypos_forwardlane, ypos_backwardlane = loop0(params)
-        # per lane; 5000 (pixels per facet) / 5 (samplefactor)
-        #    * (200 mm/0.015 mm (resolution)*2 (16 bit = 2byte)) )/1E6 = 40 MB
+        # Facet Offsets
+        # Create an array of offsets for every facet in a lane
+        facet_idx = np.arange(facets_inlane).reshape(-1, 1)  # Shape (facets, 1)
 
-        # all lanes, another option would be to slice per lane
-        @jit(nopython=True, parallel=False)
-        def loop1(params):
-            xpos = np.zeros((lanes, len(xpos_lane)), dtype=np.int16)
-            ypos = np.zeros((lanes, len(ypos_forwardlane)), dtype=np.int16)
-            xwidthlane = fxpos(0, params) - fxpos(params["bitsinscanline"] - 1, params)
-            for lane in range(0, lanes):
-                # TODO: why is this force needed?
-                xoffset = int(round(lane * xwidthlane))
-                xpos_temp = xpos_lane + xoffset
-                if lane % 2 == 1:
-                    ypos_temp = ypos_backwardlane
-                else:
-                    ypos_temp = ypos_forwardlane
-                xpos[lane] = xpos_temp
-                ypos[lane] = ypos_temp
-            return xpos.flatten(), ypos.flatten()
+        # Shift factor: movement of stage per facet
+        y_shift_per_facet = (params["stagespeed"]) / (
+            params["FACETS"] * params["rotationfrequency"] * params["samplegridsize"]
+        )
 
-        xpos, ypos = loop1(params)
-        # interpolation can be linear, however int are used to save space
-        ids = np.concatenate(([xpos], [ypos]))
+        # Broadcast (facets, 1) + (1, pixels) -> (facets, pixels)
+        y_fwd_lane = (ypos_fwd_facet + (facet_idx * y_shift_per_facet)).flatten()
+        y_bwd_lane = (
+            ypos_bwd_facet + ((facets_inlane - facet_idx) * y_shift_per_facet)
+        ).flatten()
+        x_lane_base = np.tile(xpos_facet, facets_inlane)
+
+        # 4. Lane Offsets (Broadcasting loop1)
+        lane_idx = np.arange(lanes).reshape(-1, 1)  # Shape (lanes, 1)
+        x_width_pixel = fxpos(0, params) - fxpos(params["bitsinscanline"] - 1, params)
+
+        x_offsets = (lane_idx * x_width_pixel).astype(np.int16)
+
+        # Generate X: Add lane offsets to the base lane x-positions
+        x_final = (x_lane_base + x_offsets).flatten()
+
+        # Generate Y: Alternate between forward and backward lane data based on parity
+        # We create a boolean mask for even/odd lanes
+        is_forward_lane = (np.arange(lanes) % 2 == 0).reshape(-1, 1)
+
+        # Select the appropriate Y data per lane
+        y_final = np.where(is_forward_lane, y_fwd_lane, y_bwd_lane).flatten()
+
+        # We must cast to integers so they can be used as array indices/shapes
+        # Using np.int32 or np.intp (platform-dependent integer)
+        ids = np.vstack((x_final, y_final)).astype(np.int32)
+
         return ids
 
     def patternfile(
@@ -392,14 +373,26 @@ class Interpolator:
         ids = self.createcoordinates()
         print("Created coordinates for interpolation")
         print(f"Elapsed {time() - ctime:.2f} seconds")
-        ptrn = ndimage.map_coordinates(
-            input=layerarr,
-            output=np.uint8,
-            coordinates=ids,
-            order=1,
-            mode="constant",
-            cval=0,
+        ids = self.createcoordinates()
+        x_coords = ids[1]
+        y_coords = ids[0]
+
+        # 1. Bounds Checking
+        # Create a mask for points that actually land on the image
+        mask = (
+            (x_coords >= 0)
+            & (x_coords < layerarr.shape[1])
+            & (y_coords >= 0)
+            & (y_coords < layerarr.shape[0])
         )
+
+        # 2. Fast Sampling (Advanced Indexing)
+        # Initialize with 0 (laser off)
+        ptrn = np.zeros(x_coords.shape, dtype=np.uint8)
+
+        # Map coordinates: Note the (y, x) order for NumPy indexing!
+        # layerarr[row, col] -> layerarr[y, x]
+        ptrn[mask] = layerarr[y_coords[mask], x_coords[mask]]
         print("Completed interpolation")
         print(f"Elapsed {time() - ctime:.2f} seconds")
         if ptrn.min() < 0 or ptrn.max() > 1:
