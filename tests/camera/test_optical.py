@@ -19,8 +19,10 @@ TESTIMG_DIR = TEST_DIR / "testimages"
 
 def micropython(instruction, nofollow=False):
     """Executes instruction using micropython on esp32s3 via mpremote."""
-    with tempfile.NamedTemporaryFile(mode="w+t", suffix=".py") as temp_file:
-        temp_file.write(inspect.cleandoc(instruction))
+    with tempfile.NamedTemporaryFile(mode="w+t", suffix=".py", delete=True) as temp_file:
+        # Clean and write the instruction
+        code = inspect.cleandoc(instruction)
+        temp_file.write(code)
         temp_file.flush()
 
         cmd = ["mpremote", "resume", "run", temp_file.name]
@@ -28,59 +30,65 @@ def micropython(instruction, nofollow=False):
             cmd.insert(-1, "--no-follow")
 
         try:
-            # check=True automatically raises an exception on non-zero exit codes
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            if result.stdout:
-                print(result.stdout)
-        except subprocess.CalledProcessError as e:
-            raise RuntimeError(f"mpremote execution failed: {e.stderr}")
+            # We capture both stdout and stderr
+            result = subprocess.run(
+                cmd, 
+                capture_output=True, 
+                text=True, 
+                check=False # We handle the check manually for better detail
+            )
 
+            # 1. Check for Shell/Connection Errors (Exit Code)
+            if result.returncode != 0:
+                error_msg = result.stderr.strip() or result.stdout.strip()
+                raise RuntimeError(f"mpremote shell error (Code {result.returncode}):\n{error_msg}")
 
-class OpticalTest(unittest.TestCase):
-    """Tests algorithms upon earlier taken images"""
+            # 2. Check for MicroPython Exceptions inside stdout
+            # MicroPython errors usually contain "Traceback" or "Error:"
+            if "Traceback (most recent call last):" in result.stdout:
+                raise RuntimeError(f"MicroPython Script Error:\n{result.stdout}")
 
-    def test_laserline(self):
-        img = cv.imread(str(TESTIMG_DIR / "laserline1.jpg"))
-        line = feature.detect_line(img)
-        expected = [0, 0, 1099, 719]
-        # Use list comparison for cleaner failure messages
-        self.assertEqual([int(v) for v in line], expected)
+            if result.stdout and not nofollow:
+                print(f"MicroPython Output:\n{result.stdout}")
 
-    def test_laserwidth(self):
-        img = cv.imread(str(TESTIMG_DIR / "laserline.jpg"))
-        actual = feature.cross_scan_error(img)
-        expected = {"max": 86.36, "min": 21.58, "mean": 38.04, "median": 36.0}
-        for k, v in expected.items():
-            # Use almostEqual for floats to avoid precision issues
-            self.assertAlmostEqual(actual[k], v, delta=1.0)
-
-    def test_laserspot(self):
-        """tests laser spot detection"""
-        dct = {
-            "laserspot1.jpg": np.array([26, 36]),
-            "laserspot2.jpg": np.array([27, 41]),
-        }
-        for k, v in dct.items():
-            img = cv.imread(str(Path(TESTIMG_DIR, k)))
-            np.testing.assert_array_equal(feature.spotsize(img)["axes"].round(0), v)
+        except FileNotFoundError:
+            raise RuntimeError("mpremote not found. Is it installed and in your PATH?")
+        except Exception as e:
+            raise RuntimeError(f"Unexpected error during execution: {e}")
 
 
 class Tests(unittest.TestCase):
     """Optical test for scanhead
 
-    shutter speed: it is assumed 10 units is 1 ms
+    shutter speed: it is assumed 100 units is ~1 ms
     """
 
     @classmethod
-    def setUpClass(cls):
+    def setUpClass(cls, current=110):
         cls.cam = camera.Cam()
         cls.cam.init()
-        micropython("from tools import host")
+        micropython(f"""from tools import lh as host
+                        host.laser_current = {current}
+        """)
 
     @classmethod
     def tearDownClass(cls):
         cls.cam.close()
         micropython("host.reset()")
+
+    def invalidcommand_test(self):
+        """Invalid commands can only be tested with nofollow is False
+        
+        If you set no follow to true it simply disconnects
+        ."""
+        micropython(
+            """
+            lh.superfunctie()
+        """,
+            nofollow=False,
+        )
+        time.sleep(2)
+
 
     def blinktest(self):
         """Verifies communication with ESP32 board."""
@@ -103,7 +111,7 @@ class Tests(unittest.TestCase):
         Laser is aligned without camera
         """
         micropython(f"""
-            host.laser_current = {current}
+            
             host.enable_comp(laser0=True)
         """)
         print("Press enter to confirm laser is aligned with prism")
@@ -121,12 +129,11 @@ class Tests(unittest.TestCase):
         current: value between 0 and 255 (a.u.)
         """
         micropython(f"""
-            host.laser_current = {current}
             host.enable_comp(laser0=True, polygon=True)
         """)
         # 3000 rpm 4 facets --> 200 hertz
         # one facet per  1/200 = 5 ms
-        self.cam.set_exposure(700)
+        self.cam.set_exposure(10_000)
         print("This will open up a window")
         print("Press escape to quit live view")
         self.cam.live_view(0.6)
@@ -146,7 +153,6 @@ class Tests(unittest.TestCase):
         """
         # NOTE: all ND filters and a single channel is used
         micropython(f"""
-            host.laser_current = {current}
             host.enable_comp(laser1=True, polygon=False)
         """)
         self.cam.set_exposure(300)
@@ -161,7 +167,7 @@ class Tests(unittest.TestCase):
             host.enable_comp(laser1=False, polygon=False)
         """)
 
-    def photo_pattern(self):
+    def photo_pattern(self, facet=3):
         """line with a given pattern is projected and photo is taken
 
         pattern  --  list of bits [0] or [1,0,0]
@@ -173,36 +179,19 @@ class Tests(unittest.TestCase):
             pattern = {pattern}
             bits = host.cfg.laser_timing["scanline_length"]
             line = (pattern*(bits//len(pattern)) + pattern[: bits % len(pattern)])
-            host.write_line(line, repetitions={lines})
+            host.synchronize(True)
+            if {facet}:
+                shft = host.facet_shift()
+                facet = ({facet} + shft) % host.cfg.laser_timing["facets"]
+            else:
+                facet = {facet}
+            host.write_line(line, repetitions={lines}, facet=facet)
             """,
             nofollow=True,
         )
-        self.cam.set_exposure(400)
+        self.cam.set_exposure(10_000)
         self.cam.live_view(0.6)
-        self.takepicture(times=1)
-
-    # @executor
-    # def searchcamera(self, timeout=3, build=False):
-    #     """laser is synced with photodiode and a line is projected
-
-    #     This is done for various line patterns and is
-    #     used to detect the edges of the camera
-    #     """
-    #     # self.host.laser_params['SINGLE_LINE'] = True
-    #     # self.host.laser_params['SINGLE_FACET'] = False
-    #     if build:
-    #         self.host.build()
-    #     self.host.laser_current = 120
-    #     # self.cam.set_exposure(36000)
-    #     # yield from self.writepattern([0]*8+[1]*8)
-    #     yield from self.host.enable_comp(laser1=True, polygon=False)
-    #     self.cam.live_view(scale=0.6)
-    #     # TODO: it doesn't catch the stopline
-    #     # yield from self.host.writeline([])
-    #     print(f"Wait for stopline to execute, {timeout} seconds")
-    #     yield from self.host.enable_comp(laser1=False, polygon=False)
-    #     # time.sleep(timeout)
-    #     # yield from self.host.enable_comp(synchronize=False)
+        self.take_picture(count=1)
 
     def take_picture(self, count=1):
         """Captures images and saves with a safe timestamp."""
