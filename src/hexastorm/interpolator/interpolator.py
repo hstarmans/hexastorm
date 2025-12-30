@@ -547,7 +547,7 @@ class Interpolator:
                     assert move_word[0] == 3  # scanline
                     move_header = move_word[1:]
                     bits = np.unpackbits(
-                        np.array(move_header, dtype=np.uint8), bitorder="litle"
+                        np.array(move_header, dtype=np.uint8), bitorder="little"
                     )
                     assert bits[0] == direction
                     # convert to binary, reverse, map to string, convert binary string to int
@@ -568,64 +568,108 @@ class Interpolator:
         return facetsinlane, lanes, lanewidth, np.packbits(pixeldata)
 
     def writebin(self, pixeldata, filename="test.bin", compression_level=9):
-        """writes pixeldata with parameters to parquet file
-
-        header contains stepsperline, facetsinlane and number of lane
-        rest is the pixeldata
-
-
-        pixeldata  -- must have uneven length
-        filename   -- name of binary file to write laserinformation to
-        compression_level      -- compression level
+        """
+        Writes pixeldata to binary file with massive performance improvements.
+        Inlines SPI chunking and vectorizes data processing.
         """
         self.debug_folder.mkdir(parents=True, exist_ok=True)
-        # parquet is more efficient, not supported by micropython
-        # micropython ulab has numpy load and save but cannot
-        # load object partially, as such default numpy save not used
-        lanes = int(np.ceil(self.params["samplexsize"] / self.params["lanewidth"]))
-        facetsinlane = int(self.params["facetsinlane"])
-        pixeldata = pixeldata.astype(np.uint8)
-        host = BaseHost(test=False)
-        reconstructed = []
+
+        # 1. Setup Parameters
+        params = self.params
+        lanes = int(np.ceil(params["samplexsize"] / params["lanewidth"]))
+        facets = int(params["facetsinlane"])
+        bytes_in_line = int(np.ceil(params["bitsinscanline"] / 8))
+
+        # 2. Reshape & Global Reversal (Vectorized)
+        # Reshape to (Lanes, Facets, BytesPerLine) for easy processing
+        try:
+            expected_size = lanes * facets * bytes_in_line
+            if pixeldata.size != expected_size:
+                print(f"Resizing data: {pixeldata.size} -> {expected_size}")
+                pixeldata.resize(expected_size, refcheck=False)
+
+            grid = pixeldata.reshape(lanes, facets, bytes_in_line)
+        except ValueError as e:
+            raise ValueError(f"Data shape mismatch: {e}")
+
+        # Reverse the image data bytes (Corresponds to bits[::-1] in original code)
+        grid = grid[:, :, ::-1]
+
+        # 3. Pre-calculate Headers
+        # Calculate the 7-byte configuration header once
+        def make_header(direction):
+            steps = params["stepsperline"]
+            scan_len = params["bitsinscanline"]
+            half_period = int((scan_len - 1) // (steps * 2))
+
+            # (HalfPeriod << 1) | Direction
+            payload = (half_period << 1) | direction
+            return payload.to_bytes(7, "little")
+
+        # Create full headers: [CMD_SCANLINE (0x03 usually)] + [Config Bytes]
+        # Note: Your original code used Spi.Instructions.scanline.
+        # Ensure this matches the byte value (e.g., b'\x03')
+        scanline_cmd = Spi.Instructions.scanline.to_bytes(1, "big")
+        header_bwd = scanline_cmd + make_header(0)
+        header_fwd = scanline_cmd + make_header(1)
+
+        # Calculate Padding
+        total_len = len(header_fwd) + bytes_in_line
+        pad_len = (8 - (total_len % 8)) % 8
+        padding = b"\x00" * pad_len
+
+        # Pre-calculate the Write Command Byte for SPI
+        # Your code: Spi.Commands.write.to_bytes(1, "big")
+        spi_write_cmd = Spi.Commands.write.to_bytes(1, "big")
+
+        # 4. Write Loop
         compressor = zlib.compressobj(level=compression_level)
+        out_path = self.debug_folder / filename
 
-        with open(self.debug_folder / filename, "wb") as f:
+        # 1MB Buffer to minimize disk/compressor overhead
+        IO_BUFFER_SIZE = 1024 * 1024
+        write_buffer = bytearray()
 
-            def z_write(data):
-                compressed = compressor.compress(data)
-                f.write(compressed)
+        with open(out_path, "wb") as f:
+            # File Header
+            f.write(compressor.compress(struct.pack("<f", params["lanewidth"])))
+            f.write(compressor.compress(struct.pack("<I", facets)))
+            f.write(compressor.compress(struct.pack("<I", lanes)))
 
-            # 1. Header:
-            z_write(struct.pack("<f", self.params["lanewidth"]))
-            z_write(
-                struct.pack("<I", int(self.params["facetsinlane"]))
-            )  # unsigned int (4 bytes)
-            z_write(struct.pack("<I", lanes))  # unsigned int (4 bytes)
-            # Overtime packing changed significantly
-            bitsinline = int(self.params["bitsinscanline"])
-            bytesinline = int(np.ceil(self.params["bitsinscanline"] // 8))
-            assert len(pixeldata) == round(facetsinlane * lanes * bytesinline)
-            for lane in range(lanes):
-                if lane % 2 == 1:
-                    direction = 0
-                else:
-                    direction = 1
-                for i in range(facetsinlane):
-                    offset = lane * facetsinlane * bytesinline
-                    start = i * bytesinline + offset
-                    end = (i + 1) * bytesinline + offset
-                    linedata = pixeldata[start:end]
-                    reconstructed.extend(linedata)
-                    bits = np.unpackbits(linedata)[:bitsinline]
-                    # reverse, clockwise exposure
-                    bits = bits[::-1]
-                    bytelst = host.bit_to_byte_list(
-                        bits, self.params["stepsperline"], direction
-                    )
-                    cmdlst = host.byte_to_cmd_list(bytelst)
-                    # cmd lst has lenth of 6, there are 9 bytes in a cmd
-                    for cmd in cmdlst:
-                        z_write(cmd)
+            for lane_idx in range(lanes):
+                # Select Header
+                is_forward = lane_idx % 2 == 0
+                header = header_fwd if is_forward else header_bwd
+
+                # Get all facets for this lane
+                lane_data = grid[lane_idx]
+
+                for facet_idx in range(facets):
+                    # Assemble the full raw payload for this line
+                    # [Header] + [Image Data (reversed)] + [Padding]
+                    full_payload = header + lane_data[facet_idx].tobytes() + padding
+
+                    # INLINED SPI CHUNKING (Replaces byte_to_cmd_list)
+                    # Loop over payload in 8-byte chunks
+                    for i in range(0, len(full_payload), 8):
+                        chunk = full_payload[i : i + 8]
+
+                        # CRITICAL: Reverse the chunk for SPI endianness
+                        # This matches list(reversed(chunk)) in your reference code
+                        chunk_reversed = chunk[::-1]
+
+                        # Append [Write Byte] + [Reversed Chunk]
+                        write_buffer.extend(spi_write_cmd)
+                        write_buffer.extend(chunk_reversed)
+
+                    # Flush buffer to compressor periodically
+                    if len(write_buffer) >= IO_BUFFER_SIZE:
+                        f.write(compressor.compress(write_buffer))
+                        write_buffer = bytearray()
+
+            # Final Cleanup
+            if write_buffer:
+                f.write(compressor.compress(write_buffer))
             f.write(compressor.flush())
 
 

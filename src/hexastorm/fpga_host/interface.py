@@ -106,57 +106,60 @@ class BaseHost:
         Returns:
             List[int]: Byte list ready to be packed into SPI commands.
         """
-        # the half_period is sent over
-        # this is the amount of ticks in half a cycle of
-        # the motor
-        # watch out for python "banker's rounding"
-        # sometimes target might not be equal to steps
-        bit_order = "little"
+        word_len = Spi.word_bytes
+        byteorder = "little"
         scanline_length = self.cfg.laser_timing["scanline_length"]
         half_period = int((scanline_length - 1) // (steps_line * 2))
         if half_period < 1:
-            raise Exception("Steps per line cannot be achieved")
-        # TODO: is this still an issue?
-        # you could check as follows
-        # steps = self.laser_params['TICKSINFACET']/(halfperiod*2)
-        #    print(f"{steps} is actual steps per line")
-        direction_byte = [int(bool(direction))]
+            raise ValueError("Steps per line cannot be achieved (period < 1)")
 
-        def pad_to_word_boundary(byte_lst):
-            word_len = Spi.word_bytes
-            padding_length = (word_len - len(byte_lst) % word_len) % word_len
-            byte_lst.extend([0] * padding_length)
+        # 2. Build Header using Bitwise Math
+        # The FPGA expects 56 bits: [55 bits for Ticks] + [1 bit for Direction]
+        # In Little Endian, the Direction is the Least Significant Bit (LSB).
+        # So we shift Ticks left by 1, and OR in the Direction.
 
-        if not len(laser_bits):
-            byte_lst = [Spi.Instructions.last_scanline]
-            pad_to_word_boundary(byte_lst)
-            return byte_lst
+        payload_int = (half_period << 1) | (direction & 1)
 
-        # First instruction: scanline + encoded halfperiod and direction
-        byte_lst = [Spi.Instructions.scanline]
+        # Convert integer to 7 bytes (56 bits), little endian
+        payload_bytes = payload_int.to_bytes(7, byteorder=byteorder)
 
-        # Pack direction + halfperiod bits into little-endian bytes
-        half_period_bits = [int(i) for i in bin(half_period)[2:]]
-        half_period_bits.reverse()
-        assert len(half_period_bits) < 56
-        byte_lst.extend(
-            list(
-                ulabext.packbits(direction_byte + half_period_bits, bitorder=bit_order)
-            )
-        )
-        pad_to_word_boundary(byte_lst)
+        # Create buffer starting with Instruction Byte
+        # We use bytearray for performance (mutable), converting to list at the end only if strictly needed
+        out_buffer = bytearray()
 
-        # Append actual scanline data
-        laser_bits_len = len(laser_bits)
-        if laser_bits_len == scanline_length:
-            byte_lst.extend(ulabext.packbits(laser_bits, bitorder=bit_order))
-        elif laser_bits_len == scanline_length // 8:
-            byte_lst.extend(laser_bits)
+        # Handle Empty/Stop Case
+        if len(laser_bits) == 0:
+            out_buffer.append(Spi.Instructions.last_scanline)
         else:
-            raise Exception("Invalid line length")
+            out_buffer.append(Spi.Instructions.scanline)
+            out_buffer.extend(payload_bytes)
 
-        pad_to_word_boundary(byte_lst)
-        return byte_lst
+        # 3. Header Alignment (Padding)
+        # Calculate how many zeros we need to reach the next word boundary
+        # This replaces the inner helper function to save function call overhead
+        current_len = len(out_buffer)
+        padding = (word_len - (current_len % word_len)) % word_len
+        if padding:
+            out_buffer.extend(b"\x00" * padding)
+
+        # 4. Append Laser Data
+        if len(laser_bits) > 0:
+            # Case A: Input is raw bits (0, 1, 1, 0...) -> Pack them
+            if len(laser_bits) == scanline_length:
+                out_buffer.extend(ulabext.packbits(laser_bits, bitorder=byteorder))
+            # Case B: Input is already bytes -> Just append
+            elif len(laser_bits) == scanline_length // 8:
+                out_buffer.extend(laser_bits)
+            else:
+                raise ValueError(f"Invalid laser_bits length: {len(laser_bits)}")
+
+        # 5. Final Alignment (Padding)-
+        current_len = len(out_buffer)
+        padding = (word_len - (current_len % word_len)) % word_len
+        if padding:
+            out_buffer.extend(b"\x00" * padding)
+
+        return list(out_buffer)
 
     async def write_line(
         self, bit_lst, steps_line=1, direction=0, repetitions=1, facet=None
