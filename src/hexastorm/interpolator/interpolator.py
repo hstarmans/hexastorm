@@ -1,8 +1,9 @@
 import math
-import os
+from pathlib import Path
 from io import BytesIO
 import struct
 import zlib
+from time import time
 
 import numpy as np
 from cairosvg import svg2png
@@ -99,14 +100,16 @@ class Interpolator:
     the alternative light engine described in US10114289B2.
     """
 
-    def __init__(self, stepsperline=1):
+    def __init__(self, stepsperline: int = 1):
         self.cfg = PlatformConfig(test=False)
-        self.params = self.parameters(stepsperline)
+        self.params = self._init_parameters(stepsperline)
         self.params = self.downsample(self.params)
-        currentdir = os.path.dirname(os.path.realpath(__file__))
-        self.debug_folder = os.path.join(currentdir, "debug")
 
-    def parameters(self, stepsperline=1):
+        self.current_dir = Path(__file__).parent.resolve()
+        self.debug_folder = self.current_dir / "debug"
+        self.debug_folder.mkdir(exist_ok=True)  # Creates dir if missing
+
+    def _init_parameters(self, stepsperline: int = 1):
         """
         sets parameters for slicer based on parameters from board
 
@@ -124,8 +127,8 @@ class Interpolator:
         # bytes are read using little but finally direction is flipped!
         # as such packing is here in big
         self.bitorder = "big"
-        # NOTE:  very special dictionary!!
-        # in new version of numba dictionaries are converted automatically
+
+        # Create Numba-compatible dictionary
         dct = typed.Dict.empty(key_type=types.string, value_type=types.float64)
         dct2 = {
             # angle [radians], for a definition see figure 7
@@ -194,51 +197,50 @@ class Interpolator:
                 params[item] = round(params[item])
         return params
 
-    def svgtopil(self, svg_filepath):
+    def svgtopil(self, svg_filepath: Path) -> Image.Image:
         """converts SVG snippets to a PIL Image"""
         with open(svg_filepath, "rb") as f:
             svg_data = f.read()
         dpi = 25.4 / self.params["samplegridsize"]
         png_data = svg2png(bytestring=svg_data, dpi=dpi)
         # rotation used to align jitter and crosstest correctly to laser
-        img = Image.open(BytesIO(png_data)).rotate(-90, expand=True)
-        return img
+        return Image.open(BytesIO(png_data)).rotate(-90, expand=True)
 
-    def pstopil(self, url, pixelsize=0.3527777778):
+    def pstopil(self, filepath: Path, pixelsize: float = 0.3527777778) -> Image.Image:
         """converts postscript file to a PIL Image
 
-        url       --  path to postcript file
+        filepath  --  path to postcript file
         pixelsize -- pixel size in mm
         """
-        img = Image.open(url)
+        img = Image.open(filepath)
         scale = pixelsize / self.params["samplegridsize"]
         img.load(scale=scale)
         return img
 
-    def imgtopil(self, url, pixelsize):
+    def imgtopil(self, filepath: Path, pixelsize: float) -> Image.Image:
         """converts image to a PIL image
 
-        url       --  path to PIL image, e.g. PNG or BMP
+        filepath  --  path to PIL image, e.g. PNG or BMP
         """
-        img = Image.open(url)
+        img = Image.open(filepath)
         scale = pixelsize / self.params["samplegridsize"]
         img = img.resize([round(x * scale) for x in img.size])
         return img
 
-    def piltoarray(self, pil):
+    def piltoarray(self, img: Image.Image) -> np.ndarray:
         """converts PIL Image to numpy array
 
         Method also changes the settings of on the objects
         and clips to the area of interest
-
-        pil
+        pil  --  input image as
         """
-        img_array = np.array(pil.convert("1"))
+        img_array = np.array(img.convert("1"))
         if img_array.max() == 0:
             raise Exception("Image is empty")
         # clip image
         nonzero_col = np.argwhere(img_array.sum(axis=0)).squeeze()
         nonzero_row = np.argwhere(img_array.sum(axis=1)).squeeze()
+
         img_array = img_array[
             nonzero_row[0] : nonzero_row[-1], nonzero_col[0] : nonzero_col[-1]
         ]
@@ -253,11 +255,11 @@ class Interpolator:
         return img_array
 
     def lanewidth(self):
-        params = self.params
-        lanewidth = (
-            fxpos(0, params) - fxpos(params["bitsinscanline"] - 1, params)
-        ) * params["samplegridsize"]
-        return lanewidth
+        # Helper to keep code DRY (Don't Repeat Yourself)
+        return (
+            fxpos(0, self.params)
+            - fxpos(self.params["bitsinscanline"] - 1, self.params)
+        ) * self.params["samplegridsize"]
 
     def createcoordinates(self):
         """
@@ -351,33 +353,32 @@ class Interpolator:
         test  -- runs a sampling test, whether laser
                  frequency sufficient to provide accurate sample
         """
-        from time import time
-
         ctime = time()
-        _, extension = os.path.splitext(url)
-        if extension == ".svg":
-            pil = self.svgtopil(url)
-            pil.save("debug.png")
-        elif extension == ".ps":
-            pil = self.pstopil(url)
+        file_path = Path(url)
+
+        if file_path.suffix == ".svg":
+            pil = self.svgtopil(file_path)
+            pil.save(self.debug_folder / "debug.png")
+        elif file_path.suffix == ".ps":
+            pil = self.pstopil(file_path)
         else:
-            pil = self.imgtopil(url, pixelsize)
+            pil = self.imgtopil(file_path, pixelsize)
         layerarr = self.piltoarray(pil).astype(np.uint8)
+
         if test:
             img = Image.fromarray(layerarr.astype(np.uint8) * 255)
-            img.save(os.path.join(self.debug_folder, "nyquistcheck.png"))
-        if test:
+            img.save(self.debug_folder / "nyquistcheck.png")
             layerarr = np.ones_like(layerarr)
         print("Retrieved image")
         print(f"Elapsed {time() - ctime:.2f} seconds")
         ids = self.createcoordinates()
         print("Created coordinates for interpolation")
         print(f"Elapsed {time() - ctime:.2f} seconds")
-        ids = self.createcoordinates()
+
         x_coords = ids[1]
         y_coords = ids[0]
 
-        # 1. Bounds Checking
+        # Bounds Checking
         # Create a mask for points that actually land on the image
         mask = (
             (x_coords >= 0)
@@ -386,7 +387,7 @@ class Interpolator:
             & (y_coords < layerarr.shape[0])
         )
 
-        # 2. Fast Sampling (Advanced Indexing)
+        # Fast Sampling (Advanced Indexing)
         # Initialize with 0 (laser off)
         ptrn = np.zeros(x_coords.shape, dtype=np.uint8)
 
@@ -437,24 +438,32 @@ class Interpolator:
         # repeat adden
         xcor = ids[0, ::step]
         ycor = ids[1, ::step]
+
         if xcor.min() < 0:
             print("XCOR negative, weird!")
             xcor += abs(xcor.min())
         if ycor.min() < 0:
             print("YCOR negative, weird!")
             ycor += abs(ycor.min())
+
         arr = np.zeros((xcor.max() + 1, ycor.max() + 1), dtype=np.uint8)
+
         # TODO: either use parquet or numpy
         try:
             ptrn = np.unpackbits(ptrn_df["data"], bitorder=self.bitorder)
         except IndexError:
             ptrn = np.unpackbits(ptrn_df, bitorder=self.bitorder)
+
         # TODO: this is strange, added as quick fix on may 9 2021
         ptrn = ptrn[: len(xcor)]
         arr[xcor[:], ycor[:]] = ptrn[0 : len(ptrn) : step]
         arr = arr * 255
+
         img = Image.fromarray(arr).rotate(90, expand=True)
-        img.save(os.path.join(self.debug_folder, filename + ".png"))
+
+        save_path = self.debug_folder / f"{filename}.png"
+        img.save(save_path)
+
         return img
 
     def readbin(self, filename="test.bin", mode="bytes"):
@@ -463,7 +472,7 @@ class Interpolator:
         name  -- name of binary file with laser information
         mode  -- parquet, numpy, bytes
         """
-        file_path = os.path.join(self.debug_folder, filename)
+        file_path = self.debug_folder / filename
         bitsinline = int(self.params["bitsinscanline"])
         bytesinline = int(np.ceil(self.params["bitsinscanline"] // 8))
         words_in_line = Spi.words_scanline(self.cfg.laser_timing)
@@ -569,8 +578,7 @@ class Interpolator:
         filename   -- name of binary file to write laserinformation to
         compression_level      -- compression level
         """
-        if not os.path.exists(self.debug_folder):
-            os.makedirs(self.debug_folder)
+        self.debug_folder.mkdir(parents=True, exist_ok=True)
         # parquet is more efficient, not supported by micropython
         # micropython ulab has numpy load and save but cannot
         # load object partially, as such default numpy save not used
@@ -581,7 +589,7 @@ class Interpolator:
         reconstructed = []
         compressor = zlib.compressobj(level=compression_level)
 
-        with open(os.path.join(self.debug_folder, filename), "wb") as f:
+        with open(self.debug_folder / filename, "wb") as f:
 
             def z_write(data):
                 compressed = compressor.compress(data)
@@ -625,12 +633,13 @@ if __name__ == "__main__":
     # PCB / photopaper stepsperline single channel, current 130, 2x per line
     fname = "jittertest"
     interpolator = Interpolator()
-    dir_path = os.path.dirname(os.path.realpath(__file__))
+    dir_path = Path(__file__).parent.resolve()
     # postscript resolution test
-    url = os.path.join(dir_path, "patterns", f"{fname}.svg")
+
+    url = dir_path / "patterns" / f"{fname}.svg"
     ptrn = interpolator.patternfile(url)
     # hexastorm.png pixelsize 0.035
-    # url = os.path.join(dir_path, "test-patterns", "hexastorm.png")
+    # url = dir_path / "test-patterns" / "hexastorm.png"
     # ptrn = interpolator.patternfile(url, pixelsize=0.035)
     print("This can take up to 30 seconds")
     # TODO: zlib can compress the data with a factor over 20
