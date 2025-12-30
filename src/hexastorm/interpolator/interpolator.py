@@ -11,11 +11,10 @@ from numba import jit, typed, types
 from PIL import Image
 
 from hexastorm.config import PlatformConfig, Spi
-from hexastorm.fpga_host.interface import BaseHost
 
 
 # numba.jit decorated functions cannot be defined with self
-@jit(nopython=True)
+@jit(nopython=True, cache=True)
 def displacement(pixel, params):
     """returns the displacement for a given pixel
 
@@ -49,7 +48,7 @@ def displacement(pixel, params):
     return disp
 
 
-@jit(nopython=True)
+@jit(nopython=True, cache=True)
 def fxpos(pixel, params, xstart=0):
     """returns the laserdiode x-position in pixels
 
@@ -64,7 +63,7 @@ def fxpos(pixel, params, xstart=0):
     return xpos / params["samplegridsize"]
 
 
-@jit(nopython=True)
+@jit(nopython=True, cache=True)
 def fypos(pixel, params, direction, ystart=0):
     """
     returns the laserdiode y-position in pixels
@@ -151,11 +150,9 @@ class Interpolator:
             "samplexsize": 0,
             # sample size stacking direction [mm]
             "sampleysize": 0,
-            # NOTE: sample below Nyquist criterion
-            #       you first sample the image,
-            #       you then again sample the sampled image
+            # Lasersize 20 micron we sample 2x lower (Nyquist criterion)
             # height/width of the sample gridth [mm]
-            "samplegridsize": 0.005,
+            "samplegridsize": 0.01,
             "stepsperline": stepsperline,
             "facetsinlane": 0,  # set when file is parsed
             # mm/s
@@ -358,7 +355,8 @@ class Interpolator:
 
         if file_path.suffix == ".svg":
             pil = self.svgtopil(file_path)
-            pil.save(self.debug_folder / "debug.png")
+            if test:  # kost tijd
+                pil.save(self.debug_folder / "debug.png")
         elif file_path.suffix == ".ps":
             pil = self.pstopil(file_path)
         else:
@@ -404,7 +402,7 @@ class Interpolator:
         ptrn = np.packbits(ptrn, bitorder=self.bitorder)
         return ptrn
 
-    def plotptrn(self, ptrn_df, step, filename="plot"):
+    def plotptrn(self, ptrn_data, step=1, filename="plot"):
         """function can be used to plot a dataframe with laser data
 
         The settings are retrieved from the dataframe
@@ -415,54 +413,102 @@ class Interpolator:
         the starting point of the exposure.
         The laser line is parallel to the x axis.
 
-        ptrn_df  --  dataframe with laserdata
+        ptrn_data -- Raw numpy array OR DataFrame/Dict with 'data' and parameters
         step     --  pixel step, can be used to lower the number
                      of pixels that are plotted
         filename --  filename to store pattern
         """
+
+        # 1. Update Parameters from Input (if provided)
+        # This ensures we plot using the same geometry the data was generated with
+        if hasattr(ptrn_data, "keys") and not isinstance(ptrn_data, np.ndarray):
+            for k in [
+                "lanewidth",
+                "facetsinlane",
+                "bitsinscanline",
+                "samplexsize",
+                "sampleysize",
+            ]:
+                if k in ptrn_data:
+                    val = ptrn_data[k]
+                    # Handle pandas Series/1-element arrays
+                    if hasattr(val, "__len__") and len(val) == 1:
+                        val = val[0]
+                    self.params[k] = val
+
+        # 2. Extract and Unpack Bits
+        # Handle different input types safely
+        if isinstance(ptrn_data, np.ndarray):
+            raw_bytes = ptrn_data
+        elif "data" in ptrn_data:
+            raw_bytes = ptrn_data["data"]
+            # Handle pandas Series wrapping the byte array
+            if hasattr(raw_bytes, "values"):
+                raw_bytes = raw_bytes.values[0]
+        else:
+            raise ValueError("Could not find data in input structure")
+
+        # Unpack bits (using 'big' as established in patternfile)
+        ptrn_bits = np.unpackbits(raw_bytes, bitorder=self.bitorder)
+        # 3. Generate Coordinates
         # TODO: - plot with real laser spots --> convolution?
         #       - your y-step is greater than sample size so you see lines
         #        this will not be there in
         #        reality as the laser spot is larger
         ids = self.createcoordinates()
 
-        # TODO: either use parquet or numpy
-        # in case of parquet I store additional information
-        try:
-            for k in self.params.keys():
-                self.params[k] = ptrn_df[k][0]
-        except IndexError:
-            pass
+        # 4. Handle Downsampling/Upsampling Mismatch
+        # The coordinates are for unique pixels. The data might be repeated (if downsamplefactor > 1).
+        # We repeat coordinates to match the data structure.
+        factor = int(self.params["downsamplefactor"])
+        if factor > 1:
+            ids = np.repeat(ids, factor, axis=1)
 
-        ids = np.repeat(ids, self.params["downsamplefactor"], axis=1)
-        # repeat adden
-        xcor = ids[0, ::step]
-        ycor = ids[1, ::step]
+        # 5. Safe Slicing (The Fix for "May 9 2021")
+        # Ensure we don't go out of bounds if data has extra padding bits
+        min_len = min(ids.shape[1], len(ptrn_bits))
 
-        if xcor.min() < 0:
-            print("XCOR negative, weird!")
-            xcor += abs(xcor.min())
-        if ycor.min() < 0:
-            print("YCOR negative, weird!")
-            ycor += abs(ycor.min())
+        x_full = ids[0, :min_len]
+        y_full = ids[1, :min_len]
+        bits_full = ptrn_bits[:min_len]
 
-        arr = np.zeros((xcor.max() + 1, ycor.max() + 1), dtype=np.uint8)
+        # Apply Visualization Step (Downsample for plotting speed)
+        x_plot = x_full[::step]
+        y_plot = y_full[::step]
+        bits_plot = bits_full[::step]
 
-        # TODO: either use parquet or numpy
-        try:
-            ptrn = np.unpackbits(ptrn_df["data"], bitorder=self.bitorder)
-        except IndexError:
-            ptrn = np.unpackbits(ptrn_df, bitorder=self.bitorder)
+        # 6. Normalization (Auto-Center)
+        # Shift coordinates so the minimum value is always 0.
+        # This replaces the manual "if xcor.min() < 0" check.
+        x_min, x_max = x_plot.min(), x_plot.max()
+        y_min, y_max = y_plot.min(), y_plot.max()
 
-        # TODO: this is strange, added as quick fix on may 9 2021
-        ptrn = ptrn[: len(xcor)]
-        arr[xcor[:], ycor[:]] = ptrn[0 : len(ptrn) : step]
-        arr = arr * 255
+        x_plot -= x_min
+        y_plot -= y_min
 
-        img = Image.fromarray(arr).rotate(90, expand=True)
+        width = x_max - x_min + 1
+        height = y_max - y_min + 1
+
+        print(f"Plotting Image: {width}x{height} pixels")
+
+        # 7. Rasterize
+        # Note: We index as [x, y]. In NumPy this maps X -> Rows, Y -> Cols.
+        # This creates a transposed image (vertical), which we rotate later.
+        canvas = np.zeros((width, height), dtype=np.uint8)
+
+        # Fancy indexing to map bits to grid
+        canvas[x_plot, y_plot] = bits_plot
+
+        # 8. Save
+        # Multiply by 255 to make 1s white and 0s black
+        img = Image.fromarray(canvas * 255)
+
+        # Rotate 90 to match physical orientation (compensates for [x,y] indexing)
+        img = img.rotate(90, expand=True)
 
         save_path = self.debug_folder / f"{filename}.png"
         img.save(save_path)
+        print(f"Plot saved to {save_path}")
 
         return img
 
@@ -473,99 +519,76 @@ class Interpolator:
         mode  -- parquet, numpy, bytes
         """
         file_path = self.debug_folder / filename
-        bitsinline = int(self.params["bitsinscanline"])
-        bytesinline = int(np.ceil(self.params["bitsinscanline"] // 8))
-        words_in_line = Spi.words_scanline(self.cfg.laser_timing)
-        pixeldata = []
 
-        decompressor = zlib.decompressobj()
-
-        # The global buffer that holds decompressed bytes waiting to be consumed
-        decompressed_buffer = b""
-
-        def get_next_decompressed_chunk(f):
-            """Reads a chunk of compressed data, decompresses it, and appends the result to the global buffer."""
-            nonlocal decompressed_buffer
-            # Read a reasonable chunk size, e.g., 4096 bytes of compressed data
-            compressed_data = f.read(4096)
-            if not compressed_data:
-                # End of file: Flush the decompressor to get the last bytes (trailer)
-                decompressed_data = decompressor.flush()
-            else:
-                # Decompress the chunk
-                decompressed_data = decompressor.decompress(compressed_data)
-
-            decompressed_buffer += decompressed_data
-            return len(decompressed_data)
-
-        def z_read(f, num):
-            """
-            Reads exactly 'num' decompressed bytes, reading more from the file as needed.
-            Returns: The 'num' bytes or raises an EOFError if not enough data is available.
-            """
-            nonlocal decompressed_buffer
-            # Keep reading and decompressing from the file until the buffer has enough bytes
-            while len(decompressed_buffer) < num:
-                # If we can't get any more decompressed data, it's an EOF
-                if (
-                    get_next_decompressed_chunk(f) == 0
-                    and len(decompressed_buffer) < num
-                ):
-                    raise EOFError(
-                        f"Premature end of file: Requested {num} bytes but only found {len(decompressed_buffer)}."
-                    )
-
-            # Extract the requested number of bytes from the front of the buffer
-            result = decompressed_buffer[:num]
-
-            # Remove the extracted bytes from the buffer (consume them)
-            decompressed_buffer = decompressed_buffer[num:]
-
-            return result
-
+        # 1. Read and Decompress Entire File at Once
+        # This is safe for desktop debugging (even 500MB is fine in RAM)
         with open(file_path, "rb") as f:
-            # 1. Header
-            lanewidth = struct.unpack("<f", z_read(f, 4))[0]
-            facetsinlane = struct.unpack("<I", z_read(f, 4))[0]
-            lanes = struct.unpack("<I", z_read(f, 4))[0]
-            for lane in range(lanes):
-                if lane % 2 == 1:
-                    direction = 0
-                else:
-                    direction = 1
-                for i in range(facetsinlane):
-                    # cmd lst has lenth of 6, there are 9 bytes in a cmd
-                    cmdlst = []
-                    for _ in range(words_in_line):
-                        cmdlst.append(z_read(f, 9))
-                    # let's unpack the cmds, all 6 commands start with write
-                    # first command has the scanline command
-                    # contains direction and steps per line
-                    cmd0 = cmdlst[0]
-                    assert cmd0[0] == 1  # cmd always starts with write
-                    move_word = list(cmd0[1:])[::-1]
-                    assert move_word[0] == 3  # scanline
-                    move_header = move_word[1:]
-                    bits = np.unpackbits(
-                        np.array(move_header, dtype=np.uint8), bitorder="little"
-                    )
-                    assert bits[0] == direction
-                    # convert to binary, reverse, map to string, convert binary string to int
-                    half_periodbits = int("".join(map(str, bits[1:][::-1])), 2)
-                    stepsperline = int((bitsinline - 1) // half_periodbits) / 2
-                    assert stepsperline == self.params["stepsperline"]
-                    # other command contain the linedata
-                    bitlst = []
-                    for cmd in cmdlst[1:]:
-                        assert cmd[0] == 1
-                        bits = np.unpackbits(
-                            np.array(list(cmd[1:])[::-1], dtype=np.uint8),
-                            bitorder="litle",
-                        )
-                        bitlst.extend(bits)
-                    bitlst = bitlst[: bytesinline * 8][::-1]
-                    pixeldata.extend(bitlst)
-        return facetsinlane, lanes, lanewidth, np.packbits(pixeldata)
+            compressed_data = f.read()
+            data = zlib.decompress(compressed_data)
+
+        # 2. Parse File Header (12 bytes)
+        # Offset 0-12: float lanewidth, int facets, int lanes
+        lanewidth, facets_in_lane, lanes = struct.unpack("<fII", data[:12])
+
+        # 3. Setup Geometry for Parsing
+        # Calculate how many 9-byte SPI words are in one scanline
+        words_in_line = Spi.words_scanline(self.cfg.laser_timing)
+        bytes_in_line = int(np.ceil(self.params["bitsinscanline"] / 8))
+
+        # Total number of scanlines in the file
+        total_lines = lanes * facets_in_lane
+
+        # 4. Load Raw Data into 3D Array
+        # Data starts at offset 12.
+        # Structure: [Line] -> [Word] -> [9 Bytes]
+        # We use np.frombuffer which is zero-copy (instant)
+        raw_payload = np.frombuffer(data, dtype=np.uint8, offset=12)
+
+        # Safety Check: Ensure data size matches expectation
+        expected_size = total_lines * words_in_line * 9
+        if raw_payload.size != expected_size:
+            # If size mismatches (e.g. partial write), try to salvage readable lines
+            trunc_lines = raw_payload.size // (words_in_line * 9)
+            print(
+                f"Warning: File size mismatch. Expected {total_lines} lines, found {trunc_lines}."
+            )
+            total_lines = trunc_lines
+            raw_payload = raw_payload[: total_lines * words_in_line * 9]
+
+        # Reshape to (Lines, Words, Bytes per Word)
+        # Each "Word" is 9 bytes: [0x01 (WriteCmd)] + [8 Bytes Data]
+        grid = raw_payload.reshape(total_lines, words_in_line, 9)
+
+        # 5. The "Undo SPI" Pipeline (Vectorized)
+
+        # A. Separate Headers (Word 0) from Data (Words 1..N)
+        # grid[:, 0, :] is the Scanline Command Header
+        # grid[:, 1:, :] is the Image Data
+        data_grid = grid[:, 1:, :]
+
+        # B. Remove the first byte (Write Command 0x01) from every word
+        # Input shape: (Lines, DataWords, 9) -> Output: (Lines, DataWords, 8)
+        payload_bytes = data_grid[:, :, 1:]
+
+        # C. Reverse the SPI Chunks
+        # writebin did `chunk[::-1]`. We must reverse it back.
+        payload_bytes = payload_bytes[..., ::-1]
+
+        # 6. Flatten and Clean Up
+        # Flatten the words into a continuous stream of bytes per line
+        # Shape: (Lines, TotalBytesInPayload)
+        lines = payload_bytes.reshape(total_lines, -1)
+
+        # Trim padding (SPI words align to 8 bytes, but image might be smaller)
+        lines = lines[:, :bytes_in_line]
+
+        # 7. Global Reversal
+        # writebin did `grid[:, :, ::-1]` (Global Line Reverse). We undo it here.
+        lines = lines[:, ::-1]
+
+        # 8. Return
+        # Flatten to 1D array to match original interface
+        return facets_in_lane, lanes, lanewidth, lines.flatten()
 
     def writebin(self, pixeldata, filename="test.bin", compression_level=9):
         """
@@ -676,18 +699,21 @@ class Interpolator:
 if __name__ == "__main__":
     # PCB / photopaper stepsperline single channel, current 130, 2x per line
     fname = "jittertest"
+    ctime = time()
     interpolator = Interpolator()
+    print(f"Interpolator {time() - ctime:.2f} seconds")
     dir_path = Path(__file__).parent.resolve()
     # postscript resolution test
 
     url = dir_path / "patterns" / f"{fname}.svg"
     ptrn = interpolator.patternfile(url)
+    print(f"Pattern {time() - ctime:.2f} seconds")
     # hexastorm.png pixelsize 0.035
     # url = dir_path / "test-patterns" / "hexastorm.png"
     # ptrn = interpolator.patternfile(url, pixelsize=0.035)
-    print("This can take up to 30 seconds")
     # TODO: zlib can compress the data with a factor over 20
     interpolator.writebin(ptrn, f"{fname}.bin")
+
     facetsinlane, lanes, lanewidth, arr = interpolator.readbin(f"{fname}.bin")
     assert np.allclose(interpolator.params["lanewidth"], lanewidth, 1e-3)
     assert np.allclose(interpolator.params["facetsinlane"], facetsinlane, 1e-3)
