@@ -1,288 +1,380 @@
+import logging
 import os
+import sys
+from typing import Optional
+
 import matplotlib
-matplotlib.use("Webagg")
-import matplotlib.pyplot as plt
-from matplotlib.patches import Polygon, Circle, Rectangle
-from matplotlib.ticker import MultipleLocator
-from matplotlib.transforms import Affine2D
 import numpy as np
 
+# Use Agg for file generation without a window popping up
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from matplotlib.patches import Circle, Polygon, Rectangle
+from matplotlib.transforms import Affine2D
 
-# Get the directory where the current script is located
-script_directory = os.path.dirname(os.path.abspath(__file__))
-
-# Change the current working directory to the script's directory
-os.chdir(script_directory)
-
-print(f"placing results in {script_directory}")
-
-
-def fix_dimensions(fig, ax, pix_per_mm):
-    dpi = 100
-    fig.set_dpi(dpi)
-    fig.canvas.draw()
-    width, height = fig.get_size_inches()
-    
-    # e.g. 1 unit, 13 pixels, 13/(dpi * 25.24) mm,  
-    def dataunit_to_pix_xy():
-        # origin
-        x_pix = abs(ax.transData.transform((1, 0)) - ax.transData.transform((0, 0)))[0]
-        y_pix = abs(ax.transData.transform((0, 1)) - ax.transData.transform((0, 0)))[1]
-        return x_pix, y_pix
-    x_pix, y_pix = dataunit_to_pix_xy()
-    actual_height_mm = (height*dpi)/y_pix
-    conv = actual_height_mm / (height*25.4)
-    fig.set_size_inches(width * y_pix/x_pix * conv, height * conv)
-    fig.set_dpi(round(pix_per_mm*25.4))
-    fig.canvas.draw()
-    x_pix, y_pix = dataunit_to_pix_xy()
-    # test 1 mm in x direction is 1 mm in y direction
-    assert round(x_pix,1) == round(y_pix, 1)
-    return fig
-
-## Jitter test
-##
-# create stack of vertical lines
-
-pattern_x_width = 25       # mm
-pattern_y_width = 30       # mm
-final_linewidth = 0.300    # mm 
-linewidth_start = 0.05     # mm
-text_size = 4              # mm
-pix_per_mm = 200           # pixels per mm
-tick_size = 0.2            # mm
-points_text = text_size / (1/72*25.4)
-points_ticks = tick_size / (1/72*25.4)
-
-plt.rcParams.update({'font.size': points_text,
-                     'xtick.major.size': points_ticks,    # Size of major tick marks in points
-                     'ytick.major.size': points_ticks,
-                     'xtick.minor.size': points_ticks,    # Size of minor tick marks in points
-                     'ytick.minor.size': points_ticks,
-                     'grid.linewidth': points_ticks})   # Width of grid lines in points 
-fig, ax = plt.subplots()
-triangles = int(pattern_x_width // ( final_linewidth))
-for i in range(1, triangles):
-    triangle_x = np.array([-final_linewidth/2, 0, final_linewidth/2]) + i*(final_linewidth)
-    if i % 2 == 0:
-        triangle_y = np.array([pattern_y_width, 0, pattern_y_width])
-        triangle_vertices = np.column_stack((triangle_x, triangle_y))
-        if i < 3:
-            pass
-            #print(triangle_vertices)
-        triangle = Polygon(triangle_vertices, closed=True, facecolor='black', edgecolor='none')
-        # Add the patch to the axes
-        ax.add_patch(triangle)
+# Configure standard logger
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
 
-y_start = (pattern_y_width/final_linewidth)*linewidth_start
-plt.xlim(0, pattern_x_width)  
-plt.ylim(y_start, pattern_y_width)
-
-y_ticks = np.arange(y_start, pattern_y_width + 1, 5)
-y_labels = [f"{round(x*10)}" for x in y_ticks]
-ax.grid(axis='y', linestyle='-', color='white', alpha=1)
-ax.set_yticks(y_ticks)
-ax.set_yticklabels(y_labels)
-ax.xaxis.set_major_locator(MultipleLocator(base=10))
-ax.set_xlabel("Offset [mm]")
-ax.set_ylabel("Width [μm]")
-for key, spine in ax.spines.items():
-    spine.set_visible(False)
-# ax.spines['top'].set_linewidth(1)
-# ax.spines['right'].set_linewidth(1)
-# ax.spines['bottom'].set_linewidth(1)
-# ax.spines['left'].set_linewidth(1)
-fix_dimensions(fig, ax, pix_per_mm)
-#print(fig.get_size_inches()*25.4)
-#print(fig.get_dpi())
-print("Creating jittertest old")
-plt.savefig("jittertestold.svg",  bbox_inches='tight', dpi=fig.get_dpi(), pad_inches=0)
-
-
-## Creates a fan of lines
-##
-## 
-
-final_linewidth = 0.300 # mm
-linewidth_start = 0.05  # mm
-pattern_radius = 30     # mm
-
-# Calculate the coordinates of the polygon's corners
-triangle_vertices = np.array([[0, 0], [-final_linewidth/2, pattern_radius], [final_linewidth/2, pattern_radius]])
-
-# Create the figure and axes
-fig, ax = plt.subplots()
-ax.set_aspect('equal') #Ensure the triangle isn't distorted
-
-# Function to create and add a rotated triangle
-def add_rotated_triangle(ax, vertices, angle, color='black'):
+class LaserCalibrationGen:
     """
-    Adds a rotated triangle to the given axes.
+    Generates SVG calibration patterns for laser scanning systems.
 
-    Parameters:
-        ax (matplotlib.axes.Axes): The axes to add the triangle to.
-        vertices (numpy.ndarray): The vertices of the triangle.
-        angle (float): The rotation angle in radians.
-        color (str, optional): The color of the triangle. Defaults to 'black'.
+    This class creates precise vector graphics for testing galvanometer
+    or polygon mirror scanners, including:
+    1. Fan Test (Radial resolution and focus)
+    2. Wedge Jitter Test (Traditional vertical jitter test)
+    3. Combined Grid Test (Simultaneous X-axis jitter and Y-axis cross-scan)
     """
-    # Create a rotation matrix using Affine2D
-    rotation_matrix = Affine2D().rotate(angle)
 
-    # Apply the rotation to the triangle vertices
-    rotated_vertices = rotation_matrix.transform(vertices)
+    def __init__(self, output_dir: Optional[str] = None, pix_per_mm: int = 200):
+        """
+        Initialize the generator.
 
-    # Create a Polygon patch with the rotated vertices
-    triangle = Polygon(rotated_vertices, closed=True, facecolor=color, edgecolor=None)
-    ax.add_patch(triangle)
+        Args:
+            output_dir (str, optional): Directory to save generated SVGs.
+                                      Defaults to the script's directory.
+            pix_per_mm (int): Resolution of the internal rasterization for calculation
+                              (does not affect vector output precision). Defaults to 200.
+        """
+        # Determine output directory
+        if output_dir:
+            self.script_directory = output_dir
+        else:
+            self.script_directory = os.path.dirname(os.path.abspath(__file__))
 
-angle = np.arctan(final_linewidth/(pattern_radius*2))*2
-triangles = int((0.5*np.pi)/(angle*2)+1)
+        # Ensure directory exists
+        os.makedirs(self.script_directory, exist_ok=True)
 
-for i in range(1, triangles):
-    add_rotated_triangle(ax, triangle_vertices, -2*i*angle)
+        self.pix_per_mm = pix_per_mm
+        self.setup_style()
 
-ax.set_xlim(0, pattern_radius)  
-ax.set_ylim(0, pattern_radius)  
+        logger.info(f"Initialized. Results will be saved to: {self.script_directory}")
+        logger.info(f"Resolution set to: {self.pix_per_mm} pixels/mm")
+
+    def setup_style(self):
+        """Sets up the matplotlib style for technical drawings."""
+        text_size = 4.0  # mm (font height)
+        tick_size = 0.2  # mm
+
+        # Convert mm to typographic points (1 inch = 25.4 mm = 72 points)
+        mm_to_points = 72 / 25.4
+        self.points_text = text_size * mm_to_points
+        self.points_ticks = tick_size * mm_to_points
+
+        plt.rcParams.update(
+            {
+                "font.family": "sans-serif",
+                "font.size": self.points_text,
+                "xtick.major.size": self.points_ticks,
+                "ytick.major.size": self.points_ticks,
+                "xtick.minor.size": self.points_ticks,
+                "ytick.minor.size": self.points_ticks,
+                "grid.linewidth": self.points_ticks,
+                "lines.linewidth": 0.5,
+            }
+        )
+
+    def _save_figure_exact_size(self, fig, ax, filename: str):
+        """
+        Resizes the figure so that 1 unit in the plot equals exactly 1 mm in reality,
+        then saves it to filename.
+
+        This method calculates the current display PPI and resizes the figure content
+        to match the target physical dimensions defined by the axes data. It then
+        saves the file with `bbox_inches='tight'` and a small pad to include external labels.
+
+        Args:
+            fig (matplotlib.figure.Figure): The figure object.
+            ax (matplotlib.axes.Axes): The axes object containing the plot data.
+            filename (str): The output filename (e.g., 'test.svg').
+        """
+        try:
+            # 1. Setup temporary DPI for calculation
+            calc_dpi = 100
+            fig.set_dpi(calc_dpi)
+            fig.canvas.draw()
+
+            # 2. Get current pixels per unit
+            p0 = ax.transData.transform((0, 0))
+            p1 = ax.transData.transform((1, 1))
+
+            current_x_pix_per_unit = abs(p1[0] - p0[0])
+
+            # 3. Calculate Scale
+            # We want 1 unit = 1 mm = 1/25.4 inches.
+            scale_x = (1 / 25.4) / (current_x_pix_per_unit / calc_dpi)
+
+            # 4. Apply Scaling
+            curr_w, curr_h = fig.get_size_inches()
+            # We assume square pixels (x scale == y scale)
+            fig.set_size_inches(curr_w * scale_x, curr_h * scale_x)
+
+            final_dpi = round(self.pix_per_mm * 25.4)
+            fig.set_dpi(final_dpi)
+
+            # 5. Verification
+            fig.canvas.draw()
+            p0_new = ax.transData.transform((0, 0))
+            p1_new = ax.transData.transform((1, 1))
+            new_x_pix = abs(p1_new[0] - p0_new[0])
+
+            target_pix_per_unit = final_dpi / 25.4
+
+            # Verify scaling accuracy
+            if abs(new_x_pix - target_pix_per_unit) > 1.0:
+                logger.warning(
+                    f"Scale mismatch in {filename}! "
+                    f"Expected {target_pix_per_unit:.1f} px/mm, got {new_x_pix:.1f} px/mm"
+                )
+
+            # 6. Save
+            # Calculate full image size including labels
+            renderer = fig.canvas.get_renderer()
+            bbox = fig.get_tightbbox(renderer)
+
+            full_w_mm = bbox.width * 25.4
+            full_h_mm = bbox.height * 25.4
+
+            output_path = os.path.join(self.script_directory, filename)
+            logger.info(
+                f"Saving {filename} (Image Size: {full_w_mm:.1f}x{full_h_mm:.1f}mm)..."
+            )
+            plt.savefig(output_path, bbox_inches="tight", dpi=final_dpi, pad_inches=0)
+
+        except Exception as e:
+            logger.error(f"Failed to save {filename}: {e}")
+            raise
+        finally:
+            plt.close(fig)
+
+    def _clean_axes(self, ax, x_label: str, y_label: str):
+        """
+        Removes spines (borders) and adds standardized axis labels.
+
+        Args:
+            ax (matplotlib.axes.Axes): The axes to clean.
+            x_label (str): Label for the X-axis.
+            y_label (str): Label for the Y-axis.
+        """
+        ax.set_xlabel(x_label)
+        ax.set_ylabel(y_label)
+        for key, spine in ax.spines.items():
+            spine.set_visible(False)
+
+    def generate_fan_test(self):
+        """
+        Generates a radial 'Fan' test pattern.
+
+        This pattern consists of triangles rotated around a center point to form
+        a starburst shape. It is useful for checking resolution at varying angles
+        and determining the minimum resolvable feature size (inner circle limit).
+        """
+        logger.info("Generating Fan Test...")
+        final_linewidth = 0.300  # mm (max width)
+        linewidth_start = 0.05  # mm (min width at center)
+        pattern_radius = 30  # mm
+
+        # Triangle definition
+        triangle_vertices = np.array(
+            [
+                [0, 0],
+                [-final_linewidth / 2, pattern_radius],
+                [final_linewidth / 2, pattern_radius],
+            ]
+        )
+
+        fig, ax = plt.subplots()
+        ax.set_aspect("equal")
+
+        wedge_angle = np.arctan(final_linewidth / (pattern_radius * 2)) * 2
+        num_triangles = int((0.5 * np.pi) / (wedge_angle * 2) + 1)
+
+        for i in range(1, num_triangles):
+            angle = -2 * i * wedge_angle
+            t = Affine2D().rotate(angle)
+            rotated_verts = t.transform(triangle_vertices)
+            ax.add_patch(
+                Polygon(rotated_verts, closed=True, facecolor="black", edgecolor=None)
+            )
+
+        ax.set_xlim(0, pattern_radius)
+        ax.set_ylim(0, pattern_radius)
+
+        r_start = (pattern_radius / final_linewidth) * linewidth_start
+        ax.add_patch(
+            Circle((0, 0), r_start, facecolor="white", edgecolor="white", zorder=10)
+        )
+
+        ticks = np.arange(0, pattern_radius + 1, 10)
+        labels = [f"{round(x * 10)}" for x in ticks]
+
+        for tick in np.arange(0, pattern_radius + 1, 5):
+            ax.add_patch(
+                Circle(
+                    (0, 0), tick, fill=False, edgecolor="white", linewidth=0.5, zorder=5
+                )
+            )
+
+        ax.set_xticks(ticks)
+        ax.set_xticklabels(labels)
+        ax.set_yticks(ticks)
+        ax.set_yticklabels(labels)
+
+        self._clean_axes(ax, "Radius [mm]", "Radius [mm]")
+        self._save_figure_exact_size(fig, ax, "fantest.svg")
+
+    def generate_wedge_jitter_test(self):
+        """
+        Generates a traditional wedge-based jitter test.
+
+        Creates a series of vertical triangular strips. Inconsistencies in the
+        width of these strips during printing indicate timing jitter in the
+        fast-scan axis.
+        """
+        logger.info("Generating Wedge Jitter Test...")
+        pattern_x = 25.0
+        pattern_y = 30.0
+        max_linewidth = 0.300
+        min_linewidth = 0.05
+
+        fig, ax = plt.subplots()
+
+        num_triangles = int(pattern_x // max_linewidth)
+
+        for i in range(1, num_triangles):
+            cx = i * max_linewidth
+            if i % 2 == 0:
+                verts = np.array(
+                    [
+                        [cx - max_linewidth / 2, pattern_y],
+                        [cx, 0],
+                        [cx + max_linewidth / 2, pattern_y],
+                    ]
+                )
+                ax.add_patch(
+                    Polygon(verts, closed=True, facecolor="black", edgecolor="none")
+                )
+
+        y_start = (pattern_y / max_linewidth) * min_linewidth
+
+        ax.set_xlim(0, pattern_x)
+        ax.set_ylim(y_start, pattern_y)
+
+        y_ticks = np.arange(y_start, pattern_y + 1, 5)
+        ax.set_yticks(y_ticks)
+        ax.grid(axis="y", color="white", linestyle="-")
+
+        self._clean_axes(ax, "Offset [mm]", "Height [mm]")
+        self._save_figure_exact_size(fig, ax, "jitter_wedge.svg")
+
+    def generate_combined_test(self):
+        """
+        Generates a Combined Grid Test for Jitter and Cross-Scan errors.
+
+        This creates a single square grid (default 30x30mm) containing:
+        1. Vertical Lines (Columns): Varying thickness to test X-axis (fast) jitter.
+        2. Horizontal Lines (Rows): Varying thickness to test Y-axis (slow) cross-scan error.
+
+        Labels are placed on the outside of the grid, and a minimal layout
+        is used (no grid lines, only boundary ticks) to prevent visual clutter.
+        """
+        logger.info("Generating Combined Grid Test...")
+        box_size = 30  # mm (Square size)
+        cell_size = 5  # mm (Size of each thickness zone)
+        linewidth_start = 0.025  # mm
+        stepsize = 0.025  # mm
+        lines_per_group = 10  # Number of lines per grid cell
+
+        fig, ax = plt.subplots()
+
+        def get_thickness(n):
+            return n * stepsize + linewidth_start
+
+        num_steps = int(box_size // cell_size)
+        tick_locs = []
+        tick_labels = []
+
+        for i in range(num_steps):
+            thickness = get_thickness(i)
+            pos_start = i * cell_size
+            tick_locs.append(pos_start + cell_size / 2)
+            tick_labels.append(f"{thickness * 1000:.0f}")
+
+            # Vertical Lines (Fast Axis)
+            group_width = lines_per_group * (thickness * 2) - thickness
+            center_offset_x = (cell_size - group_width) / 2
+            start_x = pos_start + center_offset_x
+
+            for line_idx in range(lines_per_group):
+                rect_x = start_x + (thickness * 2 * line_idx)
+                rect = Rectangle(
+                    (rect_x, 0),
+                    thickness,
+                    box_size,
+                    linewidth=0,
+                    edgecolor="none",
+                    facecolor="black",
+                    alpha=1,
+                )
+                ax.add_patch(rect)
+
+            # Horizontal Lines (Slow Axis)
+            group_height = lines_per_group * (thickness * 2) - thickness
+            center_offset_y = (cell_size - group_height) / 2
+            start_y = pos_start + center_offset_y
+
+            for line_idx in range(lines_per_group):
+                rect_y = start_y + (thickness * 2 * line_idx)
+                rect = Rectangle(
+                    (0, rect_y),
+                    box_size,
+                    thickness,
+                    linewidth=0,
+                    edgecolor="none",
+                    facecolor="black",
+                    alpha=1,
+                )
+                ax.add_patch(rect)
+
+        ax.set_xticks(tick_locs)
+        ax.set_xticklabels(tick_labels, rotation=-90)
+        ax.set_yticks(tick_locs)
+        ax.set_yticklabels(tick_labels)
+
+        ax.set_xlabel("fast axis")
+        ax.set_ylabel("slow axis")
+        ax.set_title("linewidth [μm]", loc="left", x=-0.2)
+
+        ax.set_xlim(0, box_size)
+        ax.set_ylim(0, box_size)
+
+        for key, spine in ax.spines.items():
+            spine.set_visible(False)
+
+        ax.grid(False)
+        ax.tick_params(axis="both", which="major", length=5, width=1)
+        ax.tick_params(axis="both", which="minor", length=0)
+
+        self._save_figure_exact_size(fig, ax, "combined_grid_test.svg")
 
 
+if __name__ == "__main__":
+    try:
+        generator = LaserCalibrationGen()
 
-r_start = (pattern_radius/final_linewidth)*linewidth_start
-# remove lines smaller than 50 micron
-circle = Circle((0, 0), r_start, facecolor='white', alpha=1, edgecolor='white')
+        # Generate all patterns
+        generator.generate_wedge_jitter_test()
+        generator.generate_fan_test()
+        generator.generate_combined_test()
 
-# Add the circle to the axes
-ax.add_patch(circle)
+        logger.info("All patterns generated successfully.")
 
-xticks = np.arange(0, pattern_radius + 1, 10)
-xlabels = [f"{round(x*10)}" for x in xticks]
-yticks = np.arange(0, pattern_radius + 1, 5)
-ylabels = [f"{round(x*10)}" for x in yticks]
-ax.set_xticks(xticks)
-ax.set_xticklabels(xlabels)
-ax.set_yticks(yticks)
-ax.set_yticklabels(ylabels)
-label = "width [μm]"
-ax.set_xlabel(label)
-ax.set_ylabel(label)
-
-# add grid lines for ticks
-for tick in yticks:
-    circle = Circle((0, 0), tick, fill=False, edgecolor='white', linewidth=1)
-    ax.add_patch(circle)
-
-for key, spine in ax.spines.items():
-    spine.set_visible(False)
-
-fix_dimensions(fig, ax, pix_per_mm)
-print("Creating fantest")
-plt.savefig("fantest.svg",  bbox_inches='tight', dpi=fig.get_dpi(), pad_inches=0)
-
-
-## Creates a cross scan error test
-##
-##
-pattern_x_width = 25       # mm
-final_linewidth = 0.300    # mm 
-linewidth_start = 0.025    # mm
-stepsize = 0.025
-height_line_group = 5      # mm
-lines_per_group = 10       # number
-
-plt.rcParams.update({'font.size': points_text,
-                     'xtick.major.size': points_ticks,    # Size of major tick marks in points
-                     'ytick.major.size': points_ticks,
-                     'xtick.minor.size': points_ticks,    # Size of minor tick marks in points
-                     'ytick.minor.size': points_ticks,
-                     'grid.linewidth': points_ticks})   # Width of grid lines in points 
-
-
-
-def thicknes_line(n):
-    return n*stepsize+linewidth_start
-
-
-
-fig, ax = plt.subplots()
-
-#fix_dimensions(fig, ax, pix_per_mm)
-y_ticks = np.arange(5, pattern_y_width + 1, height_line_group)
-y_labels = [f"{thicknes_line(idx)*1000:.0f}" for idx, _ in enumerate(y_ticks)]
-
-assert lines_per_group <  int(height_line_group // thicknes_line(len(y_ticks)))
-
-for idx, pos_height in enumerate(y_ticks):
-    thickness = thicknes_line(idx)
-    start_height = pos_height - lines_per_group * thickness
-    for line in range(lines_per_group):
-       rect = Rectangle((0, start_height+thickness*2*line), pattern_x_width, thickness, linewidth=0, edgecolor='none', facecolor='black')
-       # Add the patch to the axes
-       ax.add_patch(rect)
-
-ax.set_yticks(y_ticks)
-ax.set_yticklabels(y_labels)
-ax.xaxis.set_major_locator(MultipleLocator(base=10))
-ax.set_xlabel("Offset [mm]")
-ax.set_ylabel("Width [μm]")
-for key, spine in ax.spines.items():
-    spine.set_visible(False)
-plt.xlim(0, pattern_x_width)  
-plt.ylim(0, pattern_y_width+0.5*height_line_group)
-fix_dimensions(fig, ax, pix_per_mm)
-print("Creating crossscantest")
-plt.savefig("crosscantest.svg",  bbox_inches='tight', dpi=fig.get_dpi(), pad_inches=0)
-
-
-## Creates a jitter test, similar to the one above
-##
-##
-pattern_x_width = 25       # mm
-final_linewidth = 0.300    # mm 
-linewidth_start = 0.025    # mm
-stepsize = 0.025
-width_line_group = 5      # mm
-lines_per_group = 10       # number
-
-plt.rcParams.update({'font.size': points_text,
-                     'xtick.major.size': points_ticks,    # Size of major tick marks in points
-                     'ytick.major.size': points_ticks,
-                     'xtick.minor.size': points_ticks,    # Size of minor tick marks in points
-                     'ytick.minor.size': points_ticks,
-                     'grid.linewidth': points_ticks})   # Width of grid lines in points 
-
-
-
-def thicknes_line(n):
-    return n*stepsize+linewidth_start
-
-
-
-fig, ax = plt.subplots()
-
-#fix_dimensions(fig, ax, pix_per_mm)
-x_ticks = np.arange(5, pattern_x_width + 1, width_line_group)
-x_labels = [f"{thicknes_line(idx)*1000:.0f}" for idx, _ in enumerate(x_ticks)]
-
-assert lines_per_group <  int(width_line_group // thicknes_line(len(x_ticks)))
-
-for idx, pos_width in enumerate(x_ticks):
-    thickness = thicknes_line(idx)
-    start_width = pos_width - lines_per_group * thickness
-    for line in range(lines_per_group):
-       rect = Rectangle((start_width+thickness*2*line, 0), thickness, pattern_y_width, linewidth=0, edgecolor='none', facecolor='black')
-       # Add the patch to the axes
-       ax.add_patch(rect)
-
-ax.set_xticks(x_ticks)
-ax.set_xticklabels(x_labels)
-ax.yaxis.set_major_locator(MultipleLocator(base=10))
-ax.set_xlabel("Width [μm]")
-ax.set_ylabel("Offset [mm]")
-for key, spine in ax.spines.items():
-    spine.set_visible(False)
-plt.xlim(0, pattern_x_width+0.5*height_line_group)  
-plt.ylim(0, pattern_y_width)
-plt.xticks(rotation=-90)
-fix_dimensions(fig, ax, pix_per_mm)
-print("Creating jittertest")
-plt.savefig("jittertest.svg",  bbox_inches='tight', dpi=fig.get_dpi(), pad_inches=0)
+    except Exception as e:
+        logger.critical(f"An unexpected error occurred: {e}")
+        sys.exit(1)

@@ -290,7 +290,7 @@ class Interpolator:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     # PCB / photopaper stepsperline single channel, current 130, 2x per line
-    fname = "jittertest"
+    fname = "combined_grid_test"
     ctime = time()
     interpolator = Interpolator()
     logging.info(f"Interpolator {time() - ctime:.2f} seconds")
