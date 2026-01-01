@@ -20,6 +20,9 @@ src/hexastorm/interpolator/debug/*
 test/FPGAG/images*
 src/FPGAG/interpolator/debug*
 
+# VScode counter
+.VSCodeCounter/*
+
 
 # other
 # Byte-compiled / optimized / DLL files
