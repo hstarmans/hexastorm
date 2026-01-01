@@ -1,9 +1,11 @@
+import logging
 import math
 from pathlib import Path
 from io import BytesIO
 import struct
 import zlib
 from time import time
+from typing import Union, Tuple, Optional
 
 import numpy as np
 from cairosvg import svg2png
@@ -106,7 +108,6 @@ class Interpolator:
 
         self.current_dir = Path(__file__).parent.resolve()
         self.debug_folder = self.current_dir / "debug"
-        self.debug_folder.mkdir(exist_ok=True)  # Creates dir if missing
 
     def _init_parameters(self, stepsperline: int = 1):
         """
@@ -245,7 +246,7 @@ class Interpolator:
         x_size, y_size = [i * self.params["samplegridsize"] for i in img_array.shape]
         if (x_size > self.params["pltfxsize"]) or (y_size > self.params["pltfysize"]):
             raise Exception("Object does not fit on platform")
-        print(f"Sample size is {x_size:.2f} mm by {y_size:.2f} mm")
+        logging.info(f"Sample size is {x_size:.2f} mm by {y_size:.2f} mm")
         # NOTE: this is only a crude approximation
         self.params["samplexsize"] = x_size
         self.params["sampleysize"] = y_size
@@ -283,8 +284,8 @@ class Interpolator:
         self.params["facetsinlane"] = facets_inlane
         self.params["lanewidth"] = lanewidth
 
-        print(f"The lanewidth is {lanewidth:.2f} mm")
-        print(f"The facets in lane are {facets_inlane}")
+        logging.info(f"The lanewidth is {lanewidth:.2f} mm")
+        logging.info(f"The facets in lane are {facets_inlane}")
 
         # 2. Base Facet Generation (Single scanline)
         # We pass the entire range of pixels to the JIT functions at once
@@ -339,8 +340,12 @@ class Interpolator:
         return ids
 
     def patternfile(
-        self, url, pixelsize=0.3527777778, test=False, positiveresist=False
-    ):
+        self,
+        url: Union[str, Path],
+        pixelsize: float = 0.3527777778,
+        test: bool = False,
+        positiveresist: bool = False,
+    ) -> np.ndarray:
         """returns the pattern file as numpy array
 
         Converts image at URL to pattern for laser scanner
@@ -356,6 +361,8 @@ class Interpolator:
         if file_path.suffix == ".svg":
             pil = self.svgtopil(file_path)
             if test:  # kost tijd
+                # Ensure debug folder exists if we are writing debug images
+                self.debug_folder.mkdir(parents=True, exist_ok=True)
                 pil.save(self.debug_folder / "debug.png")
         elif file_path.suffix == ".ps":
             pil = self.pstopil(file_path)
@@ -364,14 +371,15 @@ class Interpolator:
         layerarr = self.piltoarray(pil).astype(np.uint8)
 
         if test:
+            self.debug_folder.mkdir(parents=True, exist_ok=True)
             img = Image.fromarray(layerarr.astype(np.uint8) * 255)
             img.save(self.debug_folder / "nyquistcheck.png")
             layerarr = np.ones_like(layerarr)
-        print("Retrieved image")
-        print(f"Elapsed {time() - ctime:.2f} seconds")
+        logging.info("Retrieved image")
+        logging.info(f"Elapsed {time() - ctime:.2f} seconds")
         ids = self.createcoordinates()
-        print("Created coordinates for interpolation")
-        print(f"Elapsed {time() - ctime:.2f} seconds")
+        logging.info("Created coordinates for interpolation")
+        logging.info(f"Elapsed {time() - ctime:.2f} seconds")
 
         x_coords = ids[1]
         y_coords = ids[0]
@@ -392,8 +400,8 @@ class Interpolator:
         # Map coordinates: Note the (y, x) order for NumPy indexing!
         # layerarr[row, col] -> layerarr[y, x]
         ptrn[mask] = layerarr[y_coords[mask], x_coords[mask]]
-        print("Completed interpolation")
-        print(f"Elapsed {time() - ctime:.2f} seconds")
+        logging.info("Completed interpolation")
+        logging.info(f"Elapsed {time() - ctime:.2f} seconds")
         if ptrn.min() < 0 or ptrn.max() > 1:
             raise Exception("This is not a bit list")
         if not positiveresist:
@@ -489,7 +497,7 @@ class Interpolator:
         width = x_max - x_min + 1
         height = y_max - y_min + 1
 
-        print(f"Plotting Image: {width}x{height} pixels")
+        logging.info(f"Plotting Image: {width}x{height} pixels")
 
         # 7. Rasterize
         # Note: We index as [x, y]. In NumPy this maps X -> Rows, Y -> Cols.
@@ -506,19 +514,25 @@ class Interpolator:
         # Rotate 90 to match physical orientation (compensates for [x,y] indexing)
         img = img.rotate(90, expand=True)
 
+        self.debug_folder.mkdir(parents=True, exist_ok=True)
         save_path = self.debug_folder / f"{filename}.png"
         img.save(save_path)
-        print(f"Plot saved to {save_path}")
+        logging.info(f"Plot saved to {save_path}")
 
         return img
 
-    def readbin(self, filename="test.bin", mode="bytes"):
+    def readbin(
+        self, filename: Union[str, Path] = "test.bin", mode: str = "bytes"
+    ) -> Tuple[int, int, float, np.ndarray]:
         """reads a binary data file
 
         name  -- name of binary file with laser information
         mode  -- parquet, numpy, bytes
         """
-        file_path = self.debug_folder / filename
+        # Determine full path: support absolute paths for testing, default to debug folder
+        file_path = Path(filename)
+        if not file_path.is_absolute():
+            file_path = self.debug_folder / file_path
 
         # 1. Read and Decompress Entire File at Once
         # This is safe for desktop debugging (even 500MB is fine in RAM)
@@ -549,8 +563,8 @@ class Interpolator:
         if raw_payload.size != expected_size:
             # If size mismatches (e.g. partial write), try to salvage readable lines
             trunc_lines = raw_payload.size // (words_in_line * 9)
-            print(
-                f"Warning: File size mismatch. Expected {total_lines} lines, found {trunc_lines}."
+            logging.warning(
+                f"File size mismatch. Expected {total_lines} lines, found {trunc_lines}."
             )
             total_lines = trunc_lines
             raw_payload = raw_payload[: total_lines * words_in_line * 9]
@@ -590,12 +604,23 @@ class Interpolator:
         # Flatten to 1D array to match original interface
         return facets_in_lane, lanes, lanewidth, lines.flatten()
 
-    def writebin(self, pixeldata, filename="test.bin", compression_level=9):
+    def writebin(
+        self,
+        pixeldata: np.ndarray,
+        filename: Union[str, Path] = "test.bin",
+        compression_level: int = 9,
+    ) -> None:
         """
         Writes pixeldata to binary file with massive performance improvements.
         Inlines SPI chunking and vectorizes data processing.
         """
-        self.debug_folder.mkdir(parents=True, exist_ok=True)
+        # Determine output path: support absolute paths for testing, default to debug folder
+        out_path = Path(filename)
+        if not out_path.is_absolute():
+            out_path = self.debug_folder / out_path
+
+        # Ensure the actual parent directory exists (whether it's debug or tmp)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
 
         # 1. Setup Parameters
         params = self.params
@@ -608,7 +633,7 @@ class Interpolator:
         try:
             expected_size = lanes * facets * bytes_in_line
             if pixeldata.size != expected_size:
-                print(f"Resizing data: {pixeldata.size} -> {expected_size}")
+                logging.info(f"Resizing data: {pixeldata.size} -> {expected_size}")
                 pixeldata.resize(expected_size, refcheck=False)
 
             grid = pixeldata.reshape(lanes, facets, bytes_in_line)
@@ -647,7 +672,6 @@ class Interpolator:
 
         # 4. Write Loop
         compressor = zlib.compressobj(level=compression_level)
-        out_path = self.debug_folder / filename
 
         # 1MB Buffer to minimize disk/compressor overhead
         IO_BUFFER_SIZE = 1024 * 1024
@@ -697,17 +721,15 @@ class Interpolator:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     # PCB / photopaper stepsperline single channel, current 130, 2x per line
     fname = "jittertest"
-    ctime = time()
     interpolator = Interpolator()
-    print(f"Interpolator {time() - ctime:.2f} seconds")
     dir_path = Path(__file__).parent.resolve()
     # postscript resolution test
 
     url = dir_path / "patterns" / f"{fname}.svg"
     ptrn = interpolator.patternfile(url)
-    print(f"Pattern {time() - ctime:.2f} seconds")
     # hexastorm.png pixelsize 0.035
     # url = dir_path / "test-patterns" / "hexastorm.png"
     # ptrn = interpolator.patternfile(url, pixelsize=0.035)

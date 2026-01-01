@@ -80,14 +80,11 @@ def test_roundtrip_integrity(interpolator, tmp_path):
 
     # 3. Write
     out_file = tmp_path / "test_roundtrip.bin"
-    # Gebruik .name omdat je writebin momenteel in de debug folder schrijft
-    # (Of pas writebin aan dat hij volledige paden pakt, zie eerdere discussie)
-    # Voor nu simuleren we de oude 'debug folder' logica:
-    interpolator.writebin(dummy_data, out_file.name)
+    interpolator.writebin(dummy_data, out_file)
 
     # 4. Read back
     # Let op: readbin verwacht alleen de bestandsnaam in debug folder
-    r_facets, r_lanes, r_width, r_data = interpolator.readbin(out_file.name)
+    r_facets, r_lanes, r_width, r_data = interpolator.readbin(out_file)
 
     # 5. Verify
     assert r_facets == facets
