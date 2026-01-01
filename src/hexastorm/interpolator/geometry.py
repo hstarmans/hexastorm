@@ -11,32 +11,48 @@ from hexastorm.config import PlatformConfig
 
 @jit(nopython=True, cache=True)
 def displacement(pixel: float, params: Dict[str, float]) -> float:
-    """returns the displacement for a given pixel
-
-    The x-axis is parallel to the scanline if the stage does not move.
-    It is assumed, the laser bundle traverses
-    in the negative direction and the prism motor
-    rotates counterclockwise.
-
-    pixel  --  the pixelnumber
-    params --  numba typed dictionary
     """
+    Calculates the transversal displacement of the laser beam caused by the rotating prism.
+
+    Physics Context:
+        The prism acts as a rotating "Transparent Parallel Plate" .
+        As the angle of incidence (I) changes with rotation, the beam is shifted laterally.
+
+        The formula implemented corresponds to the transversal displacement (tau)
+        described on https://reprap.org/wiki/Open_hardware_fast_high_resolution_LASER:
+        tau = T * sin(I) * (1 - sqrt((1 - sin(I)^2) / (n^2 - sin(I)^2)))
+        Where T = 2 * inradius (thickness of the prism).
+
+    Args:
+        pixel: The current pixel index in the scan line (proxy for time/angle).
+        params: Numba typed dictionary containing system geometry (FACETS, n, inradius, etc).
+
+    Returns:
+        float: The physical displacement in millimeters relative to the optical axis.
+    """
+    # For a regular polygon, the scan angle range is limited by the facet geometry.
     # interiorangle = 180-360/self.n
     # max_angle = 180-90-0.5*interiorangle
-    max_angle = 180 / params["FACETS"]
+    I_max = 180 / params["FACETS"]
+    # Calculate how many pixels fit on one facet face based on laser frequency and RPM.
     pixelsfacet = round(
         params["LASER_HZ"] / (params["rotationfrequency"] * params["FACETS"])
     )
-    angle = np.radians(-2 * max_angle * (pixel / pixelsfacet) + max_angle)
+    # Convert the current pixel number to an Angle of Incidence (I) in radians.
+    # The scan moves from -I_max to +I_max across the facet.
+    angle = np.radians(-2 * I_max * (pixel / pixelsfacet) + I_max)
 
-    # Pre-calculate sin(angle) for readability and slight perf
+    # Pre-calculate trigonometric terms for the Snell's Law / Displacement derivation
     sin_angle = np.sin(angle)
     sin_angle_sq = np.power(sin_angle, 2)
     n_sq = np.power(params["n"], 2)
 
+    # T (Thickness) = 2 * inradius
+    thickness = params["inradius"] * 2
+
+    # Calculate transversal displacement (tau)
     disp = (
-        params["inradius"]
-        * 2
+        thickness
         * sin_angle
         * (1 - np.power((1 - sin_angle_sq) / (n_sq - sin_angle_sq), 0.5))
     )
@@ -45,16 +61,25 @@ def displacement(pixel: float, params: Dict[str, float]) -> float:
 
 @jit(nopython=True, cache=True)
 def fxpos(pixel: float, params: Dict[str, float], xstart: float = 0) -> float:
-    """returns the laserdiode x-position in pixels
+    """
+    Returns the laser diode X-position (Transversal / Scan Direction) in pixels.
 
-    The x-axis is parallel to the scanline if the stage does not move.
-    pixel   -- the pixelnumber in the line
-    xstart  -- the x-start position [mm], typically
-                your xstart is larger than 0 as the displacement
-                can be negative
+    The X-axis typically represents the direction the laser scans across the sample.
+    If tiltangle (alpha) is 90 degrees (Hexastorm standard), sin(90)=1, so
+    X receives 100% of the prism displacement. AMSystems/LDIsystems/KleoLDI use
+    different angles.
+
+    Args:
+        pixel: The pixel index.
+        params: System parameters.
+        xstart: Offset in mm.
     """
     line_pixel = params["startpixel"] + pixel % params["bitsinscanline"]
+
+    # Project displacement onto X axis based on polygon tilt
     xpos = np.sin(params["tiltangle"]) * displacement(line_pixel, params) + xstart
+
+    # Convert mm to grid pixels
     return xpos / params["samplegridsize"]
 
 
@@ -63,22 +88,27 @@ def fypos(
     pixel: float, params: Dict[str, float], direction: bool, ystart: float = 0
 ) -> float:
     """
-    returns the laserdiode y-position in pixels
+    Returns the laser diode Y-position (Longitudinal / Stage Direction) in pixels.
 
-    The y-axis is orthogonal to the scanline if the stage does not move,
-    and parallel to the stage movement.
-    pixel      -- the pixelnumber in the line
-    direction  -- True is +, False is -
-    ystart     -- the y-start position [mm]
+    The Y-axis is the "slow" axis parallel to the stage movement.
+    The position is a sum of two components:
+    1. Projection of Prism Displacement: If tiltangle != 90, some scan motion bleeds into Y.
+    2. Stage Movement: The continuous motion of the substrate (v = stagespeed).
+
+    Args:
+        pixel: The pixel index.
+        params: System parameters.
+        direction: Boolean indicating scan direction (Zig-Zag scanning).
+        ystart: Y-offset in mm.
     """
     line_pixel = params["startpixel"] + pixel % params["bitsinscanline"]
 
-    # Calculate base Y position from prism rotation
-    # Note: displacement is calculated same for fwd/bwd, but scanning direction differs?
-    # Original logic preserved:
+    # 1. Optical Component: Projection of displacement onto Y (usually 0 if tilt=90)
     base_y = -np.cos(params["tiltangle"]) * displacement(line_pixel, params)
 
-    # Calculate stage movement component
+    # 2. Mechanical Component: Stage movement over time
+    # time = pixel / LASER_HZ
+    # distance = time * stagespeed
     stage_component = (line_pixel / params["LASER_HZ"]) * params["stagespeed"] + ystart
 
     if direction:
@@ -94,7 +124,16 @@ def fypos(
 
 def get_default_params(stepsperline: int = 1, config: PlatformConfig = None) -> Any:
     """
-    Creates the Numba-compatible typed dictionary with all geometry parameters.
+    Initializes the system parameters based on the physical configuration.
+
+    Connects board settings (RPM, Laser Hz) to the optical model variables:
+    - r (inradius): 15mm
+    - (FACETS): Number of polygon vertices
+    - n: Refractive index (Quartz ~1.49)
+    - alpha (tiltangle): Polygon tilt angle
+
+    Returns:
+        A Numba-compatible typed dictionary for high-performance JIT access.
     """
     if config is None:
         config = PlatformConfig(test=False)
@@ -107,35 +146,33 @@ def get_default_params(stepsperline: int = 1, config: PlatformConfig = None) -> 
 
     py_dict = {
         # angle [radians]
-        "tiltangle": np.radians(90),
+        "tiltangle": np.radians(90),  # Static polygonal tilt angle
         "LASER_HZ": laz_tim["laser_hz"],  # Hz
-        # rotation frequency polygon [Hz]
+        # Polygon rotation frequency (Hz)
         "rotationfrequency": laz_tim["rpm"] / 60,
-        # number of facets
+        # Number of vertices/facets on the polygon, must be even
         "FACETS": laz_tim["facets"],
-        # inradius polygon [mm]
+        # r: Inradius of the polygon [mm] (T = 2r)
         "inradius": 15,
-        # refractive index
+        # Refractive index of the prism material (e.g. Quartz
         "n": 1.49,
-        # platform size scanning direction [mm]
+        # Platform dimensions [mm]
         "pltfxsize": 200,
-        # platform size stacking direction [mm]
         "pltfysize": 200,
-        # sample size scanning direction [mm]
+        # Sample dimensions (calculated dynamically from image)
         "samplexsize": 0.0,
-        # sample size stacking direction [mm]
         "sampleysize": 0.0,
-        # height/width of the sample grid [mm]
+        # Optical resolution / Grid size [mm]
         "samplegridsize": 0.01,
         "stepsperline": float(stepsperline),
-        "facetsinlane": 0.0,  # set during calculation
-        # mm/s
+        "facetsinlane": 0.0,
+        # Stage Speed [mm/s]: Derived from RPM and Facets to ensure correct aspect ratio
         "stagespeed": (
             (stepsperline / mtr_cfg["steps_mm"][mtr_cfg["orth2lsrline"]])
             * (laz_tim["rpm"] / 60)
             * laz_tim["facets"]
         ),
-        # first calculates all bits in scanline and then the start
+        # Start Pixel calculation based on scanline duty cycle
         "startpixel": (
             (laz_tim["scanline_length"] / (laz_tim["end_frac"] - laz_tim["start_frac"]))
             * laz_tim["start_frac"]
@@ -147,7 +184,7 @@ def get_default_params(stepsperline: int = 1, config: PlatformConfig = None) -> 
 
     dct.update(py_dict)
 
-    # Calculate initial lanewidth (pure geometry)
+    # Initial lanewidth calculation used for lane planning (zig-zag scanning)
     dct["lanewidth"] = (fxpos(0, dct) - fxpos(dct["bitsinscanline"] - 1, dct)) * dct[
         "samplegridsize"
     ]
@@ -156,7 +193,8 @@ def get_default_params(stepsperline: int = 1, config: PlatformConfig = None) -> 
 
 
 def downsample_params(params: Any) -> Any:
-    """Adjusts parameters if downsamplefactor > 1"""
+    """Adjusts timing parameters if software downsampling is active."""
+    # This was used in the beaglebone era, so probably not needed anymore.
     if params["downsamplefactor"] > 1:
         factor = params["downsamplefactor"]
         # Update specific keys
@@ -169,7 +207,7 @@ def downsample_params(params: Any) -> Any:
 
 
 def calculate_lanewidth(params) -> float:
-    """Helper to calculate lane width in mm based on current params"""
+    """Calculates the physical width [mm] of a single scan lane (one sweep)."""
     return (fxpos(0, params) - fxpos(params["bitsinscanline"] - 1, params)) * params[
         "samplegridsize"
     ]
@@ -177,23 +215,32 @@ def calculate_lanewidth(params) -> float:
 
 def calculate_coordinates(params: Any) -> Tuple[np.ndarray, Dict[str, float]]:
     """
-    Calculates the X, Y position of the laser diode for each pixel.
+    Generates the lookup coordinate grid for the entire exposure area.
+
+    This function maps every "tick" of the laser clock to a physical X,Y location
+    on the substrate, accounting for:
+    1. Prism rotation (Fast Axis / X)
+    2. Stage movement (Slow Axis / Y)
+    3. Multi-lane stitching (if sample > single scan width)
 
     Returns:
-        ids: (2, N) numpy array of coordinates [y, x]
-        derived_stats: Dictionary containing calculated 'lanewidth' and 'facetsinlane'
+        ids: (2, N) Array of [Y_pixel, X_pixel] coordinates.
+        derived_stats: Dictionary of calculated scan properties.
     """
     if not params["sampleysize"] or not params["samplexsize"]:
         raise ValueError("Sampleysize or samplexsize are set to zero.")
 
-    # Check if line positioning is valid
+    # Validation: Ensure scan direction is consistent (Start < End physically)
     if fxpos(0, params) < 0 or fxpos(params["bitsinscanline"] - 1, params) > 0:
         raise ValueError("Line seems ill positioned: fxpos(0) < 0 or end > 0")
 
-    # 1. Basic Geometry Calculation
+    # 1. Geometry Planning
     lanewidth = calculate_lanewidth(params)
 
+    # Calculate required lanes to cover X dimension
     lanes = math.ceil(params["samplexsize"] / lanewidth)
+
+    # Calculate required facets (sweeps) to cover Y dimension
     facets_inlane = math.ceil(
         params["rotationfrequency"]
         * params["FACETS"]
@@ -203,67 +250,61 @@ def calculate_coordinates(params: Any) -> Tuple[np.ndarray, Dict[str, float]]:
     logging.info(f"The lanewidth is {lanewidth:.2f} mm")
     logging.info(f"The facets in lane are {facets_inlane}")
 
-    # 2. Base Facet Generation (Single scanline)
-    # We pass the entire range of pixels to the JIT functions at once
+    # 2. Base Facet Generation (Simulating a single polygon face sweep)
     pixel_indices = np.arange(int(params["bitsinscanline"]))
 
-    # Calculate xstart (mm to pixel conversion)
+    # Center the scanline relative to the lane start
     xstart_val = abs(
         fxpos(int(params["bitsinscanline"]) - 1, params) * params["samplegridsize"]
     )
 
-    # Numba JIT calls
+    # Calculate coordinates for one standard sweep
     xpos_facet = fxpos(pixel_indices, params, xstart_val).astype(np.int16)
     ypos_fwd_facet = fypos(pixel_indices, params, True)
     ypos_bwd_facet = fypos(pixel_indices, params, False)
 
-    # 3. Facet Offsets
-    # Create an array of offsets for every facet in a lane
+    # Lane Expansion (Stitching facets together in Y)
     facet_idx = np.arange(facets_inlane).reshape(-1, 1)  # Shape (facets, 1)
 
-    # Shift factor: movement of stage per facet
+    # Calculate Y-shift per facet (Stage movement during one facet rotation)
+    # Shift = Speed / (Facets * RPM * GridSize)
     y_shift_per_facet = (params["stagespeed"]) / (
         params["FACETS"] * params["rotationfrequency"] * params["samplegridsize"]
     )
 
-    # Broadcast (facets, 1) + (1, pixels) -> (facets, pixels)
+    # Generate Y positions for a full lane (Sequence of facets)
     y_fwd_lane = (ypos_fwd_facet + (facet_idx * y_shift_per_facet)).flatten()
     y_bwd_lane = (
         ypos_bwd_facet + ((facets_inlane - facet_idx) * y_shift_per_facet)
     ).flatten()
+    # X positions repeat for every facet in the lane
     x_lane_base = np.tile(xpos_facet, facets_inlane)
 
-    # 4. Lane Offsets (Broadcasting)
-    lane_idx = np.arange(lanes).reshape(-1, 1)  # Shape (lanes, 1)
+    # 4. Multi-Lane Generation (Stitching lanes together in X)
+    lane_idx = np.arange(lanes).reshape(-1, 1)
 
-    # Calculate pure pixel width of a lane for offset calculation
-    # Note: Re-calculating using fxpos to ensure consistency
+    # Width of a lane in pixels (for offsetting subsequent lanes)
     x_width_mm = fxpos(0, params) - fxpos(params["bitsinscanline"] - 1, params)
-    # x_width_pixel is effectively lane width in derived pixels?
-    # The original code did: x_width_pixel = ...
-    # Wait, the original code used 'x_width_pixel' but passed it to x_offsets
-    # It seems to be simply params['lanewidth'] / gridsize, but let's stick to the math:
-    x_width_val = (
-        x_width_mm  # This is actually in "normalized units" from fxpos return?
-    )
-    # Checking fxpos: returns xpos / samplegridsize. So it IS pixels.
+    x_width_val = x_width_mm  # fxpos returns units already scaled to samplegridsize? No, check fxpos return.
+    # fxpos return: xpos / params["samplegridsize"]. It returns PIXELS.
+    # Therefore x_width_mm above (diff of fxpos) IS in pixels.
 
     x_offsets = (lane_idx * x_width_val).astype(np.int16)
 
-    # Generate X: Add lane offsets to the base lane x-positions
+    # Broadcast lane offsets to base X coordinates
     x_final = (x_lane_base + x_offsets).flatten()
 
-    # Generate Y: Alternate between forward and backward lane data based on parity
+    # Zig-Zag Logic: Even lanes use Forward Y, Odd lanes use Backward Y
     is_forward_lane = (np.arange(lanes) % 2 == 0).reshape(-1, 1)
     y_final = np.where(is_forward_lane, y_fwd_lane, y_bwd_lane).flatten()
 
-    # Stack results
+    # Stack into coordinate array (Rows=X, Cols=Y for eventual image lookup)
     ids = np.vstack((x_final, y_final)).astype(np.int32)
 
     derived_stats = {
         "lanewidth": lanewidth,
         "facetsinlane": facets_inlane,
-        "lanes": lanes,  # Returning lanes is useful for the IO module later
+        "lanes": lanes,
     }
 
     return ids, derived_stats

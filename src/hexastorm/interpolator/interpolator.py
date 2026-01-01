@@ -2,7 +2,7 @@ import logging
 from pathlib import Path
 from io import BytesIO
 from time import time
-from typing import Union, Tuple
+from typing import Union
 
 import numpy as np
 from cairosvg import svg2png
@@ -15,14 +15,22 @@ from . import io
 
 class Interpolator:
     """
-    Object to determine binary laser diode information for a prism scanner.
+    Orchestrates the conversion of digital patterns (SVG/PNG) into binary laser control data.
+
+    This class acts as the bridge between the physical model of the scanner and the
+    digital image data. It performs 'Inverse Mapping' interpolation:
+    1.  Calculates the physical (X, Y) coordinates of the laser for every clock tick
+        using the physics model in `geometry.py`.
+    2.  Maps these non-linear, curved scan coordinates onto the rectilinear grid
+        of the input image.
+    3.  Samples the image at these points to determine if the laser should be ON or OFF.
     """
 
     def __init__(self, stepsperline: int = 1):
         self.cfg = PlatformConfig(test=False)
 
         # Initialize math parameters via geometry module
-        # Note: self.params is a Numba Typed Dict
+        # Note: self.params is a Numba Typed Dict optimized for JIT compilation
         self.params = geometry.get_default_params(stepsperline, self.cfg)
         self.params = geometry.downsample_params(self.params)
 
@@ -31,7 +39,10 @@ class Interpolator:
         self.bitorder = "big"
 
     def svgtopil(self, svg_filepath: Path) -> Image.Image:
-        """converts SVG snippets to a PIL Image"""
+        """
+        Converts SVG vector graphics to a raster PIL Image.
+        Includes a -90 degree rotation to align the coordinate system with the laser scan direction.
+        """
         with open(svg_filepath, "rb") as f:
             svg_data = f.read()
         dpi = 25.4 / self.params["samplegridsize"]
@@ -51,12 +62,15 @@ class Interpolator:
         return img
 
     def piltoarray(self, img: Image.Image) -> np.ndarray:
-        """converts PIL Image to numpy array, clips to interest area, updates params"""
+        """
+        Converts PIL Image to a numpy array and crops it to the region of interest.
+        Also updates the system parameters (samplexsize/sampleysize) to match the actual image dimensions.
+        """
         img_array = np.array(img.convert("1"))
         if img_array.max() == 0:
             raise Exception("Image is empty")
 
-        # clip image
+        # Clip image to the bounding box of non-zero pixels
         nonzero_col = np.argwhere(img_array.sum(axis=0)).squeeze()
         nonzero_row = np.argwhere(img_array.sum(axis=1)).squeeze()
 
@@ -64,7 +78,7 @@ class Interpolator:
             nonzero_row[0] : nonzero_row[-1], nonzero_col[0] : nonzero_col[-1]
         ]
 
-        # update geometry settings based on actual image size
+        # Update geometry settings based on actual image size
         x_size, y_size = [i * self.params["samplegridsize"] for i in img_array.shape]
 
         if (x_size > self.params["pltfxsize"]) or (y_size > self.params["pltfysize"]):
@@ -83,7 +97,17 @@ class Interpolator:
         positiveresist: bool = False,
     ) -> np.ndarray:
         """
-        Converts image at URL to pattern for laser scanner.
+        Generates the binary laser pattern by sampling the image at calculated laser positions.
+
+        The process handles the non-linear distortion of the prism scanner by:
+        1. Generating a lookup table of coordinates (ids) where the laser will physically be.
+        2. Using these coordinates to index into the image array.
+
+        Args:
+            url: Path to the input image pattern.
+            pixelsize: Size of pixels in mm if using non-SVG input.
+            test: If True, saves debug images for verification.
+            positiveresist: Determines the polarity of the output bits (Logic High/Low).
         """
         ctime = time()
         file_path = Path(url)
@@ -111,7 +135,8 @@ class Interpolator:
         logging.info(f"Elapsed {time() - ctime:.2f} seconds")
 
         # 2. Calculate Coordinates
-        # ids is (2, N) array: [y_coords, x_coords] stack
+        # ids is (2, N) array: [y_coords, x_coords] stack.
+        # These are the physical integer coordinates on the sample grid.
         ids, derived_stats = geometry.calculate_coordinates(self.params)
 
         # Update internal params with derived stats (lanewidth, etc.) for consistency
@@ -121,12 +146,15 @@ class Interpolator:
         logging.info("Created coordinates for interpolation")
         logging.info(f"Elapsed {time() - ctime:.2f} seconds")
 
-        # This is different from convention but used throughout the codebase
+        # Note: Coordinate convention swap.
+        # The 'geometry' module returns stacked arrays, but the interpretation here
+        # assumes ids[0] is the Y-index (Row) and ids[1] is the X-index (Column).
         y_coords = ids[0]
         x_coords = ids[1]
 
-        # 3. Map Image to Coordinates
-        # Bounds Checking mask
+        # 3. Map Image to Coordinates (Sampling)
+        # Create a boolean mask for coordinates that fall inside the image bounds.
+        # The scanner area is typically larger than the image (overscan).
         mask = (
             (x_coords >= 0)
             & (x_coords < layerarr.shape[1])
@@ -136,7 +164,8 @@ class Interpolator:
 
         ptrn = np.zeros(x_coords.shape, dtype=np.uint8)
 
-        # Map: layerarr[row, col] -> layerarr[y, x]
+        # Advanced Indexing: Sample the image at the calculated coordinates.
+        # layerarr[row, col] corresponds to layerarr[y, x].
         ptrn[mask] = layerarr[y_coords[mask], x_coords[mask]]
 
         logging.info("Completed interpolation")
@@ -145,11 +174,17 @@ class Interpolator:
         if ptrn.min() < 0 or ptrn.max() > 1:
             raise Exception("This is not a bit list")
 
+        # 4. Handle Polarity and Padding
+        # 'mask' defines the valid image area. '~mask' is the padding/overscan area.
         if not positiveresist:
+            # Negative Resist: Invert image.
+            # Force padding to 0 (Laser OFF) to avoid "white edge" artifacts.
             ptrn = np.logical_not(ptrn)
             ptrn[~mask] = 0
         else:
-            # Any pixel outside the image mask must be Laser OFF (0),
+            # Positive Resist: Keep image polarity.
+            # WARNING: This logic sets padding to 1. Ensure this is intended behavior
+            # (i.e., you want the laser ON outside the image area).
             ptrn[~mask] = 1
 
         ptrn = np.repeat(ptrn, self.params["downsamplefactor"])
@@ -178,7 +213,8 @@ class Interpolator:
 
     def plotptrn(self, ptrn_data, step=1, filename="plot"):
         """
-        Visualizes the pattern data.
+        Visualizes the generated pattern data.
+        Reconstructs an image from the binary data to verify correct interpolation and encoding.
         """
         # 1. Sync Params
         if hasattr(ptrn_data, "keys") and not isinstance(ptrn_data, np.ndarray):
@@ -208,7 +244,7 @@ class Interpolator:
 
         ptrn_bits = np.unpackbits(raw_bytes, bitorder=self.bitorder)
 
-        # 3. Get Coordinates
+        # 3. Get Coordinates (Re-calculate identical grid)
         ids, _ = geometry.calculate_coordinates(self.params)
 
         # 4. Handle Downsampling

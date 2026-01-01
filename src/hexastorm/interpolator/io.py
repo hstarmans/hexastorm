@@ -15,12 +15,23 @@ def write_binary_file(
     compression_level: int = 9,
 ) -> None:
     """
-    Writes pixeldata to a compressed binary file with SPI formatting.
+    Encodes and writes pixel data to a compressed binary file optimized for FPGA streaming.
+
+    This function performs the final formatting required by the hardware:
+    1.  **Global Reversal**: Reverses the byte order of the entire image to match the laser scanning direction.
+    2.  **Scanline Headers**: Prepends a 9-byte SPI header to every scanline containing
+        direction (Zig/Zag) and timing configuration (Half-Period).
+    3.  **SPI Packetization**: Chunks the data into 9-byte words (1 Write Command Byte + 8 Data Bytes).
+    4.  **Endianness Correction**: Reverses the bit/byte order within chunks to match the FPGA's SPI shift register.
+
+    File Format:
+        [Header: lanewidth(f32), facets(u32), lanes(u32)]
+        [Zlib Compressed Data Stream]
 
     Args:
-        pixeldata: The raw bit data (numpy array).
-        params: Dictionary containing geometry settings (lanewidth, facetsinlane, etc.).
-        filepath: Destination path.
+        pixeldata: The raw 1-bit raster data (numpy array).
+        params: Geometry settings dict (must contain lanewidth, facetsinlane, etc.).
+        filepath: Output destination path.
         compression_level: Zlib compression level (0-9).
     """
     out_path = Path(filepath)
@@ -52,6 +63,7 @@ def write_binary_file(
         raise ValueError(f"Data shape mismatch: {e}")
 
     # Reverse the image data bytes (Corresponds to bits[::-1])
+    # This aligns the data buffer with the physical laser sweep direction.
     grid = grid[:, :, ::-1]
 
     # 3. Pre-calculate Headers
@@ -121,7 +133,19 @@ def read_binary_file(
     filepath: Union[str, Path], laser_timing_cfg: Dict, bits_in_scanline: int
 ) -> Tuple[int, int, float, np.ndarray]:
     """
-    Reads and decodes a binary laser file.
+    Reads, decompresses, and decodes a binary laser file back into raw pixel data.
+
+    This function reverses the "FPGA-ready" formatting applied by write_binary_file.
+    It strips the SPI command bytes, reverses the endianness corrections, and
+    discards the scanline configuration headers to return the pure image bitmap.
+
+    Args:
+        filepath: Path to the .bin file.
+        laser_timing_cfg: Configuration dict to determine SPI word length.
+        bits_in_scanline: Expected number of valid bits per line (for trimming padding).
+
+    Returns:
+        Tuple containing: (facets_in_lane, lanes, lanewidth, flattened_pixel_data)
     """
     path = Path(filepath)
     if not path.exists():
