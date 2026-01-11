@@ -138,7 +138,7 @@ class PlatformConfig:
             # sda pin digipot TODO: should be 4, hotfix to 46
             i2c=dict(
                 scl=5,
-                sda=46,
+                sda=4,  # 46, printer
                 digipot_addr=0x28,
             ),
             spi=dict(
@@ -337,3 +337,12 @@ def getmovedct(platform):
     for i in range(platform.motors):
         for j in range(platform.poldegree):
             dct.update({f"C{i}{j}": 8})
+
+
+class Camera:
+    """
+    OV2311 is a 2-Megapixel (1600 x 1300)
+    pixelsize is 3.0 μm x 3.0 μm
+    """
+
+    DEFAULT_PIXEL_SIZE_UM = 3.0
