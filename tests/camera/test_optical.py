@@ -1,16 +1,17 @@
-import os
 import time
 import unittest
 import subprocess
 import tempfile
 from pathlib import Path
 import inspect
+import logging
 
 import camera
 import cv2 as cv
-import numpy as np
 
-import hexastorm.optical as feature
+from hexastorm.calibration import run_full_calibration_analysis
+
+logger = logging.getLogger(__name__)
 
 TEST_DIR = Path(__file__).parent.resolve()
 IMG_DIR = TEST_DIR / "images"
@@ -19,7 +20,9 @@ TESTIMG_DIR = TEST_DIR / "testimages"
 
 def micropython(instruction, nofollow=False):
     """Executes instruction using micropython on esp32s3 via mpremote."""
-    with tempfile.NamedTemporaryFile(mode="w+t", suffix=".py", delete=True) as temp_file:
+    with tempfile.NamedTemporaryFile(
+        mode="w+t", suffix=".py", delete=True
+    ) as temp_file:
         # Clean and write the instruction
         code = inspect.cleandoc(instruction)
         temp_file.write(code)
@@ -32,16 +35,18 @@ def micropython(instruction, nofollow=False):
         try:
             # We capture both stdout and stderr
             result = subprocess.run(
-                cmd, 
-                capture_output=True, 
-                text=True, 
-                check=False # We handle the check manually for better detail
+                cmd,
+                capture_output=True,
+                text=True,
+                check=False,  # We handle the check manually for better detail
             )
 
             # 1. Check for Shell/Connection Errors (Exit Code)
             if result.returncode != 0:
                 error_msg = result.stderr.strip() or result.stdout.strip()
-                raise RuntimeError(f"mpremote shell error (Code {result.returncode}):\n{error_msg}")
+                raise RuntimeError(
+                    f"mpremote shell error (Code {result.returncode}):\n{error_msg}"
+                )
 
             # 2. Check for MicroPython Exceptions inside stdout
             # MicroPython errors usually contain "Traceback" or "Error:"
@@ -49,7 +54,7 @@ def micropython(instruction, nofollow=False):
                 raise RuntimeError(f"MicroPython Script Error:\n{result.stdout}")
 
             if result.stdout and not nofollow:
-                print(f"MicroPython Output:\n{result.stdout}")
+                logger.info(f"MicroPython Output:\n{result.stdout}")
 
         except FileNotFoundError:
             raise RuntimeError("mpremote not found. Is it installed and in your PATH?")
@@ -78,7 +83,7 @@ class Tests(unittest.TestCase):
 
     def invalidcommand_test(self):
         """Invalid commands can only be tested with nofollow is False
-        
+
         If you set no follow to true it simply disconnects
         ."""
         micropython(
@@ -88,7 +93,6 @@ class Tests(unittest.TestCase):
             nofollow=False,
         )
         time.sleep(2)
-
 
     def blinktest(self):
         """Verifies communication with ESP32 board."""
@@ -110,17 +114,17 @@ class Tests(unittest.TestCase):
 
         Laser is aligned without camera
         """
-        micropython(f"""
+        micropython("""
             
             host.enable_comp(laser0=True)
         """)
-        print("Press enter to confirm laser is aligned with prism")
+        logger.info("Press enter to confirm laser is aligned with prism")
         input()
         micropython("""
             host.enable_comp(laser0=False)
         """)
 
-    def photo_line(self, current=80):
+    def photo_line(self):
         """turn on laser and motor
 
         User can first preview image. After pressing escape,
@@ -128,23 +132,21 @@ class Tests(unittest.TestCase):
 
         current: value between 0 and 255 (a.u.)
         """
-        micropython(f"""
+        micropython("""
             host.enable_comp(laser0=True, polygon=True)
         """)
         # 3000 rpm 4 facets --> 200 hertz
         # one facet per  1/200 = 5 ms
         self.cam.set_exposure(10_000)
-        print("This will open up a window")
-        print("Press escape to quit live view")
+        logger.info("This will open up a window")
+        logger.info("Press escape to quit live view")
         self.cam.live_view(0.6)
         self.take_picture()
-        # img = self.take_picture()
-        # print(feature.cross_scan_error(img))
         micropython("""
             host.enable_comp(laser1=False, polygon=False)
         """)
 
-    def photo_spot(self, current=80):
+    def photo_spot(self):
         """turn on laser
         User can first preview image. After pressing escape,
         a final image is taken.
@@ -152,26 +154,28 @@ class Tests(unittest.TestCase):
         current: value between 0 and 255 (a.u.)
         """
         # NOTE: all ND filters and a single channel is used
-        micropython(f"""
+        micropython("""
             host.enable_comp(laser1=True, polygon=False)
         """)
         self.cam.set_exposure(300)
-        print(
-            "Calibrate the camera with live view \
-               and press escape to confirm spot in vision"
+        logger.info(
+            "Calibrate the camera with live view "
+            "and press escape to confirm spot in vision"
         )
         self.cam.live_view(scale=0.6)
         img = self.take_picture()
-        print(feature.spotsize(img))
         micropython("""
             host.enable_comp(laser1=False, polygon=False)
         """)
 
-    def photo_pattern(self, facet=3):
+    def photo_pattern(self, facet=3, preview=True, name="facet3.jpg"):
         """line with a given pattern is projected and photo is taken
 
-        pattern  --  list of bits [0] or [1,0,0]
+        preview  --  if True, shows live view before taking picture
+        facet    --  which facet to use (0-3) or None for all facets
+        name     --  filename to save picture, if None uses timestamp
         """
+        assert facet in (0, 1, 2, 3), "facet must be 0, 1, 2, or 3"
         pattern = [1] * 1 + [0] * 39
         lines = 10_000
         micropython(
@@ -180,37 +184,82 @@ class Tests(unittest.TestCase):
             bits = host.cfg.laser_timing["scanline_length"]
             line = (pattern*(bits//len(pattern)) + pattern[: bits % len(pattern)])
             host.synchronize(True)
-            if {facet}:
-                shft = host.facet_shift()
-                facet = ({facet} + shft) % host.cfg.laser_timing["facets"]
-            else:
-                facet = {facet}
+            shft = host.facet_shift()
+            facet = ({facet} + 4 - shft) % host.cfg.laser_timing["facets"]
             host.write_line(line, repetitions={lines}, facet=facet)
             """,
             nofollow=True,
         )
-        self.cam.set_exposure(10_000)
-        self.cam.live_view(0.6)
-        self.take_picture(count=1)
+        logger.info("Wait for pattern to start...")
+        time.sleep(4)
+        if preview:
+            self.cam.set_exposure(10_000)
+            self.cam.live_view(0.6)
+        self.take_picture(count=1, name=name)
 
-    def take_picture(self, count=1):
-        """Captures images and saves with a safe timestamp."""
+    def take_picture(self, count=1, name=None):
+        """
+        Captures images.
+        If 'name' is provided, saves as that filename.
+        Otherwise, uses a timestamp.
+        """
         IMG_DIR.mkdir(parents=True, exist_ok=True)
 
         last_img = None
-        for _ in range(count):
+        for i in range(count):
             img = self.cam.capture()
             grey = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
-            # Use '-' instead of ':' for Windows/File system compatibility
-            timestamp = time.strftime("%Y%m%d-%H%M%S")
-            file_path = IMG_DIR / f"{timestamp}.jpg"
+
+            if name:
+                # If taking multiple counts with a static name, append index to avoid overwrite
+                if count > 1:
+                    stem = Path(name).stem
+                    ext = Path(name).suffix
+                    file_name = f"{stem}_{i}{ext}"
+                else:
+                    file_name = name
+            else:
+                timestamp = time.strftime("%Y%m%d-%H%M%S")
+                file_name = f"{timestamp}.jpg"
+
+            file_path = IMG_DIR / file_name
 
             cv.imwrite(str(file_path), grey)
-            print(f"Saved: {file_path}")
+            logger.info(f"Saved: {file_path}")
             last_img = img
             if count > 1:
                 time.sleep(1)
         return last_img
+
+    def test_full_calibration_cycle(self):
+        """
+        Automated sequence:
+        1. Capture images for all 4 facets (facet0.jpg to facet3.jpg).
+        2. Run calibration analysis on the images.
+        3. Assert the result is valid.
+        """
+        num_facets = 4
+
+        # 1. Capture Sequence
+        for i in range(num_facets):
+            logger.info(f"--- Capturing Calibration Image for Facet {i} ---")
+            # We disable preview to make it run automatically without pressing ESC 4 times
+            self.photo_pattern(facet=i, name=f"facet{i}.jpg", preview=True)
+            self.tearDownClass()
+            self.setUpClass()
+
+            # Optional: Clear the laser state between shots if necessary
+            # micropython("host.reset()", nofollow=False)
+
+        # 2. Run Analysis
+        # Ensure 'run_full_calibration_analysis' is imported or available in this scope
+        logger.info("--- Starting Calibration Analysis ---")
+        run_full_calibration_analysis(
+            image_dir=IMG_DIR,
+            num_facets=num_facets,
+            filename_pattern="facet{}.jpg",
+            debug=False,  # Set True if you want to see the analysis windows
+        )
 
 
 if __name__ == "__main__":
