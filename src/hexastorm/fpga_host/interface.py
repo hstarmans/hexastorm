@@ -121,7 +121,7 @@ class BaseHost:
         payload_int = (half_period << 1) | (direction & 1)
 
         # Convert integer to 7 bytes (56 bits), little endian
-        payload_bytes = payload_int.to_bytes(7, byteorder=byteorder)
+        payload_bytes = payload_int.to_bytes(7, byteorder)
 
         # Create buffer starting with Instruction Byte
         # We use bytearray for performance (mutable), converting to list at the end only if strictly needed

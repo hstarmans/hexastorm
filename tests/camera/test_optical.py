@@ -184,9 +184,8 @@ class Tests(unittest.TestCase):
             bits = host.cfg.laser_timing["scanline_length"]
             line = (pattern*(bits//len(pattern)) + pattern[: bits % len(pattern)])
             host.synchronize(True)
-            shft = host.facet_shift()
-            facet = ({facet} + 4 - shft) % host.cfg.laser_timing["facets"]
-            host.write_line(line, repetitions={lines}, facet=facet)
+            true_facet = host.remap({facet})
+            host.write_line(line, repetitions={lines}, facet=true_facet)
             """,
             nofollow=True,
         )
