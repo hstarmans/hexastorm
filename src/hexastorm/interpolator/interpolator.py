@@ -7,6 +7,7 @@ from typing import Union
 import numpy as np
 from cairosvg import svg2png
 from PIL import Image
+import cv2
 
 from hexastorm.config import PlatformConfig
 from . import geometry
@@ -89,12 +90,41 @@ class Interpolator:
         self.params["sampleysize"] = y_size
         return img_array
 
+    def laser_compensation(self, layerarr: np.ndarray, erode: bool) -> np.ndarray:
+        """
+        Fast laser spot compensation using OpenCV.
+        """
+        # Calculate diameter (kernel size must be an integer)
+        pixel_radius = self.params["laser_radius_mm"] / self.params["samplegridsize"]
+        # Kernel size should be (2 * radius + 1) to ensure a center pixel
+        kernel_size = int(round(pixel_radius * 2))
+
+        # Create an elliptical kernel to simulate the circular laser spot
+        kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE, (kernel_size, kernel_size)
+        )
+
+        logging.info(
+            f"Fast OpenCV bias: {self.params['laser_radius_mm'] * 1000:.1f}um "
+            f"({pixel_radius:.2f} px radius, {kernel_size}px kernel)"
+        )
+
+        if erode:
+            # cv2.erode expects uint8.
+            # It handles binary 0/1 fine, but 0/255 is more standard for CV2.
+            result = cv2.erode(layerarr, kernel, iterations=1)
+        else:
+            result = cv2.dilate(layerarr, kernel, iterations=1)
+
+        return result.astype(np.uint8)
+
     def patternfile(
         self,
         url: Union[str, Path],
         pixelsize: float = 0.3527777778,
         test: bool = False,
         positiveresist: bool = False,
+        radius_mm: float = 0.015,  # 15um radius = 30um diameter
     ) -> np.ndarray:
         """
         Generates the binary laser pattern by sampling the image at calculated laser positions.
@@ -107,7 +137,6 @@ class Interpolator:
             url: Path to the input image pattern.
             pixelsize: Size of pixels in mm if using non-SVG input.
             test: If True, saves debug images for verification.
-            positiveresist: Determines the polarity of the output bits (Logic High/Low).
         """
         ctime = time()
         file_path = Path(url)
@@ -124,7 +153,11 @@ class Interpolator:
             pil = self.imgtopil(file_path, pixelsize)
 
         layerarr = self.piltoarray(pil).astype(np.uint8)
-
+        # laser is black in the current images
+        layerarr = self.laser_compensation(layerarr, erode=False)
+        Image.fromarray(layerarr.astype(np.uint8) * 255).save(
+            self.debug_folder / "erosioncheck.png"
+        )
         if test:
             self.debug_folder.mkdir(parents=True, exist_ok=True)
             img = Image.fromarray(layerarr.astype(np.uint8) * 255)
@@ -176,7 +209,7 @@ class Interpolator:
 
         # 4. Handle Polarity and Padding
         # 'mask' defines the valid image area. '~mask' is the padding/overscan area.
-        if not positiveresist:
+        if not self.params["positiveresist"]:
             # Negative Resist: Invert image.
             # Force padding to 0 (Laser OFF) to avoid "white edge" artifacts.
             ptrn = np.logical_not(ptrn)
@@ -274,9 +307,13 @@ class Interpolator:
 
         logging.info(f"Plotting Image: {width}x{height} pixels")
 
-        canvas = np.zeros((width, height), dtype=np.uint8)
+        if self.params["positiveresist"]:
+            canvas = np.ones((width, height), dtype=np.uint8)
+        else:
+            canvas = np.zeros((width, height), dtype=np.uint8)
         canvas[x_plot, y_plot] = bits_plot
 
+        canvas = self.laser_compensation(canvas, erode=self.params["positiveresist"])
         img = Image.fromarray(canvas * 255)
         img = img.rotate(90, expand=True)
 

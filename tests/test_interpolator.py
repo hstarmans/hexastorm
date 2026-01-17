@@ -24,7 +24,7 @@ def test_regression_jittertest(interpolator, tmp_path):
     # The hash of the "golden master" file.
     # NOTE: Since we fixed the white edge bug, this WILL fail the first time.
     # Run pytest, copy the 'got' hash from the error, and update this string.
-    expected_hash = "53d5dc2b40c5471001301556c80d3fa9"
+    expected_hash = "fbd4611786c33a003e73333a83076fab"
 
     fname = "combined_grid_test"
     # Assuming the SVG is in the standard location relative to the test

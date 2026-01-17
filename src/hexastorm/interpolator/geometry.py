@@ -60,7 +60,9 @@ def displacement(pixel: float, params: Dict[str, float]) -> float:
 
 
 @jit(nopython=True, cache=True)
-def fxpos(pixel: float, params: Dict[str, float], xstart: float = 0) -> float:
+def fxpos(
+    pixel: float, params: Dict[str, float], facet_idx: int = 0, xstart: float = 0
+) -> float:
     """
     Returns the laser diode X-position (Transversal / Scan Direction) in pixels.
 
@@ -72,12 +74,18 @@ def fxpos(pixel: float, params: Dict[str, float], xstart: float = 0) -> float:
     Args:
         pixel: The pixel index.
         params: System parameters.
+        facet_idx: Index of the current facet.
         xstart: Offset in mm.
     """
+    # Get the correction for the current facet
+    dx = params["f" + str(facet_idx) + "_dx"]
+
     line_pixel = params["startpixel"] + pixel % params["bitsinscanline"]
 
     # Project displacement onto X axis based on polygon tilt
-    xpos = np.sin(params["tiltangle"]) * displacement(line_pixel, params) + xstart
+    xpos = (
+        (np.sin(params["tiltangle"]) * displacement(line_pixel, params)) + xstart + dx
+    )
 
     # Convert mm to grid pixels
     return xpos / params["samplegridsize"]
@@ -85,7 +93,11 @@ def fxpos(pixel: float, params: Dict[str, float], xstart: float = 0) -> float:
 
 @jit(nopython=True, cache=True)
 def fypos(
-    pixel: float, params: Dict[str, float], direction: bool, ystart: float = 0
+    pixel: float,
+    params: Dict[str, float],
+    facet_idx: int,
+    direction: bool,
+    ystart: float = 0,
 ) -> float:
     """
     Returns the laser diode Y-position (Longitudinal / Stage Direction) in pixels.
@@ -99,22 +111,25 @@ def fypos(
         pixel: The pixel index.
         params: System parameters.
         direction: Boolean indicating scan direction (Zig-Zag scanning).
+        facet_idx: Index of the current facet.
         ystart: Y-offset in mm.
     """
+    dy = params["f" + str(facet_idx) + "_dy"]
+
     line_pixel = params["startpixel"] + pixel % params["bitsinscanline"]
 
     # 1. Optical Component: Projection of displacement onto Y (usually 0 if tilt=90)
-    base_y = -np.cos(params["tiltangle"]) * displacement(line_pixel, params)
+    base_y = (-np.cos(params["tiltangle"]) * displacement(line_pixel, params)) + dy
 
     # 2. Mechanical Component: Stage movement over time
     # time = pixel / LASER_HZ
     # distance = time * stagespeed
-    stage_component = (line_pixel / params["LASER_HZ"]) * params["stagespeed"] + ystart
+    stage_component = (line_pixel / params["LASER_HZ"]) * params["stagespeed"]
 
     if direction:
-        ypos = base_y + stage_component
+        ypos = base_y + stage_component + ystart
     else:
-        ypos = base_y - stage_component
+        ypos = base_y - stage_component + ystart
 
     return ypos / params["samplegridsize"]
 
@@ -154,6 +169,8 @@ def get_default_params(stepsperline: int = 1, config: PlatformConfig = None) -> 
         "FACETS": laz_tim["facets"],
         # r: Inradius of the polygon [mm] (T = 2r)
         "inradius": 15,
+        # laser_radius_mm: Radius of the laser beam [mm]
+        "laser_radius_mm": 0.015,
         # Refractive index of the prism material (e.g. Quartz
         "n": 1.49,
         # Platform dimensions [mm]
@@ -180,7 +197,17 @@ def get_default_params(stepsperline: int = 1, config: PlatformConfig = None) -> 
         # number of pixels in a line
         "bitsinscanline": laz_tim["scanline_length"],
         "downsamplefactor": 1.0,
+        # resist
+        "positiveresist": False,
     }
+
+    dct.update(py_dict)
+
+    # Add default facet corrections (dx, dy) for each physical facet
+    num_facets = int(laz_tim["facets"])
+    for i in range(num_facets):
+        py_dict[f"f{i}_dx"] = 0.0
+        py_dict[f"f{i}_dy"] = 0.0
 
     dct.update(py_dict)
 
@@ -258,47 +285,56 @@ def calculate_coordinates(params: Any) -> Tuple[np.ndarray, Dict[str, float]]:
         fxpos(int(params["bitsinscanline"]) - 1, params) * params["samplegridsize"]
     )
 
-    # Calculate coordinates for one standard sweep
-    xpos_facet = fxpos(pixel_indices, params, xstart_val).astype(np.int16)
-    ypos_fwd_facet = fypos(pixel_indices, params, True)
-    ypos_bwd_facet = fypos(pixel_indices, params, False)
-
-    # Lane Expansion (Stitching facets together in Y)
-    facet_idx = np.arange(facets_inlane).reshape(-1, 1)  # Shape (facets, 1)
-
-    # Calculate Y-shift per facet (Stage movement during one facet rotation)
-    # Shift = Speed / (Facets * RPM * GridSize)
     y_shift_per_facet = (params["stagespeed"]) / (
         params["FACETS"] * params["rotationfrequency"] * params["samplegridsize"]
     )
 
-    # Generate Y positions for a full lane (Sequence of facets)
-    y_fwd_lane = (ypos_fwd_facet + (facet_idx * y_shift_per_facet)).flatten()
-    y_bwd_lane = (
-        ypos_bwd_facet + ((facets_inlane - facet_idx) * y_shift_per_facet)
-    ).flatten()
-    # X positions repeat for every facet in the lane
-    x_lane_base = np.tile(xpos_facet, facets_inlane)
+    # x_width_pixels for lane stitching
+    x_width_pixels = fxpos(0, params, 0) - fxpos(
+        params["bitsinscanline"] - 1, params, 0
+    )
 
-    # 4. Multi-Lane Generation (Stitching lanes together in X)
-    lane_idx = np.arange(lanes).reshape(-1, 1)
+    # 3. Coordinate Generation
+    # We will accumulate sweeps in lists then stack once for performance
+    all_x = []
+    all_y = []
 
-    # Width of a lane in pixels (for offsetting subsequent lanes)
-    x_width_mm = fxpos(0, params) - fxpos(params["bitsinscanline"] - 1, params)
-    x_width_val = x_width_mm  # fxpos returns units already scaled to samplegridsize? No, check fxpos return.
-    # fxpos return: xpos / params["samplegridsize"]. It returns PIXELS.
-    # Therefore x_width_mm above (diff of fxpos) IS in pixels.
+    num_physical_facets = int(params["FACETS"])
 
-    x_offsets = (lane_idx * x_width_val).astype(np.int16)
+    for l_idx in range(lanes):
+        is_forward = l_idx % 2 == 0
+        # Horizontal offset for this lane (stitching)
+        lane_x_offset = l_idx * x_width_pixels
 
-    # Broadcast lane offsets to base X coordinates
-    x_final = (x_lane_base + x_offsets).flatten()
+        for f_lane_idx in range(facets_inlane):
+            # IMPORTANT: Calculate which physical facet on the prism is active
+            # This follows your modulo logic: facet 0, 1, 2, 3, 0, 1...
+            facet_idx = f_lane_idx % num_physical_facets
 
-    # Zig-Zag Logic: Even lanes use Forward Y, Odd lanes use Backward Y
-    is_forward_lane = (np.arange(lanes) % 2 == 0).reshape(-1, 1)
-    y_final = np.where(is_forward_lane, y_fwd_lane, y_bwd_lane).flatten()
+            # Calculate stage movement for this specific sweep
+            # For forward lanes, stage goes 0 -> end. For backward, end -> 0.
+            if is_forward:
+                ystart_mm = f_lane_idx * y_shift_per_facet * params["samplegridsize"]
+            else:
+                ystart_mm = (
+                    (facets_inlane - f_lane_idx)
+                    * y_shift_per_facet
+                    * params["samplegridsize"]
+                )
 
-    # Stack into coordinate array (Rows=X, Cols=Y for eventual image lookup)
+            # Compute corrected X and Y for this entire sweep
+            # These are now unique per facet!
+            x_sweep = fxpos(pixel_indices, params, facet_idx, xstart_val)
+            y_sweep = fypos(pixel_indices, params, facet_idx, is_forward, ystart_mm)
+
+            all_x.append((x_sweep + lane_x_offset).astype(np.int32))
+            all_y.append(y_sweep.astype(np.int32))
+
+    # 4. Final Assembly
+    # Concatenate the lists of arrays into single flat coordinate vectors
+    x_final = np.concatenate(all_x)
+    y_final = np.concatenate(all_y)
+
     ids = np.vstack((x_final, y_final)).astype(np.int32)
 
     derived_stats = {
