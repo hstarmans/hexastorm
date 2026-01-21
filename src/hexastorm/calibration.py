@@ -164,9 +164,10 @@ def calculate_facet_shifts(rect_dots_list):
         mean_y_shift = np.mean(y_diffs)
 
         facet_data[i] = {
-            "x_shift_px": round(mean_x_shift, 3),
-            "y_shift_px": round(mean_y_shift, 3),
-            "std_x": round(np.std(x_diffs), 3),
+            "Scan_shift_um": round(mean_x_shift*Camera.DEFAULT_PIXEL_SIZE_UM, 3),
+            "Orth_shift_um": round(mean_y_shift*Camera.DEFAULT_PIXEL_SIZE_UM, 3),
+            "std_scan_um": round(np.std(x_diffs)*abs(Camera.DEFAULT_PIXEL_SIZE_UM), 3),
+            "std_orth_um": round(np.std(y_diffs)*abs(Camera.DEFAULT_PIXEL_SIZE_UM), 3),
         }
 
     return facet_data
@@ -224,12 +225,14 @@ def verify_calibration(
     # --- Plot PREDICTED dots ---
     ref_rect = rect_dots[0]
     for i in range(len(rect_dots)):
-        if "x_shift_px" not in master_report[i]:
+        report_key = str(i)
+        if "Scan_shift_um" not in master_report[report_key]:
             continue
 
         shifted_rect = ref_rect.copy()
-        shifted_rect[:, 0] += master_report[i]["x_shift_px"]
-        shifted_rect[:, 1] += master_report[i]["y_shift_px"]
+        px_size = Camera.DEFAULT_PIXEL_SIZE_UM
+        shifted_rect[:, 0] += master_report[report_key]["Scan_shift_um"] / px_size
+        shifted_rect[:, 1] += master_report[report_key]["Orth_shift_um"] / px_size
 
         predicted_dots = shifted_rect @ inv_rot_matrix.T
 
@@ -307,7 +310,8 @@ def run_full_calibration_analysis(
             for i in range(num_facets):
                 s_data = shift_data.get(i, {})
                 spot_data = all_spot_stats[i] if i < len(all_spot_stats) else {}
-                master_report[str(i)] = {**s_data, **spot_data}
+                angle_data = {"rotation_angle_deg": round(all_angles[i], 4)} if i < len(all_angles) else {}
+                master_report[str(i)] = {**s_data, **spot_data, **angle_data}
 
             # We use logging.info for the header, but strictly speaking,
             # JSON output is often better printed raw if you pipe this to a file.

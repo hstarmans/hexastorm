@@ -230,7 +230,7 @@ class Tests(unittest.TestCase):
                 time.sleep(1)
         return last_img
 
-    def test_full_calibration_cycle(self):
+    def test_full_calibration_cycle(self, capture=False):
         """
         Automated sequence:
         1. Capture images for all 4 facets (facet0.jpg to facet3.jpg).
@@ -238,17 +238,17 @@ class Tests(unittest.TestCase):
         3. Assert the result is valid.
         """
         num_facets = 4
+        if capture:
+            # 1. Capture Sequence
+            for i in range(num_facets):
+                logger.info(f"--- Capturing Calibration Image for Facet {i} ---")
+                # We disable preview to make it run automatically without pressing ESC 4 times
+                self.photo_pattern(facet=i, name=f"facet{i}.jpg", preview=True)
+                self.tearDownClass()
+                self.setUpClass()
 
-        # 1. Capture Sequence
-        for i in range(num_facets):
-            logger.info(f"--- Capturing Calibration Image for Facet {i} ---")
-            # We disable preview to make it run automatically without pressing ESC 4 times
-            self.photo_pattern(facet=i, name=f"facet{i}.jpg", preview=True)
-            self.tearDownClass()
-            self.setUpClass()
-
-            # Optional: Clear the laser state between shots if necessary
-            # micropython("host.reset()", nofollow=False)
+                # Optional: Clear the laser state between shots if necessary
+                # micropython("host.reset()", nofollow=False)
 
         # 2. Run Analysis
         # Ensure 'run_full_calibration_analysis' is imported or available in this scope
