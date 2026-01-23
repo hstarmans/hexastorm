@@ -137,7 +137,7 @@ def fypos(
 # --- Parameter Management ---
 
 
-def get_default_params(stepsperline: int = 1, config: PlatformConfig = None) -> Any:
+def get_default_params(stepsperline: float, config: PlatformConfig = None) -> Any:
     """
     Initializes the system parameters based on the physical configuration.
 

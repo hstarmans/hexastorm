@@ -13,6 +13,9 @@ from hexastorm.config import PlatformConfig
 from . import geometry
 from . import io
 
+# Disable PIL Decompression Bomb Warning
+Image.MAX_IMAGE_PIXELS = None
+
 
 class Interpolator:
     """
@@ -27,7 +30,7 @@ class Interpolator:
     3.  Samples the image at these points to determine if the laser should be ON or OFF.
     """
 
-    def __init__(self, stepsperline: int = 1):
+    def __init__(self, stepsperline: float = 0.25):
         self.cfg = PlatformConfig(test=False)
 
         # Initialize math parameters via geometry module
@@ -124,6 +127,7 @@ class Interpolator:
         pixelsize: float = 0.3527777778,
         test: bool = False,
         positiveresist: bool = False,
+        laser_compensate: bool = False,  # remove laser spot size
         radius_mm: float = 0.015,  # 15um radius = 30um diameter
     ) -> np.ndarray:
         """
@@ -154,10 +158,11 @@ class Interpolator:
 
         layerarr = self.piltoarray(pil).astype(np.uint8)
         # laser is black in the current images
-        layerarr = self.laser_compensation(layerarr, erode=False)
-        Image.fromarray(layerarr.astype(np.uint8) * 255).save(
-            self.debug_folder / "erosioncheck.png"
-        )
+        if laser_compensate:
+            layerarr = self.laser_compensation(layerarr, erode=False)
+            Image.fromarray(layerarr.astype(np.uint8) * 255).save(
+                self.debug_folder / "erosioncheck.png"
+            )
         if test:
             self.debug_folder.mkdir(parents=True, exist_ok=True)
             img = Image.fromarray(layerarr.astype(np.uint8) * 255)
@@ -314,14 +319,13 @@ class Interpolator:
         canvas[x_plot, y_plot] = bits_plot
 
         canvas = self.laser_compensation(canvas, erode=self.params["positiveresist"])
-        img = Image.fromarray(canvas * 255)
-        img = img.rotate(90, expand=True)
+        rotated_canvas = cv2.rotate(canvas, cv2.ROTATE_90_COUNTERCLOCKWISE)
 
         self.debug_folder.mkdir(parents=True, exist_ok=True)
         save_path = self.debug_folder / f"{filename}.png"
-        img.save(save_path)
+        cv2.imwrite(str(save_path), rotated_canvas * 255)
         logging.info(f"Plot saved to {save_path}")
-        return img
+        return rotated_canvas
 
 
 if __name__ == "__main__":

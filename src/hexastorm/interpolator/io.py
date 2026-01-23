@@ -94,6 +94,7 @@ def write_binary_file(
     IO_BUFFER_SIZE = 1024 * 1024
     write_buffer = bytearray()
 
+    logging.info(f"Writing binary file to {out_path}...")
     with open(out_path, "wb") as f:
         # File Header
         f.write(compressor.compress(struct.pack("<f", lanewidth)))
