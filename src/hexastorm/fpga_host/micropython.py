@@ -126,6 +126,7 @@ class ESP32Host(BaseHost):
         Logs failures if drivers are not detected. Only runs once per session.
         """
         esp32_cfg = self.cfg.esp32_cfg
+        self.steppers = {}
 
         if not self.steppers_init:
             tmc_cfg = esp32_cfg["tmc2209"]
@@ -137,6 +138,7 @@ class ESP32Host(BaseHost):
                         mtr_id=mtr_id,
                         uart_dct=tmc_cfg["uart"],
                     )
+                    self.steppers[ax_name] = tmc
                     for key, value in tmc_cfg["settings"]:
                         setattr(tmc, key, value)
                 except ConnectionFail:

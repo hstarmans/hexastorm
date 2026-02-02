@@ -140,29 +140,39 @@ class Polynomial(Elaboratable):
             step_motor = cntrs[idx][hdl_cfg.bit_shift]
 
             with m.If(motor == laser_idx):
-                # When you switch between sources, there should not be a pulse
-                # 1. Create previous value registers
+                # 1. Pipeline registers for edge detection
                 step_motor_d = Signal()
                 step_laser_d = Signal()
-
                 m.d.sync += [
                     step_motor_d.eq(step_motor),
                     step_laser_d.eq(self.step_laser),
                 ]
 
-                # 2. Edge detect for each source
-                edge_motor = Signal()
-                edge_laser = Signal()
+                # 2. Detect Rising (Start) and Falling (End) edges for both sources
+                # Motor source
+                rise_motor = (step_motor == 1) & (step_motor_d == 0)
+                fall_motor = (step_motor == 0) & (step_motor_d == 1)
 
-                m.d.sync += [
-                    edge_motor.eq((step_motor == 1) & (step_motor_d == 0)),
-                    edge_laser.eq((self.step_laser == 1) & (step_laser_d == 0)),
+                # Laser source
+                rise_laser = (self.step_laser == 1) & (step_laser_d == 0)
+                fall_laser = (self.step_laser == 0) & (step_laser_d == 1)
+
+                # 3. Select the *Events* based on the override
+                # We switch which edges we listen to, rather than the raw level.
+                # This filters out the "jump" glitch when switching sources.
+                evt_rise = Signal()
+                evt_fall = Signal()
+                m.d.comb += [
+                    evt_rise.eq(Mux(self.override_laser, rise_laser, rise_motor)),
+                    evt_fall.eq(Mux(self.override_laser, fall_laser, fall_motor)),
                 ]
 
-                # 3. Mux the *edges*, not the raw step signal
-                m.d.sync += steppers[motor].step.eq(
-                    Mux(self.override_laser, edge_laser, edge_motor)
-                )
+                # 4. Reconstruct the signal (SR Latch behavior)
+                # This preserves the exact pulse width of the chosen source.
+                with m.If(evt_rise):
+                    m.d.sync += steppers[motor].step.eq(1)
+                with m.Elif(evt_fall):
+                    m.d.sync += steppers[motor].step.eq(0)
             with m.Else():
                 m.d.sync += steppers[motor].step.eq(step_motor)
 

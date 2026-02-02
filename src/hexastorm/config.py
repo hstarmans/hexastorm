@@ -126,19 +126,19 @@ class PlatformConfig:
                 settings=[
                     ("direction_inverted", False),
                     ("vsense", True),
-                    ("current", 100),
-                    ("iscale_analog", True),
+                    ("current", 400),
+                    ("iscale_analog", False),
                     ("interpolation", True),
                     ("spread_cycle", False),
                     ("microstep_resolution", 16),
-                    ("internal_rsense", False),
+                    ("internal_rsense", True),
                     ("motor_enabled", False),
                 ],
             ),
             # sda pin digipot TODO: should be 4, hotfix to 46
             i2c=dict(
                 scl=5,
-                sda=4,  # 46, printer
+                sda=46,  # 4 pcb, 46 printer
                 digipot_addr=0x28,
             ),
             spi=dict(
