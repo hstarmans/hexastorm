@@ -249,10 +249,15 @@ class Interpolator:
             in_path, self.cfg.laser_timing, self.params["bitsinscanline"]
         )
 
-    def plotptrn(self, ptrn_data, step=1, filename="plot"):
+    def plotptrn(self, ptrn_data, step=1, filename="plot", color_lanes=True):
         """
         Visualizes the generated pattern data.
-        Reconstructs an image from the binary data to verify correct interpolation and encoding.
+
+        Args:
+            ptrn_data: The binary pattern data.
+            step: Plotting step size (higher is faster but lower resolution).
+            filename: Output filename.
+            color_lanes: If True, alternates lane colors (Light Blue/White).
         """
         # 1. Sync Params
         if hasattr(ptrn_data, "keys") and not isinstance(ptrn_data, np.ndarray):
@@ -262,6 +267,7 @@ class Interpolator:
                 "bitsinscanline",
                 "samplexsize",
                 "sampleysize",
+                "lanes",
             ]:
                 if k in ptrn_data:
                     # Handle pandas/numpy scalars
@@ -296,7 +302,7 @@ class Interpolator:
         y_full = ids[1, :min_len]
         bits_full = ptrn_bits[:min_len]
 
-        # 6. Rasterize
+        # 6. Prepare Plot Data
         x_plot = x_full[::step]
         y_plot = y_full[::step]
         bits_plot = bits_full[::step]
@@ -312,18 +318,70 @@ class Interpolator:
 
         logging.info(f"Plotting Image: {width}x{height} pixels")
 
-        if self.params["positiveresist"]:
-            canvas = np.ones((width, height), dtype=np.uint8)
-        else:
-            canvas = np.zeros((width, height), dtype=np.uint8)
-        canvas[x_plot, y_plot] = bits_plot
+        # 7. Rendering
+        # Initialize 1-channel canvas for "Lane IDs"
+        canvas = np.zeros((width, height), dtype=np.uint8)
 
-        canvas = self.laser_compensation(canvas, erode=self.params["positiveresist"])
-        rotated_canvas = cv2.rotate(canvas, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        # Define IDs for the grayscale map
+        VAL_EVEN = 100
+        VAL_ODD = 200
+        VAL_ALL = 255
+
+        if color_lanes:
+            num_lanes = int(self.params.get("lanes", 1))
+            samples_per_lane = len(x_plot) // num_lanes
+
+            # Loop only to assign IDs (Very fast compared to dilation)
+            for i in range(num_lanes):
+                start = i * samples_per_lane
+                end = start + samples_per_lane if i < num_lanes - 1 else len(x_plot)
+
+                # Check if this slice has any active bits
+                # (Optimization: boolean indexing is faster than creating sub-arrays)
+                lbits = bits_plot[start:end]
+                active_indices = np.where(lbits == 1)[0]
+
+                if active_indices.size > 0:
+                    # Map local indices back to global indices
+                    global_indices = start + active_indices
+
+                    # Determine value (Even=100, Odd=200)
+                    val = VAL_EVEN if (i % 2 == 0) else VAL_ODD
+
+                    # Assign to canvas
+                    canvas[x_plot[global_indices], y_plot[global_indices]] = val
+        else:
+            # Standard Monochrome (assign 255 to all active pixels)
+            active_mask = bits_plot == 1
+            canvas[x_plot[active_mask], y_plot[active_mask]] = VAL_ALL
+
+        # 8. Apply Laser Compensation ONCE
+        # This expands the '100' regions and '200' regions simultaneously
+        canvas_dilated = self.laser_compensation(canvas, erode=False)
+
+        # 9. Create Final RGB Image
+        # Initialize Black Canvas
+        rgb_canvas = np.zeros((width, height, 3), dtype=np.uint8)
+
+        if color_lanes:
+            # Colors (BGR)
+            COL_EVEN = (255, 200, 100)  # Light Blue
+            COL_ODD = (255, 255, 255)  # White
+
+            # Map the dilated IDs to Colors
+            # Note: Overlaps will favor VAL_ODD (200) because 200 > 100 and dilation uses Max
+            rgb_canvas[canvas_dilated == VAL_EVEN] = COL_EVEN
+            rgb_canvas[canvas_dilated == VAL_ODD] = COL_ODD
+        else:
+            # Map all active pixels to White
+            rgb_canvas[canvas_dilated > 0] = (255, 255, 255)
+
+        # 10. Rotate and Save
+        rotated_canvas = cv2.rotate(rgb_canvas, cv2.ROTATE_90_COUNTERCLOCKWISE)
 
         self.debug_folder.mkdir(parents=True, exist_ok=True)
         save_path = self.debug_folder / f"{filename}.png"
-        cv2.imwrite(str(save_path), rotated_canvas * 255)
+        cv2.imwrite(str(save_path), rotated_canvas)
         logging.info(f"Plot saved to {save_path}")
         return rotated_canvas
 
