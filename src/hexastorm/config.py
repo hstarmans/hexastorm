@@ -8,7 +8,8 @@ as well as platform-level configuration settings used for FPGA synthesis and fir
 """
 
 from collections import OrderedDict
-from math import ceil
+
+from math import ceil, sin, radians
 
 
 class Spi:
@@ -58,6 +59,57 @@ class Spi:
         return ceil(bytes_move / Spi.word_bytes)
 
 
+# seperate function for numba jit
+def displacement_kernel(pixel, params):
+    """
+    Calculates the transversal displacement of the laser beam caused by the rotating prism.
+
+    Physics Context:
+        The prism acts as a rotating "Transparent Parallel Plate" .
+        As the angle of incidence (I) changes with rotation, the beam is shifted laterally.
+
+        The formula implemented corresponds to the transversal displacement (tau)
+        described on https://reprap.org/wiki/Open_hardware_fast_high_resolution_LASER:
+        tau = T * sin(I) * (1 - sqrt((1 - sin(I)^2) / (n^2 - sin(I)^2)))
+        Where T = 2 * inradius (thickness of the prism).
+
+    Args:
+        pixel: The current pixel index in the scan line (proxy for time/angle).
+        params: Numba typed dictionary containing system geometry (FACETS, n, inradius, etc).
+
+    Returns:
+        float: The physical displacement in millimeters relative to the optical axis.
+    """
+    # For a regular polygon, the scan angle range is limited by the facet geometry.
+    # interiorangle = 180-360/self.n
+    # max_angle = 180-90-0.5*interiorangle
+    I_max = 180 / params["FACETS"]
+
+    # Calculate how many pixels fit on one facet face based on laser frequency and RPM.
+    pixelsfacet = round(
+        params["LASER_HZ"] / (params["rotationfrequency"] * params["FACETS"])
+    )
+    # Convert the current pixel number to an Angle of Incidence (I) in radians.
+    # The scan moves from -I_max to +I_max across the facet.
+    angle = radians(-2 * I_max * (pixel / pixelsfacet) + I_max)
+
+    # Pre-calculate trigonometric terms for the Snell's Law / Displacement derivation
+    sin_angle = sin(angle)
+    sin_angle_sq = pow(sin_angle, 2)
+    n_sq = pow(params["n"], 2)
+
+    # T (Thickness) = 2 * inradius
+    thickness = params["inradius"] * 2
+
+    # Calculate transversal displacement (tau)
+    disp = (
+        thickness
+        * sin_angle
+        * (1 - pow((1 - sin_angle_sq) / (n_sq - sin_angle_sq), 0.5))
+    )
+    return disp
+
+
 class PlatformConfig:
     """
     Holds platform configuration.
@@ -102,6 +154,83 @@ class PlatformConfig:
             )
         self.update_laser_timing()
         self.laser_bits = 1  # enables adding pwm to laser (not widely tested)
+
+    @property
+    def optical_settings(self):
+        """
+        Returns a dictionary of physical parameters, including calculated Lanewidth.
+        """
+        laz_tim = self.laser_timing
+        mtr_cfg = self.motor_cfg
+
+        settings = {"stepsperline": 0.25}  # four exposures per line
+
+        settings.update(
+            {
+                # angle [radians]
+                "tiltangle": radians(90),  # Static polygonal tilt angle
+                # r: Inradius of the polygon [mm] (T = 2r)
+                "inradius": 15.0,
+                # Refractive index of the prism material (e.g. Quartz
+                "n": 1.49,
+                # Number of vertices/facets on the polygon, must be even
+                "FACETS": float(laz_tim["facets"]),
+                "LASER_HZ": float(laz_tim["laser_hz"])
+                if "laser_hz" in laz_tim
+                else 0.0,
+                # Polygon rotation frequency (Hz)
+                "rotationfrequency": laz_tim["rpm"] / 60,
+                # Radius of the laser beam [mm]
+                "laser_radius_mm": 0.015,
+                # Platform dimensions [mm]
+                "pltfxsize": 200.0,
+                "pltfysize": 200.0,
+                # Sample dimensions (calculated dynamically from image)
+                "samplexsize": 0.0,
+                "sampleysize": 0.0,
+                # Optical resolution / Grid size [mm]
+                "samplegridsize": 0.01,
+                "facetsinlane": 0.0,
+                # Stage Speed [mm/s]: Derived from RPM and Facets to ensure correct aspect ratio
+                "stagespeed": (
+                    (
+                        settings["stepsperline"]
+                        / mtr_cfg["steps_mm"][mtr_cfg["orth2lsrline"]]
+                    )
+                    * (laz_tim["rpm"] / 60)
+                    * laz_tim["facets"]
+                ),
+                # Start Pixel calculation based on scanline duty cycle
+                "startpixel": (
+                    (
+                        laz_tim["scanline_length"]
+                        / (laz_tim["end_frac"] - laz_tim["start_frac"])
+                    )
+                    * laz_tim["start_frac"]
+                ),
+                # number of pixels in a line
+                "bitsinscanline": float(laz_tim["scanline_length"]),
+                "downsamplefactor": 1.0,
+                # resist
+                "positiveresist": 0.0,
+            }
+        )
+
+        # Store in settings (converted to grid pixels if that was your convention,
+        # but storing as mm is usually safer for config, assuming downstream converts it)
+        # Based on your previous code, lanewidth was in MM.
+        settings["lanewidth"] = abs(
+            displacement_kernel(settings["bitsinscanline"] - 1, settings)
+            - displacement_kernel(0, settings)
+        )
+
+        # Add default facet corrections (placeholders)
+        num_facets = int(laz_tim["facets"])
+        for i in range(num_facets):
+            settings[f"f{i}_dx"] = 0.0
+            settings[f"f{i}_dy"] = 0.0
+
+        return settings
 
     @property
     def esp32_cfg(self):

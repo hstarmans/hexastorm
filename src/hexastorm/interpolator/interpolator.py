@@ -30,12 +30,12 @@ class Interpolator:
     3.  Samples the image at these points to determine if the laser should be ON or OFF.
     """
 
-    def __init__(self, stepsperline: float = 0.25):
+    def __init__(self):
         self.cfg = PlatformConfig(test=False)
 
         # Initialize math parameters via geometry module
         # Note: self.params is a Numba Typed Dict optimized for JIT compilation
-        self.params = geometry.get_default_params(stepsperline, self.cfg)
+        self.params = geometry.get_default_params()
         self.params = geometry.downsample_params(self.params)
 
         self.current_dir = Path(__file__).parent.resolve()

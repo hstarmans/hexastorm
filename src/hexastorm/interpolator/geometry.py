@@ -4,59 +4,15 @@ from typing import Dict, Tuple, Any
 
 import numpy as np
 from numba import jit, typed, types
-from hexastorm.config import PlatformConfig
+from hexastorm.config import PlatformConfig, displacement_kernel
+
+
+config = PlatformConfig(test=False)
 
 # --- JIT Compiled Math Functions ---
 
 
-@jit(nopython=True, cache=True)
-def displacement(pixel: float, params: Dict[str, float]) -> float:
-    """
-    Calculates the transversal displacement of the laser beam caused by the rotating prism.
-
-    Physics Context:
-        The prism acts as a rotating "Transparent Parallel Plate" .
-        As the angle of incidence (I) changes with rotation, the beam is shifted laterally.
-
-        The formula implemented corresponds to the transversal displacement (tau)
-        described on https://reprap.org/wiki/Open_hardware_fast_high_resolution_LASER:
-        tau = T * sin(I) * (1 - sqrt((1 - sin(I)^2) / (n^2 - sin(I)^2)))
-        Where T = 2 * inradius (thickness of the prism).
-
-    Args:
-        pixel: The current pixel index in the scan line (proxy for time/angle).
-        params: Numba typed dictionary containing system geometry (FACETS, n, inradius, etc).
-
-    Returns:
-        float: The physical displacement in millimeters relative to the optical axis.
-    """
-    # For a regular polygon, the scan angle range is limited by the facet geometry.
-    # interiorangle = 180-360/self.n
-    # max_angle = 180-90-0.5*interiorangle
-    I_max = 180 / params["FACETS"]
-    # Calculate how many pixels fit on one facet face based on laser frequency and RPM.
-    pixelsfacet = round(
-        params["LASER_HZ"] / (params["rotationfrequency"] * params["FACETS"])
-    )
-    # Convert the current pixel number to an Angle of Incidence (I) in radians.
-    # The scan moves from -I_max to +I_max across the facet.
-    angle = np.radians(-2 * I_max * (pixel / pixelsfacet) + I_max)
-
-    # Pre-calculate trigonometric terms for the Snell's Law / Displacement derivation
-    sin_angle = np.sin(angle)
-    sin_angle_sq = np.power(sin_angle, 2)
-    n_sq = np.power(params["n"], 2)
-
-    # T (Thickness) = 2 * inradius
-    thickness = params["inradius"] * 2
-
-    # Calculate transversal displacement (tau)
-    disp = (
-        thickness
-        * sin_angle
-        * (1 - np.power((1 - sin_angle_sq) / (n_sq - sin_angle_sq), 0.5))
-    )
-    return disp
+displacement = jit(nopython=True, cache=True)(displacement_kernel)
 
 
 @jit(nopython=True, cache=True)
@@ -137,84 +93,17 @@ def fypos(
 # --- Parameter Management ---
 
 
-def get_default_params(stepsperline: float, config: PlatformConfig = None) -> Any:
+def get_default_params() -> Any:
     """
     Initializes the system parameters based on the physical configuration.
-
-    Connects board settings (RPM, Laser Hz) to the optical model variables:
-    - r (inradius): 15mm
-    - (FACETS): Number of polygon vertices
-    - n: Refractive index (Quartz ~1.49)
-    - alpha (tiltangle): Polygon tilt angle
 
     Returns:
         A Numba-compatible typed dictionary for high-performance JIT access.
     """
-    if config is None:
-        config = PlatformConfig(test=False)
-
-    laz_tim = config.laser_timing
-    mtr_cfg = config.motor_cfg
-
     # Create Numba-compatible dictionary
     dct = typed.Dict.empty(key_type=types.string, value_type=types.float64)
 
-    py_dict = {
-        # angle [radians]
-        "tiltangle": np.radians(90),  # Static polygonal tilt angle
-        "LASER_HZ": laz_tim["laser_hz"],  # Hz
-        # Polygon rotation frequency (Hz)
-        "rotationfrequency": laz_tim["rpm"] / 60,
-        # Number of vertices/facets on the polygon, must be even
-        "FACETS": laz_tim["facets"],
-        # r: Inradius of the polygon [mm] (T = 2r)
-        "inradius": 15,
-        # laser_radius_mm: Radius of the laser beam [mm]
-        "laser_radius_mm": 0.015,
-        # Refractive index of the prism material (e.g. Quartz
-        "n": 1.49,
-        # Platform dimensions [mm]
-        "pltfxsize": 200,
-        "pltfysize": 200,
-        # Sample dimensions (calculated dynamically from image)
-        "samplexsize": 0.0,
-        "sampleysize": 0.0,
-        # Optical resolution / Grid size [mm]
-        "samplegridsize": 0.01,
-        "stepsperline": float(stepsperline),
-        "facetsinlane": 0.0,
-        # Stage Speed [mm/s]: Derived from RPM and Facets to ensure correct aspect ratio
-        "stagespeed": (
-            (stepsperline / mtr_cfg["steps_mm"][mtr_cfg["orth2lsrline"]])
-            * (laz_tim["rpm"] / 60)
-            * laz_tim["facets"]
-        ),
-        # Start Pixel calculation based on scanline duty cycle
-        "startpixel": (
-            (laz_tim["scanline_length"] / (laz_tim["end_frac"] - laz_tim["start_frac"]))
-            * laz_tim["start_frac"]
-        ),
-        # number of pixels in a line
-        "bitsinscanline": laz_tim["scanline_length"],
-        "downsamplefactor": 1.0,
-        # resist
-        "positiveresist": False,
-    }
-
-    dct.update(py_dict)
-
-    # Add default facet corrections (dx, dy) for each physical facet
-    num_facets = int(laz_tim["facets"])
-    for i in range(num_facets):
-        py_dict[f"f{i}_dx"] = 0.0
-        py_dict[f"f{i}_dy"] = 0.0
-
-    dct.update(py_dict)
-
-    # Initial lanewidth calculation used for lane planning (zig-zag scanning)
-    dct["lanewidth"] = (fxpos(0, dct) - fxpos(dct["bitsinscanline"] - 1, dct)) * dct[
-        "samplegridsize"
-    ]
+    dct.update(config.optical_settings)
 
     return dct
 
