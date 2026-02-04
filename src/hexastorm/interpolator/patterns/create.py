@@ -1,16 +1,15 @@
 import logging
 import os
-import sys
 from typing import Optional
 
 import matplotlib
-import numpy as np
 
 # Use Agg for file generation without a window popping up
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.patches import Circle, Polygon, Rectangle
-from matplotlib.transforms import Affine2D
+from matplotlib.patches import Circle, Rectangle
+
+from ...config import PlatformConfig
 
 # Configure standard logger
 logging.basicConfig(
@@ -36,7 +35,6 @@ class LaserCalibrationGen:
         self,
         output_dir: Optional[str] = None,
         pix_per_mm: int = 200,
-        laser_spot_size_microns: float = 30.0,
     ):
         """
         Initialize the generator.
@@ -46,9 +44,6 @@ class LaserCalibrationGen:
                                       Defaults to the script's directory.
             pix_per_mm (int): Resolution of the internal rasterization for calculation
                               (does not affect vector output precision). Defaults to 200.
-            laser_spot_size_microns (float): The physical diameter of the laser spot in microns.
-                                             The code will automatically shrink vector features
-                                             by this amount to prevent overlap (kerf compensation).
         """
         # Determine output directory
         if output_dir:
@@ -61,15 +56,20 @@ class LaserCalibrationGen:
 
         self.pix_per_mm = pix_per_mm
 
-        # Convert microns to mm for internal calc
-        self.laser_spot_mm = laser_spot_size_microns / 1000.0
+        config = PlatformConfig(test=False)
+        self.optical_settings = config.optical_settings
+
+        # The code will automatically shrink vector features
+        # by this amount to prevent overlap (kerf compensation).
+        self.laser_spot_mm = self.optical_settings["laser_radius_mm"] * 2
 
         self.setup_style()
+        self.tight = "tight"  # use None to disable
 
         logger.info(f"Initialized. Results will be saved to: {self.script_directory}")
         logger.info(f"Resolution set to: {self.pix_per_mm} pixels/mm")
         logger.info(
-            f"Laser Spot Compensation: {laser_spot_size_microns} microns ({self.laser_spot_mm} mm)"
+            f"Laser Spot Compensation: {self.laser_spot_mm * 1000:.1f} microns ({self.laser_spot_mm} mm)"
         )
 
     def setup_style(self):
@@ -111,78 +111,82 @@ class LaserCalibrationGen:
             return 0.0
         return digital_width
 
-    def _save_figure_exact_size(self, fig, ax, filename: str):
+    def resize_to_mm_scale(self, fig, ax):
         """
-        Resizes the figure so that 1 unit in the plot equals exactly 1 mm in reality,
-        then saves it to filename.
-
-        This method calculates the current display PPI and resizes the figure content
-        to match the target physical dimensions defined by the axes data. It then
-        saves the file with `bbox_inches='tight'` and a small pad to include external labels.
-
-        Args:
-            fig (matplotlib.figure.Figure): The figure object.
-            ax (matplotlib.axes.Axes): The axes object containing the plot data.
-            filename (str): The output filename (e.g., 'test.svg').
+        Resizes figure so that 1 Data Unit = 1 mm.
+        Must be called BEFORE calculating screen-relative positions.
         """
-        try:
-            # 1. Setup temporary DPI for calculation
-            calc_dpi = 100
-            fig.set_dpi(calc_dpi)
-            fig.canvas.draw()
+        # 1. Setup temporary DPI for calculation
+        calc_dpi = 100
+        fig.set_dpi(calc_dpi)
+        fig.canvas.draw()
 
-            # 2. Get current pixels per unit
-            p0 = ax.transData.transform((0, 0))
-            p1 = ax.transData.transform((1, 1))
+        # 2. Get current pixels per unit
+        p0 = ax.transData.transform((0, 0))
+        p1 = ax.transData.transform((1, 1))
+        current_x_pix_per_unit = abs(p1[0] - p0[0])
 
-            current_x_pix_per_unit = abs(p1[0] - p0[0])
+        # 3. Calculate Scale (1 unit = 1 mm = 1/25.4 inches)
+        scale_x = (1 / 25.4) / (current_x_pix_per_unit / calc_dpi)
 
-            # 3. Calculate Scale
-            # We want 1 unit = 1 mm = 1/25.4 inches.
-            scale_x = (1 / 25.4) / (current_x_pix_per_unit / calc_dpi)
+        # 4. Apply Scaling
+        curr_w, curr_h = fig.get_size_inches()
+        fig.set_size_inches(curr_w * scale_x, curr_h * scale_x)
 
-            # 4. Apply Scaling
-            curr_w, curr_h = fig.get_size_inches()
-            # We assume square pixels (x scale == y scale)
-            fig.set_size_inches(curr_w * scale_x, curr_h * scale_x)
+        # 5. Set Final DPI
+        final_dpi = round(self.pix_per_mm * 25.4)
+        fig.set_dpi(final_dpi)
 
-            final_dpi = round(self.pix_per_mm * 25.4)
-            fig.set_dpi(final_dpi)
+        # 6. Final Draw to update transforms
+        fig.canvas.draw()
+        return final_dpi
 
-            # 5. Verification
-            fig.canvas.draw()
-            p0_new = ax.transData.transform((0, 0))
-            p1_new = ax.transData.transform((1, 1))
-            new_x_pix = abs(p1_new[0] - p0_new[0])
+    def get_top_left_in_data_coords(self, fig, ax):
+        """
+        Returns the (X, Y) position in mm of the axis origin assuming top left is (0,0).
+        """
+        renderer = fig.canvas.get_renderer()
 
-            target_pix_per_unit = final_dpi / 25.4
+        # This is the box (in inches) that will actually be saved
+        tight_bbox = fig.get_tightbbox(renderer)
 
-            # Verify scaling accuracy
-            if abs(new_x_pix - target_pix_per_unit) > 1.0:
-                logger.warning(
-                    f"Scale mismatch in {filename}! "
-                    f"Expected {target_pix_per_unit:.1f} px/mm, got {new_x_pix:.1f} px/mm"
-                )
+        # Get the Data Origin (0,0) in Figure Pixels
+        origin_pix = ax.transData.transform((0, 0))
 
-            # 6. Save
-            # Calculate full image size including labels
-            renderer = fig.canvas.get_renderer()
-            bbox = fig.get_tightbbox(renderer)
+        # Convert Data Origin to Figure Inches
+        origin_inch_x = origin_pix[0] / fig.dpi
+        origin_inch_y = origin_pix[1] / fig.dpi
 
-            full_w_mm = bbox.width * 25.4
-            full_h_mm = bbox.height * 25.4
+        final_origin_x_mm = origin_inch_x * 25.4
+        # Matplotlib (Bottom-Up) Y Origin
+        final_origin_y_mm_bottom = origin_inch_y * 25.4
 
-            output_path = os.path.join(self.script_directory, filename)
-            logger.info(
-                f"Saving {filename} (Image Size: {full_w_mm:.1f}x{full_h_mm:.1f}mm)..."
-            )
-            plt.savefig(output_path, bbox_inches="tight", dpi=final_dpi, pad_inches=0)
+        if self.tight == "tight":
+            final_origin_x_mm -= tight_bbox.x0 * 25.4
+            final_origin_y_mm_bottom -= tight_bbox.y0 * 25.4
+            # Calculate full image size
+            full_w_mm = tight_bbox.width * 25.4
+            full_h_mm = tight_bbox.height * 25.4
+        else:
+            full_w_mm = fig.get_size_inches()[0] * 25.4
+            full_h_mm = fig.get_size_inches()[1] * 25.4
 
-        except Exception as e:
-            logger.error(f"Failed to save {filename}: {e}")
-            raise
-        finally:
-            plt.close(fig)
+        # Calculate Top-Down Y Origin (for Inkscape/Machine Config)
+        final_origin_y_mm_top = full_h_mm - final_origin_y_mm_bottom
+
+        logger.info(f"IMAGE SIZE: {full_w_mm:.3f}mm x {full_h_mm:.3f}mm")
+        logger.info(
+            f"ORIGIN (Screen/Top-Left):       X={final_origin_x_mm:.4f}, Y={final_origin_y_mm_top:.4f}"
+        )
+        return final_origin_x_mm, final_origin_y_mm_top
+
+    def save_final(self, fig, filename):
+        """Just saves the file, assuming resizing is already done."""
+        output_path = os.path.join(self.script_directory, filename)
+        # padding=0 ensures the edges match what we calculated
+        fig.savefig(output_path, dpi=fig.dpi, pad_inches=0, bbox_inches=self.tight)
+        logger.info(f"Saved {filename}")
+        plt.close(fig)
 
     def _clean_axes(self, ax, x_label: str, y_label: str):
         """
@@ -197,135 +201,6 @@ class LaserCalibrationGen:
         ax.set_ylabel(y_label)
         for key, spine in ax.spines.items():
             spine.set_visible(False)
-
-    def generate_fan_test(self):
-        """
-        Generates a radial 'Fan' test pattern.
-
-        This pattern consists of triangles rotated around a center point to form
-        a starburst shape. It is useful for checking resolution at varying angles
-        and determining the minimum resolvable feature size (inner circle limit).
-        """
-        logger.info("Generating Fan Test (Compensated)...")
-        final_linewidth_target = 0.300  # mm (max width)
-        pattern_radius = 30  # mm
-
-        # Compensate the width
-        # We define the triangle by its widest point (outer edge).
-        comp_final_width = self._get_compensated_width(final_linewidth_target)
-
-        # If the laser is wider than the line, we can't draw the start.
-        if comp_final_width <= 0:
-            logger.warning(
-                "Fan test: Laser spot is larger than max linewidth! Skipping."
-            )
-            return
-
-        # Triangle definition (using compensated width)
-        triangle_vertices = np.array(
-            [
-                [0, 0],
-                [-comp_final_width / 2, pattern_radius],
-                [comp_final_width / 2, pattern_radius],
-            ]
-        )
-
-        fig, ax = plt.subplots()
-        ax.set_aspect("equal")
-
-        # Angle depends on TARGET width (the pitch), not compensated width
-        # This ensures the frequency of the starburst matches the physical design intent
-        wedge_angle = np.arctan(final_linewidth_target / (pattern_radius * 2)) * 2
-        num_triangles = int((0.5 * np.pi) / (wedge_angle * 2) + 1)
-
-        for i in range(1, num_triangles):
-            angle = -2 * i * wedge_angle
-            t = Affine2D().rotate(angle)
-            rotated_verts = t.transform(triangle_vertices)
-            ax.add_patch(
-                Polygon(rotated_verts, closed=True, facecolor="black", edgecolor=None)
-            )
-
-        ax.set_xlim(0, pattern_radius)
-        ax.set_ylim(0, pattern_radius)
-
-        # White circle to mask the messy center
-        # We calculate the point where the physical lines would merge
-        # This occurs when arc_length ~= laser_spot_mm
-        r_start = (pattern_radius / final_linewidth_target) * self.laser_spot_mm
-        ax.add_patch(
-            Circle((0, 0), r_start, facecolor="white", edgecolor="white", zorder=10)
-        )
-
-        ticks = np.arange(0, pattern_radius + 1, 10)
-        labels = [f"{round(x * 10)}" for x in ticks]
-
-        for tick in np.arange(0, pattern_radius + 1, 5):
-            ax.add_patch(
-                Circle(
-                    (0, 0), tick, fill=False, edgecolor="white", linewidth=0.5, zorder=5
-                )
-            )
-
-        ax.set_xticks(ticks)
-        ax.set_xticklabels(labels)
-        ax.set_yticks(ticks)
-        ax.set_yticklabels(labels)
-
-        self._clean_axes(ax, "Radius [mm]", "Radius [mm]")
-        self._save_figure_exact_size(fig, ax, "fantest.svg")
-
-    def generate_wedge_jitter_test(self):
-        """
-        Generates a traditional wedge-based jitter test.
-
-        Creates a series of vertical triangular strips. Inconsistencies in the
-        width of these strips during printing indicate timing jitter in the
-        fast-scan axis.
-        """
-        logger.info("Generating Wedge Jitter Test (Compensated)...")
-        pattern_x = 25.0
-        pattern_y = 30.0
-        max_linewidth_target = 0.300
-        min_linewidth_target = 0.05  # Note: Might be unprintable at tip if < spot size
-
-        fig, ax = plt.subplots()
-
-        # How many triangles fit? Based on TARGET width (pitch)
-        num_triangles = int(pattern_x // max_linewidth_target)
-
-        # Digital width calculation
-        comp_max_width = self._get_compensated_width(max_linewidth_target)
-
-        for i in range(1, num_triangles):
-            cx = i * max_linewidth_target  # Center remains constant (based on pitch)
-
-            if i % 2 == 0 and comp_max_width > 0:
-                # Triangle geometry adjusted for spot size
-                # We simply shrink the width, maintaining the center line
-                verts = np.array(
-                    [
-                        [cx - comp_max_width / 2, pattern_y],
-                        [cx, 0],  # Tip converges to center
-                        [cx + comp_max_width / 2, pattern_y],
-                    ]
-                )
-                ax.add_patch(
-                    Polygon(verts, closed=True, facecolor="black", edgecolor="none")
-                )
-
-        # Calculate where the line becomes unprintable (width < spot size)
-        y_start = (pattern_y / max_linewidth_target) * self.laser_spot_mm
-
-        ax.set_xlim(0, pattern_x)
-        ax.set_ylim(y_start, pattern_y)
-
-        y_ticks = np.arange(y_start, pattern_y + 1, 5)
-        ax.set_yticks(y_ticks)
-        ax.grid(axis="y", color="white", linestyle="-")
-
-        self._clean_axes(ax, "Offset [mm]", "Height [mm]")
-        self._save_figure_exact_size(fig, ax, "jitter_wedge.svg")
 
     def generate_combined_test(self):
         """
@@ -353,6 +228,8 @@ class LaserCalibrationGen:
         num_steps = int(box_size // cell_size)
         tick_locs = []
         tick_labels = []
+
+        lanewidth = self.optical_settings["lanewidth"]
 
         for i in range(num_steps):
             target_thickness = get_thickness(i)
@@ -434,6 +311,9 @@ class LaserCalibrationGen:
             x=-0.2,
         )
 
+        # Needed, so the grid is not distorted
+        ax.set_aspect("equal")
+
         ax.set_xlim(0, box_size)
         ax.set_ylim(0, box_size)
 
@@ -444,20 +324,25 @@ class LaserCalibrationGen:
         ax.tick_params(axis="both", which="major", length=5, width=1)
         ax.tick_params(axis="both", which="minor", length=0)
 
-        self._save_figure_exact_size(fig, ax, "combined_grid_test.svg")
+        # 1. First, Resize the figure to force 1mm scale
+        self.resize_to_mm_scale(fig, ax)
+
+        # 2. Calculate where the Top-Left of the paper is in your Data Coordinates
+        tl_x, tl_y = self.get_top_left_in_data_coords(fig, ax)
+
+        # Note: -offset_y because Y goes UP in data coords, but DOWN from top-left
+        ax.add_patch(
+            Circle((-tl_x + lanewidth, 0), radius=1, color="black", clip_on=False)
+        )
+
+        # 4. Save
+        self.save_final(fig, "combined_grid_test.svg")
 
 
 if __name__ == "__main__":
-    try:
-        generator = LaserCalibrationGen(laser_spot_size_microns=30.0)
+    generator = LaserCalibrationGen()
 
-        # Generate all patterns
-        generator.generate_wedge_jitter_test()
-        generator.generate_fan_test()
-        generator.generate_combined_test()
+    # Generate all patterns
+    generator.generate_combined_test()
 
-        logger.info("All patterns generated successfully.")
-
-    except Exception as e:
-        logger.critical(f"An unexpected error occurred: {e}")
-        sys.exit(1)
+    logger.info("All patterns generated successfully.")

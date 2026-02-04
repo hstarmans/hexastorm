@@ -219,9 +219,11 @@ class PlatformConfig:
         # Store in settings (converted to grid pixels if that was your convention,
         # but storing as mm is usually safer for config, assuming downstream converts it)
         # Based on your previous code, lanewidth was in MM.
+
+        start_pixel = settings["startpixel"]
         settings["lanewidth"] = abs(
-            displacement_kernel(settings["bitsinscanline"] - 1, settings)
-            - displacement_kernel(0, settings)
+            displacement_kernel(start_pixel + settings["bitsinscanline"] - 1, settings)
+            - displacement_kernel(start_pixel, settings)
         )
 
         # Add default facet corrections (placeholders)
