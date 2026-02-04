@@ -7,7 +7,8 @@ import matplotlib
 # Use Agg for file generation without a window popping up
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.patches import Circle, Rectangle
+from matplotlib.lines import Line2D
+from matplotlib.patches import Rectangle
 
 from ...config import PlatformConfig
 
@@ -74,8 +75,9 @@ class LaserCalibrationGen:
 
     def setup_style(self):
         """Sets up the matplotlib style for technical drawings."""
-        text_size = 4.0  # mm (font height)
-        tick_size = 0.2  # mm
+        # RECOMMENDED: 2.0mm is a sweet spot for 30x30mm calibration grids
+        text_size = 2.0  # mm (font height)
+        tick_size = 0.3  # mm (slightly thicker for visibility)
 
         # Convert mm to typographic points (1 inch = 25.4 mm = 72 points)
         mm_to_points = 72 / 25.4
@@ -86,11 +88,14 @@ class LaserCalibrationGen:
             {
                 "font.family": "sans-serif",
                 "font.size": self.points_text,
-                "xtick.major.size": self.points_ticks,
-                "ytick.major.size": self.points_ticks,
-                "xtick.minor.size": self.points_ticks,
-                "ytick.minor.size": self.points_ticks,
-                "grid.linewidth": self.points_ticks,
+                "axes.labelsize": self.points_text * 1.1,  # Slightly larger labels
+                "xtick.labelsize": self.points_text,
+                "ytick.labelsize": self.points_text,
+                "xtick.major.size": self.points_ticks * 4,  # Length of the tick line
+                "ytick.major.size": self.points_ticks * 4,
+                "xtick.major.width": 0.2,  # Thickness of the tick line
+                "ytick.major.width": 0.2,
+                "grid.linewidth": 0.1,
                 "lines.linewidth": 0.5,
             }
         )
@@ -140,6 +145,36 @@ class LaserCalibrationGen:
         # 6. Final Draw to update transforms
         fig.canvas.draw()
         return final_dpi
+
+    def _add_line(self, ax, x1, y1, x2, y2, width=0.1):
+        line = Line2D([x1, x2], [y1, y2], linewidth=width, color="black", clip_on=False)
+        ax.add_line(line)
+
+    def add_vernier_alignment(self, ax, start_pos, boundary_level, vertical=False):
+        """Standard alignment vernier."""
+        # Master Scale
+        for i in range(11):
+            pos = start_pos + i
+            if not vertical:
+                self._add_line(
+                    ax, pos, boundary_level - 1.0, pos, boundary_level, width=0.15
+                )
+            else:
+                self._add_line(
+                    ax, boundary_level - 1.0, pos, boundary_level, pos, width=0.15
+                )
+
+        # Slave Scale
+        for i in range(11):
+            pos = start_pos + (i * 0.95)
+            if not vertical:
+                self._add_line(
+                    ax, pos, boundary_level, pos, boundary_level + 1.0, width=0.15
+                )
+            else:
+                self._add_line(
+                    ax, boundary_level, pos, boundary_level + 1.0, pos, width=0.15
+                )
 
     def get_top_left_in_data_coords(self, fig, ax):
         """
@@ -302,14 +337,8 @@ class LaserCalibrationGen:
         ax.set_yticks(tick_locs)
         ax.set_yticklabels(tick_labels)
 
-        ax.set_xlabel("fast axis")
-        ax.set_ylabel("slow axis")
-        # Added spot size to title for documentation on the print itself
-        ax.set_title(
-            "linewidth [μm]",
-            loc="left",
-            x=-0.2,
-        )
+        ax.set_xlabel("scan --> width [μm]", x=0.3)
+        ax.set_ylabel("stage --> width [μm]", y=0.2)
 
         # Needed, so the grid is not distorted
         ax.set_aspect("equal")
@@ -330,9 +359,9 @@ class LaserCalibrationGen:
         # 2. Calculate where the Top-Left of the paper is in your Data Coordinates
         tl_x, tl_y = self.get_top_left_in_data_coords(fig, ax)
 
-        # Note: -offset_y because Y goes UP in data coords, but DOWN from top-left
-        ax.add_patch(
-            Circle((-tl_x + lanewidth, 0), radius=1, color="black", clip_on=False)
+        # Vernier Aligntment Mark for Stage
+        self.add_vernier_alignment(
+            ax, start_pos=-10, boundary_level=lanewidth - tl_x, vertical=True
         )
 
         # 4. Save
