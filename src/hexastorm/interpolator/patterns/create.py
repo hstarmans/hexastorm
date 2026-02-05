@@ -150,6 +150,84 @@ class LaserCalibrationGen:
         line = Line2D([x1, x2], [y1, y2], linewidth=width, color="black", clip_on=False)
         ax.add_line(line)
 
+    def add_stitched_vernier(self, ax, center_x, center_y, vertical=False):
+        """
+        Draws a Vernier pattern specifically designed for Slicing overlaps.
+
+        It clips the pattern:
+        - The Master (Lower) scale exists ONLY to the Left of center_x.
+        - The Slave (Upper) scale exists ONLY to the Right of center_x.
+        """
+
+        # Settings
+        num_ticks = 10  # Enough ticks to see the pattern fade in/out
+        pitch = 1.0  # Spacing between lines
+        tick_height = 1.0
+        width = 0.2  # line-width
+
+        # We iterate a range that spans across the boundary
+        # e.g. from -7 to +7
+        offset_range = range(-(num_ticks // 2), (num_ticks // 2) + 1)
+
+        for i in offset_range:
+            # 1. Calculate Potential Positions assuming 0 is at center_x
+            #    (We calculate BOTH potential positions for every index to see what fits)
+
+            # Master (Standard) position
+            pos_master = center_x + (i * pitch)
+
+            # Slave (Vernier) position
+            # Note: We align them at index 0 (the boundary)
+            pos_slave = center_x + (i * pitch)
+
+            # 2. Logic for Horizontal Orientation (Vertical=False)
+            if not vertical:
+                # --- MASTER SCALE (Lower) ---
+                # Rule: Only draw IF it sits to the LEFT of the slicer cut (center_x)
+                if pos_master <= center_x:
+                    self._add_line(
+                        ax,
+                        pos_master,
+                        center_y,
+                        pos_master,
+                        center_y - tick_height,
+                        width=width,
+                    )
+
+                # --- SLAVE SCALE (Upper) ---
+                # Rule: Only draw IF it sits to the RIGHT of the slicer cut (center_x)
+                if pos_slave >= center_x:
+                    self._add_line(
+                        ax,
+                        pos_slave,
+                        center_y,
+                        pos_slave,
+                        center_y + tick_height,
+                        width=width,
+                    )
+
+            # 3. Logic for Vertical Orientation (Vertical=True)
+            else:
+                # Same logic but coordinates flipped
+                if pos_master <= center_y:  # Below split
+                    self._add_line(
+                        ax,
+                        center_x,
+                        pos_master,
+                        center_x - tick_height,
+                        pos_master,
+                        width=width,
+                    )
+                if pos_slave >= center_y:  # Above split
+                    self._add_line(
+                        ax,
+                        center_x,
+                        pos_slave,
+                        center_x + tick_height,
+                        pos_slave,
+                        width=width,
+                    )
+
     def add_vernier_alignment(self, ax, start_pos, boundary_level, vertical=False):
         """Standard alignment vernier."""
         # Master Scale
@@ -249,9 +327,9 @@ class LaserCalibrationGen:
         is used (no grid lines, only boundary ticks) to prevent visual clutter.
         """
         logger.info("Generating Combined Grid Test (Compensated)...")
-        box_size = 30  # mm (Square size)
+        box_size = 25  # mm (Square size)
         cell_size = 5  # mm (Size of each thickness zone)
-        linewidth_start = 0.04  # mm
+        linewidth_start = 0.06  # mm
         stepsize = 0.020  # mm
         lines_per_group = 10  # Number of lines per grid cell
 
@@ -362,6 +440,11 @@ class LaserCalibrationGen:
         # Vernier Aligntment Mark for Stage
         self.add_vernier_alignment(
             ax, start_pos=-10, boundary_level=lanewidth - tl_x, vertical=True
+        )
+
+        # Vernier Alignment Mark for Scan
+        self.add_stitched_vernier(
+            ax, center_x=lanewidth - tl_x, center_y=20, vertical=False
         )
 
         # 4. Save
