@@ -6,9 +6,7 @@ from hexastorm.esp32_controller import ESP32Controller
 
 logger = logging.getLogger(__name__)
 
-
 class Tests(unittest.TestCase):
-    # Test that we can send commands, get output, and handle interrupts properly via ESP32Controller.
     @classmethod
     def setUpClass(cls):
         cls.esp = ESP32Controller(port='/dev/ttyACM0')
@@ -19,9 +17,8 @@ class Tests(unittest.TestCase):
         """
         logger.info("Running Invalid Command Test...")
         
-        # Define the invalid code locally
         def remote_fail():
-            import host # noqa: F401 (silence linter warning if host isn't local)
+            import host  # noqa: F401 (silence linter warning if host isn't local)
             host.superfunctie()
 
         with self.assertRaises(RuntimeError) as cm:
@@ -36,8 +33,7 @@ class Tests(unittest.TestCase):
         """
         logger.info("Running Valid Command Test...")
 
-        # We pass operands via kwargs to show injection
-        def remote_calc():
+        def remote_calc(a, b):
             print(a + b)
 
         result = self.esp.exec_func(remote_calc, a=10, b=5)
@@ -48,18 +44,16 @@ class Tests(unittest.TestCase):
     def test_blink(self):
         logger.info("Running Blink Test...")
         
-        # The logic is now standard Python code, fully lintable
-        def remote_blink():
+        def remote_blink(dur):
             import machine, time
             led = machine.Pin(8, machine.Pin.OUT)
             led.off()
-            time.sleep(dur) # 'dur' is injected via kwargs
+            time.sleep(dur) 
             led.on()
 
-        # Fire and forget
         self.esp.exec_func(remote_blink, wait=False, dur=2)
         
-        # Wait for python to catch up + buffer
+        # Wait for duration + buffer
         time.sleep(2.5)
         
         # Verify we can talk again
@@ -72,31 +66,24 @@ class Tests(unittest.TestCase):
         """
         logger.info("Running Interrupt State Retention Test...")
 
-        # 1. Initialize global variable x
         self.esp.exec_wait("x = 0")
 
-        # 2. Define the infinite loop function locally
-        # Note: We don't define a function *on* the ESP32, we just send
-        # a script that runs an infinite loop.
+        # This still relies on global x because x is state *outside* the function.
+        # However, we must explicitly declare global x because we are now 
+        # inside a real function scope on the ESP32.
         def remote_loop():
             import time
-            global x
-            x += 1           # Step 1: Increase
-            while True:      # Step 2: Sleep forever
+            global x  # Necessary now because we are inside a 'def' scope on ESP32
+            x += 1          
+            while True:      
                 time.sleep(0.1)
 
-        # 3. Start execution in background (wait=False)
-        logger.info("Starting infinite loop function...")
         self.esp.exec_func(remote_loop, wait=False)
 
-        # 4. Wait briefly for x += 1 to happen
         time.sleep(0.5)
-
-        # 5. Interrupt!
-        logger.info("Sending Ctrl+C to stop execution...")
+        logger.info("Sending Ctrl+C...")
         self.esp.stop()
 
-        # 6. Verify State
         val = self.esp.exec_wait("print(x)")
         logger.info(f"Value of x after interrupt: {val}")
         self.assertEqual(val, "1", "Global variable x should be 1 after interrupt")

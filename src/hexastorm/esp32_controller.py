@@ -81,28 +81,24 @@ class ESP32Controller:
 
     def exec_func(self, func, wait=True, **kwargs):
         """
-        Extracts the body of a local Python function and runs it on the ESP32.
+        Sends the function definition to the ESP32 and calls it with provided kwargs.
         
         :param func: The local function object.
         :param wait: If True, uses exec_wait; else exec_no_wait.
-        :param kwargs: Variables to inject into the global scope before running.
+        :param kwargs: Arguments to pass to the function call.
         """
-        # 1. Get source and dedent
+        # 1. Get the full source code of the function (including 'def ...')
         source = inspect.getsource(func)
         source = textwrap.dedent(source)
         
-        # 2. Extract body (naive approach: everything after first line)
-        # This assumes the function definition "def name(...):" is on one line.
-        lines = source.splitlines()
-        body = "\n".join(lines[1:])
-        body = textwrap.dedent(body)
+        # 2. Get the function name so we can call it
+        func_name = func.__name__
         
-        # 3. Create header for variable injection
-        header = ""
-        for key, value in kwargs.items():
-            header += f"{key} = {value!r}\n"
-            
-        full_command = header + body
+        # 3. Format the arguments (e.g., "a=10, b=5")
+        args_str = ", ".join(f"{k}={v!r}" for k, v in kwargs.items())
+        
+        # 4. Construct the full payload: Define it, then call it.
+        full_command = f"{source}\n{func_name}({args_str})"
         
         if wait:
             return self.exec_wait(full_command)
