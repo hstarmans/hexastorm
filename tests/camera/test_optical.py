@@ -34,15 +34,13 @@ class Tests(unittest.TestCase):
         cls.esp = ESP32Controller(timeout=4.0)
 
         # Define setup logic locally
-        def setup_board():
-            # We import here so the linter sees it, 
-            # and so it runs on the ESP32 side.
-            from tools import lh as host 
-            # Inject 'curr' via kwargs below
-            host.laser_current = curr  # noqa: F821
+        def setup_board(curr):
+            global host
+            from tools import lh as host # noqa: F401 
+            host.laser_current = curr
 
         # Execute setup
-        # We pass 'curr' to avoid f-string injection
+        # We pass 'curr' as a direct argument to the function call
         cls.esp.exec_func(setup_board, curr=current_val)
 
     @classmethod
@@ -62,10 +60,12 @@ class Tests(unittest.TestCase):
         Laser is aligned without camera.
         """
         def enable_laser():
-            host.enable_comp(laser1=True) # noqa: F821
+            global host
+            host.enable_comp(laser1=True)
 
         def disable_laser():
-            host.enable_comp(laser1=False) # noqa: F821
+            global host
+            host.enable_comp(laser1=False)
 
         self.esp.exec_func(enable_laser)
 
@@ -80,7 +80,8 @@ class Tests(unittest.TestCase):
         User can first preview image. After pressing escape, a final image is taken.
         """
         def start_preview():
-            host.enable_comp(laser0=True, polygon=True) # noqa: F821
+            global host
+            host.enable_comp(laser0=True, polygon=True)
 
         self.esp.exec_func(start_preview)
 
@@ -94,7 +95,8 @@ class Tests(unittest.TestCase):
         self.take_picture()
 
         def stop_preview():
-            host.enable_comp(laser1=False, polygon=False) # noqa: F821
+            global host
+            host.enable_comp(laser1=False, polygon=False)
             
         self.esp.exec_func(stop_preview)
 
@@ -104,8 +106,8 @@ class Tests(unittest.TestCase):
         User can first preview image. After pressing escape, a final image is taken.
         """
         def start_spot():
-            # NOTE: all ND filters and a single channel is used
-            host.enable_comp(laser1=True, polygon=False) # noqa: F821
+            global host
+            host.enable_comp(laser1=True, polygon=False)
 
         self.esp.exec_func(start_spot)
 
@@ -133,23 +135,13 @@ class Tests(unittest.TestCase):
         local_pattern = [1] * 1 + [0] * 39
         local_lines = 10_000
 
-        def remote_pattern():
-            # Variables 'pat', 'reps', 'fct' are injected via kwargs
-            # 'host' is assumed available globally on ESP32
-            
-            # Note: The linter will flag 'pat', 'reps', 'fct' as undefined
-            # unless we ignore them or trick the linter. 
-            # Since this function is never run locally, ignoring is safe.
-            
-            bits = host.cfg.laser_timing["scanline_length"] # noqa: F821
-            
-            # Use 'pat' injected from kwargs
-            line = (pat * (bits // len(pat)) + pat[: bits % len(pat)]) # noqa: F821
-            
-            host.synchronize(True) # noqa: F821
-            true_facet = host.remap(fct) # noqa: F821
-            
-            host.write_line(line, repetitions=reps, facet=true_facet) # noqa: F821
+        def remote_pattern(pat, reps, fct):
+            global host
+            bits = host.cfg.laser_timing["scanline_length"] 
+            line = (pat * (bits // len(pat)) + pat[: bits % len(pat)])
+            host.synchronize(True) 
+            true_facet = host.remap(fct) 
+            host.write_line(line, repetitions=reps, facet=true_facet) 
 
         # Execute using exec_func
         # wait=False because this might take time/run async
@@ -221,7 +213,8 @@ class Tests(unittest.TestCase):
                 
                 # Re-setup parameters if reset() cleared them
                 def reset_current():
-                    host.laser_current = 110 # noqa: F821
+                    global host
+                    host.laser_current = 110
                 self.esp.exec_func(reset_current)
 
         logger.info("--- Starting Calibration Analysis ---")
