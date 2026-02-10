@@ -13,6 +13,9 @@ build*
 *.gtkw
 *.vcd
 
+# camera images
+tests/camera/images*
+
 # interpolater preview images
 src/hexastorm/interpolator/debug/*
 

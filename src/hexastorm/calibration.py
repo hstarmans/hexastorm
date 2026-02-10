@@ -4,6 +4,7 @@ from pathlib import Path
 import json
 import logging
 import traceback
+from datetime import datetime
 
 from .config import Camera
 
@@ -261,6 +262,86 @@ def verify_calibration(
         cv.imwrite("calibration_verification.jpg", vis)
 
 
+def generate_reports(report_data, output_dir):
+    """
+    Generates a Markdown report AND a JSON file with calibration data.
+    """
+    output_dir = Path(output_dir)
+    md_path = output_dir / "calibration_report.md"
+    json_path = output_dir / "calibration_data.json"
+    
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # --- 1. Markdown Report ---
+    md_content = f"""
+# Facet Error Report
+**Date:** {current_time}
+
+<table>
+    <thead>
+        <tr>
+            <th>Facet</th>
+            <th>Timing Shift (Scan μm)</th>
+            <th>Mechanical Tilt (Orth μm)</th>
+            <th>Spot Diameter (μm)</th>
+            <th>Eccentricity</th>
+            <th>Rotation Angle (deg)</th>
+        </tr>
+    </thead>
+    <tbody>
+"""
+
+    sorted_keys = sorted(report_data.keys(), key=lambda x: int(x))
+    
+    # Structure for JSON output
+    opt_correct = {}
+
+    for key in sorted_keys:
+        data = report_data[key]
+        
+        scan_shift = data.get("Scan_shift_um", 0.0)
+        orth_shift = data.get("Orth_shift_um", 0.0)
+        spot_size = data.get("mean_spot_size_um", "N/A")
+        eccentricity = data.get("mean_eccentricity", "N/A")
+        rotation_angle = data.get("rotation_angle_deg", "N/A")
+        
+        # Populate JSON Dictionary
+        opt_correct[int(key)] = {
+            "scan": scan_shift if isinstance(scan_shift, (int, float)) else 0.0,
+            "orth": orth_shift if isinstance(orth_shift, (int, float)) else 0.0
+        }
+
+        # Format Markdown Row
+        facet_label = f"<strong>{key} (Ref)</strong>" if key == "0" else f"<strong>{key}</strong>"
+        md_content += f"""        <tr>
+            <td>{facet_label}</td>
+            <td>{scan_shift}</td>
+            <td>{orth_shift}</td>
+            <td>{spot_size}</td>
+            <td>{eccentricity}</td>
+            <td>{rotation_angle}</td>
+        </tr>
+"""
+
+    md_content += """    </tbody>
+</table>
+"""
+
+    try:
+        # Write Markdown
+        with open(md_path, "w", encoding="utf-8") as f:
+            f.write(md_content)
+        logging.info(f"Markdown report generated: {md_path}")
+        
+        # Write JSON
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(opt_correct, f, indent=4)
+        logging.info(f"JSON calibration data generated: {json_path}")
+        
+    except Exception as e:
+        logging.error(f"Failed to write reports: {e}")
+
+
 def run_full_calibration_analysis(
     image_dir, num_facets=4, filename_pattern="facet{}.jpg", debug=False
 ):
@@ -313,18 +394,12 @@ def run_full_calibration_analysis(
                 angle_data = {"rotation_angle_deg": round(all_angles[i], 4)} if i < len(all_angles) else {}
                 master_report[str(i)] = {**s_data, **spot_data, **angle_data}
 
-            # We use logging.info for the header, but strictly speaking,
-            # JSON output is often better printed raw if you pipe this to a file.
-            # However, sticking to the 'flip print to logging' request:
             logging.info("--- Calibration Report Generated ---")
 
-            # Note: logging multiple lines of JSON can be messy with prefixes.
-            # Using print here for the pure data payload is often preferred even with logging enabled,
-            # but per your request, I've logged it.
-            for line in json.dumps(master_report, indent=4).split("\n"):
-                logging.info(line)
+            # 4. Generate Reports (Markdown + JSON)
+            generate_reports(master_report, image_dir)
 
-            # 4. Verify Visuals
+            # 5. Verify Visuals
             valid_angles = [a for a in all_angles if a != 0]
             avg_angle = np.mean(valid_angles) if valid_angles else 0
             verify_calibration(
