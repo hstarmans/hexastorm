@@ -16,33 +16,44 @@ logging.basicConfig(
 )
 
 
-def get_dots(img_path, pixelsize=Camera.DEFAULT_PIXEL_SIZE_UM, debug=False):
+def get_dots(img, pixelsize=Camera.DEFAULT_PIXEL_SIZE_UM, debug=False):
     """
     Analyzes an image to find laser dots.
-    img_path: str or Path object to the image.
+    img: numpy array (loaded image).
     """
-    # Resolve absolute path to ensure cv.imread works irrespective of execution dir
-    img_path = Path(img_path).resolve()
-
-    img = cv.imread(str(img_path))
     if img is None:
-        raise ValueError(f"Could not load image at {img_path}")
+        raise ValueError("Image data is None")
 
     gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
 
     # 1. Use an adaptive threshold or a higher fixed one
-    # Laser dots often have a 'halo'; we want the core.
     _, thresh = cv.threshold(gray, 100, 255, cv.THRESH_BINARY)
 
     # 2. Find connected components
     contours, _ = cv.findContours(thresh, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
 
-    # 3. Filter by size (area) to remove single-pixel noise
+    # Calculate Area Limits based on Physical Size ---
+    # Expected limits: 10um to 200um diameter
+    min_diameter_um = 10.0
+    max_diameter_um = 200.0
+
+    # Convert to pixel radius: (um_diameter / pixelsize) / 2
+    min_radius_px = (min_diameter_um / pixelsize) / 2.0
+    max_radius_px = (max_diameter_um / pixelsize) / 2.0
+
+    # Calculate Area limits: A = pi * r^2
+    min_area_px = np.pi * (min_radius_px ** 2)
+    max_area_px = np.pi * (max_radius_px ** 2)
+    # ---------------------------------------------------------
+
+    # 3. Filter by size (area) to remove noise
     valid_dots = []
     dot_metrics = []
     for cnt in contours:
         area = cv.contourArea(cnt)
-        if 5 < area < 1000:
+        
+        # Check against calculated pixel area limits
+        if min_area_px < area < max_area_px:
             # 1. Get the Centroid (Moment-based)
             M = cv.moments(cnt)
             if M["m00"] == 0:
@@ -51,12 +62,13 @@ def get_dots(img_path, pixelsize=Camera.DEFAULT_PIXEL_SIZE_UM, debug=False):
 
             # 2. Fit Ellipse (requires at least 5 points)
             if len(cnt) >= 5:
-                # el = ((center_x, center_y), (width, height), angle)
                 el = cv.fitEllipse(cnt)
                 axes = np.array(el[1]) * pixelsize  # Convert to micrometers
             else:
-                # Fallback for very tiny dots
-                axes = np.array([np.sqrt(area), np.sqrt(area)]) * pixelsize
+                # Fallback for very tiny dots (approximate from area)
+                # d = 2 * sqrt(area/pi) -> mapped to axes
+                d_px = 2 * np.sqrt(area / np.pi)
+                axes = np.array([d_px, d_px]) * pixelsize
 
             valid_dots.append(center)
             dot_metrics.append(
@@ -93,7 +105,7 @@ def get_dots(img_path, pixelsize=Camera.DEFAULT_PIXEL_SIZE_UM, debug=False):
                 1,
             )
 
-        window_name = f"Debug: {img_path.name}"
+        window_name = "dots_debug"
         cv.namedWindow(window_name, cv.WINDOW_NORMAL)
         h, w = img.shape[:2]
         cv.resizeWindow(window_name, int(w * 0.6), int(h * 0.6))
@@ -368,7 +380,20 @@ def run_full_calibration_analysis(
         # 1. Process each image
         for i, path in enumerate(image_paths):
             logging.info(f"Processing Facet {i}...")
-            dots_facet, stat = get_dots(path, debug=debug)
+            
+            # Resolve absolute path to ensure cv.imread works
+            path = path.resolve()
+            img = cv.imread(str(path))
+            
+            if img is None:
+                logging.error(f"Could not load image at {path}")
+                # Append empty placeholders to maintain index alignment
+                all_rect_dots.append(np.array([]))
+                all_spot_stats.append({})
+                all_angles.append(0)
+                continue
+            
+            dots_facet, stat = get_dots(img, debug=debug)
 
             if len(dots_facet) == 0:
                 logging.warning(f"No dots found in {path.name}")

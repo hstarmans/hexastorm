@@ -3,10 +3,12 @@ import unittest
 from pathlib import Path
 import logging
 
-import camera
+import fire
 import cv2 as cv
+from tqdm import tqdm
 
-from hexastorm.calibration import run_full_calibration_analysis
+import camera
+from hexastorm.calibration import run_full_calibration_analysis, get_dots
 from hexastorm.esp32_controller import ESP32Controller
 from hexastorm.config import PlatformConfig
 
@@ -17,24 +19,24 @@ IMG_DIR = TEST_DIR / "images"
 TESTIMG_DIR = TEST_DIR / "testimages"
 
 
-class Tests(unittest.TestCase):
+class StaticTests:
     """Optical test for scanhead
 
+    Does not require facet synchronization
     shutter speed: it is assumed 100 units is ~1 ms
     """
 
-    @classmethod
-    def setUpClass(cls):
+    def __init__(self):
         # Default current matching original parameter
         current_val = 110
 
-        cls.cfg = PlatformConfig(test=False)
+        self.cfg = PlatformConfig(test=False)
 
-        cls.cam = camera.Cam()
-        cls.cam.init()
+        self.cam = camera.Cam()
+        self.cam.init()
 
         # Initialize Controller
-        cls.esp = ESP32Controller(timeout=4.0)
+        self.esp = ESP32Controller(timeout=4.0)
 
         # Define setup logic locally
         def setup_board(curr):
@@ -44,18 +46,13 @@ class Tests(unittest.TestCase):
 
         # Execute setup
         # We pass 'curr' as a direct argument to the function call
-        cls.esp.exec_func(setup_board, curr=current_val)
+        self.esp.exec_func(setup_board, curr=current_val)
 
-    @classmethod
-    def tearDownClass(cls):
-        cls.cam.close()
-        try:
-            if hasattr(cls, 'esp') and cls.esp:
-                # Simple cleanup command
-                cls.esp.exec_wait("host.reset()")
-                cls.esp.close()
-        except Exception as e:
-            logger.warning(f"Error during tearDown: {e}")
+    def close(self):
+        self.cam.close()
+        self.esp.exec_wait("host.reset()")
+        self.esp.close()
+
 
     def align_laser(self):
         """
@@ -95,7 +92,7 @@ class Tests(unittest.TestCase):
         logger.info("Press escape to quit live view")
 
         self.cam.live_view(0.6)
-        self.take_picture()
+        self.take_picture(save=False)
 
         def stop_preview():
             global host
@@ -123,46 +120,62 @@ class Tests(unittest.TestCase):
         self.take_picture()
 
         def stop_spot():
-            host.enable_comp(laser1=False, polygon=False) # noqa: F821
+            global host
+            host.enable_comp(laser1=False, polygon=False)
             
         self.esp.exec_func(stop_spot)
 
-    def take_picture(self, count=1, name=None):
+    def take_picture(self, count=1, name=None, save=True):
         """
         Captures images using the camera class.
+        
+        Args:
+            count (int): Number of images to capture.
+            name (str): Filename to save as.
+            save (bool): If True, saves to disk. If False, just returns the image object.
         """
-        IMG_DIR.mkdir(parents=True, exist_ok=True)
+        if save:
+            IMG_DIR.mkdir(parents=True, exist_ok=True)
 
         last_img = None
         for i in range(count):
             img = self.cam.capture()
-            grey = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
-
-            if name:
-                if count > 1:
-                    stem = Path(name).stem
-                    ext = Path(name).suffix
-                    file_name = f"{stem}_{i}{ext}"
-                else:
-                    file_name = name
-            else:
-                timestamp = time.strftime("%Y%m%d-%H%M%S")
-                file_name = f"{timestamp}.jpg"
-
-            file_path = IMG_DIR / file_name
-
-            cv.imwrite(str(file_path), grey)
-            logger.info(f"Saved: {file_path}")
+            # If camera returns None or empty, handle gracefully
+            if img is None:
+                continue
+                
+            # Keep original color img for returning, but maybe convert for saving?
+            # Original code converted to grey for saving.
+            # We will return the raw image (usually BGR from OpenCV) to maintain info.
+            
             last_img = img
+
+            if save:
+                grey = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+                if name:
+                    if count > 1:
+                        stem = Path(name).stem
+                        ext = Path(name).suffix
+                        file_name = f"{stem}_{i}{ext}"
+                    else:
+                        file_name = name
+                else:
+                    timestamp = time.strftime("%Y%m%d-%H%M%S")
+                    file_name = f"{timestamp}.jpg"
+
+                file_path = IMG_DIR / file_name
+                cv.imwrite(str(file_path), grey)
+                logger.info(f"Saved: {file_path}")
+
             if count > 1:
                 time.sleep(1)
+                
         return last_img
     
 
-class TestDynamic(Tests):
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
+class DynamicTests(StaticTests):
+    def __init__(self):
+        super().__init__()
 
         def get_facet_zero_mapping():
             global host, spoll, sys
@@ -175,15 +188,21 @@ class TestDynamic(Tests):
             true_facet = host.remap(0) 
             return true_facet
 
-        cls.esp.exec_func(get_facet_zero_mapping)
-        cls.facet_zero = 0
+        self.esp.exec_func(get_facet_zero_mapping)
+        self.facet_zero = 0
         
-        logger.info(f"TestDynamic Setup Complete. Facet 0 maps to: {cls.facet_zero}")
+        logger.info(f"TestDynamic Setup Complete. Facet 0 maps to: {self.facet_zero}")
 
-    def picture_line(self, line, fct=None, preview=True, takepicture=True, name=None):
+    def picture_line(self, line, fct=None, preview=True, takepicture=True, name=None, save_image=True):
         """
         Projects a line pattern on a specific facet and takes a picture.
         Uses serial handshaking (P -> R) to ensure synchronization.
+        
+        Args:
+            save_image (bool): If True, saves the captured image to disk. 
+                               If False, keeps it in memory only.
+        Returns:
+            image (numpy array) or None
         """
         # Default to the dynamically mapped facet 0 found in setUpClass
         if fct is None:
@@ -236,15 +255,95 @@ class TestDynamic(Tests):
                     break
             time.sleep(0.01)
 
+        result_img = None
         if ready:
             if preview:
                 self.cam.live_view(0.6)
             if takepicture:
-                self.take_picture(count=1, name=name)
+                # Pass the save flag down to take_picture
+                result_img = self.take_picture(count=1, name=name, save=save_image)
         else:
             raise Exception("Timeout: ESP32 did not respond with 'R'")
 
         self.esp.serial.write(b'Q')
+
+        # We must confirm the ESP32 has fully exited the previous function 
+        # and returned to the REPL before we return control to the loop.
+        start_drain = time.time()
+        buffer = b""
+        while (time.time() - start_drain) < 2.0:
+            if self.esp.serial.in_waiting:
+                chunk = self.esp.serial.read(self.esp.serial.in_waiting)
+                buffer += chunk
+                if b">>>" in buffer: # Look for the MicroPython prompt
+                    break
+            time.sleep(0.01)
+
+        return result_img
+
+    def scan_visibility(self, facet=0, step=10):
+        """
+        Loops over all pixels in the scanline length. 
+        Projects a single pixel, takes a picture (no save), and checks visibility.
+
+        Args:
+            facet (int): The facet index to scan.
+            step (int): The stride/interval between pixels (default=10).
+        """
+        scan_len = self.cfg.laser_timing["scanline_length"]
+        visibility_map = []
+        pixels_to_scan = list(range(0, scan_len, step))
+        
+        logger.info(f"Starting Pixel Visibility Scan. Total Pixels: {scan_len} (Step: {step})")
+        
+        # We use tqdm here. 
+        # file=sys.stdout ensures it prints even if stderr is captured by some test runners.
+        try:
+            for i in tqdm(pixels_to_scan, desc="Scanning Pixels", unit="px"):
+                # 1. Create a line with only the current pixel ON
+                line = [0] * scan_len
+                line[i] = 1
+
+                # 2. Project and capture (Don't save to disk to save time/space)
+                # Note: We assume picture_line returns the image as implemented previously
+                img = self.picture_line(
+                    line=line, 
+                    fct=facet, 
+                    preview=False, 
+                    takepicture=True,
+                    save_image=False, # Ensure picture_line supports this argument
+                    name=None
+                )
+
+                # 3. Analyze image
+                is_visible = False
+                if img is not None:
+                    # Pass the in-memory image to get_dots
+                    dots, _ = get_dots(img, debug=False)
+                    if len(dots) > 0:
+                        is_visible = True
+                
+                visibility_map.append(is_visible)
+
+        except KeyboardInterrupt:
+            logger.warning("Scan interrupted by user.")
+        
+        # Print final summary
+        logger.info("-" * 30)
+        logger.info("Visibility Scan Results:")
+        logger.info("-" * 30)
+        
+        visible_indices = [idx for idx, vis in enumerate(visibility_map) if vis]
+        
+        # Calculate percentage
+        if scan_len > 0:
+            percent = (len(visible_indices) / scan_len) * 100
+        else:
+            percent = 0
+            
+        logger.info(f"Visible Pixels: {len(visible_indices)}/{scan_len} ({percent:.1f}%)")
+        logger.info(f"Visible Indices: {visible_indices}")
+
 
     def stability_pattern(self, facet=3, preview=True):
         """
@@ -273,8 +372,8 @@ class TestDynamic(Tests):
 
         if capture:
             for facet in range(num_facets):
-                logger.info(f"--- Capturing Calibration Image for Facet {i} ---")
-                self.stability_pattern(facet=facet, preview=True)
+                logger.info(f"--- Capturing Calibration Image for Facet {facet} ---")
+                self.stability_pattern(facet=facet, preview=False)
 
 
         logger.info("--- Starting Calibration Analysis ---")
@@ -285,6 +384,35 @@ class TestDynamic(Tests):
             debug=False,
         )
 
+class Launcher:
+    """Main Entry Point."""
+    
+    def __init__(self):
+        self._active_test = None
+
+    @property
+    def static(self):
+        if self._active_test is None:
+            self._active_test = StaticTests()
+        return self._active_test
+
+    @property
+    def dynamic(self):
+        if self._active_test is None:
+            self._active_test = DynamicTests()
+        return self._active_test
+    
+    def close(self):
+        if self._active_test:
+            self._active_test.close()
+            self._active_test = None
+
+def main():
+    tool = Launcher()
+    try:
+        fire.Fire(tool)
+    finally:
+        tool.close()
 
 if __name__ == "__main__":
-    unittest.main()
+    main()
