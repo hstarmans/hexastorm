@@ -88,5 +88,62 @@ class Tests(unittest.TestCase):
         logger.info(f"Value of x after interrupt: {val}")
         self.assertEqual(val, "1", "Global variable x should be 1 after interrupt")
 
+    def test_soft_interrupt(self):
+        """
+        Tests breaking a loop using 'uselect' and a custom character ('q').
+        """
+        logger.info("Running Soft Interrupt (uselect) Test...")
+        
+        def remote_poll_loop():
+            import sys, uselect, time
+            
+            # 1. Register Standard Input (Serial) for polling
+            spoll = uselect.poll()
+            spoll.register(sys.stdin, uselect.POLLIN)
+            
+            counter = 0
+            while True:
+                counter += 1
+                
+                # 2. Check for data immediately (timeout=0)
+                if spoll.poll(0):
+                   char = sys.stdin.read(1)
+                   if char == 'q':
+                       print("Quit received!") # <--- We search for this string
+                       break
+                
+                time.sleep(0.1)
+            
+            return counter
+
+        # 1. Start the loop asynchronously
+        self.esp.exec_func(remote_poll_loop, wait=False)
+        
+        # 2. Let it run briefly
+        time.sleep(1.0)
+        
+        # 3. Send 'q' to break the loop softly
+        logger.info("Sending 'q' command to break loop...")
+        self.esp.serial.write(b'q')
+        
+        # 4. VERIFY EXIT (The Critical Step)
+        # Give ESP32 time to process 'q' and print the message
+        time.sleep(0.5)
+        
+        # Read whatever is in the serial buffer
+        if self.esp.serial.in_waiting:
+            output = self.esp.serial.read(self.esp.serial.in_waiting).decode('utf-8', errors='replace')
+        else:
+            output = ""
+            
+        # If your 'if spoll.poll(0):' code is commented out, this will FAIL 
+        # because the loop never prints "Quit received!"
+        self.assertIn("Quit received!", output, "Loop did not exit via soft interrupt!")
+
+        # 5. Now it is safe to confirm the board is free
+        res = self.esp.exec_wait("print('I am free')")
+        self.assertEqual(res, "I am free")
+        logger.info("Soft interrupt successful.")
+
 if __name__ == "__main__":
     unittest.main()

@@ -8,6 +8,7 @@ import cv2 as cv
 
 from hexastorm.calibration import run_full_calibration_analysis
 from hexastorm.esp32_controller import ESP32Controller
+from hexastorm.config import PlatformConfig
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,8 @@ class Tests(unittest.TestCase):
     def setUpClass(cls):
         # Default current matching original parameter
         current_val = 110
+
+        cls.cfg = PlatformConfig(test=False)
 
         cls.cam = camera.Cam()
         cls.cam.init()
@@ -124,44 +127,6 @@ class Tests(unittest.TestCase):
             
         self.esp.exec_func(stop_spot)
 
-    def photo_pattern(self, facet=3, preview=True):
-        """
-        Line with a given pattern is projected and photo is taken.
-        """
-        assert facet in (0, 1, 2, 3), "facet must be 0, 1, 2, or 3"
-
-        # Python list is compatible with MicroPython
-        fname = f"facet{facet}.jpg"
-        local_pattern = [1] * 1 + [0] * 39
-        local_lines = 10_000
-
-        def remote_pattern(pat, reps, fct):
-            global host
-            bits = host.cfg.laser_timing["scanline_length"] 
-            line = (pat * (bits // len(pat)) + pat[: bits % len(pat)])
-            host.synchronize(True) 
-            true_facet = host.remap(fct) 
-            host.write_line(line, repetitions=reps, facet=true_facet) 
-
-        # Execute using exec_func
-        # wait=False because this might take time/run async
-        self.esp.exec_func(
-            remote_pattern, 
-            wait=False, 
-            pat=local_pattern, 
-            reps=local_lines, 
-            fct=facet
-        )
-
-        logger.info("Wait for pattern to start...")
-        time.sleep(4)
-
-        if preview:
-            self.cam.set_exposure(10_000)
-            self.cam.live_view(0.6)
-
-        self.take_picture(count=1, name=fname)
-
     def take_picture(self, count=1, name=None):
         """
         Captures images using the camera class.
@@ -192,8 +157,112 @@ class Tests(unittest.TestCase):
             if count > 1:
                 time.sleep(1)
         return last_img
+    
 
-    def test_full_calibration_cycle(self):
+class TestDynamic(Tests):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+
+        def get_facet_zero_mapping():
+            global host, spoll, sys
+            import sys, uselect
+
+            host.synchronize(True) 
+            spoll = uselect.poll()
+            spoll.register(sys.stdin, uselect.POLLIN)
+            
+            true_facet = host.remap(0) 
+            return true_facet
+
+        cls.esp.exec_func(get_facet_zero_mapping)
+        cls.facet_zero = 0
+        
+        logger.info(f"TestDynamic Setup Complete. Facet 0 maps to: {cls.facet_zero}")
+
+    def picture_line(self, line, fct=None, preview=True, takepicture=True, name=None):
+        """
+        Projects a line pattern on a specific facet and takes a picture.
+        Uses serial handshaking (P -> R) to ensure synchronization.
+        """
+        # Default to the dynamically mapped facet 0 found in setUpClass
+        if fct is None:
+            fct = self.facet_zero
+        
+        # Default filename
+        if name is None:
+            name = f"dynamic_facet_{fct}.jpg"
+
+        def remote_pattern(line, fct):
+            # Imports required inside the function for ESP32 execution
+            global host, spoll, sys
+            
+            chunk = host.cfg.hdl_cfg.lines_chunk
+            true_facet = host.remap(fct, measure=False) 
+            
+            while True:
+                host.write_line(line, repetitions=chunk, facet=true_facet) 
+                
+                # Check for incoming commands (non-blocking)
+                if spoll.poll(0):
+                    cmd = sys.stdin.read(1)
+                    if cmd == 'P': # PICTURE REQUEST
+                        # Signal PC we are ready/stable
+                        sys.stdout.write('R') 
+                    elif cmd == 'Q': # QUIT REQUEST
+                        return
+
+        # Start the remote loop (wait=False is crucial here)
+        self.esp.exec_func(
+            remote_pattern, 
+            wait=False, 
+            line=line, 
+            fct=fct
+        )
+
+        self.cam.set_exposure(10_000)
+        
+        # 1. Request Picture
+        self.esp.serial.reset_input_buffer()
+        self.esp.serial.write(b'P')
+        
+        # 2. Wait for 'R' response (with timeout)
+        start_time = time.time()
+        ready = False
+        while (time.time() - start_time) < 2.0: # 3s timeout
+            if self.esp.serial.in_waiting:
+                if self.esp.serial.read(1) == b'R':
+                    ready = True
+                    break
+            time.sleep(0.01)
+
+        if ready:
+            if preview:
+                self.cam.live_view(0.6)
+            if takepicture:
+                self.take_picture(count=1, name=name)
+        else:
+            raise Exception("Timeout: ESP32 did not respond with 'R'")
+
+        self.esp.serial.write(b'Q')
+
+    def stability_pattern(self, facet=3, preview=True):
+        """
+        Line with a given pattern is projected and photo is taken.
+        """
+        assert facet in (0, 1, 2, 3), "facet must be 0, 1, 2, or 3"
+
+        # Python list is compatible with MicroPython
+        fname = f"facet{facet}.jpg"
+        pat = [1] * 1 + [0] * 39
+        local_lines = 10_000
+        bits = self.cfg.laser_timing["scanline_length"] 
+        # extend pattern to line
+        line = (pat * (bits // len(pat)) + pat[: bits % len(pat)])
+
+        self.picture_line(line=line, fct=facet, name=fname, preview=preview)
+    
+    def full_calibration_cycle(self):
         """
         Automated sequence:
         1. Capture images for all 4 facets.
@@ -203,19 +272,10 @@ class Tests(unittest.TestCase):
         num_facets = 4
 
         if capture:
-            for i in range(num_facets):
+            for facet in range(num_facets):
                 logger.info(f"--- Capturing Calibration Image for Facet {i} ---")
+                self.stability_pattern(facet=facet, preview=True)
 
-                self.photo_pattern(facet=i, name=f"facet{i}.jpg", preview=False)
-
-                # Reset logic if necessary between shots
-                self.esp.exec_wait("host.reset()")
-                
-                # Re-setup parameters if reset() cleared them
-                def reset_current():
-                    global host
-                    host.laser_current = 110
-                self.esp.exec_func(reset_current)
 
         logger.info("--- Starting Calibration Analysis ---")
         run_full_calibration_analysis(
