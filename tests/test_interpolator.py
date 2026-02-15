@@ -9,7 +9,7 @@ from hexastorm.interpolator.interpolator import Interpolator
 
 @pytest.fixture
 def interpolator():
-    return Interpolator(stepsperline=1)
+    return Interpolator()
 
 
 def test_regression_jittertest(interpolator, tmp_path):
@@ -24,7 +24,7 @@ def test_regression_jittertest(interpolator, tmp_path):
     # The hash of the "golden master" file.
     # NOTE: Since we fixed the white edge bug, this WILL fail the first time.
     # Run pytest, copy the 'got' hash from the error, and update this string.
-    expected_hash = "fbd4611786c33a003e73333a83076fab"
+    expected_hash = "1ca652a70ee54eecdb1337630448d4f3"
 
     fname = "combined_grid_test"
     # Assuming the SVG is in the standard location relative to the test

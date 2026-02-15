@@ -93,7 +93,7 @@ def fypos(
 # --- Parameter Management ---
 
 
-def get_default_params() -> Any:
+def get_default_params(params) -> Any:
     """
     Initializes the system parameters based on the physical configuration.
 
@@ -102,8 +102,7 @@ def get_default_params() -> Any:
     """
     # Create Numba-compatible dictionary
     dct = typed.Dict.empty(key_type=types.string, value_type=types.float64)
-
-    dct.update(config.optical_settings)
+    dct.update(params)
 
     return dct
 

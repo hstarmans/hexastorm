@@ -1,10 +1,10 @@
 from amaranth import Elaboratable, Module, Signal, Cat
 from amaranth.lib.io import Buffer
-from luna.gateware.memory import TransactionalizedFIFO
 
 from .config import Spi
 from .resources import LaserscannerRecord
 from .blocks.photodiode_debounce import PhotodiodeDebounce
+from .luna.memory import TransactionalizedFIFO
 
 
 class Laserhead(Elaboratable):

@@ -2,7 +2,7 @@ from random import randint
 from struct import unpack
 
 from hexastorm.lasers import Laserhead, DiodeSimulator
-from hexastorm.fpga_host.mock import TestHost
+from hexastorm.fpga_host.mock import MockHost
 from hexastorm.config import Spi, PlatformConfig
 from hexastorm.utils import LunaGatewareTestCase, async_test_case
 
@@ -16,7 +16,7 @@ class BaseTest(LunaGatewareTestCase):
 
     async def initialize_signals(self, sim):
         """Initialize signals and host configuration for simulation."""
-        self.host = TestHost(fifo_full=None, sim=None)
+        self.host = MockHost(fifo_full=None, sim=None)
         self.sim = sim
         sim.set(self.dut.pd_db.raw, 1)
         await sim.tick()
@@ -463,7 +463,7 @@ class Loweredge(BaseTest):
     async def initialize_signals(self, sim):
         """Initialize signals and host configuration for simulation."""
         self.sim = sim
-        self.host = TestHost(fifo_full=None, sim=None)
+        self.host = MockHost(fifo_full=None, sim=None)
         self.host.cfg.laser_timing = self.plf_cfg.laser_timing
         self.host.cfg.hdl_cfg.single_line = False
         sim.set(self.dut.pd_db.raw, 1)

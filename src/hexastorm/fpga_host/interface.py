@@ -7,9 +7,12 @@ from ..config import Spi, PlatformConfig
 
 try:
     import numpy as np
+
+    NP_FLOAT = float
 except ImportError:
     from ulab import numpy as np
 
+    NP_FLOAT = np.float
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +33,7 @@ class BaseHost:
         self.test = test
         self.cfg = PlatformConfig(self.test)
         # mpy requires np.float
-        self._position = np.array([0] * self.cfg.hdl_cfg.motors, dtype=np.float)
+        self._position = np.array([0] * self.cfg.hdl_cfg.motors, dtype=NP_FLOAT)
 
     @property
     async def position(self):

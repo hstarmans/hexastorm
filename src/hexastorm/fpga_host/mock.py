@@ -3,7 +3,7 @@ from asyncio import TimeoutError
 from .interface import BaseHost
 
 
-class TestHost(BaseHost):
+class MockHost(BaseHost):
     """
     Host interface to interact with the FPGA for Amaranth HDL tests.
     """

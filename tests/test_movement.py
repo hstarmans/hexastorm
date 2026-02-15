@@ -1,5 +1,5 @@
 from hexastorm.utils import LunaGatewareTestCase, async_test_case
-from hexastorm.fpga_host.mock import TestHost
+from hexastorm.fpga_host.mock import MockHost
 from hexastorm.config import PlatformConfig
 from hexastorm.movement import Polynomial
 
@@ -11,7 +11,7 @@ class TestPolynomial(LunaGatewareTestCase):
 
     async def initialize_signals(self, sim) -> None:
         """Initialize simulation environment and signals."""
-        self.host = TestHost(fifo_full=None, sim=None)
+        self.host = MockHost(fifo_full=None, sim=None)
         self.move_ticks = self.plf_cfg.hdl_cfg.move_ticks
         self.sim = sim
         sim.set(self.dut.tick_limit, self.move_ticks)

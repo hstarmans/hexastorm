@@ -241,7 +241,7 @@ class ESP32Host(BaseHost):
         Returns:
             bool: True if steppers are enabled, False otherwise.
         """
-        return self.stepper_cs.value == 0
+        return self.stepper_cs.value() == 0
 
     @enable_steppers.setter
     def enable_steppers(self, val):

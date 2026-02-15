@@ -9,7 +9,13 @@ as well as platform-level configuration settings used for FPGA synthesis and fir
 
 from collections import OrderedDict
 
-from math import ceil, sin, radians
+from math import ceil, radians
+import sys
+
+if sys.implementation.name == "micropython":
+    from ulab import numpy as np
+else:
+    import numpy as np
 
 
 class Spi:
@@ -91,12 +97,12 @@ def displacement_kernel(pixel, params):
     )
     # Convert the current pixel number to an Angle of Incidence (I) in radians.
     # The scan moves from -I_max to +I_max across the facet.
-    angle = radians(-2 * I_max * (pixel / pixelsfacet) + I_max)
+    angle = np.radians(-2 * I_max * (pixel / pixelsfacet) + I_max)
 
     # Pre-calculate trigonometric terms for the Snell's Law / Displacement derivation
-    sin_angle = sin(angle)
-    sin_angle_sq = pow(sin_angle, 2)
-    n_sq = pow(params["n"], 2)
+    sin_angle = np.sin(angle)
+    sin_angle_sq = sin_angle**2
+    n_sq = params["n"] ** 2
 
     # T (Thickness) = 2 * inradius
     thickness = params["inradius"] * 2
@@ -105,7 +111,7 @@ def displacement_kernel(pixel, params):
     disp = (
         thickness
         * sin_angle
-        * (1 - pow((1 - sin_angle_sq) / (n_sq - sin_angle_sq), 0.5))
+        * (1 - ((1 - sin_angle_sq) / (n_sq - sin_angle_sq)) ** 0.5)
     )
     return disp
 
@@ -155,8 +161,7 @@ class PlatformConfig:
         self.update_laser_timing()
         self.laser_bits = 1  # enables adding pwm to laser (not widely tested)
 
-    @property
-    def optical_settings(self):
+    def optical_settings(self, correction=False):
         """
         Returns a dictionary of physical parameters, including calculated Lanewidth.
         """
@@ -226,11 +231,27 @@ class PlatformConfig:
             - displacement_kernel(start_pixel, settings)
         )
 
-        # Add default facet corrections (placeholders)
-        num_facets = int(laz_tim["facets"])
-        for i in range(num_facets):
-            settings[f"f{i}_dx"] = 0.0
-            settings[f"f{i}_dy"] = 0.0
+        if correction:
+            print("WARNING: Optical correction set")
+            settings.update(
+                {
+                    "f0_dx": 0.0,
+                    "f0_dy": 0.0,
+                    "f1_dx": -0.018171,
+                    "f1_dy": -0.004177,
+                    "f2_dx": -0.01345,
+                    "f2_dy": -0.077707,
+                    "f3_dx": -0.044907,
+                    "f3_dy": -0.048889,
+                }
+            )
+        else:
+            print("no correction set")
+            # Add default facet corrections (placeholders)
+            num_facets = int(laz_tim["facets"])
+            for i in range(num_facets):
+                settings[f"f{i}_dx"] = 0.0  # scan
+                settings[f"f{i}_dy"] = 0.0  # stage
 
         return settings
 
@@ -269,7 +290,7 @@ class PlatformConfig:
             # sda pin digipot TODO: should be 4, hotfix to 46
             i2c=dict(
                 scl=5,
-                sda=46,  # 4 pcb, 46 printer
+                sda=4,  # 4 pcb, 46 printer
                 digipot_addr=0x28,
             ),
             spi=dict(

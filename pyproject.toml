@@ -11,15 +11,14 @@ authors = [
 ]
 license = { file = "LICENSE.txt" }
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12, <3.13"
 dependencies = [
     "amaranth-boards",
     "cairosvg>=2.7.1",
     "fire>=0.7.1",
-    "luna-usb",
-    "numba>=0.56.4",
-    "numpy>=1.19.5",
-    "opencv-python>=4.5.3.56",
+    "numba>=0.60.0",
+    "numpy>=2.0.0",
+    "opencv-python>=4.10.0",
     "pillow>=11.2.1",
     "tqdm>=4.67.3",
     "yowasp-nextpnr-ice40>=0.8.0.0.post621",
@@ -29,13 +28,12 @@ dependencies = [
 [dependency-groups]
 dev = [
     "nbqa>=1.9.1",
-    "pdm>=2.24.2",
     "pytest>=8.4.2",
     "ruff>=0.11.12",
 ]
 plot = [
     "ipykernel>=6.29.5",
-    "matplotlib>=3.6.3",
+    "matplotlib>=3.9.0",
 ]
 
 [tool.ruff]
@@ -44,9 +42,5 @@ line-length = 88
 [tool.ruff.format]
 quote-style = "double"
 
-[tool.pdm.scripts]
-test = "python -m unittest discover -t . -s tests -v"
-
 [tool.uv.sources]
-luna-usb = { git = "https://github.com/greatscottgadgets/luna.git", rev = "6c7c93d6ff5bd2390f430949cea4baf6686f0f97" }
 amaranth-boards = { git = "https://github.com/amaranth-lang/amaranth-boards.git", rev = "c26a72e59c786b38e0e989ae64c6c2560ca7c29c" }

@@ -6,10 +6,21 @@
 
 """SPI and derived interfaces."""
 
+from amaranth import Signal, Module, Cat, Elaboratable
 from ..utils import LunaGatewareTestCase
 
-from amaranth import Signal, Module, Cat, Elaboratable
-from luna.gateware.interface.spi import SPIBus
+
+class SPIBus:
+    """
+    Modern replacement for the luna SPIBus Record.
+    Uses simple Signals to avoid 'amaranth.hdl.rec' deprecation warnings.
+    """
+
+    def __init__(self):
+        self.sck = Signal(name="sck")
+        self.sdi = Signal(name="sdi")
+        self.sdo = Signal(name="sdo")
+        self.cs = Signal(name="cs")
 
 
 class SPICommandInterface(Elaboratable):
@@ -19,7 +30,7 @@ class SPICommandInterface(Elaboratable):
         I: sck           -- SPI clock, from the SPI master
         I: sdi           -- SPI data in
         O: sdo           -- SPI data out
-        I: cs            -- chip select, active high (as we assume your I/O will use PinsN)
+        I: cs            -- chip select, active high (internal logic)
 
         O: command       -- the command read from the SPI bus
         O: command_ready -- a new command is ready
@@ -97,7 +108,7 @@ class SPICommandInterface(Elaboratable):
                 with m.If(spi.cs):
                     m.next = "RECEIVE_COMMAND"
 
-            # Once CS is low, we'll shift in our command.
+            # Once CS is low (active high here), we'll shift in our command.
             with m.State("RECEIVE_COMMAND"):
                 # If CS is de-asserted early; our transaction is being aborted.
                 with m.If(~spi.cs):
@@ -120,7 +131,7 @@ class SPICommandInterface(Elaboratable):
                     ]
                     m.next = "PROCESSING"
 
-            # Give our controller a wait state to prepare any response they might want to...
+            # Give our controller a wait state to prepare any response...
             with m.State("PROCESSING"):
                 m.next = "LATCH_OUTPUT"
 
@@ -153,7 +164,7 @@ class SPICommandInterface(Elaboratable):
                         self.word_received.eq(current_word),
                     ]
 
-                    # Go back to receiving more commands,
+                    # Go back to receiving more commands
                     m.next = "RECEIVE_COMMAND"
 
         return m
@@ -175,9 +186,8 @@ class SPIGatewareTestCase(LunaGatewareTestCase):
         sim = self.sim
 
         # Apply the new bit...
-        if hasattr(spi, "sdi"):
-            sim.set(spi.sdi, bit)
-            await self.advance_cycles(cycles_per_bit)
+        sim.set(spi.sdi, bit)
+        await self.advance_cycles(cycles_per_bit)
 
         # Rising edge of serial clock
         sim.set(spi.sck, 1)

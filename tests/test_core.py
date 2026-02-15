@@ -6,7 +6,7 @@ from numpy.testing import assert_array_almost_equal, assert_array_equal
 from hexastorm.config import Spi, PlatformConfig
 from hexastorm.utils import async_test_case
 from hexastorm.luna.spi import SPIGatewareTestCase
-from hexastorm.fpga_host.mock import TestHost
+from hexastorm.fpga_host.mock import MockHost
 from hexastorm.core import SPIParser, Dispatcher
 
 
@@ -16,7 +16,7 @@ class TestParser(SPIGatewareTestCase):
     FRAGMENT_ARGUMENTS = {"hdl_cfg": hdl_cfg}
 
     async def initialize_signals(self, sim):
-        self.host = TestHost(self.dut.fifo_full, sim)
+        self.host = MockHost(self.dut.fifo_full, sim)
         self.sim = sim
         self.dut.spi = self.dut.spi_command.spi
         self.host.spi_exchange_data = self.spi_exchange_data
@@ -170,7 +170,7 @@ class TestDispatcher(SPIGatewareTestCase):
 
     async def initialize_signals(self, sim):
         self.sim = sim
-        self.host = TestHost(self.dut.parser.fifo_full, sim)
+        self.host = MockHost(self.dut.parser.fifo_full, sim)
         self.dut.spi = self.dut.parser.spi_command.spi
         self.host.spi_exchange_data = self.spi_exchange_data
         sim.set(self.dut.spi.cs, 0)

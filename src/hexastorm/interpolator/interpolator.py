@@ -35,7 +35,9 @@ class Interpolator:
 
         # Initialize math parameters via geometry module
         # Note: self.params is a Numba Typed Dict optimized for JIT compilation
-        self.params = geometry.get_default_params()
+        self.params = geometry.get_default_params(
+            self.cfg.optical_settings(correction=True)
+        )
         self.params = geometry.downsample_params(self.params)
 
         self.current_dir = Path(__file__).parent.resolve()
@@ -259,6 +261,18 @@ class Interpolator:
             filename: Output filename.
             color_lanes: If True, alternates lane colors (Light Blue/White).
         """
+        # TODO: you rely on samplexsize/sampleysize being set correctly in params, but these are only set during piltoarray.
+        # plot should be invariant to the input method, so you should calculate these based on the coordinate grid or pass them as arguments.
+        # x_size = self.params["samplexsize"]
+        # y_size = self.params["sampleysize"]
+
+        # self.params = geometry.get_default_params(
+        #     self.cfg.optical_settings(correction=False)
+        # )
+
+        # self.params["samplexsize"] = x_size
+        # self.params["sampleysize"] = y_size
+
         # 1. Sync Params
         if hasattr(ptrn_data, "keys") and not isinstance(ptrn_data, np.ndarray):
             for k in [

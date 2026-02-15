@@ -2,7 +2,6 @@ import itertools
 
 from amaranth import Record
 from amaranth.build import Pins, PinsN, Resource, ResourceError, Subsignal, Attrs
-from amaranth.hdl.rec import Layout
 
 __all__ = ["StepperResource", "LaserscannerResource", "BLDCResource"]
 
@@ -64,30 +63,22 @@ def StepperResource(*args, step_pin, dir_pin, limit_pin, number=None, conn=None)
     return Resource.family(*args, number, default_name="stepper", ios=ios)
 
 
-class BLDCLayout(Layout):
-    """Signal layout for a 3-phase BLDC motor."""
-
-    def __init__(self):
-        super().__init__(
-            [
-                ("uL", 1),
-                ("uH", 1),
-                ("vL", 1),
-                ("vH", 1),
-                ("wL", 1),
-                ("wH", 1),
-                ("sensor0", 1),
-                ("sensor1", 1),
-                ("sensor2", 1),
-            ]
-        )
-
-
 class BLDCRecord(Record):
     """Record representation of a BLDC motor resource."""
 
     def __init__(self):
-        super().__init__(BLDCLayout())
+        layout = [
+            ("uL", 1),
+            ("uH", 1),
+            ("vL", 1),
+            ("vH", 1),
+            ("wL", 1),
+            ("wH", 1),
+            ("sensor0", 1),
+            ("sensor1", 1),
+            ("sensor2", 1),
+        ]
+        super().__init__(layout)
 
 
 def BLDCResource(
@@ -109,7 +100,7 @@ def BLDCResource(
 
     I/O signals:
         uL/uH, vL/vH, wL/wH -- 3-phase low/high drive signals
-        sensor*             -- Hall sensor inputs
+        sensor* -- Hall sensor inputs
     """
     ios = [
         Subsignal("uL", Pins(uL, dir="o", conn=conn, assert_width=1)),
@@ -127,24 +118,16 @@ def BLDCResource(
     return Resource.family(*args, number, default_name="bldc", ios=ios)
 
 
-class LaserScannerLayout(Layout):
-    """Signal layout for a laser scanner head."""
-
-    def __init__(self):
-        super().__init__(
-            [
-                ("lasers", 2),
-                ("pwm", 1),
-                ("en", 1),
-            ]
-        )
-
-
 class LaserscannerRecord(Record):
     """Record to test stepper motor"""
 
     def __init__(self):
-        super().__init__(LaserScannerLayout())
+        layout = [
+            ("lasers", 2),
+            ("pwm", 1),
+            ("en", 1),
+        ]
+        super().__init__(layout)
 
 
 def LaserscannerResource(

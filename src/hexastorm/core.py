@@ -1,12 +1,12 @@
 from amaranth import Cat, Elaboratable, Module, Signal, signed, Mux
 from amaranth.lib.io import Buffer
-from amaranth.hdl import Array
-from luna.gateware.memory import TransactionalizedFIFO
+from amaranth import Array
 
 from .config import Spi
 from .spi_helpers import connect_synchronized_spi
 from .lasers import DiodeSimulator, Laserhead
 from .luna.spi import SPICommandInterface
+from .luna.memory import TransactionalizedFIFO
 
 # from .motor import Driver
 from .movement import Polynomial
