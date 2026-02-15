@@ -36,7 +36,7 @@ uv sync
 Code can be executed as follows. 
 ```console
 uv sync --group dev 
-uv run pdm run test
+uv run pytest tests/test_core.py
 uv sync --group plot
 uv run python -m hexastorm.interpolator.patterns.create
 uv run python -m hexastorm.interpolator.interpolator
