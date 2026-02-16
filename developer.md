@@ -82,7 +82,7 @@ Laser spots are measured using the arducam UC-621. There is a binary available f
 binary only works on the GNU/Linux 11 (bullseye). No sources are available and it cannot be recompiled. There is a new version
 of this camera by arducam but its driver cannot be used by UC-621. The new version uses the libcam driver. My camera is not
 libcam compatabile. For more information see https://github.com/ArduCAM/MIPI_Camera.
-Install my version of the Python libary available at [ArducamPython](https://github.com/hstarmans/Arducampython).
+Before you install my arducampython wrapper. I have the following notes.
 The following lines need to be in the /boot/config.txt for the arducam to work. If all is well you should see the camera via 
 i2cdetect -y 10;
 ```

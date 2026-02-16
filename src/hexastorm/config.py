@@ -161,16 +161,17 @@ class PlatformConfig:
         self.update_laser_timing()
         self.laser_bits = 1  # enables adding pwm to laser (not widely tested)
 
-    def optical_settings(self, correction=False):
+    def get_optical_params(self, correction=False, stepsperline=0.25):
         """
         Returns a dictionary of physical parameters, including calculated Lanewidth.
         """
         laz_tim = self.laser_timing
         mtr_cfg = self.motor_cfg
 
-        settings = {"stepsperline": 0.25}  # four exposures per line
+        # need steps per line to calculate stage speed
+        params = {"stepsperline": stepsperline}  # 0.25 is four exposures per line
 
-        settings.update(
+        params.update(
             {
                 # angle [radians]
                 "tiltangle": radians(90),  # Static polygonal tilt angle
@@ -199,7 +200,7 @@ class PlatformConfig:
                 # Stage Speed [mm/s]: Derived from RPM and Facets to ensure correct aspect ratio
                 "stagespeed": (
                     (
-                        settings["stepsperline"]
+                        params["stepsperline"]
                         / mtr_cfg["steps_mm"][mtr_cfg["orth2lsrline"]]
                     )
                     * (laz_tim["rpm"] / 60)
@@ -225,15 +226,14 @@ class PlatformConfig:
         # but storing as mm is usually safer for config, assuming downstream converts it)
         # Based on your previous code, lanewidth was in MM.
 
-        start_pixel = settings["startpixel"]
-        settings["lanewidth"] = abs(
-            displacement_kernel(start_pixel + settings["bitsinscanline"] - 1, settings)
-            - displacement_kernel(start_pixel, settings)
+        start_pixel = params["startpixel"]
+        params["lanewidth"] = abs(
+            displacement_kernel(start_pixel + params["bitsinscanline"] - 1, params)
+            - displacement_kernel(start_pixel, params)
         )
 
         if correction:
-            print("WARNING: Optical correction set")
-            settings.update(
+            params.update(
                 {
                     "f0_dx": 0.0,
                     "f0_dy": 0.0,
@@ -246,14 +246,12 @@ class PlatformConfig:
                 }
             )
         else:
-            print("no correction set")
-            # Add default facet corrections (placeholders)
             num_facets = int(laz_tim["facets"])
             for i in range(num_facets):
-                settings[f"f{i}_dx"] = 0.0  # scan
-                settings[f"f{i}_dy"] = 0.0  # stage
+                params[f"f{i}_dx"] = 0.0  # scan
+                params[f"f{i}_dy"] = 0.0  # stage
 
-        return settings
+        return params
 
     @property
     def esp32_cfg(self):

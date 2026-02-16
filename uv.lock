@@ -34,6 +34,17 @@ wheels = [
 ]
 
 [[package]]
+name = "arducampython"
+version = "0.1.0"
+source = { git = "https://github.com/hstarmans/Arducampython.git#71591c5bba189653a77c3d7c70151636af6d6bf9" }
+dependencies = [
+    { name = "numpy" },
+    { name = "opencv-python" },
+    { name = "pybind11" },
+    { name = "setuptools" },
+]
+
+[[package]]
 name = "asttokens"
 version = "3.0.1"
 source = { registry = "https://pypi.org/simple" }
@@ -253,52 +264,54 @@ name = "hexastorm"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "amaranth-boards" },
-    { name = "cairosvg" },
     { name = "fire" },
-    { name = "numba" },
     { name = "numpy" },
-    { name = "opencv-python" },
     { name = "pillow" },
+    { name = "ruff" },
     { name = "tqdm" },
-    { name = "yowasp-nextpnr-ice40" },
-    { name = "yowasp-yosys" },
 ]
 
 [package.dev-dependencies]
-dev = [
-    { name = "nbqa" },
-    { name = "pytest" },
-    { name = "ruff" },
-]
-plot = [
+desktop = [
+    { name = "amaranth-boards" },
+    { name = "cairosvg" },
     { name = "ipykernel" },
     { name = "matplotlib" },
+    { name = "nbqa" },
+    { name = "numba" },
+    { name = "pytest" },
+    { name = "yowasp-nextpnr-ice40" },
+    { name = "yowasp-yosys" },
+]
+pi = [
+    { name = "arducampython" },
+    { name = "opencv-python" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "amaranth-boards", git = "https://github.com/amaranth-lang/amaranth-boards.git?rev=c26a72e59c786b38e0e989ae64c6c2560ca7c29c" },
-    { name = "cairosvg", specifier = ">=2.7.1" },
     { name = "fire", specifier = ">=0.7.1" },
-    { name = "numba", specifier = ">=0.60.0" },
     { name = "numpy", specifier = ">=2.0.0" },
-    { name = "opencv-python", specifier = ">=4.10.0" },
     { name = "pillow", specifier = ">=11.2.1" },
+    { name = "ruff", specifier = ">=0.11.12" },
     { name = "tqdm", specifier = ">=4.67.3" },
-    { name = "yowasp-nextpnr-ice40", specifier = ">=0.8.0.0.post621" },
-    { name = "yowasp-yosys", specifier = ">=0.53.0.0.post912" },
 ]
 
 [package.metadata.requires-dev]
-dev = [
-    { name = "nbqa", specifier = ">=1.9.1" },
-    { name = "pytest", specifier = ">=8.4.2" },
-    { name = "ruff", specifier = ">=0.11.12" },
-]
-plot = [
+desktop = [
+    { name = "amaranth-boards", git = "https://github.com/amaranth-lang/amaranth-boards.git?rev=c26a72e59c786b38e0e989ae64c6c2560ca7c29c" },
+    { name = "cairosvg", specifier = ">=2.7.1" },
     { name = "ipykernel", specifier = ">=6.29.5" },
     { name = "matplotlib", specifier = ">=3.9.0" },
+    { name = "nbqa", specifier = ">=1.9.1" },
+    { name = "numba", specifier = ">=0.60.0" },
+    { name = "pytest", specifier = ">=8.4.2" },
+    { name = "yowasp-nextpnr-ice40", specifier = ">=0.8.0.0.post621" },
+    { name = "yowasp-yosys", specifier = ">=0.53.0.0.post912" },
+]
+pi = [
+    { name = "arducampython", git = "https://github.com/hstarmans/Arducampython.git" },
+    { name = "opencv-python", specifier = ">=4.10.0" },
 ]
 
 [[package]]
@@ -713,6 +726,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pybind11"
+version = "3.0.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/2f/7b/a6d8dcb83c457e24a9df1e4d8fd5fb8034d4bbc62f3c324681e8a9ba57c2/pybind11-3.0.1.tar.gz", hash = "sha256:9c0f40056a016da59bab516efb523089139fcc6f2ba7e4930854c61efb932051", size = 546914 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cd/8a/37362fc2b949d5f733a8b0f2ff51ba423914cabefe69f1d1b6aab710f5fe/pybind11-3.0.1-py3-none-any.whl", hash = "sha256:aa8f0aa6e0a94d3b64adfc38f560f33f15e589be2175e103c0a33c6bce55ee89", size = 293611 },
+]
+
+[[package]]
 name = "pycodestyle"
 version = "2.14.0"
 source = { registry = "https://pypi.org/simple" }
@@ -838,6 +860,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/f6/58/ac864a75067dcbd3b95be5ab4eb2b601d7fbc3d3d736a27e391a4f92a5c1/ruff-0.15.1-py3-none-win32.whl", hash = "sha256:660975d9cb49b5d5278b12b03bb9951d554543a90b74ed5d366b20e2c57c2098", size = 10462555 },
     { url = "https://files.pythonhosted.org/packages/e0/5e/d4ccc8a27ecdb78116feac4935dfc39d1304536f4296168f91ed3ec00cd2/ruff-0.15.1-py3-none-win_amd64.whl", hash = "sha256:c820fef9dd5d4172a6570e5721704a96c6679b80cf7be41659ed439653f62336", size = 11599956 },
     { url = "https://files.pythonhosted.org/packages/2a/07/5bda6a85b220c64c65686bc85bd0bbb23b29c62b3a9f9433fa55f17cda93/ruff-0.15.1-py3-none-win_arm64.whl", hash = "sha256:5ff7d5f0f88567850f45081fac8f4ec212be8d0b963e385c3f7d0d2eb4899416", size = 10874604 },
+]
+
+[[package]]
+name = "setuptools"
+version = "82.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/82/f3/748f4d6f65d1756b9ae577f329c951cda23fb900e4de9f70900ced962085/setuptools-82.0.0.tar.gz", hash = "sha256:22e0a2d69474c6ae4feb01951cb69d515ed23728cf96d05513d36e42b62b37cb", size = 1144893 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e1/c6/76dc613121b793286a3f91621d7b75a2b493e0390ddca50f11993eadf192/setuptools-82.0.0-py3-none-any.whl", hash = "sha256:70b18734b607bd1da571d097d236cfcfacaf01de45717d59e6e04b96877532e0", size = 1003468 },
 ]
 
 [[package]]

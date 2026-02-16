@@ -33,12 +33,14 @@ class Interpolator:
     def __init__(self):
         self.cfg = PlatformConfig(test=False)
 
-        # Initialize math parameters via geometry module
-        # Note: self.params is a Numba Typed Dict optimized for JIT compilation
-        self.params = geometry.get_default_params(
-            self.cfg.optical_settings(correction=True)
-        )
-        self.params = geometry.downsample_params(self.params)
+        # Initialize math parameters via config (pure python side)
+        raw_params = self.cfg.get_optical_params(correction=True)
+
+        # Initialize the Scanner model (JIT-compiled geometry calculations)
+        self.geo = geometry.ScannerModel(raw_params)
+
+        # Link self.params to the JIT class params so we can read them easily
+        self.params = self.geo.params
 
         self.current_dir = Path(__file__).parent.resolve()
         self.debug_folder = self.current_dir / "debug"
@@ -177,11 +179,7 @@ class Interpolator:
         # 2. Calculate Coordinates
         # ids is (2, N) array: [y_coords, x_coords] stack.
         # These are the physical integer coordinates on the sample grid.
-        ids, derived_stats = geometry.calculate_coordinates(self.params)
-
-        # Update internal params with derived stats (lanewidth, etc.) for consistency
-        for k, v in derived_stats.items():
-            self.params[k] = v
+        ids = self.geo.calculate_coordinates()
 
         logging.info("Created coordinates for interpolation")
         logging.info(f"Elapsed {time() - ctime:.2f} seconds")
@@ -240,18 +238,32 @@ class Interpolator:
 
         io.write_binary_file(pixeldata, self.params, out_path)
 
-    def readbin(self, filename: Union[str, Path] = "test.bin"):
+    def readbin(self, filename: Union[str, Path] = "test.bin") -> dict:
         """Wrapper for io.read_binary_file"""
-        # Resolve path: default to debug folder if not absolute
         in_path = Path(filename)
         if not in_path.is_absolute():
             in_path = self.debug_folder / in_path
 
-        return io.read_binary_file(
+        # Unpack the tuple internally
+        facets, lanes, width, data = io.read_binary_file(
             in_path, self.cfg.laser_timing, self.params["bitsinscanline"]
         )
 
-    def plotptrn(self, ptrn_data, step=1, filename="plot", color_lanes=True):
+        # Return a clean dictionary
+        return {
+            "facetsinlane": facets,
+            "lanes": lanes,
+            "lanewidth": width,
+            "data": data,
+        }
+
+    def plotptrn(
+        self,
+        ptrn_data: Union[np.ndarray, dict],
+        step: int = 1,
+        filename: str = "plot",
+        color_lanes: bool = True,
+    ):
         """
         Visualizes the generated pattern data.
 
@@ -261,34 +273,38 @@ class Interpolator:
             filename: Output filename.
             color_lanes: If True, alternates lane colors (Light Blue/White).
         """
-        # TODO: you rely on samplexsize/sampleysize being set correctly in params, but these are only set during piltoarray.
-        # plot should be invariant to the input method, so you should calculate these based on the coordinate grid or pass them as arguments.
-        # x_size = self.params["samplexsize"]
-        # y_size = self.params["sampleysize"]
+        raw_bytes = ptrn_data.get("data")
+        metadata = ptrn_data
 
-        # self.params = geometry.get_default_params(
-        #     self.cfg.optical_settings(correction=False)
-        # )
+        # 1. Setup Local Parameters (Start fresh, don't touch self.params)
+        # We get the default hardware config (speeds, frequencies, etc.)
+        raw_params = self.cfg.get_optical_params(correction=True)
+        local_params = geometry.ScannerModel.to_numba_dict(raw_params)
 
-        # self.params["samplexsize"] = x_size
-        # self.params["sampleysize"] = y_size
+        # A. Calculate the 'lanewidth' for this specific hardware config
+        # We calculate this fresh to ensure it matches the JIT's logic
+        start_x = geometry._jit_fxpos(0.0, local_params, 0, 0.0)
+        end_x = geometry._jit_fxpos(
+            local_params["bitsinscanline"] - 1, local_params, 0, 0.0
+        )
+        calc_lanewidth = (start_x - end_x) * local_params["samplegridsize"]
 
-        # 1. Sync Params
-        if hasattr(ptrn_data, "keys") and not isinstance(ptrn_data, np.ndarray):
-            for k in [
-                "lanewidth",
-                "facetsinlane",
-                "bitsinscanline",
-                "samplexsize",
-                "sampleysize",
-                "lanes",
-            ]:
-                if k in ptrn_data:
-                    # Handle pandas/numpy scalars
-                    val = ptrn_data[k]
-                    if hasattr(val, "__len__") and len(val) == 1:
-                        val = val[0]
-                    self.params[k] = val
+        # B. Reverse-Engineer 'samplexsize'
+        # x_size = lanes * width
+        local_params["samplexsize"] = float(metadata["lanes"] * calc_lanewidth)
+
+        # C. Reverse-Engineer 'sampleysize'
+        # The formula used to create facets was:
+        # facets = ceil( rot_freq * FACETS * (y_size / speed) )
+        # So we invert it: y_size = (facets * speed) / (rot_freq * FACETS)
+        term = local_params["rotationfrequency"] * local_params["FACETS"]
+        local_params["sampleysize"] = float(
+            metadata["facetsinlane"] * local_params["stagespeed"] / term
+        )
+
+        # Explicitly set these too, just in case
+        local_params["lanes"] = float(metadata["lanes"])
+        local_params["facetsinlane"] = float(metadata["facetsinlane"])
 
         # 2. Extract Data
         if isinstance(ptrn_data, np.ndarray):
@@ -303,7 +319,7 @@ class Interpolator:
         ptrn_bits = np.unpackbits(raw_bytes, bitorder=self.bitorder)
 
         # 3. Get Coordinates (Re-calculate identical grid)
-        ids, _ = geometry.calculate_coordinates(self.params)
+        ids = geometry._jit_calculate_grid(local_params)
 
         # 4. Handle Downsampling
         factor = int(self.params["downsamplefactor"])
@@ -342,7 +358,7 @@ class Interpolator:
         VAL_ALL = 255
 
         if color_lanes:
-            num_lanes = int(self.params.get("lanes", 1))
+            num_lanes = int(local_params.get("lanes", 1))
             samples_per_lane = len(x_plot) // num_lanes
 
             # Loop only to assign IDs (Very fast compared to dilation)
@@ -416,14 +432,20 @@ if __name__ == "__main__":
     # hexastorm.png pixelsize 0.035
     # url = dir_path / "test-patterns" / "hexastorm.png"
     # ptrn = interpolator.patternfile(url, pixelsize=0.035)
-    # TODO: zlib can compress the data with a factor over 20
     interpolator.writebin(ptrn, f"{fname}.bin")
 
-    facetsinlane, lanes, lanewidth, arr = interpolator.readbin(f"{fname}.bin")
-    assert np.allclose(interpolator.params["lanewidth"], lanewidth, 1e-3)
-    assert np.allclose(interpolator.params["facetsinlane"], facetsinlane, 1e-3)
-    assert len(arr) == round(
-        facetsinlane * lanes * np.ceil(interpolator.params["bitsinscanline"] // 8)
+    pattern_data = interpolator.readbin(f"{fname}.bin")
+
+    assert np.allclose(
+        interpolator.params["lanewidth"], pattern_data["lanewidth"], 1e-3
+    )
+    assert np.allclose(
+        interpolator.params["facetsinlane"], pattern_data["facetsinlane"], 1e-3
+    )
+    assert len(pattern_data["data"]) == round(
+        pattern_data["facetsinlane"]
+        * pattern_data["lanes"]
+        * np.ceil(interpolator.params["bitsinscanline"] // 8)
     )
     # TODO: step must be an integer!!
-    interpolator.plotptrn(arr, step=1)
+    interpolator.plotptrn(pattern_data, step=1)

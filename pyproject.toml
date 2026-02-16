@@ -13,29 +13,28 @@ license = { file = "LICENSE.txt" }
 readme = "README.md"
 requires-python = ">=3.12, <3.13"
 dependencies = [
-    "amaranth-boards",
-    "cairosvg>=2.7.1",
     "fire>=0.7.1",
     "numpy>=2.0.0",
-    "opencv-python>=4.10.0",
     "pillow>=11.2.1",
     "tqdm>=4.67.3",
-    "yowasp-nextpnr-ice40>=0.8.0.0.post621",
-    "yowasp-yosys>=0.53.0.0.post912",
+    "ruff>=0.11.12",
 ]
 
 [dependency-groups]
-interpolate = [
+desktop = [
+    "amaranth-boards",
+    "cairosvg>=2.7.1",
     "numba>=0.60.0",
-]
-dev = [
     "nbqa>=1.9.1",
     "pytest>=8.4.2",
-    "ruff>=0.11.12",
-]
-plot = [
+    "yowasp-nextpnr-ice40>=0.8.0.0.post621",
+    "yowasp-yosys>=0.53.0.0.post912",
     "ipykernel>=6.29.5",
     "matplotlib>=3.9.0",
+]
+pi = [
+    "opencv-python>=4.10.0",
+    "arducampython",
 ]
 
 [tool.ruff]
@@ -46,3 +45,4 @@ quote-style = "double"
 
 [tool.uv.sources]
 amaranth-boards = { git = "https://github.com/amaranth-lang/amaranth-boards.git", rev = "c26a72e59c786b38e0e989ae64c6c2560ca7c29c" }
+arducampython = { git = "https://github.com/hstarmans/Arducampython.git" }

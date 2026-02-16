@@ -58,7 +58,7 @@ class LaserCalibrationGen:
         self.pix_per_mm = pix_per_mm
 
         config = PlatformConfig(test=False)
-        self.optical_settings = config.optical_settings
+        self.optical_settings = config.get_optical_params()
 
         # The code will automatically shrink vector features
         # by this amount to prevent overlap (kerf compensation).
