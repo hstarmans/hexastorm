@@ -6,6 +6,7 @@
 *.svg
 *.csv
 *.jpg
+*.sw[a-p]
 build*
 
 
