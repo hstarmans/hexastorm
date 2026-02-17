@@ -30,11 +30,13 @@ class Interpolator:
     3.  Samples the image at these points to determine if the laser should be ON or OFF.
     """
 
-    def __init__(self):
+    def __init__(self, correction: bool = False, exposures: int = 1):
         self.cfg = PlatformConfig(test=False)
 
         # Initialize math parameters via config (pure python side)
-        raw_params = self.cfg.get_optical_params(correction=True)
+        raw_params = self.cfg.get_optical_params(
+            correction=correction, exposures=exposures
+        )
 
         # Initialize the Scanner model (JIT-compiled geometry calculations)
         self.geo = geometry.ScannerModel(raw_params)
@@ -77,14 +79,6 @@ class Interpolator:
         img_array = np.array(img.convert("1"))
         if img_array.max() == 0:
             raise Exception("Image is empty")
-
-        # Clip image to the bounding box of non-zero pixels
-        nonzero_col = np.argwhere(img_array.sum(axis=0)).squeeze()
-        nonzero_row = np.argwhere(img_array.sum(axis=1)).squeeze()
-
-        img_array = img_array[
-            nonzero_row[0] : nonzero_row[-1], nonzero_col[0] : nonzero_col[-1]
-        ]
 
         # Update geometry settings based on actual image size
         x_size, y_size = [i * self.params["samplegridsize"] for i in img_array.shape]
@@ -170,8 +164,7 @@ class Interpolator:
         if test:
             self.debug_folder.mkdir(parents=True, exist_ok=True)
             img = Image.fromarray(layerarr.astype(np.uint8) * 255)
-            img.save(self.debug_folder / "nyquistcheck.png")
-            layerarr = np.ones_like(layerarr)  # Force all white for test
+            img.save(self.debug_folder / "simplecheck.png")
 
         logging.info("Retrieved image")
         logging.info(f"Elapsed {time() - ctime:.2f} seconds")
@@ -424,7 +417,7 @@ if __name__ == "__main__":
     # current 130, 4x per line
     fname = "combined_grid_test"
     ctime = time()
-    interpolator = Interpolator()
+    interpolator = Interpolator(correction=False, exposures=4)
     logging.info(f"Interpolator {time() - ctime:.2f} seconds")
     dir_path = Path(__file__).parent.resolve()
     # postscript resolution test

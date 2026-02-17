@@ -218,7 +218,7 @@ class PlatformConfig:
                     * laz_tim["start_frac"]
                 ),
                 # number of pixels in a line
-                "bitsinscanline": float(laz_tim["scanline_length"]),
+                "bitsinscanline": int(laz_tim["scanline_length"]),
                 "downsamplefactor": 1.0,
                 # resist
                 "positiveresist": 0.0,
