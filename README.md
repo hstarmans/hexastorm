@@ -25,20 +25,18 @@ Part of the code can be run on Micropython, rest is Python only.
 # Install
 Install the dependency manager uv.
 ```console
-sudo apt install pipx
-pipx ensurepath
-pipx install uv
+curl -LsSf https://astral-sh/uv/install.sh | sh
+uv sync --group desktop
 ```
 Use uv to install the dependencies in pyproject.toml.
+Use group is dekstop for the default setup and pi for the setup with the arducam
 ```console
-uv sync
+uv sync --group desktop
 ```
 Code can be executed as follows. 
 ```console
-uv sync --group dev 
 uv run pytest tests/test_core.py
-uv sync --group plot
-uv run python -m hexastorm.interpolator.patterns.create
+uv run python -m hexastorm.interpolator.patterns.machine
 uv run python -m hexastorm.interpolator.interpolator
 ```
 
