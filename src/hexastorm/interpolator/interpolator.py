@@ -260,7 +260,6 @@ class Interpolator:
     def plotptrn(
         self,
         ptrn_data: Union[np.ndarray, dict],
-        step: int = 1,
         filename: str = "plot",
         color_lanes: bool = True,
     ):
@@ -333,6 +332,9 @@ class Interpolator:
         bits_full = ptrn_bits[:min_len]
 
         # 6. Prepare Plot Data
+        step = (
+            1  # Adjust this for faster plotting (e.g., 10 means plot every 10th point)
+        )
         x_plot = x_full[::step]
         y_plot = y_full[::step]
         bits_plot = bits_full[::step]
@@ -418,7 +420,8 @@ class Interpolator:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    # PCB / photopaper stepsperline single channel, current 130, 2x per line
+    # PCB / photopaper stepsperline dual channel,
+    # current 130, 4x per line
     fname = "combined_grid_test"
     ctime = time()
     interpolator = Interpolator()
@@ -429,9 +432,6 @@ if __name__ == "__main__":
     url = dir_path / "patterns" / f"{fname}.svg"
     ptrn = interpolator.patternfile(url)
     logging.info(f"Pattern {time() - ctime:.2f} seconds")
-    # hexastorm.png pixelsize 0.035
-    # url = dir_path / "test-patterns" / "hexastorm.png"
-    # ptrn = interpolator.patternfile(url, pixelsize=0.035)
     interpolator.writebin(ptrn, f"{fname}.bin")
 
     pattern_data = interpolator.readbin(f"{fname}.bin")
@@ -447,5 +447,4 @@ if __name__ == "__main__":
         * pattern_data["lanes"]
         * np.ceil(interpolator.params["bitsinscanline"] // 8)
     )
-    # TODO: step must be an integer!!
-    interpolator.plotptrn(pattern_data, step=1)
+    interpolator.plotptrn(pattern_data)

@@ -161,15 +161,18 @@ class PlatformConfig:
         self.update_laser_timing()
         self.laser_bits = 1  # enables adding pwm to laser (not widely tested)
 
-    def get_optical_params(self, correction=False, stepsperline=0.25):
+    def get_optical_params(self, correction=False, exposures=4):
         """
         Returns a dictionary of physical parameters, including calculated Lanewidth.
+
+        correction: If True, applies empirically derived facet-specific corrections to the displacement.
+        exposures: Number of exposures per facet, used to calculate stepsperline for stage speed.
         """
         laz_tim = self.laser_timing
         mtr_cfg = self.motor_cfg
 
         # need steps per line to calculate stage speed
-        params = {"stepsperline": stepsperline}  # 0.25 is four exposures per line
+        params = {"stepsperline": 1 / exposures}  # 0.25 is four exposures per line
 
         params.update(
             {
