@@ -37,6 +37,7 @@ class Interpolator:
         raw_params = self.cfg.get_optical_params(
             correction=correction, exposures=exposures
         )
+        self.correction = correction
 
         # Initialize the Scanner model (JIT-compiled geometry calculations)
         self.geo = geometry.ScannerModel(raw_params)
@@ -270,7 +271,7 @@ class Interpolator:
 
         # 1. Setup Local Parameters (Start fresh, don't touch self.params)
         # We get the default hardware config (speeds, frequencies, etc.)
-        raw_params = self.cfg.get_optical_params(correction=True)
+        raw_params = self.cfg.get_optical_params(correction=self.correction)
         local_params = geometry.ScannerModel.to_numba_dict(raw_params)
 
         # A. Calculate the 'lanewidth' for this specific hardware config

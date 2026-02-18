@@ -1,41 +1,43 @@
-# Laser scanner
-[Laser scanning](https://en.wikipedia.org/wiki/Laser_scanning) is the controlled deflection of laser beams, visible or invisible.
-In a high-speed polygon scanner system, the laser is deflected by a rotating prism or mirror. 
-The position of the laser is determined via a photodiode.  
-Hexastorm is a full toolkit for working with polygon lasers scanners using FPGA technology and provides hardware, gateware, and software 
-to enable laser scanning applications.  
-<img src="https://cdn.hackaday.io/images/490011635348687883.jpg" align="center" height="300"/>  
-Code is tested on the system shown above, branded as [Hexastorm](https://www.hexastorm.com). 
-The FreeCAD design is shared [here](https://github.com/hstarmans/hexastorm_design) 
-and PCB designs are found [here](https://github.com/hstarmans/firestarter).
-A blog can be found on [Hackaday](https://hackaday.io/project/21933-open-hardware-fast-high-resolution-laser).
-The code took most inspiration from [LDGraphy](https://github.com/hzeller/ldgraphy).  
-Making a PCB with scanner is shown in the video;  
-[![video in action not showing](https://img.youtube.com/vi/dR09Tev0cPk/0.jpg)](http://www.youtube.com/watch?v=dR09Tev0cPk "Making PCB with Laser Direct Imaging").
+# Hexastorm: Open Source Polygon Laser Scanner
 
-The alignment procedure is shown in the following video.
+**Hexastorm** is a comprehensive open-source toolkit for building high-speed, high-resolution polygon [laser scanners](https://en.wikipedia.org/wiki/Laser_scanning). Designed for applications like **PCB Laser Direct Imaging (LDI)** and **SLA 3D printing**, it leverages **FPGA technology** to achieve the precise timing required for polygon scanning.
+Unlike traditional galvanometer scanners, Hexastorm uses a high-speed rotating prism or mirror to deflect the laser beam, with position feedback determined via a photodiode. The system is powered by a **Lattice iCE40UP5K FPGA** (utilizing **Amaranth HDL**) and an **ESP32-S3** (utilizing **Micropython**), providing a complete stack of hardware, gateware, and software to enable advanced laser scanning applications.
 
-[![Alignment procedure image not showing](http://img.youtube.com/vi/Ri6DAneEzw4/0.jpg)](http://www.youtube.com/watch?v=Ri6DAneEzw4 "Alignment procedure")
+<p align="center">
+  <img src="https://cdn.hackaday.io/images/490011635348687883.jpg" height="300" alt="Hexastorm System"/>
+</p>
 
-## Requirements
-Code can be deployed on microcontroller ESP32S3 and FPGA UP5K.  
-This requires additional library [esp32_hexastorm](https://github.com/hstarmans/esp32_hexastorm).
-Part of the code can be run on Micropython, rest is Python only. 
+### Project Resources
+* **Website:** [Hexastorm.com](https://www.hexastorm.com)
+* **Blog & Updates:** [Hackaday.io Project Page](https://hackaday.io/project/21933-open-hardware-fast-high-resolution-laser)
+* **Hardware Design:**
+    * **Mechanical (FreeCAD):** [hstarmans/hexastorm_design](https://github.com/hstarmans/hexastorm_design)
+    * **Electronics (PCB):** [hstarmans/firestarter](https://github.com/hstarmans/firestarter)
+    * **Firmware:** [hstarmans/esp32_hexastorm](https://github.com/hstarmans/esp32_hexastorm)
+
+*Acknowledgement: This code draws inspiration from [LDGraphy](https://github.com/hzeller/ldgraphy).*
+
+### Demos
+**Making a PCB with Laser Direct Imaging**
+[![Making PCB with Hexastorm](https://img.youtube.com/vi/dR09Tev0cPk/0.jpg)](http://www.youtube.com/watch?v=dR09Tev0cPk "Making PCB with Laser Direct Imaging")
 
 # Install
-Install the dependency manager uv.
+First, install the [uv](https://github.com/astral-sh/uv) dependency manager:
 ```console
 curl -LsSf https://astral-sh/uv/install.sh | sh
-uv sync --group desktop
 ```
-Use uv to install the dependencies in pyproject.toml.
-Use group is dekstop for the default setup and pi for the setup with the arducam
+Sync the project dependencies from pyproject.toml. Use the desktop group for the default setup 
+(this excludes camera support):
 ```console
 uv sync --group desktop
 ```
-Code can be executed as follows. 
+You can execute tests and run the main modules as follows:  
+**Core tests**
 ```console
 uv run pytest tests/test_core.py
+```
+**Pattern generation and interpolator**
+```console
 uv run python -m hexastorm.interpolator.patterns.machine
 uv run python -m hexastorm.interpolator.interpolator
 ```

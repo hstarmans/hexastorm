@@ -33,8 +33,7 @@ desktop = [
     "ipykernel>=6.29.5",
     "matplotlib>=3.9.0",
 ]
-pi = [
-    "opencv-python>=4.10.0",
+camera = [
     "arducampython",
 ]
 

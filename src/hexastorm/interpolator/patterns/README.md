@@ -1,8 +1,23 @@
-Test Patterns
-=============
-Patterns can be generated via
+# Test Patterns
+
+The `hexastorm` package provides utilities for generating and visualizing calibration patterns. These patterns are essential for both mechanical alignment and algorithmic validation.
+
+## Pattern Types
+
+| Category | Purpose |
+| --- | --- |
+| **Machine Patterns** | Used to physically align the machine hardware and offsets between subsequent lanes. |
+| **Camera Patterns** | Used to verify the accuracy of the facet correction algorithms using a camera. |
+
+## Generation
+
+To generate patterns, ensure your environment is synced with the required dependency groups, then use the `uv run` command:
+
 ```console
-uv run python -m hexastorm.interpolator.patterns.create
+# Ensure dependencies are present
+uv sync --system --group camera --group desktop
+
+# Run the pattern generator
+uv run python -m hexastorm.interpolator.patterns.machine
+
 ```
-In the past, VTK was used to create slices.  
-An alternative might be to use [PySLM](https://github.com/drlukeparry/pyslm), [Trimesh](https://github.com/mikedh/trimesh) or [PyClipper](https://pypi.org/project/pyclipper/).

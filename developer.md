@@ -1,79 +1,8 @@
 # Dev notes
 
-The camera is a major dependency. My version of arducam does not support the latest raspberry pi OS.
-As a result, I fixed numpy to 1.19.5 and python to 3.9.2.
-
-## Precommit
-Install Git pre-commit hooks based on the .pre-commit-config.yaml file.
-```pre-commit install```
-
-## Jupyter lab
-
-Jupyter lab only works with git extension if key is added to ssh agent.
-```ssh-ad id_ed25519```
-You can use the following script to launch jupyter lab.
-```
-#!/bin/bash
-
-env -C ~/projects/hexastorm/ poetry run jupyter lab --no-browser --ip "*"
-```
-
-## Notes removed from installation
-On Raspbian, install libatlas so latest Numpy, etc. can be installed via pip.
-```console
-sudo apt update
-sudo apt install libatlas3-base
-```
-Install [luna](https://github.com/greatscottgadgets/luna) and checkout at f54de01.
-So after git cloning, run ```git checkout f54de01```.
-Priop to yowasp apio was used but this result in a suboptimal binary.
-```console
-pip3 install yowasp-yosys
-pip3 install yowasp-nextpnr-ice40-all
-```
-If yowasp is used, add in  ```~/.bashrc```
-```
-## add python files to path
-export PATH="/home/ubuntu/.local/bin:$PATH"
-## these lines only needed for ubuntu core
-export YOSYS="yowasp-yosys"
-export ICEPACK="yowasp-icepack"
-export NEXTPNR_ICE40="yowasp-nextpnr-ice40"
-```
-Run  ```source ~/.bashrc``` afterwards.
-You can enable wifi using [link](https://github.com/sraodev/Raspberry-Pi-Headless-Setup-via-Network-Manager).
-Using the raspberry pi installer you can automatically fix wifi and it will copy password.
-
-If the behaviour of the FPGA is simulated, signal traces for [GTKWave](http://gtkwave.sourceforge.net/) are generated if the following flag is set.
-```console
-export GENERATE_VCDS=1
-```
-After rebooting, you can check the configuration via
-```console
-ls /dev/spi*
-sudo vcdbg log msg
-```
-Usefull links are [1](http://terminal28.blogspot.com/2016/05/enabling-spi1-on-raspberry-pi-bzero23.html) and [2](https://bootlin.com/blog/enabling-new-hardware-on-raspberry-pi-with-device-tree-overlays/).  
-
-The slicer relies on numba for acceleration. Latest is llvm-12 but pip3 only supports 10 now.
-```console
-sudo apt-get install llvm-10
-LLVM_CONFIG=/usr/lib/llvm-10/bin/llvm-config pip3 install llvmlite
-pip3 install numba
-```
-The location of llvm-config can be found with
-```console
-find / -name llvm-config
-```
-
-## Notes removed from Camera
+## Camera
 The operation of the laser scanner can be verified with a camera.
-Two camera's have been tried; [uEye](https://en.ids-imaging.com/) 2240 monochrome camera and [Arducam Global shutter](https://www.arducam.com/products/camera-breakout-board/global-shutter-camera/) which used the OV2311 chip. I use an old version UC-621 which is not compatible with the latest version of raspberry and drivers.
-The images of the cameras are analyzed with [OpenCV](https://opencv.org/).
-```console
-sudo apt install -y libopenjp2-7 libilmbase-dev libopenexr-dev libgstreamer1.0-dev ffmpeg
-pip3 install opencv-python
-```
+Two camera's have been tried; [uEye](https://en.ids-imaging.com/) 2240 monochrome camera and [Arducam Global shutter](https://www.arducam.com/products/camera-breakout-board/global-shutter-camera/) which used the OV2311 chip. I use an old version UC-621 which is not compatible with the latest version of raspberry and drivers. 
 Camera must be enabled via raspi-config. Raspi-config states that this will no longer be supported in future versions and denotes camera as legacy.
 I had to leave 'i2c-dev' in '/etc/modules-load.d/modules.conf' for i2c to load.
 
@@ -99,6 +28,18 @@ gpu_mem=300
 ```
 There should not be dtparam=spi=on, somewhere. This would enable two chip selects for SPI0 and 
 creates a conflict with the pin select of SPI1. 
+The correction python depedencies can be obtained for bullseye by using conda. 
+You use uv to install the remaining packages in your conda environment.
+
+```bash
+wget "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-aarch64.sh"
+bash Miniforge3-Linux-aarch64.sh
+source .bashrc
+conda create -n hexastorm python=3.12 numba "numpy>=2.0.0"
+conda install "opencv>=4.10.0"
+conda activate hexastorm
+uv pip install --system -e ".[camera,desktop]"
+```
 
 #### uEye camera
 Disadvantages; uEye is more expensive, drivers require an account and there is no good Python driver.  
@@ -108,7 +49,6 @@ linux, arm v7 (Raspberry pi platform). A Python library for the camera is availa
 My version can be installed via [uEyeCamera](https://github.com/hstarmans/ueyecamera).
 
 # Brief Description
-
 The controller sends over a command with a word to the FPGA which stores it in SRAM.
 The command is 8 bits long and the word 64 bits. Only for write commands, word is not empty.
 If the memory is full, the FPGA send this back to the host. 
@@ -123,7 +63,6 @@ The following commands are possible;
 | START    | enable execution of instructions stored in SRAM          |
 | STOP     | halt execution of instructions stored in SRAM            |
 | WRITE    | sent over an instruction and store it in SRAM            |
-
 
 ## Write
 A write commmand is followed by an instruction which is placed in the SRAM.
@@ -205,25 +144,3 @@ can establish precedence between instructions.
 A user can read but not write directly to pins. This ensures that the host
 can establish precedence between instructions.
 
-## Alignment procedure
-
-You start by printing several patterns with a different dosage.
-The correct dosage and the actual size of a lane is determined.
-You then try several offsets between lanes to find the optimum.
-The backlash is ignored for the moment. 
-
-## Detailed description
-Look at the test folders and individually tests on how to use the code. The whole scanhead can be simulated virtually. 
-As such, a scanner is not needed.
-
-## Limitations 
-System is for writing to, i.e. exposing, a substrate. Reading should also be possible to enable optical coherence tomagraphy.    
-System has no link for LIDAR measurements, circuit can be found [here](https://hackaday.io/project/163501-open-source-lidar-unruly).    
-The FPGA controls all the stepper motors. At the moment it is not possible to read instruction from a GCODE file.  
-Add maximum-length linear-feedback shift register sequence and CRC check.  
-
-
-<!-- 
-TODO:
-  add docs
- -->
