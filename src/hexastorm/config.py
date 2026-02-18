@@ -8,14 +8,22 @@ as well as platform-level configuration settings used for FPGA synthesis and fir
 """
 
 from collections import OrderedDict
-
 from math import ceil, radians
 import sys
+import logging
 
 if sys.implementation.name == "micropython":
     from ulab import numpy as np
+
+    MICROPYTHON = True
 else:
+    import json
+    from pathlib import Path
     import numpy as np
+
+    MICROPYTHON = False
+
+logger = logging.getLogger(__name__)
 
 
 class Spi:
@@ -165,7 +173,7 @@ class PlatformConfig:
         """
         Returns a dictionary of physical parameters, including calculated Lanewidth.
 
-        correction: If True, applies empirically derived facet-specific corrections to the displacement.
+        correction: If True, loads empirically derived corrections from calibration_history.json.
         exposures: Number of exposures per facet, used to calculate stepsperline for stage speed.
         """
         laz_tim = self.laser_timing
@@ -235,24 +243,49 @@ class PlatformConfig:
             - displacement_kernel(start_pixel, params)
         )
 
+        # Initialize to 0.0
+        num_facets = int(laz_tim["facets"])
+        for i in range(num_facets):
+            params[f"f{i}_scan"] = 0.0
+            params[f"f{i}_orth"] = 0.0
+
         if correction:
-            params.update(
-                {
-                    "f0_dx": 0.0,
-                    "f0_dy": 0.0,
-                    "f1_dx": -0.018171,
-                    "f1_dy": -0.004177,
-                    "f2_dx": -0.01345,
-                    "f2_dy": -0.077707,
-                    "f3_dx": -0.044907,
-                    "f3_dy": -0.048889,
-                }
-            )
-        else:
-            num_facets = int(laz_tim["facets"])
-            for i in range(num_facets):
-                params[f"f{i}_dx"] = 0.0  # scan
-                params[f"f{i}_dy"] = 0.0  # stage
+            if MICROPYTHON:
+                logging.error("Calibration correction not supported in MicroPython.")
+                return params
+            try:
+                history_path = (
+                    Path(__file__).resolve().parent.parent / "calibration_history.json"
+                )
+
+                if history_path.exists():
+                    with open(history_path, "r") as f:
+                        history = json.load(f)
+
+                    if history and isinstance(history, list):
+                        # Get the last (most recent) entry
+                        latest = history[-1]
+                        corrections = latest.get("facets", {})
+
+                        for i in range(num_facets):
+                            f_key = str(i)
+                            if f_key in corrections:
+                                params[f"f{i}_scan"] = corrections[f_key].get(
+                                    "scan", 0.0
+                                )
+                                params[f"f{i}_orth"] = corrections[f_key].get(
+                                    "orth", 0.0
+                                )
+                        logging.info(
+                            f"Applied calibration from: {latest.get('timestamp')}"
+                        )
+                    else:
+                        logging.warning(
+                            "Warning: Calibration history is empty or invalid."
+                        )
+
+            except Exception as e:
+                logging.error(f"Error loading calibration data: {e}")
 
         return params
 

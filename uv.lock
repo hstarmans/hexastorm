@@ -272,6 +272,9 @@ dependencies = [
 ]
 
 [package.dev-dependencies]
+camera = [
+    { name = "arducampython" },
+]
 desktop = [
     { name = "amaranth-boards" },
     { name = "cairosvg" },
@@ -284,10 +287,6 @@ desktop = [
     { name = "yowasp-nextpnr-ice40" },
     { name = "yowasp-yosys" },
 ]
-pi = [
-    { name = "arducampython" },
-    { name = "opencv-python" },
-]
 
 [package.metadata]
 requires-dist = [
@@ -299,6 +298,7 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
+camera = [{ name = "arducampython", git = "https://github.com/hstarmans/Arducampython.git" }]
 desktop = [
     { name = "amaranth-boards", git = "https://github.com/amaranth-lang/amaranth-boards.git?rev=c26a72e59c786b38e0e989ae64c6c2560ca7c29c" },
     { name = "cairosvg", specifier = ">=2.7.1" },
@@ -310,10 +310,6 @@ desktop = [
     { name = "pytest", specifier = ">=8.4.2" },
     { name = "yowasp-nextpnr-ice40", specifier = ">=0.8.0.0.post621" },
     { name = "yowasp-yosys", specifier = ">=0.53.0.0.post912" },
-]
-pi = [
-    { name = "arducampython", git = "https://github.com/hstarmans/Arducampython.git" },
-    { name = "opencv-python", specifier = ">=4.10.0" },
 ]
 
 [[package]]

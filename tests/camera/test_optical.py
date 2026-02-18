@@ -1,5 +1,4 @@
 import time
-import unittest
 from pathlib import Path
 import logging
 
@@ -41,7 +40,8 @@ class StaticTests:
         # Define setup logic locally
         def setup_board(curr):
             global host
-            from tools import lh as host # noqa: F401 
+            from tools import lh as host
+
             host.laser_current = curr
 
         # Execute setup
@@ -53,12 +53,12 @@ class StaticTests:
         self.esp.exec_wait("host.reset()")
         self.esp.close()
 
-
     def align_laser(self):
         """
         Align laser with prism.
         Laser is aligned without camera.
         """
+
         def enable_laser():
             global host
             host.enable_comp(laser1=True)
@@ -79,6 +79,7 @@ class StaticTests:
         Turn on laser and motor.
         User can first preview image. After pressing escape, a final image is taken.
         """
+
         def start_preview():
             global host
             host.enable_comp(laser0=True, polygon=True)
@@ -97,7 +98,7 @@ class StaticTests:
         def stop_preview():
             global host
             host.enable_comp(laser1=False, polygon=False)
-            
+
         self.esp.exec_func(stop_preview)
 
     def photo_spot(self):
@@ -105,6 +106,7 @@ class StaticTests:
         Turn on laser.
         User can first preview image. After pressing escape, a final image is taken.
         """
+
         def start_spot():
             global host
             host.enable_comp(laser1=True, polygon=False)
@@ -122,13 +124,13 @@ class StaticTests:
         def stop_spot():
             global host
             host.enable_comp(laser1=False, polygon=False)
-            
+
         self.esp.exec_func(stop_spot)
 
     def take_picture(self, count=1, name=None, save=True):
         """
         Captures images using the camera class.
-        
+
         Args:
             count (int): Number of images to capture.
             name (str): Filename to save as.
@@ -143,11 +145,11 @@ class StaticTests:
             # If camera returns None or empty, handle gracefully
             if img is None:
                 continue
-                
+
             # Keep original color img for returning, but maybe convert for saving?
             # Original code converted to grey for saving.
             # We will return the raw image (usually BGR from OpenCV) to maintain info.
-            
+
             last_img = img
 
             if save:
@@ -169,9 +171,9 @@ class StaticTests:
 
             if count > 1:
                 time.sleep(1)
-                
+
         return last_img
-    
+
 
 class DynamicTests(StaticTests):
     def __init__(self):
@@ -179,27 +181,30 @@ class DynamicTests(StaticTests):
 
         def get_facet_zero_mapping():
             global host, spoll, sys
-            import sys, uselect
+            import sys
+            import uselect
 
-            host.synchronize(True) 
+            host.synchronize(True)
             spoll = uselect.poll()
             spoll.register(sys.stdin, uselect.POLLIN)
-            
-            true_facet = host.remap(0) 
+
+            true_facet = host.remap(0)
             return true_facet
 
         self.esp.exec_func(get_facet_zero_mapping)
         self.facet_zero = 0
-        
+
         logger.info(f"TestDynamic Setup Complete. Facet 0 maps to: {self.facet_zero}")
 
-    def picture_line(self, line, fct=None, preview=True, takepicture=True, name=None, save_image=True):
+    def picture_line(
+        self, line, fct=None, preview=True, takepicture=True, name=None, save_image=True
+    ):
         """
         Projects a line pattern on a specific facet and takes a picture.
         Uses serial handshaking (P -> R) to ensure synchronization.
-        
+
         Args:
-            save_image (bool): If True, saves the captured image to disk. 
+            save_image (bool): If True, saves the captured image to disk.
                                If False, keeps it in memory only.
         Returns:
             image (numpy array) or None
@@ -207,7 +212,7 @@ class DynamicTests(StaticTests):
         # Default to the dynamically mapped facet 0 found in setUpClass
         if fct is None:
             fct = self.facet_zero
-        
+
         # Default filename
         if name is None:
             name = f"dynamic_facet_{fct}.jpg"
@@ -215,42 +220,37 @@ class DynamicTests(StaticTests):
         def remote_pattern(line, fct):
             # Imports required inside the function for ESP32 execution
             global host, spoll, sys
-            
+
             chunk = host.cfg.hdl_cfg.lines_chunk
-            true_facet = host.remap(fct, measure=False) 
-            
+            true_facet = host.remap(fct, measure=False)
+
             while True:
-                host.write_line(line, repetitions=chunk, facet=true_facet) 
-                
+                host.write_line(line, repetitions=chunk, facet=true_facet)
+
                 # Check for incoming commands (non-blocking)
                 if spoll.poll(0):
                     cmd = sys.stdin.read(1)
-                    if cmd == 'P': # PICTURE REQUEST
+                    if cmd == "P":  # PICTURE REQUEST
                         # Signal PC we are ready/stable
-                        sys.stdout.write('R') 
-                    elif cmd == 'Q': # QUIT REQUEST
+                        sys.stdout.write("R")
+                    elif cmd == "Q":  # QUIT REQUEST
                         return
 
         # Start the remote loop (wait=False is crucial here)
-        self.esp.exec_func(
-            remote_pattern, 
-            wait=False, 
-            line=line, 
-            fct=fct
-        )
+        self.esp.exec_func(remote_pattern, wait=False, line=line, fct=fct)
 
         self.cam.set_exposure(10_000)
-        
+
         # 1. Request Picture
         self.esp.serial.reset_input_buffer()
-        self.esp.serial.write(b'P')
-        
+        self.esp.serial.write(b"P")
+
         # 2. Wait for 'R' response (with timeout)
         start_time = time.time()
         ready = False
-        while (time.time() - start_time) < 2.0: # 3s timeout
+        while (time.time() - start_time) < 2.0:  # 3s timeout
             if self.esp.serial.in_waiting:
-                if self.esp.serial.read(1) == b'R':
+                if self.esp.serial.read(1) == b"R":
                     ready = True
                     break
             time.sleep(0.01)
@@ -265,9 +265,9 @@ class DynamicTests(StaticTests):
         else:
             raise Exception("Timeout: ESP32 did not respond with 'R'")
 
-        self.esp.serial.write(b'Q')
+        self.esp.serial.write(b"Q")
 
-        # We must confirm the ESP32 has fully exited the previous function 
+        # We must confirm the ESP32 has fully exited the previous function
         # and returned to the REPL before we return control to the loop.
         start_drain = time.time()
         buffer = b""
@@ -275,7 +275,7 @@ class DynamicTests(StaticTests):
             if self.esp.serial.in_waiting:
                 chunk = self.esp.serial.read(self.esp.serial.in_waiting)
                 buffer += chunk
-                if b">>>" in buffer: # Look for the MicroPython prompt
+                if b">>>" in buffer:  # Look for the MicroPython prompt
                     break
             time.sleep(0.01)
 
@@ -283,7 +283,7 @@ class DynamicTests(StaticTests):
 
     def scan_visibility(self, facet=0, step=10):
         """
-        Loops over all pixels in the scanline length. 
+        Loops over all pixels in the scanline length.
         Projects a single pixel, takes a picture (no save), and checks visibility.
 
         Args:
@@ -293,10 +293,12 @@ class DynamicTests(StaticTests):
         scan_len = self.cfg.laser_timing["scanline_length"]
         visibility_map = []
         pixels_to_scan = list(range(0, scan_len, step))
-        
-        logger.info(f"Starting Pixel Visibility Scan. Total Pixels: {scan_len} (Step: {step})")
-        
-        # We use tqdm here. 
+
+        logger.info(
+            f"Starting Pixel Visibility Scan. Total Pixels: {scan_len} (Step: {step})"
+        )
+
+        # We use tqdm here.
         # file=sys.stdout ensures it prints even if stderr is captured by some test runners.
         try:
             for i in tqdm(pixels_to_scan, desc="Scanning Pixels", unit="px"):
@@ -307,12 +309,12 @@ class DynamicTests(StaticTests):
                 # 2. Project and capture (Don't save to disk to save time/space)
                 # Note: We assume picture_line returns the image as implemented previously
                 img = self.picture_line(
-                    line=line, 
-                    fct=facet, 
-                    preview=False, 
+                    line=line,
+                    fct=facet,
+                    preview=False,
                     takepicture=True,
-                    save_image=False, # Ensure picture_line supports this argument
-                    name=None
+                    save_image=False,  # Ensure picture_line supports this argument
+                    name=None,
                 )
 
                 # 3. Analyze image
@@ -322,28 +324,29 @@ class DynamicTests(StaticTests):
                     dots, _ = get_dots(img, debug=False)
                     if len(dots) > 0:
                         is_visible = True
-                
+
                 visibility_map.append(is_visible)
 
         except KeyboardInterrupt:
             logger.warning("Scan interrupted by user.")
-        
+
         # Print final summary
         logger.info("-" * 30)
         logger.info("Visibility Scan Results:")
         logger.info("-" * 30)
-        
+
         visible_indices = [idx for idx, vis in enumerate(visibility_map) if vis]
-        
+
         # Calculate percentage
         if scan_len > 0:
             percent = (len(visible_indices) / scan_len) * 100
         else:
             percent = 0
-            
-        logger.info(f"Visible Pixels: {len(visible_indices)}/{scan_len} ({percent:.1f}%)")
-        logger.info(f"Visible Indices: {visible_indices}")
 
+        logger.info(
+            f"Visible Pixels: {len(visible_indices)}/{scan_len} ({percent:.1f}%)"
+        )
+        logger.info(f"Visible Indices: {visible_indices}")
 
     def stability_pattern(self, facet=3, preview=True):
         """
@@ -354,13 +357,12 @@ class DynamicTests(StaticTests):
         # Python list is compatible with MicroPython
         fname = f"facet{facet}.jpg"
         pat = [1] * 1 + [0] * 39
-        local_lines = 10_000
-        bits = self.cfg.laser_timing["scanline_length"] 
+        bits = self.cfg.laser_timing["scanline_length"]
         # extend pattern to line
-        line = (pat * (bits // len(pat)) + pat[: bits % len(pat)])
+        line = pat * (bits // len(pat)) + pat[: bits % len(pat)]
 
         self.picture_line(line=line, fct=facet, name=fname, preview=preview)
-    
+
     def full_calibration_cycle(self):
         """
         Automated sequence:
@@ -375,7 +377,6 @@ class DynamicTests(StaticTests):
                 logger.info(f"--- Capturing Calibration Image for Facet {facet} ---")
                 self.stability_pattern(facet=facet, preview=False)
 
-
         logger.info("--- Starting Calibration Analysis ---")
         run_full_calibration_analysis(
             image_dir=IMG_DIR,
@@ -384,9 +385,10 @@ class DynamicTests(StaticTests):
             debug=False,
         )
 
+
 class Launcher:
     """Main Entry Point."""
-    
+
     def __init__(self):
         self._active_test = None
 
@@ -401,11 +403,12 @@ class Launcher:
         if self._active_test is None:
             self._active_test = DynamicTests()
         return self._active_test
-    
+
     def close(self):
         if self._active_test:
             self._active_test.close()
             self._active_test = None
+
 
 def main():
     tool = Launcher()
@@ -413,6 +416,7 @@ def main():
         fire.Fire(tool)
     finally:
         tool.close()
+
 
 if __name__ == "__main__":
     main()

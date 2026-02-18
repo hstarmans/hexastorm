@@ -33,7 +33,7 @@ def _jit_fxpos(
         xstart: Offset in mm.
     """
     # Get the correction for the current facet
-    dx = params["f" + str(facet_idx) + "_dx"]
+    dx = params["f" + str(facet_idx) + "_scan"]
 
     line_pixel = params["startpixel"] + pixel % params["bitsinscanline"]
 
@@ -69,7 +69,7 @@ def _jit_fypos(
         facet_idx: Index of the current facet.
         ystart: Y-offset in mm.
     """
-    dy = params["f" + str(facet_idx) + "_dy"]
+    dy = params["f" + str(facet_idx) + "_orth"]
 
     line_pixel = params["startpixel"] + pixel % params["bitsinscanline"]
 

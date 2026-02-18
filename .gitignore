@@ -18,6 +18,7 @@ build*
 tests/camera/images*
 tests/data/*.json
 tests/data/*.md
+src/calibration_history.json
 
 # interpolater preview images
 src/hexastorm/interpolator/debug/*

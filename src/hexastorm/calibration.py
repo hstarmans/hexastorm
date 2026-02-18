@@ -16,6 +16,68 @@ logging.basicConfig(
 )
 
 
+def update_calibration_history(master_report):
+    """
+    Appends the new calibration results to 'calibration_history.json'
+    ONLY if the data is different from the previous run.
+    """
+    root_dir = Path(__file__).resolve().parent.parent
+    history_file = root_dir / "calibration_history.json"
+
+    # 1. Prepare the new data payload (without timestamp yet)
+    new_facets_data = {}
+
+    # Iterate through facets in the report
+    for facet_key, data in master_report.items():
+        if "Scan_shift_um" in data:
+            new_facets_data[facet_key] = {
+                "scan": round(data["Scan_shift_um"] / 1000.0, 6),
+                "orth": round(data["Orth_shift_um"] / 1000.0, 6),
+                "rotation_angle": data.get("rotation_angle_deg", 0.0),
+                "spot_size_um": data.get("mean_spot_size_um", 0),
+                "eccentricity": data.get("mean_eccentricity", 0),
+            }
+
+    # 2. Load existing history
+    history = []
+    if history_file.exists():
+        try:
+            with open(history_file, "r") as f:
+                content = f.read()
+                if content:
+                    history = json.loads(content)
+        except Exception as e:
+            logging.error(f"Could not read existing history: {e}")
+
+    # 3. Check for Duplicate Content
+    if history:
+        last_record = history[-1]
+        last_facets = last_record.get("facets", {})
+
+        # Direct dictionary comparison checks if keys and values are identical
+        if new_facets_data == last_facets:
+            logging.info(
+                "Calibration result is identical to the last record. Skipping save."
+            )
+            return
+
+    # 4. If different, add timestamp and save
+    timestamp = datetime.now().isoformat()
+    new_record = {"timestamp": timestamp, "facets": new_facets_data}
+
+    history.append(new_record)
+
+    if len(history) > 10000:
+        history = history[-10000:]
+
+    try:
+        with open(history_file, "w") as f:
+            json.dump(history, f, indent=2)
+        logging.info(f"Calibration history updated: {history_file}")
+    except Exception as e:
+        logging.error(f"Failed to save history: {e}")
+
+
 def get_dots(img, pixelsize=Camera.DEFAULT_PIXEL_SIZE_UM, debug=False):
     """
     Analyzes an image to find laser dots.
@@ -42,8 +104,8 @@ def get_dots(img, pixelsize=Camera.DEFAULT_PIXEL_SIZE_UM, debug=False):
     max_radius_px = (max_diameter_um / pixelsize) / 2.0
 
     # Calculate Area limits: A = pi * r^2
-    min_area_px = np.pi * (min_radius_px ** 2)
-    max_area_px = np.pi * (max_radius_px ** 2)
+    min_area_px = np.pi * (min_radius_px**2)
+    max_area_px = np.pi * (max_radius_px**2)
     # ---------------------------------------------------------
 
     # 3. Filter by size (area) to remove noise
@@ -51,7 +113,7 @@ def get_dots(img, pixelsize=Camera.DEFAULT_PIXEL_SIZE_UM, debug=False):
     dot_metrics = []
     for cnt in contours:
         area = cv.contourArea(cnt)
-        
+
         # Check against calculated pixel area limits
         if min_area_px < area < max_area_px:
             # 1. Get the Centroid (Moment-based)
@@ -177,10 +239,14 @@ def calculate_facet_shifts(rect_dots_list):
         mean_y_shift = np.mean(y_diffs)
 
         facet_data[i] = {
-            "Scan_shift_um": round(mean_x_shift*Camera.DEFAULT_PIXEL_SIZE_UM, 3),
-            "Orth_shift_um": round(mean_y_shift*Camera.DEFAULT_PIXEL_SIZE_UM, 3),
-            "std_scan_um": round(np.std(x_diffs)*abs(Camera.DEFAULT_PIXEL_SIZE_UM), 3),
-            "std_orth_um": round(np.std(y_diffs)*abs(Camera.DEFAULT_PIXEL_SIZE_UM), 3),
+            "Scan_shift_um": round(mean_x_shift * Camera.DEFAULT_PIXEL_SIZE_UM, 3),
+            "Orth_shift_um": round(mean_y_shift * Camera.DEFAULT_PIXEL_SIZE_UM, 3),
+            "std_scan_um": round(
+                np.std(x_diffs) * abs(Camera.DEFAULT_PIXEL_SIZE_UM), 3
+            ),
+            "std_orth_um": round(
+                np.std(y_diffs) * abs(Camera.DEFAULT_PIXEL_SIZE_UM), 3
+            ),
         }
 
     return facet_data
@@ -274,86 +340,6 @@ def verify_calibration(
         cv.imwrite("calibration_verification.jpg", vis)
 
 
-def generate_reports(report_data, output_dir):
-    """
-    Generates a Markdown report AND a JSON file with calibration data.
-    """
-    output_dir = Path(output_dir)
-    md_path = output_dir / "calibration_report.md"
-    json_path = output_dir / "calibration_data.json"
-    
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    # --- 1. Markdown Report ---
-    md_content = f"""
-# Facet Error Report
-**Date:** {current_time}
-
-<table>
-    <thead>
-        <tr>
-            <th>Facet</th>
-            <th>Timing Shift (Scan μm)</th>
-            <th>Mechanical Tilt (Orth μm)</th>
-            <th>Spot Diameter (μm)</th>
-            <th>Eccentricity</th>
-            <th>Rotation Angle (deg)</th>
-        </tr>
-    </thead>
-    <tbody>
-"""
-
-    sorted_keys = sorted(report_data.keys(), key=lambda x: int(x))
-    
-    # Structure for JSON output
-    opt_correct = {}
-
-    for key in sorted_keys:
-        data = report_data[key]
-        
-        scan_shift = data.get("Scan_shift_um", 0.0)
-        orth_shift = data.get("Orth_shift_um", 0.0)
-        spot_size = data.get("mean_spot_size_um", "N/A")
-        eccentricity = data.get("mean_eccentricity", "N/A")
-        rotation_angle = data.get("rotation_angle_deg", "N/A")
-        
-        # Populate JSON Dictionary
-        opt_correct[int(key)] = {
-            "scan": scan_shift if isinstance(scan_shift, (int, float)) else 0.0,
-            "orth": orth_shift if isinstance(orth_shift, (int, float)) else 0.0
-        }
-
-        # Format Markdown Row
-        facet_label = f"<strong>{key} (Ref)</strong>" if key == "0" else f"<strong>{key}</strong>"
-        md_content += f"""        <tr>
-            <td>{facet_label}</td>
-            <td>{scan_shift}</td>
-            <td>{orth_shift}</td>
-            <td>{spot_size}</td>
-            <td>{eccentricity}</td>
-            <td>{rotation_angle}</td>
-        </tr>
-"""
-
-    md_content += """    </tbody>
-</table>
-"""
-
-    try:
-        # Write Markdown
-        with open(md_path, "w", encoding="utf-8") as f:
-            f.write(md_content)
-        logging.info(f"Markdown report generated: {md_path}")
-        
-        # Write JSON
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(opt_correct, f, indent=4)
-        logging.info(f"JSON calibration data generated: {json_path}")
-        
-    except Exception as e:
-        logging.error(f"Failed to write reports: {e}")
-
-
 def run_full_calibration_analysis(
     image_dir, num_facets=4, filename_pattern="facet{}.jpg", debug=False
 ):
@@ -380,11 +366,11 @@ def run_full_calibration_analysis(
         # 1. Process each image
         for i, path in enumerate(image_paths):
             logging.info(f"Processing Facet {i}...")
-            
+
             # Resolve absolute path to ensure cv.imread works
             path = path.resolve()
             img = cv.imread(str(path))
-            
+
             if img is None:
                 logging.error(f"Could not load image at {path}")
                 # Append empty placeholders to maintain index alignment
@@ -392,7 +378,7 @@ def run_full_calibration_analysis(
                 all_spot_stats.append({})
                 all_angles.append(0)
                 continue
-            
+
             dots_facet, stat = get_dots(img, debug=debug)
 
             if len(dots_facet) == 0:
@@ -416,13 +402,15 @@ def run_full_calibration_analysis(
             for i in range(num_facets):
                 s_data = shift_data.get(i, {})
                 spot_data = all_spot_stats[i] if i < len(all_spot_stats) else {}
-                angle_data = {"rotation_angle_deg": round(all_angles[i], 4)} if i < len(all_angles) else {}
+                angle_data = (
+                    {"rotation_angle_deg": round(all_angles[i], 4)}
+                    if i < len(all_angles)
+                    else {}
+                )
                 master_report[str(i)] = {**s_data, **spot_data, **angle_data}
 
-            logging.info("--- Calibration Report Generated ---")
-
-            # 4. Generate Reports (Markdown + JSON)
-            generate_reports(master_report, image_dir)
+            # 4. Save History (No more markdown/json reports in local folder)
+            update_calibration_history(master_report)
 
             # 5. Verify Visuals
             valid_angles = [a for a in all_angles if a != 0]
