@@ -1,11 +1,10 @@
 # Hexastorm: Open Source Polygon Laser Scanner
 
 **Hexastorm** is a comprehensive open-source toolkit for building high-speed, high-resolution polygon [laser scanners](https://en.wikipedia.org/wiki/Laser_scanning). Designed for applications like **PCB Laser Direct Imaging (LDI)** and **SLA 3D printing**, it leverages **FPGA technology** to achieve the precise timing required for polygon scanning.
+
 Unlike traditional galvanometer scanners, Hexastorm uses a high-speed rotating prism or mirror to deflect the laser beam, with position feedback determined via a photodiode. The system is powered by a **Lattice iCE40UP5K FPGA** (utilizing **Amaranth HDL**) and an **ESP32-S3** (utilizing **Micropython**), providing a complete stack of hardware, gateware, and software to enable advanced laser scanning applications.
 
-<p align="center">
-  <img src="https://cdn.hackaday.io/images/490011635348687883.jpg" height="300" alt="Hexastorm System"/>
-</p>
+<img src="https://cdn.hackaday.io/images/490011635348687883.jpg" height="300" alt="Hexastorm System"/>
 
 ### Project Resources
 * **Website:** [Hexastorm.com](https://www.hexastorm.com)
@@ -18,8 +17,9 @@ Unlike traditional galvanometer scanners, Hexastorm uses a high-speed rotating p
 *Acknowledgement: This code draws inspiration from [LDGraphy](https://github.com/hzeller/ldgraphy).*
 
 ### Demos
-**Making a PCB with Laser Direct Imaging**
-[![Making PCB with Hexastorm](https://img.youtube.com/vi/dR09Tev0cPk/0.jpg)](http://www.youtube.com/watch?v=dR09Tev0cPk "Making PCB with Laser Direct Imaging")
+
+**Making a PCB with Laser Direct Imaging**   
+[![Making PCB with Hexastorm](https://img.youtube.com/vi/dR09Tev0cPk/mqdefault.jpg)](http://www.youtube.com/watch?v=dR09Tev0cPk "Making PCB with Laser Direct Imaging")
 
 # Install
 First, install the [uv](https://github.com/astral-sh/uv) dependency manager:
