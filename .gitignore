@@ -14,18 +14,9 @@ build*
 *.gtkw
 *.vcd
 
-# camera images
-tests/camera/images*
-tests/data/*.json
-tests/data/*.md
-src/calibration_history.json
+# Output
+output/*
 
-# interpolater preview images
-src/hexastorm/interpolator/debug/*
-
-# Optical camera images
-test/FPGAG/images*
-src/FPGAG/interpolator/debug*
 
 # VScode counter
 .VSCodeCounter/*

@@ -13,6 +13,8 @@ from ..config import displacement_kernel
 # that doesn't depend on the class state, just the params passed to it.
 displacement = jit(nopython=True, cache=True)(displacement_kernel)
 
+logger = logging.getLogger(__name__)
+
 
 @jit(nopython=True, cache=True)
 def _jit_fxpos(
@@ -226,6 +228,6 @@ class ScannerModel:
             ids: (2, N) Array of [Y_pixel, X_pixel] coordinates.
         """
         ids = _jit_calculate_grid(self.params)
-        logging.info(f"The lanewidth is {self.params['lanewidth']:.2f} mm")
-        logging.info(f"The facets in lane are {int(self.params['facetsinlane'])}")
+        logger.debug(f"The lanewidth is {self.params['lanewidth']:.2f} mm")
+        logger.debug(f"The facets in lane are {int(self.params['facetsinlane'])}")
         return ids

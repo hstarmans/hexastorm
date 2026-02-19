@@ -1,34 +1,34 @@
 import pytest
-import os
+from pathlib import Path
 from hexastorm.calibration import run_full_calibration_analysis
 
 # 1. Define Data
 EXPECTED_OUTPUT = {
     "0": {
-        "x_shift_px": 0.0,
-        "y_shift_px": 0.0,
-        "std_x": 0.0,
+        "Scan_shift_um": 0.0,
+        "Orth_shift_um": 0.0,
+        "std_scan_um": 0.0,
         "mean_spot_size_um": 29.588,
         "mean_eccentricity": 1.887,
     },
     "1": {
-        "x_shift_px": -9.146,
-        "y_shift_px": -28.014,
-        "std_x": 0.468,
+        "Scan_shift_um": -27.438,
+        "Orth_shift_um": -84.042,
+        "std_scan_um": 1.404,
         "mean_spot_size_um": 28.775,
         "mean_eccentricity": 1.77,
     },
     "2": {
-        "x_shift_px": 3.998,
-        "y_shift_px": -23.814,
-        "std_x": 1.749,
+        "Scan_shift_um": 11.994,
+        "Orth_shift_um": -71.442,
+        "std_scan_um": 5.247,
         "mean_spot_size_um": 26.467,
         "mean_eccentricity": 1.763,
     },
     "3": {
-        "x_shift_px": -7.879,
-        "y_shift_px": -27.756,
-        "std_x": 0.669,
+        "Scan_shift_um": -23.637,
+        "Orth_shift_um": -83.268,
+        "std_scan_um": 2.007,
         "mean_spot_size_um": 26.496,
         "mean_eccentricity": 1.83,
     },
@@ -36,14 +36,14 @@ EXPECTED_OUTPUT = {
 
 
 # 2. FIXTURE: Run the heavy calculation only ONCE
-# scope="module" means: run this function once per file, not once per test.
 @pytest.fixture(scope="module")
 def calibration_result():
-    test_dir = os.path.dirname(__file__)
-    image_folder = os.path.join(test_dir, "data")
+    # Use pathlib for consistency with the rest of your project
+    test_dir = Path(__file__).parent.resolve()
+    image_folder = test_dir / "data"
 
     # Return the dictionary of results to be used by tests
-    return run_full_calibration_analysis(image_folder, debug=False)
+    return run_full_calibration_analysis(image_dir=image_folder, debug=False)
 
 
 # 3. PARAMETRIZE: Generate a separate test case for every item in EXPECTED_OUTPUT
@@ -66,7 +66,7 @@ def test_facet_accuracy(calibration_result, facet_id, expected_metrics):
             f"Metric {metric_name} missing for Facet {facet_id}"
         )
 
-        # Compare
+        # Compare using approx to handle floating point fuzziness
         assert actual_val == pytest.approx(expected_val, rel=1e-3), (
             f"Facet {facet_id} mismatch on {metric_name}"
         )

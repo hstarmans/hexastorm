@@ -169,6 +169,36 @@ class PlatformConfig:
         self.update_laser_timing()
         self.laser_bits = 1  # enables adding pwm to laser (not widely tested)
 
+    @property
+    def paths(self):
+        """
+        Standardized output directories for files generated during tests/calibration.
+        Returns a dictionary of pathlib.Path objects. Auto-creates directories if they don't exist.
+        """
+        if MICROPYTHON:
+            logging.error(
+                "The ESP32 doesn't handle these files natively. Skipping path setup."
+            )
+            return {}
+
+        project_root = Path(__file__).resolve().parent.parent.parent
+        output_base = project_root / "output"
+
+        dirs = {
+            "base": output_base,
+            "calibration": output_base / "calibration",
+            "images": output_base / "images",
+            "patterns": output_base / "patterns",
+            "svgs": output_base / "svgs",
+            "debug": output_base / "debug",
+        }
+
+        # Auto-create the directories on the Host PC
+        for name, path in dirs.items():
+            path.mkdir(parents=True, exist_ok=True)
+
+        return dirs
+
     def get_optical_params(self, correction=False, exposures=4):
         """
         Returns a dictionary of physical parameters, including calculated Lanewidth.

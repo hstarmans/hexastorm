@@ -7,6 +7,8 @@ from typing import Dict, Tuple, Any, Union
 import numpy as np
 from hexastorm.config import Spi
 
+logger = logging.getLogger(__name__)
+
 
 def write_binary_file(
     pixeldata: np.ndarray,
@@ -53,7 +55,7 @@ def write_binary_file(
     try:
         expected_size = lanes * facets * bytes_in_line
         if pixeldata.size != expected_size:
-            logging.info(f"Resizing data: {pixeldata.size} -> {expected_size}")
+            logger.debug(f"Resizing data: {pixeldata.size} -> {expected_size}")
             # Note: resize in-place might affect the array passed by reference,
             # but usually patternfile creates a new array anyway.
             pixeldata.resize(expected_size, refcheck=False)
@@ -94,7 +96,7 @@ def write_binary_file(
     IO_BUFFER_SIZE = 1024 * 1024
     write_buffer = bytearray()
 
-    logging.info(f"Writing binary file to {out_path}...")
+    logger.info(f"Writing binary file to {out_path}...")
     with open(out_path, "wb") as f:
         # File Header
         f.write(compressor.compress(struct.pack("<f", lanewidth)))
@@ -170,7 +172,7 @@ def read_binary_file(
     expected_size = total_lines * words_in_line * 9
     if raw_payload.size != expected_size:
         trunc_lines = raw_payload.size // (words_in_line * 9)
-        logging.warning(
+        logger.warning(
             f"File size mismatch. Expected {total_lines} lines, found {trunc_lines}."
         )
         total_lines = trunc_lines

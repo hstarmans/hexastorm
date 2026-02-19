@@ -3,17 +3,11 @@ import numpy as np
 from pathlib import Path
 import json
 import logging
-import traceback
 from datetime import datetime
 
-from .config import Camera
+from .config import Camera, PlatformConfig
 
-# Configure logging to display time, level, and message
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    datefmt="%H:%M:%S",
-)
+logger = logging.getLogger(__name__)
 
 
 def update_calibration_history(master_report):
@@ -21,8 +15,8 @@ def update_calibration_history(master_report):
     Appends the new calibration results to 'calibration_history.json'
     ONLY if the data is different from the previous run.
     """
-    root_dir = Path(__file__).resolve().parent.parent
-    history_file = root_dir / "calibration_history.json"
+    cfg = PlatformConfig(test=False)
+    history_file = cfg.paths["calibration"] / "calibration_history.json"
 
     # 1. Prepare the new data payload (without timestamp yet)
     new_facets_data = {}
@@ -47,7 +41,7 @@ def update_calibration_history(master_report):
                 if content:
                     history = json.loads(content)
         except Exception as e:
-            logging.error(f"Could not read existing history: {e}")
+            logger.error(f"Could not read existing history: {e}")
 
     # 3. Check for Duplicate Content
     if history:
@@ -56,7 +50,7 @@ def update_calibration_history(master_report):
 
         # Direct dictionary comparison checks if keys and values are identical
         if new_facets_data == last_facets:
-            logging.info(
+            logger.warning(
                 "Calibration result is identical to the last record. Skipping save."
             )
             return
@@ -70,12 +64,9 @@ def update_calibration_history(master_report):
     if len(history) > 10000:
         history = history[-10000:]
 
-    try:
-        with open(history_file, "w") as f:
-            json.dump(history, f, indent=2)
-        logging.info(f"Calibration history updated: {history_file}")
-    except Exception as e:
-        logging.error(f"Failed to save history: {e}")
+    with open(history_file, "w") as f:
+        json.dump(history, f, indent=2)
+    logger.info(f"Calibration history updated: {history_file}")
 
 
 def get_dots(img, pixelsize=Camera.DEFAULT_PIXEL_SIZE_UM, debug=False):
@@ -172,7 +163,7 @@ def get_dots(img, pixelsize=Camera.DEFAULT_PIXEL_SIZE_UM, debug=False):
         h, w = img.shape[:2]
         cv.resizeWindow(window_name, int(w * 0.6), int(h * 0.6))
         cv.imshow(window_name, vis)
-        logging.info("Debug image displayed. Click window and press key to continue.")
+        logger.info("Debug image displayed. Click window and press key to continue.")
         cv.waitKey(0)
         cv.destroyAllWindows()
 
@@ -270,7 +261,7 @@ def verify_calibration(
         loaded_count += 1
 
     if base_img is None or loaded_count == 0:
-        logging.warning("No images loaded for verification.")
+        logger.warning("No images loaded for verification.")
         return
 
     base_img = (base_img / loaded_count).astype(np.uint8)
@@ -332,7 +323,7 @@ def verify_calibration(
         h, w = vis.shape[:2]
         cv.resizeWindow(window_name, int(w * 0.7), int(h * 0.7))
         cv.imshow(window_name, vis)
-        logging.info(
+        logger.info(
             "Verification image displayed. Press any key in the window to close."
         )
         cv.waitKey(0)
@@ -341,20 +332,27 @@ def verify_calibration(
 
 
 def run_full_calibration_analysis(
-    image_dir, num_facets=4, filename_pattern="facet{}.jpg", debug=False
+    image_dir=None, num_facets=4, filename_pattern="facet{}.jpg", debug=False
 ):
     """
     Orchestrates the loading, analysis, and verification of calibration images.
     """
-    image_dir = Path(image_dir)
-    logging.info(f"--- Starting Calibration Analysis on: {image_dir} ---")
+    cfg = PlatformConfig(test=False)
+
+    # Safely default to the standard image pipeline folder
+    if image_dir is None:
+        image_dir = cfg.paths["images"]
+    else:
+        image_dir = Path(image_dir)
+
+    logger.info(f"Starting Calibration Analysis on: {image_dir}")
 
     image_paths = []
     # Verify paths exist before starting heavy processing
     for i in range(num_facets):
         p = image_dir / filename_pattern.format(i)
         if not p.exists():
-            logging.error(f"Missing expected file: {p}")
+            logger.error(f"Missing expected file: {p}")
             return
         image_paths.append(p)
 
@@ -362,78 +360,74 @@ def run_full_calibration_analysis(
     all_spot_stats = []
     all_angles = []
 
-    try:
-        # 1. Process each image
-        for i, path in enumerate(image_paths):
-            logging.info(f"Processing Facet {i}...")
+    # 1. Process each image
+    for i, path in enumerate(image_paths):
+        logger.debug(f"Processing Facet {i}...")
 
-            # Resolve absolute path to ensure cv.imread works
-            path = path.resolve()
-            img = cv.imread(str(path))
+        # Resolve absolute path to ensure cv.imread works
+        path = path.resolve()
+        img = cv.imread(str(path))
 
-            if img is None:
-                logging.error(f"Could not load image at {path}")
-                # Append empty placeholders to maintain index alignment
-                all_rect_dots.append(np.array([]))
-                all_spot_stats.append({})
-                all_angles.append(0)
-                continue
+        if img is None:
+            logger.error(f"Could not load image at {path}")
+            # Append empty placeholders to maintain index alignment
+            all_rect_dots.append(np.array([]))
+            all_spot_stats.append({})
+            all_angles.append(0)
+            continue
 
-            dots_facet, stat = get_dots(img, debug=debug)
+        dots_facet, stat = get_dots(img, debug=debug)
 
-            if len(dots_facet) == 0:
-                logging.warning(f"No dots found in {path.name}")
-                all_rect_dots.append(np.array([]))
-                all_spot_stats.append({})
-                all_angles.append(0)
-                continue
+        if len(dots_facet) == 0:
+            logger.warning(f"No dots found in {path.name}")
+            all_rect_dots.append(np.array([]))
+            all_spot_stats.append({})
+            all_angles.append(0)
+            continue
 
-            all_spot_stats.append(stat)
-            rect_dot, angle = rectify_dots(dots_facet)
-            all_angles.append(angle)
-            all_rect_dots.append(rect_dot)
+        all_spot_stats.append(stat)
+        rect_dot, angle = rectify_dots(dots_facet)
+        all_angles.append(angle)
+        all_rect_dots.append(rect_dot)
 
-        # 2. Calculate Shifts
-        if all_rect_dots and len(all_rect_dots[0]) > 0:
-            shift_data = calculate_facet_shifts(all_rect_dots)
+    # 2. Calculate Shifts
+    if all_rect_dots and len(all_rect_dots[0]) > 0:
+        shift_data = calculate_facet_shifts(all_rect_dots)
 
-            # 3. Create Master Report
-            master_report = {}
-            for i in range(num_facets):
-                s_data = shift_data.get(i, {})
-                spot_data = all_spot_stats[i] if i < len(all_spot_stats) else {}
-                angle_data = (
-                    {"rotation_angle_deg": round(all_angles[i], 4)}
-                    if i < len(all_angles)
-                    else {}
-                )
-                master_report[str(i)] = {**s_data, **spot_data, **angle_data}
-
-            # 4. Save History (No more markdown/json reports in local folder)
-            update_calibration_history(master_report)
-
-            # 5. Verify Visuals
-            valid_angles = [a for a in all_angles if a != 0]
-            avg_angle = np.mean(valid_angles) if valid_angles else 0
-            verify_calibration(
-                image_paths, master_report, avg_angle, all_rect_dots, visual_debug=debug
+        # 3. Create Master Report
+        master_report = {}
+        for i in range(num_facets):
+            s_data = shift_data.get(i, {})
+            spot_data = all_spot_stats[i] if i < len(all_spot_stats) else {}
+            angle_data = (
+                {"rotation_angle_deg": round(all_angles[i], 4)}
+                if i < len(all_angles)
+                else {}
             )
-        else:
-            logging.error("Insufficient data to calculate shifts (Facet 0 empty?).")
+            master_report[str(i)] = {**s_data, **spot_data, **angle_data}
 
-    except Exception as e:
-        logging.error(f"An unexpected error occurred: {e}")
-        logging.debug(traceback.format_exc())
+        # 4. Save History (No more markdown/json reports in local folder)
+        update_calibration_history(master_report)
+
+        # 5. Verify Visuals
+        valid_angles = [a for a in all_angles if a != 0]
+        avg_angle = np.mean(valid_angles) if valid_angles else 0
+        verify_calibration(
+            image_paths, master_report, avg_angle, all_rect_dots, visual_debug=debug
+        )
+    else:
+        logger.error("Insufficient data to calculate shifts (Facet 0 empty?).")
 
     return master_report
 
 
 if __name__ == "__main__":
-    # USER CONFIGURATION
-    target_folder = Path(__file__).parent.parent.parent / "tests" / "camera" / "images"
+    from .log_setup import configure_logging
+
+    configure_logging(logging.DEBUG)
 
     run_full_calibration_analysis(
-        image_dir=target_folder,
+        image_dir=None,  # Use default from config
         num_facets=4,
         filename_pattern="facet{}.jpg",
         debug=False,

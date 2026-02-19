@@ -16,6 +16,8 @@ from . import io
 # Disable PIL Decompression Bomb Warning
 Image.MAX_IMAGE_PIXELS = None
 
+logger = logging.getLogger(__name__)
+
 
 class Interpolator:
     """
@@ -46,7 +48,8 @@ class Interpolator:
         self.params = self.geo.params
 
         self.current_dir = Path(__file__).parent.resolve()
-        self.debug_folder = self.current_dir / "debug"
+        self.debug_folder = self.cfg.paths["base"] / "debug"
+        self.debug_folder.mkdir(parents=True, exist_ok=True)
         self.bitorder = "big"
 
     def svgtopil(self, svg_filepath: Path) -> Image.Image:
@@ -87,7 +90,7 @@ class Interpolator:
         if (x_size > self.params["pltfxsize"]) or (y_size > self.params["pltfysize"]):
             raise Exception("Object does not fit on platform")
 
-        logging.info(f"Sample size is {x_size:.2f} mm by {y_size:.2f} mm")
+        logger.debug(f"Sample size is {x_size:.2f} mm by {y_size:.2f} mm")
         self.params["samplexsize"] = x_size
         self.params["sampleysize"] = y_size
         return img_array
@@ -106,7 +109,7 @@ class Interpolator:
             cv2.MORPH_ELLIPSE, (kernel_size, kernel_size)
         )
 
-        logging.info(
+        logger.debug(
             f"Fast OpenCV bias: {self.params['laser_radius_mm'] * 1000:.1f}um "
             f"({pixel_radius:.2f} px radius, {kernel_size}px kernel)"
         )
@@ -167,16 +170,16 @@ class Interpolator:
             img = Image.fromarray(layerarr.astype(np.uint8) * 255)
             img.save(self.debug_folder / "simplecheck.png")
 
-        logging.info("Retrieved image")
-        logging.info(f"Elapsed {time() - ctime:.2f} seconds")
+        logger.debug("Retrieved image")
+        logger.debug(f"Elapsed {time() - ctime:.2f} seconds")
 
         # 2. Calculate Coordinates
         # ids is (2, N) array: [y_coords, x_coords] stack.
         # These are the physical integer coordinates on the sample grid.
         ids = self.geo.calculate_coordinates()
 
-        logging.info("Created coordinates for interpolation")
-        logging.info(f"Elapsed {time() - ctime:.2f} seconds")
+        logger.debug("Created coordinates for interpolation")
+        logger.debug(f"Elapsed {time() - ctime:.2f} seconds")
 
         # Note: Coordinate convention swap.
         # The 'geometry' module returns stacked arrays, but the interpretation here
@@ -200,8 +203,8 @@ class Interpolator:
         # layerarr[row, col] corresponds to layerarr[y, x].
         ptrn[mask] = layerarr[y_coords[mask], x_coords[mask]]
 
-        logging.info("Completed interpolation")
-        logging.info(f"Elapsed {time() - ctime:.2f} seconds")
+        logger.debug("Completed interpolation")
+        logger.debug(f"Elapsed {time() - ctime:.2f} seconds")
 
         if ptrn.min() < 0 or ptrn.max() > 1:
             raise Exception("This is not a bit list")
@@ -228,7 +231,7 @@ class Interpolator:
         # Resolve path: default to debug folder if not absolute
         out_path = Path(filename)
         if not out_path.is_absolute():
-            out_path = self.debug_folder / out_path
+            out_path = self.cfg.paths["patterns"] / out_path
 
         io.write_binary_file(pixeldata, self.params, out_path)
 
@@ -236,19 +239,23 @@ class Interpolator:
         """Wrapper for io.read_binary_file"""
         in_path = Path(filename)
         if not in_path.is_absolute():
-            in_path = self.debug_folder / in_path
+            in_path = self.cfg.paths["patterns"] / in_path
 
         # Unpack the tuple internally
-        facets, lanes, width, data = io.read_binary_file(
+        facets, lanes, width, data_bytes = io.read_binary_file(
             in_path, self.cfg.laser_timing, self.params["bitsinscanline"]
         )
 
+        data_bits = np.unpackbits(data_bytes, bitorder=self.bitorder)
+
         # Return a clean dictionary
         return {
-            "facetsinlane": facets,
-            "lanes": lanes,
-            "lanewidth": width,
-            "data": data,
+            "data": data_bits,
+            "metadata": {
+                "lanes": lanes,
+                "lanewidth": width,
+                "facetsinlane": facets,
+            },
         }
 
     def plotptrn(
@@ -266,8 +273,8 @@ class Interpolator:
             filename: Output filename.
             color_lanes: If True, alternates lane colors (Light Blue/White).
         """
-        raw_bytes = ptrn_data.get("data")
-        metadata = ptrn_data
+        ptrn_bits = ptrn_data.get("data")
+        metadata = ptrn_data.get("metadata")
 
         # 1. Setup Local Parameters (Start fresh, don't touch self.params)
         # We get the default hardware config (speeds, frequencies, etc.)
@@ -309,8 +316,6 @@ class Interpolator:
         else:
             raise ValueError("Could not find data in input structure")
 
-        ptrn_bits = np.unpackbits(raw_bytes, bitorder=self.bitorder)
-
         # 3. Get Coordinates (Re-calculate identical grid)
         ids = geometry._jit_calculate_grid(local_params)
 
@@ -342,7 +347,7 @@ class Interpolator:
         width = x_max - x_min + 1
         height = y_max - y_min + 1
 
-        logging.info(f"Plotting Image: {width}x{height} pixels")
+        logger.debug(f"Plotting Image: {width}x{height} pixels")
 
         # 7. Rendering
         # Initialize 1-channel canvas for "Lane IDs"
@@ -408,37 +413,38 @@ class Interpolator:
         self.debug_folder.mkdir(parents=True, exist_ok=True)
         save_path = self.debug_folder / f"{filename}.png"
         cv2.imwrite(str(save_path), rotated_canvas)
-        logging.info(f"Plot saved to {save_path}")
+        logger.info(f"Plot saved to {save_path}")
         return rotated_canvas
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    from ..log_setup import configure_logging
+
+    configure_logging(logging.DEBUG)
     # PCB / photopaper stepsperline dual channel,
     # current 130, 4x per line
     fname = "combined_grid_test"
     ctime = time()
     interpolator = Interpolator(correction=False, exposures=4)
-    logging.info(f"Interpolator {time() - ctime:.2f} seconds")
+    logger.info(f"Interpolator {time() - ctime:.2f} seconds")
     dir_path = Path(__file__).parent.resolve()
     # postscript resolution test
 
-    url = dir_path / "patterns" / f"{fname}.svg"
+    url = interpolator.cfg.paths["svgs"] / f"{fname}.svg"
     ptrn = interpolator.patternfile(url)
-    logging.info(f"Pattern {time() - ctime:.2f} seconds")
+    logger.info(f"Pattern {time() - ctime:.2f} seconds")
     interpolator.writebin(ptrn, f"{fname}.bin")
 
     pattern_data = interpolator.readbin(f"{fname}.bin")
+    metadata = pattern_data.get("metadata")
 
+    assert np.allclose(interpolator.params["lanewidth"], metadata["lanewidth"], 1e-3)
     assert np.allclose(
-        interpolator.params["lanewidth"], pattern_data["lanewidth"], 1e-3
-    )
-    assert np.allclose(
-        interpolator.params["facetsinlane"], pattern_data["facetsinlane"], 1e-3
+        interpolator.params["facetsinlane"], metadata["facetsinlane"], 1e-3
     )
     assert len(pattern_data["data"]) == round(
-        pattern_data["facetsinlane"]
-        * pattern_data["lanes"]
-        * np.ceil(interpolator.params["bitsinscanline"] // 8)
+        metadata["facetsinlane"]
+        * metadata["lanes"]
+        * np.ceil(interpolator.params["bitsinscanline"])
     )
     interpolator.plotptrn(pattern_data)

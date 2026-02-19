@@ -3,13 +3,10 @@ import os
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 
-# Adjust these imports to match your actual project structure
 from ...config import displacement_kernel
 from .machine import LaserCalibrationGen
 from ..interpolator import Interpolator
 
-# Configure logging to see output
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -126,8 +123,11 @@ class CameraCalibrationGen(LaserCalibrationGen):
 
 
 if __name__ == "__main__":
+    from ...log_setup import configure_logging
+
+    configure_logging(logging.DEBUG)
+
     # 1. Setup Interpolator
-    # correction=False is usually safer for raw calibration patterns to avoid double-correcting
     interpolator = Interpolator(correction=False, exposures=1)
 
     # 2. Setup Generator
@@ -145,7 +145,7 @@ if __name__ == "__main__":
     v_svg_path = os.path.join(output_dir, v_svg_name)
     v_bin_path = os.path.join(output_dir, v_svg_name.replace(".svg", ".bin"))
 
-    logger.info(f"Interpolating {v_svg_name} -> .bin ...")
+    logger.debug(f"Interpolating {v_svg_name} -> .bin ...")
     ptrn_v = interpolator.patternfile(v_svg_path)
     interpolator.writebin(ptrn_v, v_bin_path)
 
@@ -159,8 +159,8 @@ if __name__ == "__main__":
     h_svg_path = os.path.join(output_dir, h_svg_name)
     h_bin_path = os.path.join(output_dir, h_svg_name.replace(".svg", ".bin"))
 
-    logger.info(f"Interpolating {h_svg_name} -> .bin ...")
+    logger.debug(f"Interpolating {h_svg_name} -> .bin ...")
     ptrn_h = interpolator.patternfile(h_svg_path)
     interpolator.writebin(ptrn_h, h_bin_path)
 
-    logger.info("All calibration patterns generated and compiled.")
+    logger.debug("All calibration patterns generated and compiled.")

@@ -12,12 +12,7 @@ from matplotlib.patches import Rectangle
 
 from ...config import PlatformConfig
 
-# Configure standard logger
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    datefmt="%H:%M:%S",
-)
+
 logger = logging.getLogger(__name__)
 
 
@@ -46,18 +41,16 @@ class LaserCalibrationGen:
             pix_per_mm (int): Resolution of the internal rasterization for calculation
                               (does not affect vector output precision). Defaults to 200.
         """
+        config = PlatformConfig(test=False)
+
         # Determine output directory
-        if output_dir:
-            self.script_directory = output_dir
-        else:
-            self.script_directory = os.path.dirname(os.path.abspath(__file__))
+        self.script_directory = config.paths["svgs"]
 
         # Ensure directory exists
         os.makedirs(self.script_directory, exist_ok=True)
 
         self.pix_per_mm = pix_per_mm
 
-        config = PlatformConfig(test=False)
         self.optical_settings = config.get_optical_params()
 
         # The code will automatically shrink vector features
@@ -68,8 +61,8 @@ class LaserCalibrationGen:
         self.tight = "tight"  # use None to disable
 
         logger.info(f"Initialized. Results will be saved to: {self.script_directory}")
-        logger.info(f"Resolution set to: {self.pix_per_mm} pixels/mm")
-        logger.info(
+        logger.debug(f"Resolution set to: {self.pix_per_mm} pixels/mm")
+        logger.debug(
             f"Laser Spot Compensation: {self.laser_spot_mm * 1000:.1f} microns ({self.laser_spot_mm} mm)"
         )
 
@@ -287,8 +280,8 @@ class LaserCalibrationGen:
         # Calculate Top-Down Y Origin (for Inkscape/Machine Config)
         final_origin_y_mm_top = full_h_mm - final_origin_y_mm_bottom
 
-        logger.info(f"IMAGE SIZE: {full_w_mm:.3f}mm x {full_h_mm:.3f}mm")
-        logger.info(
+        logger.debug(f"IMAGE SIZE: {full_w_mm:.3f}mm x {full_h_mm:.3f}mm")
+        logger.debug(
             f"ORIGIN (Screen/Top-Left):       X={final_origin_x_mm:.4f}, Y={final_origin_y_mm_top:.4f}"
         )
         return final_origin_x_mm, final_origin_y_mm_top
@@ -326,7 +319,7 @@ class LaserCalibrationGen:
         Labels are placed on the outside of the grid, and a minimal layout
         is used (no grid lines, only boundary ticks) to prevent visual clutter.
         """
-        logger.info("Generating Combined Grid Test (Compensated)...")
+        logger.debug("Generating Combined Grid Test (Compensated)...")
         box_size = 25  # mm (Square size)
         cell_size = 5  # mm (Size of each thickness zone)
         linewidth_start = 0.06  # mm
@@ -452,9 +445,11 @@ class LaserCalibrationGen:
 
 
 if __name__ == "__main__":
+    from ...log_setup import configure_logging
+
+    configure_logging(logging.DEBUG)
     generator = LaserCalibrationGen()
 
     # Generate all patterns
     generator.generate_combined_test()
-
-    logger.info("All patterns generated successfully.")
+    logger.debug("All patterns generated successfully.")

@@ -7,15 +7,12 @@ import cv2 as cv
 from tqdm import tqdm
 
 import camera
+from hexastorm.log_setup import configure_logging
 from hexastorm.calibration import run_full_calibration_analysis, get_dots
 from hexastorm.esp32_controller import ESP32Controller
 from hexastorm.config import PlatformConfig
 
 logger = logging.getLogger(__name__)
-
-TEST_DIR = Path(__file__).parent.resolve()
-IMG_DIR = TEST_DIR / "images"
-TESTIMG_DIR = TEST_DIR / "testimages"
 
 
 class StaticTests:
@@ -136,19 +133,11 @@ class StaticTests:
             name (str): Filename to save as.
             save (bool): If True, saves to disk. If False, just returns the image object.
         """
-        if save:
-            IMG_DIR.mkdir(parents=True, exist_ok=True)
-
         last_img = None
         for i in range(count):
             img = self.cam.capture()
-            # If camera returns None or empty, handle gracefully
             if img is None:
                 continue
-
-            # Keep original color img for returning, but maybe convert for saving?
-            # Original code converted to grey for saving.
-            # We will return the raw image (usually BGR from OpenCV) to maintain info.
 
             last_img = img
 
@@ -165,9 +154,9 @@ class StaticTests:
                     timestamp = time.strftime("%Y%m%d-%H%M%S")
                     file_name = f"{timestamp}.jpg"
 
-                file_path = IMG_DIR / file_name
+                file_path = self.cfg.paths["images"] / file_name
                 cv.imwrite(str(file_path), grey)
-                logger.info(f"Saved: {file_path}")
+                logger.info(f"Saved: {file_path.name}")
 
             if count > 1:
                 time.sleep(1)
@@ -298,8 +287,6 @@ class DynamicTests(StaticTests):
             f"Starting Pixel Visibility Scan. Total Pixels: {scan_len} (Step: {step})"
         )
 
-        # We use tqdm here.
-        # file=sys.stdout ensures it prints even if stderr is captured by some test runners.
         try:
             for i in tqdm(pixels_to_scan, desc="Scanning Pixels", unit="px"):
                 # 1. Create a line with only the current pixel ON
@@ -307,13 +294,12 @@ class DynamicTests(StaticTests):
                 line[i] = 1
 
                 # 2. Project and capture (Don't save to disk to save time/space)
-                # Note: We assume picture_line returns the image as implemented previously
                 img = self.picture_line(
                     line=line,
                     fct=facet,
                     preview=False,
                     takepicture=True,
-                    save_image=False,  # Ensure picture_line supports this argument
+                    save_image=False,
                     name=None,
                 )
 
@@ -348,6 +334,13 @@ class DynamicTests(StaticTests):
         )
         logger.info(f"Visible Indices: {visible_indices}")
 
+    def capture_bin_pattern(self, bin_path, facet=None, name=None):
+        """
+        Helper to load a .bin file created by the Interpolator,
+        convert it to a bit-list, and project it.
+        """
+        pass
+
     def stability_pattern(self, facet=3, preview=True):
         """
         Line with a given pattern is projected and photo is taken.
@@ -379,7 +372,7 @@ class DynamicTests(StaticTests):
 
         logger.info("--- Starting Calibration Analysis ---")
         run_full_calibration_analysis(
-            image_dir=IMG_DIR,
+            image_dir=None,  # Use default from config
             num_facets=num_facets,
             filename_pattern="facet{}.jpg",
             debug=False,
@@ -411,6 +404,7 @@ class Launcher:
 
 
 def main():
+    configure_logging(logging.DEBUG)
     tool = Launcher()
     try:
         fire.Fire(tool)
