@@ -1,6 +1,5 @@
 import logging
 import os
-from typing import Optional
 
 import matplotlib
 
@@ -11,6 +10,7 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 
 from ...config import PlatformConfig
+from ..interpolator import Interpolator
 
 
 logger = logging.getLogger(__name__)
@@ -29,20 +29,20 @@ class LaserCalibrationGen:
 
     def __init__(
         self,
-        output_dir: Optional[str] = None,
         pix_per_mm: int = 200,
+        correction: bool = False,
+        exposures: int = 1,
     ):
         """
         Initialize the generator.
 
         Args:
-            output_dir (str, optional): Directory to save generated SVGs.
-                                      Defaults to the script's directory.
             pix_per_mm (int): Resolution of the internal rasterization for calculation
                               (does not affect vector output precision). Defaults to 200.
         """
         config = PlatformConfig(test=False)
 
+        self.interpolator = Interpolator(correction=correction, exposures=exposures)
         # Determine output directory
         self.script_directory = config.paths["svgs"]
 
@@ -291,8 +291,9 @@ class LaserCalibrationGen:
         output_path = os.path.join(self.script_directory, filename)
         # padding=0 ensures the edges match what we calculated
         fig.savefig(output_path, dpi=fig.dpi, pad_inches=0, bbox_inches=self.tight)
-        logger.info(f"Saved {filename}")
         plt.close(fig)
+        logger.info(f"Saved {filename}")
+        self.interpolator.img_to_bin(filename)
 
     def _clean_axes(self, ax, x_label: str, y_label: str):
         """

@@ -264,53 +264,49 @@ name = "hexastorm"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "amaranth-boards" },
+    { name = "cairosvg" },
     { name = "fire" },
+    { name = "ipykernel" },
+    { name = "matplotlib" },
+    { name = "nbqa" },
+    { name = "numba" },
     { name = "numpy" },
+    { name = "opencv-python" },
     { name = "pillow" },
+    { name = "pytest" },
     { name = "ruff" },
     { name = "tqdm" },
+    { name = "yowasp-nextpnr-ice40" },
+    { name = "yowasp-yosys" },
 ]
 
 [package.dev-dependencies]
 camera = [
     { name = "arducampython" },
 ]
-desktop = [
-    { name = "amaranth-boards" },
-    { name = "cairosvg" },
-    { name = "ipykernel" },
-    { name = "matplotlib" },
-    { name = "nbqa" },
-    { name = "numba" },
-    { name = "opencv-python" },
-    { name = "pytest" },
-    { name = "yowasp-nextpnr-ice40" },
-    { name = "yowasp-yosys" },
-]
 
 [package.metadata]
 requires-dist = [
-    { name = "fire", specifier = ">=0.7.1" },
-    { name = "numpy", specifier = ">=2.0.0" },
-    { name = "pillow", specifier = ">=11.2.1" },
-    { name = "ruff", specifier = ">=0.11.12" },
-    { name = "tqdm", specifier = ">=4.67.3" },
-]
-
-[package.metadata.requires-dev]
-camera = [{ name = "arducampython", git = "https://github.com/hstarmans/Arducampython.git" }]
-desktop = [
     { name = "amaranth-boards", git = "https://github.com/amaranth-lang/amaranth-boards.git?rev=c26a72e59c786b38e0e989ae64c6c2560ca7c29c" },
     { name = "cairosvg", specifier = ">=2.7.1" },
+    { name = "fire", specifier = ">=0.7.1" },
     { name = "ipykernel", specifier = ">=6.29.5" },
     { name = "matplotlib", specifier = ">=3.9.0" },
     { name = "nbqa", specifier = ">=1.9.1" },
     { name = "numba", specifier = ">=0.60.0" },
+    { name = "numpy", specifier = ">=2.0.0" },
     { name = "opencv-python", specifier = ">=4.10.0" },
+    { name = "pillow", specifier = ">=11.2.1" },
     { name = "pytest", specifier = ">=8.4.2" },
+    { name = "ruff", specifier = ">=0.11.12" },
+    { name = "tqdm", specifier = ">=4.67.3" },
     { name = "yowasp-nextpnr-ice40", specifier = ">=0.8.0.0.post621" },
     { name = "yowasp-yosys", specifier = ">=0.53.0.0.post912" },
 ]
+
+[package.metadata.requires-dev]
+camera = [{ name = "arducampython", git = "https://github.com/hstarmans/Arducampython.git" }]
 
 [[package]]
 name = "iniconfig"

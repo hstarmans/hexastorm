@@ -10,14 +10,58 @@ from .config import Camera, PlatformConfig
 logger = logging.getLogger(__name__)
 
 
+def append_history_record(filename, payload_dict, max_records=10000):
+    """
+    Appends a dictionary payload to a JSON history file.
+    Automatically adds a timestamp and checks for duplicate data.
+    """
+    cfg = PlatformConfig(test=False)
+    history_file = cfg.paths["calibration"] / filename
+
+    # 1. Load existing history
+    history = []
+    if history_file.exists():
+        try:
+            with open(history_file, "r") as f:
+                content = f.read()
+                if content:
+                    history = json.loads(content)
+        except Exception as e:
+            logger.error(f"Could not read existing history in {filename}: {e}")
+
+    # 2. Check for Duplicate Content
+    if history:
+        # Copy the last record and remove the timestamp for a clean comparison
+        last_record = history[-1].copy()
+        last_record.pop("timestamp", None)
+
+        if payload_dict == last_record:
+            logger.warning(
+                f"Result is identical to the last record in {filename}. Skipping save."
+            )
+            return
+
+    # 3. Create the new record with a timestamp
+    new_record = {"timestamp": datetime.now().isoformat()}
+    new_record.update(payload_dict)
+
+    # 4. Append, cap the limit, and save
+    history.append(new_record)
+
+    if len(history) > max_records:
+        history = history[-max_records:]
+
+    with open(history_file, "w") as f:
+        json.dump(history, f, indent=2)
+
+    logger.info(f"History updated: {history_file}")
+
+
 def update_calibration_history(master_report):
     """
     Appends the new calibration results to 'calibration_history.json'
     ONLY if the data is different from the previous run.
     """
-    cfg = PlatformConfig(test=False)
-    history_file = cfg.paths["calibration"] / "calibration_history.json"
-
     # 1. Prepare the new data payload (without timestamp yet)
     new_facets_data = {}
 
@@ -32,41 +76,8 @@ def update_calibration_history(master_report):
                 "eccentricity": data.get("mean_eccentricity", 0),
             }
 
-    # 2. Load existing history
-    history = []
-    if history_file.exists():
-        try:
-            with open(history_file, "r") as f:
-                content = f.read()
-                if content:
-                    history = json.loads(content)
-        except Exception as e:
-            logger.error(f"Could not read existing history: {e}")
-
-    # 3. Check for Duplicate Content
-    if history:
-        last_record = history[-1]
-        last_facets = last_record.get("facets", {})
-
-        # Direct dictionary comparison checks if keys and values are identical
-        if new_facets_data == last_facets:
-            logger.warning(
-                "Calibration result is identical to the last record. Skipping save."
-            )
-            return
-
-    # 4. If different, add timestamp and save
-    timestamp = datetime.now().isoformat()
-    new_record = {"timestamp": timestamp, "facets": new_facets_data}
-
-    history.append(new_record)
-
-    if len(history) > 10000:
-        history = history[-10000:]
-
-    with open(history_file, "w") as f:
-        json.dump(history, f, indent=2)
-    logger.info(f"Calibration history updated: {history_file}")
+    payload = {"facets": new_facets_data}
+    append_history_record("calibration_history.json", payload)
 
 
 def get_dots(img, pixelsize=Camera.DEFAULT_PIXEL_SIZE_UM, debug=False):

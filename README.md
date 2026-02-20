@@ -26,11 +26,14 @@ First, install the [uv](https://github.com/astral-sh/uv) dependency manager:
 ```console
 curl -LsSf https://astral-sh/uv/install.sh | sh
 ```
-Sync the project dependencies from pyproject.toml. Use the desktop group for the default setup 
-(this excludes camera support):
+Sync the project dependencies from [pyproject.toml](./pyproject.toml).
 ```console
-uv sync --group desktop
+uv sync
 ```
+Activate camera support via, see [developer.md](./developer.md).
+```console 
+uv sync --group camera
+``` 
 You can execute tests and run the main modules as follows:  
 **Core tests**
 ```console

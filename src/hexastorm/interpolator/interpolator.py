@@ -50,6 +50,7 @@ class Interpolator:
         self.current_dir = Path(__file__).parent.resolve()
         self.debug_folder = self.cfg.paths["base"] / "debug"
         self.debug_folder.mkdir(parents=True, exist_ok=True)
+        self._last_output_path = None  # To track the last output pat file for reading
         self.bitorder = "big"
 
     def svgtopil(self, svg_filepath: Path) -> Image.Image:
@@ -146,6 +147,8 @@ class Interpolator:
         """
         ctime = time()
         file_path = Path(url)
+        if not file_path.is_absolute():
+            file_path = self.cfg.paths["svgs"] / file_path
 
         # 1. Load Image
         if file_path.suffix == ".svg":
@@ -226,17 +229,31 @@ class Interpolator:
         ptrn = np.packbits(ptrn, bitorder=self.bitorder)
         return ptrn
 
+    def img_to_bin(self, img_name: Path, bin_name: Path = None):
+        """Convenience method to convert IMG directly to BIN."""
+        img_name = Path(img_name)
+
+        if not bin_name:
+            bin_name = img_name.with_suffix(".pat")
+
+        ptrn = self.patternfile(img_name)
+        self.writebin(ptrn, bin_name)
+
     def writebin(self, pixeldata: np.ndarray, filename: Union[str, Path] = "test.bin"):
         """Wrapper for io.write_binary_file"""
         # Resolve path: default to debug folder if not absolute
         out_path = Path(filename)
+        self._last_output_path = out_path
         if not out_path.is_absolute():
             out_path = self.cfg.paths["patterns"] / out_path
 
         io.write_binary_file(pixeldata, self.params, out_path)
 
-    def readbin(self, filename: Union[str, Path] = "test.bin") -> dict:
+    def readbin(self, filename: Union[str, Path] = None) -> dict:
         """Wrapper for io.read_binary_file"""
+
+        if filename is None:
+            filename = self._last_output_path
         in_path = Path(filename)
         if not in_path.is_absolute():
             in_path = self.cfg.paths["patterns"] / in_path
@@ -423,19 +440,16 @@ if __name__ == "__main__":
     configure_logging(logging.DEBUG)
     # PCB / photopaper stepsperline dual channel,
     # current 130, 4x per line
-    fname = "combined_grid_test"
+    fname = Path("combined_grid_test.svg")
+    bin_name = fname.with_suffix(".bin")
     ctime = time()
     interpolator = Interpolator(correction=False, exposures=4)
     logger.info(f"Interpolator {time() - ctime:.2f} seconds")
-    dir_path = Path(__file__).parent.resolve()
-    # postscript resolution test
 
-    url = interpolator.cfg.paths["svgs"] / f"{fname}.svg"
-    ptrn = interpolator.patternfile(url)
+    ptrn = interpolator.patternfile(fname)
     logger.info(f"Pattern {time() - ctime:.2f} seconds")
-    interpolator.writebin(ptrn, f"{fname}.bin")
-
-    pattern_data = interpolator.readbin(f"{fname}.bin")
+    interpolator.writebin(ptrn, bin_name)
+    pattern_data = interpolator.readbin(bin_name)
     metadata = pattern_data.get("metadata")
 
     assert np.allclose(interpolator.params["lanewidth"], metadata["lanewidth"], 1e-3)

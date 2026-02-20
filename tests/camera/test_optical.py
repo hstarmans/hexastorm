@@ -1,6 +1,7 @@
 import time
 from pathlib import Path
 import logging
+import json
 
 import fire
 import cv2 as cv
@@ -8,7 +9,12 @@ from tqdm import tqdm
 
 import camera
 from hexastorm.log_setup import configure_logging
-from hexastorm.calibration import run_full_calibration_analysis, get_dots
+from hexastorm.interpolator.patterns import camera as cam_patterns
+from hexastorm.calibration import (
+    run_full_calibration_analysis,
+    get_dots,
+    append_history_record,
+)
 from hexastorm.esp32_controller import ESP32Controller
 from hexastorm.config import PlatformConfig
 
@@ -321,7 +327,7 @@ class DynamicTests(StaticTests):
         logger.info("Visibility Scan Results:")
         logger.info("-" * 30)
 
-        visible_indices = [idx for idx, vis in enumerate(visibility_map) if vis]
+        visible_indices = [idx * step for idx, vis in enumerate(visibility_map) if vis]
 
         # Calculate percentage
         if scan_len > 0:
@@ -334,12 +340,40 @@ class DynamicTests(StaticTests):
         )
         logger.info(f"Visible Indices: {visible_indices}")
 
-    def capture_bin_pattern(self, bin_path, facet=None, name=None):
+        payload = {
+            "facet": facet,
+            "step": step,
+            "visible_pixels": visible_indices,
+        }
+
+        append_history_record("scan_visibility.json", payload)
+
+    def scan_error(self):
         """
-        Helper to load a .bin file created by the Interpolator,
-        convert it to a bit-list, and project it.
+        Retrieves the scan by error by projecting a line
+        and analyzing the resulting image.
         """
-        pass
+        pix_margin = 20
+
+        history_file = self.cfg.paths["calibration"] / "scan_visibility.json"
+        with open(history_file, "r") as f:
+            history = json.load(f)
+            last_record = history[-1]
+            visible_pixels = last_record.get("visible_pixels", [])
+
+        lower_pixel = min(visible_pixels) + pix_margin
+        upper_pixel = max(visible_pixels) - pix_margin
+
+        cam = cam_patterns.CameraCalibrationGen(
+            lower_pixel=lower_pixel, upper_pixel=upper_pixel, line_thickness_mm=0.015
+        )
+        cam.generate_vertical_jitter_test_line()
+        pattern_bits = self.cam.get_pattern_data()["data"]
+        ptrn = pattern_bits.reshape(-1, self.cfg.laser_timing["scanline_length"])
+        for facet in range(self.cfg.laser_timing["num_facets"]):
+            self.picture_line(
+                line=ptrn[facet], fct=facet, name=f"scan_error_facet_{facet}.jpg"
+            )
 
     def stability_pattern(self, facet=3, preview=True):
         """
