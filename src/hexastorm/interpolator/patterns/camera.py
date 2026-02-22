@@ -3,7 +3,6 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 import math
 
-from ...config import displacement_kernel
 from .machine import LaserCalibrationGen
 
 logger = logging.getLogger(__name__)
@@ -36,22 +35,15 @@ class CameraCalibrationGen(LaserCalibrationGen):
 
     def calculate_view_bounds(self, px_low: int, px_high: int):
         start_pixel = self.optical_settings["startpixel"]
-        start_point = displacement_kernel(
-            pixel=start_pixel, params=self.optical_settings
-        )
-        self.x_min = -(
-            displacement_kernel(
-                pixel=start_pixel + px_low, params=self.optical_settings
-            )
-            - start_point
-        )
-        self.x_max = -(
-            displacement_kernel(
-                pixel=start_pixel + px_high, params=self.optical_settings
-            )
-            - start_point
-        )
+        grid_size = self.optical_settings["samplegridsize"]
+        start_point = self.interpolator.geo.fxpos(pixel=start_pixel)
 
+        def px_to_mm(px):
+            return (start_point - self.interpolator.geo.fxpos(pixel=px)) * grid_size
+
+        # 3. Calculated bounds
+        self.x_min = px_to_mm(px_low)
+        self.x_max = px_to_mm(px_high)
         self.view_width = self.x_max - self.x_min
 
     def _setup_exact_canvas(self, fig, ax, width_mm, height_mm):
@@ -66,7 +58,7 @@ class CameraCalibrationGen(LaserCalibrationGen):
         fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
         ax.set_position([0, 0, 1, 1])
 
-    def generate_vertical_jitter_test(self) -> str:
+    def generate_vertical_jitter_test(self):
         """Generates test and returns the filename used."""
         filename = f"cam_test_vertical_{self.line_thickness_mm * 1000:.0f}um.svg"
         logger.info(f"Generating Vertical Jitter Test ({filename})...")
@@ -96,7 +88,34 @@ class CameraCalibrationGen(LaserCalibrationGen):
         self.resize_to_mm_scale(fig, ax)
         self.save_final(fig, filename)
 
-    def generate_horizontal_cross_test(self) -> str:
+    def generate_blank_test(self) -> str:
+        """
+        Generates a test pattern to verify view bounds.
+        Fills the area from 0 to x_min with black, and leaves the area
+        between x_min and x_max completely blank.
+        """
+        filename = "cam_test_blank_bounds.svg"
+        logger.info(f"Generating Blank Bounds Test ({filename})...")
+
+        fig, ax = plt.subplots()
+
+        # 1. Draw a solid block from X=0 to X=x_min
+        # This makes the start of the camera viewport highly visible.
+
+        rect_left = Rectangle(
+            (self.x_min, 0),
+            self.x_max - self.x_min,
+            self.pattern_height_mm,
+            color="black",
+            linewidth=0,
+        )
+        ax.add_patch(rect_left)
+
+        self._setup_exact_canvas(fig, ax, self.x_max, self.pattern_height_mm)
+        self.resize_to_mm_scale(fig, ax)
+        self.save_final(fig, filename)
+
+    def generate_horizontal_cross_test(self):
         """Generates test and returns the filename used."""
         filename = f"cam_test_horizontal_{self.line_thickness_mm * 1000:.0f}um.svg"
         logger.info(f"Generating Horizontal Cross Test ({filename})...")
@@ -125,15 +144,50 @@ class CameraCalibrationGen(LaserCalibrationGen):
         self.resize_to_mm_scale(fig, ax)
         self.save_final(fig, filename)
 
+    def test_view_bounds(self):
+        """Generates a test pattern to verify view bounds."""
+        self.generate_blank_test()
+        scanline_length = self.interpolator.cfg.laser_timing["scanline_length"]
+        pattern_bits = self.interpolator.readbin()["data"]
+        ptrn = pattern_bits.reshape(-1, scanline_length)
+        # --- CLI ASCII Profile ---
 
-if __name__ == "__main__":
+        scanline = ptrn[0, :]
+        bucket_size = 100
+
+        logger.info(f"Exact sum in target region (200:500): {scanline[200:500].sum()}")
+        logger.info("-" * 50)
+
+        logger.info(f"{'Pixel Range':<15} | {'Sum':<6} | {'Profile'}")
+        logger.info("-" * 50)
+
+        # Loop through the scanline in chunks of 100
+        for i in range(0, len(scanline), bucket_size):
+            end = min(i + bucket_size, len(scanline))
+            bucket = scanline[i:end]
+            bucket_sum = bucket.sum()
+
+            # Create a simple ASCII bar (scales to max 20 '#' characters)
+            # Assuming the values are 0 or 1. If your active pixels are 255,
+            # change the math to: bucket_sum / (255 * bucket_size)
+            intensity_ratio = bucket_sum / bucket_size
+            bar = "#" * int(intensity_ratio * 20)
+
+            # Print the row
+            logger.info(f"{i:04d} to {end:04d} | {bucket_sum:<6.0f} | {bar}")
+
+
+def main():
     from ...log_setup import configure_logging
 
     configure_logging(logging.DEBUG)
 
-    generator = CameraCalibrationGen(
+    cam_pat = CameraCalibrationGen(
         lower_pixel=200, upper_pixel=500, line_thickness_mm=0.15
     )
+    cam_pat.generate_vertical_jitter_test()
+    cam_pat.generate_horizontal_cross_test()
 
-    generator.generate_vertical_jitter_test()
-    generator.generate_horizontal_cross_test()
+
+if __name__ == "__main__":
+    main()

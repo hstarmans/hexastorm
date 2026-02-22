@@ -214,6 +214,14 @@ class ScannerModel:
             dct[k] = float(v)
         return dct
 
+    def fxpos(self, pixel: float, facet_idx: int = 0, xstart: float = 0) -> float:
+        return _jit_fxpos(pixel, self.params, facet_idx, xstart)
+
+    def fypos(
+        self, pixel: float, facet_idx: int, direction: bool, ystart: float = 0
+    ) -> float:
+        return _jit_fypos(pixel, self.params, facet_idx, direction, ystart)
+
     def calculate_coordinates(self) -> np.ndarray:
         """
         Generates the lookup coordinate grid for the entire exposure area.

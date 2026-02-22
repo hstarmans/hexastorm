@@ -48,6 +48,7 @@ arducampython = { git = "https://github.com/hstarmans/Arducampython.git" }
 
 [project.scripts]
 cam = "tests.camera.test_optical:main"
+pat_cam = "hexastorm.interpolator.patterns.camera:main"
 
 [tool.setuptools]
 package-dir = {"" = "src", "tests" = "tests"}
