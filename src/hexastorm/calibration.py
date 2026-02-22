@@ -90,8 +90,13 @@ def get_dots(img, pixelsize=Camera.DEFAULT_PIXEL_SIZE_UM, debug=False):
 
     gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
 
+    # Ask Otsu to calculate the ideal threshold mathematically
+    otsu_val, _ = cv.threshold(gray, 0, 255, cv.THRESH_OTSU)
+    # Enforce a minimum floor (e.g., 50) so we don't pick up sensor noise
+    final_val = max(otsu_val, 50)
+
     # 1. Use an adaptive threshold or a higher fixed one
-    _, thresh = cv.threshold(gray, 100, 255, cv.THRESH_BINARY)
+    _, thresh = cv.threshold(gray, final_val, 255, cv.THRESH_BINARY)
 
     # 2. Find connected components
     contours, _ = cv.findContours(thresh, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
@@ -220,6 +225,11 @@ def calculate_facet_shifts(rect_dots_list):
     # Reference facet is index 0
     ref_facet = rect_dots_list[0]
     num_dots_ref = len(ref_facet)
+    min_dots= 3
+
+    if num_dots_ref < min_dots:
+        logger.error(f"Facet 0 has less than {min_dots} dots. Calibration impossible.")
+        return None
 
     facet_data = {}
 
@@ -230,7 +240,7 @@ def calculate_facet_shifts(rect_dots_list):
                 f"Facet {i} has {len(facet)} dots, but Facet 0 has {num_dots_ref}. Skipping."
             )
             facet_data[i] = {"error": "dot_count_mismatch"}
-            continue
+            return None
 
         # 2. Compute Timing Shift (X-axis)
         x_diffs = facet[:, 0] - ref_facet[:, 0]
@@ -404,6 +414,10 @@ def run_full_calibration_analysis(
     # 2. Calculate Shifts
     if all_rect_dots and len(all_rect_dots[0]) > 0:
         shift_data = calculate_facet_shifts(all_rect_dots)
+
+        if shift_data is None:
+            logger.error("Calibration sequence aborted due to inconsistent dot counts.")
+            return {}
 
         # 3. Create Master Report
         master_report = {}

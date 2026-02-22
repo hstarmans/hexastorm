@@ -331,12 +331,12 @@ class DynamicTests(StaticTests):
 
         # Calculate percentage
         if scan_len > 0:
-            percent = (len(visible_indices) / scan_len) * 100
+            percent = (len(visible_indices) * step / scan_len) * 100
         else:
             percent = 0
 
         logger.info(
-            f"Visible Pixels: {len(visible_indices)}/{scan_len} ({percent:.1f}%)"
+            f"Visible Pixels: {len(visible_indices) * step}/{scan_len} ({percent:.1f}%)"
         )
         logger.info(f"Visible Indices: {visible_indices}")
 
@@ -364,15 +364,16 @@ class DynamicTests(StaticTests):
         lower_pixel = min(visible_pixels) + pix_margin
         upper_pixel = max(visible_pixels) - pix_margin
 
-        cam = cam_patterns.CameraCalibrationGen(
-            lower_pixel=lower_pixel, upper_pixel=upper_pixel, line_thickness_mm=0.015
+        cam_pat = cam_patterns.CameraCalibrationGen(
+            lower_pixel=lower_pixel, upper_pixel=upper_pixel, line_thickness_mm=0.150
         )
-        cam.generate_vertical_jitter_test_line()
-        pattern_bits = self.cam.get_pattern_data()["data"]
+        cam_pat.generate_vertical_jitter_test()
+        pattern_bits = cam_pat.interpolator.readbin()["data"]
         ptrn = pattern_bits.reshape(-1, self.cfg.laser_timing["scanline_length"])
-        for facet in range(self.cfg.laser_timing["num_facets"]):
+        for facet in range(self.cfg.laser_timing["facets"]):
+            line = ptrn[facet].tolist()
             self.picture_line(
-                line=ptrn[facet], fct=facet, name=f"scan_error_facet_{facet}.jpg"
+                line=line, fct=facet, name=f"scan_error_facet_{facet}.jpg", preview=False
             )
 
     def stability_pattern(self, facet=3, preview=True):
@@ -397,7 +398,7 @@ class DynamicTests(StaticTests):
         2. Run calibration analysis.
         """
         capture = False
-        num_facets = 4
+        num_facets = self.cfg.laser_timing["facets"]
 
         if capture:
             for facet in range(num_facets):
