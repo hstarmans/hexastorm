@@ -88,7 +88,7 @@ class CameraCalibrationGen(LaserCalibrationGen):
         self.resize_to_mm_scale(fig, ax)
         self.save_final(fig, filename)
 
-    def generate_blank_test(self) -> str:
+    def generate_blank_test(self):
         """
         Generates a test pattern to verify view bounds.
         Fills the area from 0 to x_min with black, and leaves the area
@@ -146,13 +146,13 @@ class CameraCalibrationGen(LaserCalibrationGen):
 
     def test_view_bounds(self):
         """Generates a test pattern to verify view bounds."""
-        self.generate_blank_test()
         scanline_length = self.interpolator.cfg.laser_timing["scanline_length"]
         pattern_bits = self.interpolator.readbin()["data"]
         ptrn = pattern_bits.reshape(-1, scanline_length)
         # --- CLI ASCII Profile ---
 
         scanline = ptrn[0, :]
+        scanline = scanline[::-1]
         bucket_size = 100
 
         logger.info(f"Exact sum in target region (200:500): {scanline[200:500].sum()}")
