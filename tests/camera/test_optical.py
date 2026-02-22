@@ -372,6 +372,7 @@ class DynamicTests(StaticTests):
         ptrn = pattern_bits.reshape(-1, self.cfg.laser_timing["scanline_length"])
         for facet in range(self.cfg.laser_timing["facets"]):
             line = ptrn[facet].tolist()
+            line = line[::-1]  # Reverse the line 
             self.picture_line(
                 line=line, fct=facet, name=f"scan_error_facet_{facet}.jpg", preview=False
             )
