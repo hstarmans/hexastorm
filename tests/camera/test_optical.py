@@ -6,6 +6,7 @@ import json
 import fire
 import cv2 as cv
 from tqdm import tqdm
+import numpy as np
 
 import camera
 from hexastorm.log_setup import configure_logging
@@ -350,10 +351,11 @@ class DynamicTests(StaticTests):
 
     def scan_error(self):
         """
-        Retrieves the scan by error by projecting a line
+        Retrieves the scan by error by projecting a vertical jitter pattern
         and analyzing the resulting image.
         """
         pix_margin = 20
+        fpattern = "scan_error_facet_{}.jpg"
 
         history_file = self.cfg.paths["calibration"] / "scan_visibility.json"
         with open(history_file, "r") as f:
@@ -364,18 +366,75 @@ class DynamicTests(StaticTests):
         lower_pixel = min(visible_pixels) + pix_margin
         upper_pixel = max(visible_pixels) - pix_margin
 
+        line_thickness_mm = 0.150
+        min_size_mm = 0.050
+        max_size_mm = 0.200
+
         cam_pat = cam_patterns.CameraCalibrationGen(
-            lower_pixel=lower_pixel, upper_pixel=upper_pixel, line_thickness_mm=0.150
+            lower_pixel=lower_pixel, upper_pixel=upper_pixel, line_thickness_mm=line_thickness_mm
         )
-        cam_pat.generate_vertical_jitter_test()
-        pattern_bits = cam_pat.interpolator.readbin()["data"]
-        ptrn = pattern_bits.reshape(-1, self.cfg.laser_timing["scanline_length"])
-        for facet in range(self.cfg.laser_timing["facets"]):
-            line = ptrn[facet].tolist()
-            line = line[::-1]  # Reverse the line 
-            self.picture_line(
-                line=line, fct=facet, name=f"scan_error_facet_{facet}.jpg", preview=False
+        def dispatch(storelog=False):
+            pattern_bits = cam_pat.interpolator.readbin()["data"]
+            ptrn = pattern_bits.reshape(-1, self.cfg.laser_timing["scanline_length"])
+            facets = self.cfg.laser_timing["facets"]
+            for facet in range(facets):
+                line = ptrn[facet].tolist()
+                line = line[::-1]  # Reverse the line 
+                self.picture_line(
+                    line=line, 
+                    fct=facet, 
+                    name=fpattern.format(facet), 
+                    preview=False
+                )
+            results = run_full_calibration_analysis(
+                filename_pattern=fpattern,
+                min_diameter_mm=min_size_mm,
+                max_diameter_mm=max_size_mm,
+                debug=False,
+                store_log=storelog,
             )
+            scan_errors = []
+            for facet in range(facets):
+                scan_errors.append(float(results[str(facet)]["Scan_shift_um"]))
+            return scan_errors
+
+
+        cam_pat.set_correction(correction=False)
+        cam_pat.generate_vertical_jitter_test()
+        scan_errors = dispatch(storelog=True)
+        cam_pat.set_correction(correction=True)
+        cam_pat.generate_vertical_jitter_test()
+        scan_errors_new = dispatch()
+        
+        logger.info(f"Uncorrected Errors (um): {scan_errors}")
+        logger.info(f"Corrected Errors (um):   {scan_errors_new}")
+
+        # --- Mechanical Validation ---
+        # Convert to numpy arrays and take the absolute values
+        abs_before = np.abs(scan_errors)
+        abs_after = np.abs(scan_errors_new)
+
+        # Calculate the worst-case error for both runs
+        max_err_before = np.max(abs_before)
+        max_err_after = np.max(abs_after)
+
+        # Calculate Mean Absolute Error (MAE) for reporting
+        mae_before = np.mean(abs_before)
+        mae_after = np.mean(abs_after)
+
+        logger.info("\n--- Calibration Summary ---")
+        logger.info(f"MAE Before: {mae_before:.2f} um | MAE After: {mae_after:.2f} um")
+        logger.info(f"Max Error Before: {max_err_before:.2f} um | Max Error After: {max_err_after:.2f} um")
+
+        # 1. Assert the system actually improved
+        assert max_err_after < max_err_before, "Calibration Failure: Correction increased the maximum error!"
+
+        # 2. Assert the system meets the final engineering tolerance
+        # (Setting a strict 30-micron limit based on your results)
+        TOLERANCE_UM = 30.0 
+        assert max_err_after <= TOLERANCE_UM, f"Tolerance Failure: Worst facet ({max_err_after:.2f} um) exceeds {TOLERANCE_UM} um limit."
+
+        logger.info(f"SUCCESS: System calibrated to within +/- {TOLERANCE_UM} microns.")
 
     def stability_pattern(self, facet=3, preview=True):
         """
@@ -409,7 +468,6 @@ class DynamicTests(StaticTests):
         logger.info("--- Starting Calibration Analysis ---")
         run_full_calibration_analysis(
             image_dir=None,  # Use default from config
-            num_facets=num_facets,
             filename_pattern="facet{}.jpg",
             debug=False,
         )

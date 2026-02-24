@@ -34,24 +34,29 @@ class Interpolator:
 
     def __init__(self, correction: bool = False, exposures: int = 1):
         self.cfg = PlatformConfig(test=False)
+        self.correction = correction
+        self.exposures = exposures
+        self.set_optical_params(correction=correction, exposures=exposures)
+        self.debug_folder = self.cfg.paths["base"] / "debug"
+        self.debug_folder.mkdir(parents=True, exist_ok=True)
+        self._last_output_path = None  # To track the last output pat file for reading
+        self.bitorder = "big"
 
+    def set_optical_params(self, correction: bool = None, exposures: int = None):
+        if correction is not None:
+            self.correction = correction
+        if exposures is not None:
+            self.exposures = exposures
         # Initialize math parameters via config (pure python side)
         raw_params = self.cfg.get_optical_params(
-            correction=correction, exposures=exposures
+            correction=self.correction, exposures=self.exposures
         )
-        self.correction = correction
-
         # Initialize the Scanner model (JIT-compiled geometry calculations)
         self.geo = geometry.ScannerModel(raw_params)
 
         # Link self.params to the JIT class params so we can read them easily
         self.params = self.geo.params
 
-        self.current_dir = Path(__file__).parent.resolve()
-        self.debug_folder = self.cfg.paths["base"] / "debug"
-        self.debug_folder.mkdir(parents=True, exist_ok=True)
-        self._last_output_path = None  # To track the last output pat file for reading
-        self.bitorder = "big"
 
     def svgtopil(self, svg_filepath: Path) -> Image.Image:
         """

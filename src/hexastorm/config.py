@@ -283,39 +283,24 @@ class PlatformConfig:
             if MICROPYTHON:
                 logging.error("Calibration correction not supported in MicroPython.")
                 return params
-            try:
-                history_path = (
-                    Path(__file__).resolve().parent.parent / "calibration_history.json"
-                )
+            history_path = (
+                self.paths["calibration"] / "calibration_history.json"
+            )
 
-                if history_path.exists():
-                    with open(history_path, "r") as f:
-                        history = json.load(f)
+            with open(history_path, "r") as f:
+                history = json.load(f)
 
-                    if history and isinstance(history, list):
-                        # Get the last (most recent) entry
-                        latest = history[-1]
-                        corrections = latest.get("facets", {})
+            # Get the last (most recent) entry
+            latest = history[-1]
+            corrections = latest.get("facets", {})
 
-                        for i in range(num_facets):
-                            f_key = str(i)
-                            if f_key in corrections:
-                                params[f"f{i}_scan"] = corrections[f_key].get(
-                                    "scan", 0.0
-                                )
-                                params[f"f{i}_orth"] = corrections[f_key].get(
-                                    "orth", 0.0
-                                )
-                        logging.info(
-                            f"Applied calibration from: {latest.get('timestamp')}"
-                        )
-                    else:
-                        logging.warning(
-                            "Warning: Calibration history is empty or invalid."
-                        )
-
-            except Exception as e:
-                logging.error(f"Error loading calibration data: {e}")
+            for i in range(num_facets):
+                f_key = str(i)
+                params[f"f{i}_scan"] = corrections[f_key]["scan"]
+                params[f"f{i}_orth"] = corrections[f_key]["orth"]
+            logging.info(
+                f"Applied calibration from: {latest.get('timestamp')}"
+            )
 
         return params
 

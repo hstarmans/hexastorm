@@ -375,6 +375,8 @@ def run_full_calibration_analysis(
     filename_pattern="facet{}.jpg",
     debug=False,
     store_log=True,
+    min_diameter_mm=0.01,  # Default 0.01 mm (10 um)
+    max_diameter_mm=0.20,  # Default 0.20 mm (200 um)
 ):
     """
     Orchestrates the loading, analysis, and verification of calibration images.
@@ -388,6 +390,10 @@ def run_full_calibration_analysis(
         image_dir = Path(image_dir)
 
     logger.info(f"Starting Calibration Analysis on: {image_dir}")
+
+    # --- Convert mm inputs to microns for internal processing ---
+    min_diameter_um = min_diameter_mm * 1000.0
+    max_diameter_um = max_diameter_mm * 1000.0
 
     image_paths = []
     # Verify paths exist before starting heavy processing
@@ -418,7 +424,13 @@ def run_full_calibration_analysis(
             all_angles.append(0)
             continue
 
-        dots_facet, stat = get_dots(img, debug=debug)
+        # Pass the calculated microns to get_dots
+        dots_facet, stat = get_dots(
+            img,
+            debug=debug,
+            min_diameter_um=min_diameter_um,
+            max_diameter_um=max_diameter_um,
+        )
 
         if len(dots_facet) == 0:
             logger.warning(f"No dots found in {path.name}")
@@ -475,11 +487,13 @@ if __name__ == "__main__":
 
     configure_logging(logging.DEBUG)
 
-    # Run the analysis, turn off logging to file if desired, and capture the results
+    # Run the analysis, passing the size thresholds in mm
     results = run_full_calibration_analysis(
         image_dir=None,  # Use default from config
         num_facets=4,
         filename_pattern="scan_error_facet_{}.jpg",
         debug=False,
         store_log=False,  # Set to True to save to calibration_history.json
+        min_diameter_mm=0.01,  # Equivalent to 10 um
+        max_diameter_mm=0.20,  # Equivalent to 200 um
     )
