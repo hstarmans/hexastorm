@@ -80,7 +80,13 @@ def update_calibration_history(master_report):
     append_history_record("calibration_history.json", payload)
 
 
-def get_dots(img, pixelsize=Camera.DEFAULT_PIXEL_SIZE_UM, debug=False):
+def get_dots(
+    img,
+    pixelsize=Camera.DEFAULT_PIXEL_SIZE_UM,
+    debug=False,
+    min_diameter_um=10.0,
+    max_diameter_um=200.0,
+):
     """
     Analyzes an image to find laser dots.
     img: numpy array (loaded image).
@@ -98,13 +104,24 @@ def get_dots(img, pixelsize=Camera.DEFAULT_PIXEL_SIZE_UM, debug=False):
     # 1. Use an adaptive threshold or a higher fixed one
     _, thresh = cv.threshold(gray, final_val, 255, cv.THRESH_BINARY)
 
+    # Dynamic Morphological Closing ---
+    # Calculate the minimum diameter in pixels
+    min_diameter_px = min_diameter_um / pixelsize
+
+    # Kernel size must be an odd integer (e.g., 3, 5, 7)
+    # Forcing the kernel size to an odd number guarantees that your
+    # morphological closing expands and shrinks your laser dots perfectly symmetrical
+    kernel_size = int(np.ceil(min_diameter_px))
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+
+    kernel = np.ones((kernel_size, kernel_size), np.uint8)
+
+    # Apply the closing operation
+    thresh = cv.morphologyEx(thresh, cv.MORPH_CLOSE, kernel)
+
     # 2. Find connected components
     contours, _ = cv.findContours(thresh, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
-
-    # Calculate Area Limits based on Physical Size ---
-    # Expected limits: 10um to 200um diameter
-    min_diameter_um = 10.0
-    max_diameter_um = 200.0
 
     # Convert to pixel radius: (um_diameter / pixelsize) / 2
     min_radius_px = (min_diameter_um / pixelsize) / 2.0
@@ -225,7 +242,7 @@ def calculate_facet_shifts(rect_dots_list):
     # Reference facet is index 0
     ref_facet = rect_dots_list[0]
     num_dots_ref = len(ref_facet)
-    min_dots= 3
+    min_dots = 3
 
     if num_dots_ref < min_dots:
         logger.error(f"Facet 0 has less than {min_dots} dots. Calibration impossible.")
@@ -353,7 +370,11 @@ def verify_calibration(
 
 
 def run_full_calibration_analysis(
-    image_dir=None, num_facets=4, filename_pattern="facet{}.jpg", debug=False
+    image_dir=None,
+    num_facets=4,
+    filename_pattern="facet{}.jpg",
+    debug=False,
+    store_log=True,
 ):
     """
     Orchestrates the loading, analysis, and verification of calibration images.
@@ -374,7 +395,7 @@ def run_full_calibration_analysis(
         p = image_dir / filename_pattern.format(i)
         if not p.exists():
             logger.error(f"Missing expected file: {p}")
-            return
+            return {}
         image_paths.append(p)
 
     all_rect_dots = []
@@ -431,8 +452,9 @@ def run_full_calibration_analysis(
             )
             master_report[str(i)] = {**s_data, **spot_data, **angle_data}
 
-        # 4. Save History (No more markdown/json reports in local folder)
-        update_calibration_history(master_report)
+        # 4. Save History optionally
+        if store_log:
+            update_calibration_history(master_report)
 
         # 5. Verify Visuals
         valid_angles = [a for a in all_angles if a != 0]
@@ -442,7 +464,9 @@ def run_full_calibration_analysis(
         )
     else:
         logger.error("Insufficient data to calculate shifts (Facet 0 empty?).")
+        master_report = {}
 
+    # 6. Ensure the results are returned
     return master_report
 
 
@@ -451,9 +475,11 @@ if __name__ == "__main__":
 
     configure_logging(logging.DEBUG)
 
-    run_full_calibration_analysis(
+    # Run the analysis, turn off logging to file if desired, and capture the results
+    results = run_full_calibration_analysis(
         image_dir=None,  # Use default from config
         num_facets=4,
-        filename_pattern="facet{}.jpg",
+        filename_pattern="scan_error_facet_{}.jpg",
         debug=False,
+        store_log=False,  # Set to True to save to calibration_history.json
     )
