@@ -479,6 +479,8 @@ def calibration(
     filename_pattern="facet{}.jpg",
     debug=False,
     store_log=True,
+    min_diameter_mm=0.01,  # Default 0.01 mm (10 um)
+    max_diameter_mm=0.20,  # Default 0.20 mm (200 um)
 ):
     """
     Orchestrates the loading, analysis, and verification of calibration images.
@@ -491,6 +493,10 @@ def calibration(
         image_dir = Path(image_dir)
 
     logger.info(f"Starting Calibration Analysis on: {image_dir}")
+
+    # --- Convert mm inputs to microns for internal processing ---
+    min_diameter_um = min_diameter_mm * 1000.0
+    max_diameter_um = max_diameter_mm * 1000.0
 
     image_paths = []
     for i in range(num_facets):
@@ -507,7 +513,12 @@ def calibration(
         path = path.resolve()
         img = cv.imread(str(path))
 
-        dots_facet, stat = get_dots(img, debug=debug)
+        dots_facet, stat = get_dots(
+            img,
+            debug=debug,
+            max_diameter_um=max_diameter_um,
+            min_diameter_um=min_diameter_um,
+        )
 
         all_raw_dots.append(dots_facet)
         all_spot_stats.append(stat)
@@ -555,12 +566,14 @@ if __name__ == "__main__":
 
     configure_logging(logging.DEBUG)
 
+    # Run the analysis, passing the size thresholds in mm
     results = calibration(
-        image_dir=None,
-        num_facets=4,
+        image_dir=None,  # Use default from config
         filename_pattern="facet{}.jpg",
         debug=False,
-        store_log=True,
+        store_log=False,  # Set to True to save to calibration_history.json
+        min_diameter_mm=0.01,  # Equivalent to 10 um
+        max_diameter_mm=0.20,  # Equivalent to 200 um
     )
 
     # Convert dictionary to a pretty-printed string

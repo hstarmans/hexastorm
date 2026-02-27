@@ -66,6 +66,10 @@ class LaserCalibrationGen:
             f"Laser Spot Compensation: {self.laser_spot_mm * 1000:.1f} microns ({self.laser_spot_mm} mm)"
         )
 
+    def set_correction(self, correction: bool = None, exposures: int = None):
+        """Enables or disables correction mode."""
+        self.interpolator.set_optical_params(correction=correction, exposures=exposures)
+
     def setup_style(self):
         """Sets up the matplotlib style for technical drawings."""
         # RECOMMENDED: 2.0mm is a sweet spot for 30x30mm calibration grids
