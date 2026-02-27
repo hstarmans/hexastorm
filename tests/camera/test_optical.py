@@ -11,7 +11,7 @@ import camera
 from hexastorm.log_setup import configure_logging
 from hexastorm.interpolator.patterns import camera as cam_patterns
 from hexastorm.calibration import (
-    run_full_calibration_analysis,
+    calibration,
     get_dots,
     append_history_record,
 )
@@ -372,9 +372,12 @@ class DynamicTests(StaticTests):
         ptrn = pattern_bits.reshape(-1, self.cfg.laser_timing["scanline_length"])
         for facet in range(self.cfg.laser_timing["facets"]):
             line = ptrn[facet].tolist()
-            line = line[::-1]  # Reverse the line 
+            line = line[::-1]  # Reverse the line
             self.picture_line(
-                line=line, fct=facet, name=f"scan_error_facet_{facet}.jpg", preview=False
+                line=line,
+                fct=facet,
+                name=f"scan_error_facet_{facet}.jpg",
+                preview=False,
             )
 
     def stability_pattern(self, facet=3, preview=True):
@@ -407,7 +410,7 @@ class DynamicTests(StaticTests):
                 self.stability_pattern(facet=facet, preview=False)
 
         logger.info("--- Starting Calibration Analysis ---")
-        run_full_calibration_analysis(
+        calibration(
             image_dir=None,  # Use default from config
             num_facets=num_facets,
             filename_pattern="facet{}.jpg",

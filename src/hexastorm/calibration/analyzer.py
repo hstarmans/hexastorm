@@ -1,13 +1,27 @@
-import cv2 as cv
-import numpy as np
+import math
 from pathlib import Path
 import json
 import logging
 from datetime import datetime
 
-from .config import Camera, PlatformConfig
+import cv2 as cv
+import numpy as np
+
+from ..config import Camera, PlatformConfig
 
 logger = logging.getLogger(__name__)
+
+
+def dicts_are_close(d1, d2, rel_tol=1e-5, abs_tol=1e-5):
+    """Recursively checks if two dictionaries are almost equal, ignoring minor float differences."""
+    if isinstance(d1, dict) and isinstance(d2, dict):
+        if d1.keys() != d2.keys():
+            return False
+        return all(dicts_are_close(d1[k], d2[k], rel_tol, abs_tol) for k in d1)
+    elif isinstance(d1, (int, float)) and isinstance(d2, (int, float)):
+        return math.isclose(d1, d2, rel_tol=rel_tol, abs_tol=abs_tol)
+    else:
+        return d1 == d2
 
 
 def append_history_record(filename, payload_dict, max_records=10000):
@@ -35,7 +49,7 @@ def append_history_record(filename, payload_dict, max_records=10000):
         last_record = history[-1].copy()
         last_record.pop("timestamp", None)
 
-        if payload_dict == last_record:
+        if dicts_are_close(payload_dict, last_record):
             logger.warning(
                 f"Result is identical to the last record in {filename}. Skipping save."
             )
@@ -109,8 +123,6 @@ def get_dots(
     min_diameter_px = min_diameter_um / pixelsize
 
     # Kernel size must be an odd integer (e.g., 3, 5, 7)
-    # Forcing the kernel size to an odd number guarantees that your
-    # morphological closing expands and shrinks your laser dots perfectly symmetrical
     kernel_size = int(np.ceil(min_diameter_px))
     if kernel_size % 2 == 0:
         kernel_size += 1
@@ -130,7 +142,6 @@ def get_dots(
     # Calculate Area limits: A = pi * r^2
     min_area_px = np.pi * (min_radius_px**2)
     max_area_px = np.pi * (max_radius_px**2)
-    # ---------------------------------------------------------
 
     # 3. Filter by size (area) to remove noise
     valid_dots = []
@@ -152,7 +163,6 @@ def get_dots(
                 axes = np.array(el[1]) * pixelsize  # Convert to micrometers
             else:
                 # Fallback for very tiny dots (approximate from area)
-                # d = 2 * sqrt(area/pi) -> mapped to axes
                 d_px = 2 * np.sqrt(area / np.pi)
                 axes = np.array([d_px, d_px]) * pixelsize
 
@@ -175,12 +185,9 @@ def get_dots(
     dots = dots[dots[:, 0].argsort()]
 
     if debug:
-        # Create a color visualization
         vis = img.copy()
         for i, (x, y) in enumerate(dots):
-            # Draw dot center (sub-pixel)
             cv.circle(vis, (int(x), int(y)), 4, (0, 255, 0), -1)
-            # Label the dot index
             cv.putText(
                 vis,
                 str(i),
@@ -200,7 +207,6 @@ def get_dots(
         cv.waitKey(0)
         cv.destroyAllWindows()
 
-    # Calculate global metrics for the whole facet
     if dot_metrics:
         facet_avg_size = round(np.mean([m["major_axis"] for m in dot_metrics]), 3)
         facet_avg_ecc = round(np.mean([m["eccentricity"] for m in dot_metrics]), 3)
@@ -212,77 +218,154 @@ def get_dots(
         return dots, {}
 
 
-def rectify_dots(dots):
-    """
-    dots: np.array of shape (n, 2) -> [[x, y], ...]
-    Returns: rectified_dots, angle_deg
-    """
+def compute_angle(dots):
+    """Calculates the rotation angle of the dot line."""
     if len(dots) < 2:
-        return dots, 0.0
-
-    x = dots[:, 0]
-    y = dots[:, 1]
-
-    # 1. Fit line to find the angle of the scan path
-    m, c = np.polyfit(x, y, 1)
+        raise ValueError("At least 2 dots are required to compute an angle.")
+    m, c = np.polyfit(dots[:, 0], dots[:, 1], 1)
     angle_rad = np.arctan(m)
+    return np.degrees(angle_rad)
 
-    # 2. Create Rotation Matrix
+
+def rotate_dots(dots, angle_deg):
+    """Rotates dots by the specified angle to align with the X axis."""
+    if len(dots) == 0:
+        raise ValueError("No dots to rotate.")
+    angle_rad = np.radians(angle_deg)
+
+    # We rotate by -angle_rad to flatten the line to y=0
     cos_a = np.cos(-angle_rad)
     sin_a = np.sin(-angle_rad)
     rotation_matrix = np.array([[cos_a, -sin_a], [sin_a, cos_a]])
 
-    # 3. Rotate all points so the line becomes horizontal
-    rectified = dots @ rotation_matrix.T
-
-    return rectified, np.degrees(angle_rad)
+    return dots @ rotation_matrix.T
 
 
 def calculate_facet_shifts(rect_dots_list):
-    # Reference facet is index 0
-    ref_facet = rect_dots_list[0]
-    num_dots_ref = len(ref_facet)
-    min_dots = 3
+    """
+    Calculates shifts against a 'virtual reference' which is the spatial mean
+    of matching dots across all facets.
+    """
+    num_facets = len(rect_dots_list)
+    if num_facets == 0 or any(len(f) < 3 for f in rect_dots_list):
+        logger.error("Not enough valid dots across facets to calculate shifts.")
+        return None, None
 
-    if num_dots_ref < min_dots:
-        logger.error(f"Facet 0 has less than {min_dots} dots. Calibration impossible.")
-        return None
+    # Physical constraints
+    max_shift_um = 200.0
+    max_shift_px = max_shift_um / abs(Camera.DEFAULT_PIXEL_SIZE_UM)
 
+    # 1. Build the Virtual Reference Facet
+    # Use the first facet as an anchor just to identify matching dot groupings
+    anchor_facet = rect_dots_list[0]
+    virtual_reference = []
+
+    # Keep track of the aligned dots for each facet so we can compute math easily
+    facet_matched_dots = {i: [] for i in range(num_facets)}
+
+    for anchor_dot in anchor_facet:
+        group = [anchor_dot]
+        matched_for_this_dot = {0: anchor_dot}
+        is_valid_group = True
+
+        # Find the corresponding dot in the other facets
+        for i in range(1, num_facets):
+            facet = rect_dots_list[i]
+            distances = np.linalg.norm(facet - anchor_dot, axis=1)
+            closest_idx = np.argmin(distances)
+
+            if distances[closest_idx] <= max_shift_px:
+                matched_pt = facet[closest_idx]
+                group.append(matched_pt)
+                matched_for_this_dot[i] = matched_pt
+            else:
+                is_valid_group = False  # Dot drifted too far or is missing
+                break
+
+        if is_valid_group:
+            # Calculate the MEAN spatial position for this dot across all facets
+            mean_dot = np.mean(group, axis=0)
+            virtual_reference.append(mean_dot)
+            for i in range(num_facets):
+                facet_matched_dots[i].append(matched_for_this_dot[i])
+
+    virtual_reference = np.array(virtual_reference)
+
+    if len(virtual_reference) < 3:
+        logger.error(
+            "Failed to build virtual reference: too few matching dots across all facets."
+        )
+        return None, None
+
+    # 2. Calculate Shifts against the Virtual Reference
     facet_data = {}
+    for i in range(num_facets):
+        target_dots = np.array(facet_matched_dots[i])
 
-    for i, facet in enumerate(rect_dots_list):
-        # 1. Sanity Check: Dot Count
-        if len(facet) != num_dots_ref:
-            logging.error(
-                f"Facet {i} has {len(facet)} dots, but Facet 0 has {num_dots_ref}. Skipping."
-            )
-            facet_data[i] = {"error": "dot_count_mismatch"}
-            return None
+        # Deviations from the ideal mean
+        x_diffs = target_dots[:, 0] - virtual_reference[:, 0]
+        y_diffs = target_dots[:, 1] - virtual_reference[:, 1]
 
-        # 2. Compute Timing Shift (X-axis)
-        x_diffs = facet[:, 0] - ref_facet[:, 0]
-        mean_x_shift = np.mean(x_diffs)
-
-        # 3. Compute Orthogonal Shift (Y-axis)
-        y_diffs = facet[:, 1] - ref_facet[:, 1]
-        mean_y_shift = np.mean(y_diffs)
-
-        facet_data[i] = {
-            "Scan_shift_um": round(mean_x_shift * Camera.DEFAULT_PIXEL_SIZE_UM, 3),
-            "Orth_shift_um": round(mean_y_shift * Camera.DEFAULT_PIXEL_SIZE_UM, 3),
+        facet_data[str(i)] = {
+            "Scan_shift_um": round(np.mean(x_diffs) * Camera.DEFAULT_PIXEL_SIZE_UM, 3),
+            "Orth_shift_um": round(np.mean(y_diffs) * Camera.DEFAULT_PIXEL_SIZE_UM, 3),
             "std_scan_um": round(
                 np.std(x_diffs) * abs(Camera.DEFAULT_PIXEL_SIZE_UM), 3
             ),
             "std_orth_um": round(
                 np.std(y_diffs) * abs(Camera.DEFAULT_PIXEL_SIZE_UM), 3
             ),
+            "dots_matched": len(virtual_reference),
         }
 
-    return facet_data
+    return facet_data, virtual_reference
+
+
+def calculate_2d_grid_shifts(ref_dots, target_dots, pixel_size_um):
+    """
+    Calculates the X and Y translation shifts between two 2D point clouds
+    (e.g., a reference grid and a target grid) using nearest-neighbor matching.
+    Returns the average shift in micrometers.
+    """
+    if len(ref_dots) == 0 or len(target_dots) == 0:
+        logger.error("Empty dot array provided for 2D shift calculation.")
+        return 0.0, 0.0
+
+    x_diffs = []
+    y_diffs = []
+
+    # Physical constraint to avoid matching a dot to the WRONG grid neighbor
+    # (Assuming spacing is 300um, a shift of > 150um is physically impossible
+    # without aliasing onto the next dot).
+    max_shift_px = 150.0 / abs(pixel_size_um)
+
+    for target_pt in target_dots:
+        distances = np.linalg.norm(ref_dots - target_pt, axis=1)
+        closest_idx = np.argmin(distances)
+
+        if distances[closest_idx] <= max_shift_px:
+            dx_px = target_pt[0] - ref_dots[closest_idx][0]
+            dy_px = target_pt[1] - ref_dots[closest_idx][1]
+            x_diffs.append(dx_px)
+            y_diffs.append(dy_px)
+
+    if not x_diffs:
+        logger.error("No valid matching dots found within the 150um physical limit.")
+        return 0.0, 0.0
+
+    mean_shift_x_um = np.mean(x_diffs) * abs(pixel_size_um)
+    mean_shift_y_um = np.mean(y_diffs) * abs(pixel_size_um)
+
+    return mean_shift_x_um, mean_shift_y_um
 
 
 def verify_calibration(
-    image_paths, master_report, avg_angle_deg, rect_dots, visual_debug=False
+    image_paths,
+    master_report,
+    avg_angle_deg,
+    rect_dots,
+    virtual_ref,
+    visual_debug=True,
 ):
     # 1. Create a Stacked Image (Average of all facets)
     base_img = None
@@ -317,45 +400,66 @@ def verify_calibration(
         else base_img.copy()
     )
 
-    detected_colors = [(255, 255, 0), (0, 255, 0), (255, 0, 0), (0, 255, 255)]
-    predicted_color = (0, 0, 255)  # Red
+    detected_colors = [(255, 255, 0), (0, 255, 0), (0, 165, 255), (0, 255, 255)]
+    outlier_color = (0, 0, 255)
+    predicted_color = (255, 0, 255)
 
     # --- Plot DETECTED dots ---
     for i in range(len(rect_dots)):
         if i >= len(detected_colors):
             break
+
+        report_key = str(i)
+        valid_mask = master_report.get(report_key, {}).get(
+            "valid_mask", [True] * len(rect_dots[i])
+        )
+
         # De-rectify: Rotate back to original image space
         detected_dots_img_space = rect_dots[i] @ inv_rot_matrix.T
 
-        for pt in detected_dots_img_space:
-            cv.circle(vis, (int(pt[0]), int(pt[1])), 6, detected_colors[i], 1)
+        for pt_idx, pt in enumerate(detected_dots_img_space):
+            is_valid = valid_mask[pt_idx] if pt_idx < len(valid_mask) else True
 
-    # --- Plot PREDICTED dots ---
-    ref_rect = rect_dots[0]
-    for i in range(len(rect_dots)):
-        report_key = str(i)
-        if "Scan_shift_um" not in master_report[report_key]:
-            continue
+            if is_valid:
+                cv.circle(vis, (int(pt[0]), int(pt[1])), 6, detected_colors[i], 1)
+            else:
+                cv.circle(vis, (int(pt[0]), int(pt[1])), 6, outlier_color, 2)
+                cv.drawMarker(
+                    vis,
+                    (int(pt[0]), int(pt[1])),
+                    outlier_color,
+                    cv.MARKER_CROSS,
+                    markerSize=10,
+                    thickness=2,
+                )
 
-        shifted_rect = ref_rect.copy()
-        px_size = Camera.DEFAULT_PIXEL_SIZE_UM
-        shifted_rect[:, 0] += master_report[report_key]["Scan_shift_um"] / px_size
-        shifted_rect[:, 1] += master_report[report_key]["Orth_shift_um"] / px_size
+    # --- Plot PREDICTED dots (Against the Virtual Reference) ---
+    if virtual_ref is not None:
+        for i in range(len(rect_dots)):
+            report_key = str(i)
+            if "Scan_shift_um" not in master_report.get(report_key, {}):
+                continue
 
-        predicted_dots = shifted_rect @ inv_rot_matrix.T
+            shifted_rect = virtual_ref.copy()
+            px_size = Camera.DEFAULT_PIXEL_SIZE_UM
 
-        for pt in predicted_dots:
-            cv.drawMarker(
-                vis,
-                (int(pt[0]), int(pt[1])),
-                predicted_color,
-                cv.MARKER_TILTED_CROSS,
-                markerSize=8,
-                thickness=1,
-            )
+            # Re-apply the shift to the virtual mean to predict the spot
+            shifted_rect[:, 0] += master_report[report_key]["Scan_shift_um"] / px_size
+            shifted_rect[:, 1] += master_report[report_key]["Orth_shift_um"] / px_size
+
+            predicted_dots = shifted_rect @ inv_rot_matrix.T
+
+            for pt in predicted_dots:
+                cv.drawMarker(
+                    vis,
+                    (int(pt[0]), int(pt[1])),
+                    predicted_color,
+                    cv.MARKER_TILTED_CROSS,
+                    markerSize=8,
+                    thickness=1,
+                )
 
     if visual_debug:
-        # Show the result
         window_name = "Calibration Verification"
         cv.namedWindow(window_name, cv.WINDOW_NORMAL)
         h, w = vis.shape[:2]
@@ -369,7 +473,7 @@ def verify_calibration(
         cv.imwrite("calibration_verification.jpg", vis)
 
 
-def run_full_calibration_analysis(
+def calibration(
     image_dir=None,
     num_facets=4,
     filename_pattern="facet{}.jpg",
@@ -380,8 +484,7 @@ def run_full_calibration_analysis(
     Orchestrates the loading, analysis, and verification of calibration images.
     """
     cfg = PlatformConfig(test=False)
-
-    # Safely default to the standard image pipeline folder
+    num_facets = cfg.laser_timing["facets"]
     if image_dir is None:
         image_dir = cfg.paths["images"]
     else:
@@ -390,96 +493,75 @@ def run_full_calibration_analysis(
     logger.info(f"Starting Calibration Analysis on: {image_dir}")
 
     image_paths = []
-    # Verify paths exist before starting heavy processing
     for i in range(num_facets):
         p = image_dir / filename_pattern.format(i)
-        if not p.exists():
-            logger.error(f"Missing expected file: {p}")
-            return {}
         image_paths.append(p)
 
-    all_rect_dots = []
+    all_raw_dots = []
     all_spot_stats = []
     all_angles = []
 
-    # 1. Process each image
+    # 1. Process each image to find dots and individual angles
     for i, path in enumerate(image_paths):
         logger.debug(f"Processing Facet {i}...")
-
-        # Resolve absolute path to ensure cv.imread works
         path = path.resolve()
         img = cv.imread(str(path))
 
-        if img is None:
-            logger.error(f"Could not load image at {path}")
-            # Append empty placeholders to maintain index alignment
-            all_rect_dots.append(np.array([]))
-            all_spot_stats.append({})
-            all_angles.append(0)
-            continue
-
         dots_facet, stat = get_dots(img, debug=debug)
 
-        if len(dots_facet) == 0:
-            logger.warning(f"No dots found in {path.name}")
-            all_rect_dots.append(np.array([]))
-            all_spot_stats.append({})
-            all_angles.append(0)
-            continue
-
+        all_raw_dots.append(dots_facet)
         all_spot_stats.append(stat)
-        rect_dot, angle = rectify_dots(dots_facet)
+
+        angle = compute_angle(dots_facet)
         all_angles.append(angle)
-        all_rect_dots.append(rect_dot)
 
-    # 2. Calculate Shifts
-    if all_rect_dots and len(all_rect_dots[0]) > 0:
-        shift_data = calculate_facet_shifts(all_rect_dots)
+    # 2. Find the Global Truth (Median Angle)
+    global_angle = np.median(all_angles)
+    logger.debug(f"Global median rotation angle calculated: {global_angle:.4f}")
 
-        if shift_data is None:
-            logger.error("Calibration sequence aborted due to inconsistent dot counts.")
-            return {}
+    # 3. Apply Global Rotation
+    all_rect_dots = [rotate_dots(dots, global_angle) for dots in all_raw_dots]
 
-        # 3. Create Master Report
-        master_report = {}
-        for i in range(num_facets):
-            s_data = shift_data.get(i, {})
-            spot_data = all_spot_stats[i] if i < len(all_spot_stats) else {}
-            angle_data = (
-                {"rotation_angle_deg": round(all_angles[i], 4)}
-                if i < len(all_angles)
-                else {}
-            )
-            master_report[str(i)] = {**s_data, **spot_data, **angle_data}
+    # 4. Calculate Shifts against the virtual mean
+    shift_data, virtual_ref = calculate_facet_shifts(all_rect_dots)
 
-        # 4. Save History optionally
-        if store_log:
-            update_calibration_history(master_report)
+    # 5. Create Master Report
+    master_report = {}
+    for i in range(num_facets):
+        s_data = shift_data[str(i)]
+        spot_data = all_spot_stats[i]
+        angle_data = {"rotation_angle_deg": round(all_angles[i], 4)}
+        master_report[str(i)] = {**s_data, **spot_data, **angle_data}
 
-        # 5. Verify Visuals
-        valid_angles = [a for a in all_angles if a != 0]
-        avg_angle = np.mean(valid_angles) if valid_angles else 0
-        verify_calibration(
-            image_paths, master_report, avg_angle, all_rect_dots, visual_debug=debug
-        )
-    else:
-        logger.error("Insufficient data to calculate shifts (Facet 0 empty?).")
-        master_report = {}
+    # Save History optionally
+    if store_log:
+        update_calibration_history(master_report)
 
-    # 6. Ensure the results are returned
+    # Verify Visuals
+    verify_calibration(
+        image_paths,
+        master_report,
+        global_angle,
+        all_rect_dots,
+        virtual_ref,
+        visual_debug=debug,
+    )
+
     return master_report
 
 
 if __name__ == "__main__":
-    from .log_setup import configure_logging
+    from ..log_setup import configure_logging
 
     configure_logging(logging.DEBUG)
 
-    # Run the analysis, turn off logging to file if desired, and capture the results
-    results = run_full_calibration_analysis(
-        image_dir=None,  # Use default from config
+    results = calibration(
+        image_dir=None,
         num_facets=4,
-        filename_pattern="scan_error_facet_{}.jpg",
+        filename_pattern="facet{}.jpg",
         debug=False,
-        store_log=False,  # Set to True to save to calibration_history.json
+        store_log=True,
     )
+
+    # Convert dictionary to a pretty-printed string
+    logger.info(f"Calibration Results:\n{json.dumps(results, indent=4)}")

@@ -1,4 +1,4 @@
-# port to micropython
+# port to micropython, this wsed on the raspberry, just for reference not supported at the moment
 # import numpy as np
 # import pandas as pd
 # import plotext as plt
