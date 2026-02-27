@@ -1,7 +1,6 @@
 import logging
 import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle
-import math
+from matplotlib.patches import Rectangle, Circle
 
 from .machine import LaserCalibrationGen
 
@@ -24,7 +23,6 @@ class CameraCalibrationGen(LaserCalibrationGen):
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
-        self.pattern_height_mm = 2.0  # Height of the test pattern in mm
 
         # IMPORTANT: Disable 'tight' cropping.
         # We will manually control the canvas size to include the whitespace at X=0.
@@ -62,13 +60,13 @@ class CameraCalibrationGen(LaserCalibrationGen):
         """Generates test and returns the filename used."""
         filename = f"cam_test_vertical_{self.line_thickness_mm * 1000:.0f}um.svg"
         logger.info(f"Generating Vertical Jitter Test ({filename})...")
+        pattern_height = 2  # mm
 
         fig, ax = plt.subplots()
 
         pitch = self.line_thickness_mm * 2
         num_lines = int(self.view_width / pitch)
         digital_width = self._get_compensated_width(self.line_thickness_mm)
-        pattern_height = self.pattern_height_mm
 
         for i in range(num_lines):
             start_x = self.x_min + (i * pitch)
@@ -115,32 +113,58 @@ class CameraCalibrationGen(LaserCalibrationGen):
         self.resize_to_mm_scale(fig, ax)
         self.save_final(fig, filename)
 
-    def generate_horizontal_cross_test(self):
-        """Generates test and returns the filename used."""
-        filename = f"cam_test_horizontal_{self.line_thickness_mm * 1000:.0f}um.svg"
-        logger.info(f"Generating Horizontal Cross Test ({filename})...")
+    def generate_dot_grid_test(self):
+        """
+        Generates a 2D grid of dots over the view width and returns the filename.
+        Dynamically calculates the number of dots to maintain a minimum 4x spacing.
+        """
+        filename = f"cam_test_grid_{self.line_thickness_mm * 1000:.0f}um.svg"
+        logger.info(f"Generating Dot Grid Test ({filename})...")
 
         fig, ax = plt.subplots()
 
-        pitch = self.line_thickness_mm * 2
-        digital_width = self._get_compensated_width(self.line_thickness_mm)
-        num_lines = math.ceil(self.pattern_height_mm / pitch)
+        dot_size = self.line_thickness_mm
+        digital_dot_diameter = self._get_compensated_width(dot_size)
+        dot_radius = digital_dot_diameter / 2.0
 
-        for i in range(num_lines):
-            start_y = i * pitch
-            if digital_width > 0:
-                center_y = start_y + (self.line_thickness_mm / 2)
-                draw_y = center_y - (digital_width / 2)
-                rect = Rectangle(
-                    (self.x_min, draw_y),
-                    self.view_width,
-                    digital_width,
-                    color="black",
-                    linewidth=0,
-                )
-                ax.add_patch(rect)
+        # Calculate how many dots fit horizontally with the minimum spacing criteria
+        min_spacing_x = dot_radius * 4.0
+        calculated_dots_x = int(self.view_width / min_spacing_x)
 
-        self._setup_exact_canvas(fig, ax, self.x_max, self.pattern_height_mm)
+        # Enforce maximum 10 dots, or stick with the calculated amount if lower
+        if calculated_dots_x > 10:
+            num_dots_x = 10
+        elif calculated_dots_x < 1:
+            raise Exception("View width is too small to comfortably fit even 1 dot!")
+        else:
+            num_dots_x = calculated_dots_x
+
+        # Recalculate optimal horizontal spacing to evenly fill the view width
+        spacing_x = self.view_width / num_dots_x
+
+        # Vertical settings remain fixed per requirements
+        num_dots_y = 10
+        spacing_y = dot_radius * 4.0
+        pattern_height = spacing_y * num_dots_y  # mm
+
+        for i in range(num_dots_x):
+            for j in range(num_dots_y):
+                if digital_dot_diameter > 0:
+                    # Center the dot within its respective grid cell
+                    center_x = self.x_min + (i * spacing_x) + (spacing_x / 2.0)
+                    center_y = (j * spacing_y) + (spacing_y / 2.0)
+
+                    # Replace Rectangle with a true Circle
+                    circle = Circle(
+                        (center_x, center_y),
+                        radius=dot_radius,
+                        color="black",
+                        linewidth=0,
+                    )
+                    ax.add_patch(circle)
+
+        # Use the dynamically calculated pattern_height for this specific canvas
+        self._setup_exact_canvas(fig, ax, self.x_max, pattern_height)
         self.resize_to_mm_scale(fig, ax)
         self.save_final(fig, filename)
 
@@ -186,7 +210,7 @@ def main():
         lower_pixel=200, upper_pixel=500, line_thickness_mm=0.15
     )
     cam_pat.generate_vertical_jitter_test()
-    cam_pat.generate_horizontal_cross_test()
+    cam_pat.generate_dot_grid_test()
 
 
 if __name__ == "__main__":
