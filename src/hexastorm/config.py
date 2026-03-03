@@ -89,7 +89,7 @@ def displacement_kernel(pixel, params):
 
     Args:
         pixel: The current pixel index in the scan line (proxy for time/angle).
-        params: Numba typed dictionary containing system geometry (FACETS, n, inradius, etc).
+        params: Numba typed dictionary containing system geometry (facets, n, inradius, etc).
 
     Returns:
         float: The physical displacement in millimeters relative to the optical axis.
@@ -97,11 +97,11 @@ def displacement_kernel(pixel, params):
     # For a regular polygon, the scan angle range is limited by the facet geometry.
     # interiorangle = 180-360/self.n
     # max_angle = 180-90-0.5*interiorangle
-    I_max = 180 / params["FACETS"]
+    I_max = 180 / params["facets"]
 
     # Calculate how many pixels fit on one facet face based on laser frequency and RPM.
     pixelsfacet = round(
-        params["LASER_HZ"] / (params["rotationfrequency"] * params["FACETS"])
+        params["laser_hz"] / (params["rotationfrequency"] * params["facets"])
     )
     # Convert the current pixel number to an Angle of Incidence (I) in radians.
     # The scan moves from -I_max to +I_max across the facet.
@@ -199,6 +199,33 @@ class PlatformConfig:
 
         return dirs
 
+    def load_latest_calibration(self):
+        """Helper to fetch the latest calibration dictionary from disk."""
+        if MICROPYTHON:
+            logging.error("Calibration correction not supported in MicroPython.")
+            return {}
+
+        history_path = self.paths["calibration"] / "calibration_history.json"
+        with open(history_path, "r") as f:
+            history = json.load(f)
+
+        latest = history[-1]
+        logging.info(f"Applied calibration from: {latest.get('timestamp')}")
+        return latest["facets"]
+
+    def get_visible_pixels(self):
+        """Retrieves pixels visible on camera"""
+        if MICROPYTHON:
+            logging.error("Calibration correction not supported in MicroPython.")
+            return {}
+
+        history_file = self.cfg.paths["calibration"] / "scan_visibility.json"
+        with open(history_file, "r") as f:
+            history = json.load(f)
+            last_record = history[-1]
+            visible_pixels = last_record.get("visible_pixels", [])
+        return visible_pixels
+
     def get_optical_params(self, correction=False, exposures=4):
         """
         Returns a dictionary of physical parameters, including calculated Lanewidth.
@@ -206,6 +233,13 @@ class PlatformConfig:
         correction: If True, loads empirically derived corrections from calibration_history.json.
         exposures: Number of exposures per facet, used to calculate stepsperline for stage speed.
         """
+        if correction is True:
+            correction_data = self.load_latest_calibration()
+        elif isinstance(correction, dict):
+            correction_data = correction
+            logging.info("Applied custom calibration dictionary.")
+        else:
+            correction_data = {}  # Handles False, None, etc.
         laz_tim = self.laser_timing
         mtr_cfg = self.motor_cfg
 
@@ -221,10 +255,8 @@ class PlatformConfig:
                 # Refractive index of the prism material (e.g. Quartz
                 "n": 1.49,
                 # Number of vertices/facets on the polygon, must be even
-                "FACETS": float(laz_tim["facets"]),
-                "LASER_HZ": float(laz_tim["laser_hz"])
-                if "laser_hz" in laz_tim
-                else 0.0,
+                "facets": float(laz_tim["facets"]),
+                "laser_hz": float(laz_tim["laser_hz"]),
                 # Polygon rotation frequency (Hz)
                 "rotationfrequency": laz_tim["rpm"] / 60,
                 # Radius of the laser beam [mm]
@@ -273,34 +305,15 @@ class PlatformConfig:
             - displacement_kernel(start_pixel, params)
         )
 
-        # Initialize to 0.0
         num_facets = int(laz_tim["facets"])
+
         for i in range(num_facets):
-            params[f"f{i}_scan"] = 0.0
-            params[f"f{i}_orth"] = 0.0
-
-        if correction:
-            if MICROPYTHON:
-                logging.error("Calibration correction not supported in MicroPython.")
-                return params
-            history_path = (
-                self.paths["calibration"] / "calibration_history.json"
-            )
-
-            with open(history_path, "r") as f:
-                history = json.load(f)
-
-            # Get the last (most recent) entry
-            latest = history[-1]
-            corrections = latest.get("facets", {})
-
-            for i in range(num_facets):
-                f_key = str(i)
-                params[f"f{i}_scan"] = corrections[f_key]["scan"]
-                params[f"f{i}_orth"] = corrections[f_key]["orth"]
-            logging.info(
-                f"Applied calibration from: {latest.get('timestamp')}"
-            )
+            if correction_data != {}:
+                params[f"f{i}_scan"] = correction_data[str(i)]["scan"]
+                params[f"f{i}_orth"] = correction_data[str(i)]["orth"]
+            else:
+                params[f"f{i}_scan"] = 0.0
+                params[f"f{i}_orth"] = 0.0
 
         return params
 

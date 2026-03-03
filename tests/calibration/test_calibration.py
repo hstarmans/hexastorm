@@ -9,11 +9,7 @@ import numpy as np
 from pathlib import Path
 import logging
 
-from hexastorm.calibration.analyzer import (
-    calibration,
-    get_dots,
-    calculate_2d_grid_shifts,
-)
+from hexastorm.calibration.analyzer import calibration
 from hexastorm.config import Camera
 from hexastorm.log_setup import configure_logging
 
@@ -184,41 +180,48 @@ def test_2d_verification(tmp_path):
     img_dir = tmp_path / "images_2d"
     img_dir.mkdir()
 
-    ref_image_path = img_dir / "facet0.jpg"
-
-    # 1. Generate reference and extract using your production get_dots
-    generate_2d_grid_image(
-        ref_image_path, GRID_SHIFTS_UM[0]["scan"], GRID_SHIFTS_UM[0]["orth"]
-    )
-    ref_img = cv.imread(str(ref_image_path))
-    ref_detected_dots, _ = get_dots(ref_img, pixelsize=PIXEL_SIZE_UM, debug=False)
-
-    assert len(ref_detected_dots) == GRID_ROWS * GRID_COLS, (
-        "Not all dots found in ref image!"
-    )
-
-    # 2. Test every other facet against this reference
-    for i in range(1, 4):
-        expected_x = GRID_SHIFTS_UM[i]["scan"]
-        expected_y = GRID_SHIFTS_UM[i]["orth"]
-
+    # 1. Generate all 4 facet grid images using the synthetic generator
+    for i in range(4):
         target_path = img_dir / f"facet{i}.jpg"
-        generate_2d_grid_image(target_path, expected_x, expected_y)
-
-        # Extract using your production get_dots
-        target_img = cv.imread(str(target_path))
-        target_detected_dots, _ = get_dots(
-            target_img, pixelsize=PIXEL_SIZE_UM, debug=False
+        generate_2d_grid_image(
+            target_path, GRID_SHIFTS_UM[i]["scan"], GRID_SHIFTS_UM[i]["orth"]
         )
 
-        # Calculate using your new production calculation method
-        calc_x_um, calc_y_um = calculate_2d_grid_shifts(
-            ref_detected_dots, target_detected_dots, PIXEL_SIZE_UM
-        )
+    # 2. Run the unified calibration function in 2D mode
+    results = calibration(
+        image_dir=img_dir,
+        num_facets=4,
+        debug=False,
+        store_log=False,
+        compute_rotation=False,  # Tells analyzer to treat this as a 2D grid
+    )
+
+    assert results, "2D Calibration returned empty results!"
+
+    # 3. Calculate the expected virtual reference (the mean of all input shifts)
+    mean_scan = sum(f["scan"] for f in GRID_SHIFTS_UM) / len(GRID_SHIFTS_UM)
+    mean_orth = sum(f["orth"] for f in GRID_SHIFTS_UM) / len(GRID_SHIFTS_UM)
+
+    # 4. Verify each facet against its expected RELATIVE shift
+    for i in range(4):
+        facet_key = str(i)
+        assert facet_key in results, f"Facet {i} missing from output"
+
+        # The true deviation is the absolute position minus the group center
+        expected_scan_rel = GRID_SHIFTS_UM[i]["scan"] - mean_scan
+        expected_orth_rel = GRID_SHIFTS_UM[i]["orth"] - mean_orth
+
+        actual_scan = results[facet_key].get("Scan_shift_um")
+        actual_orth = results[facet_key].get("Orth_shift_um")
+        actual_angle = results[facet_key].get("rotation_angle_deg")
 
         logger.info(
-            f"Facet {i} 2D - Expected: X={expected_x}, Y={expected_y} | Calculated: X={calc_x_um:.2f}, Y={calc_y_um:.2f}"
+            f"Facet {i} 2D - Expected Rel: Scan={expected_scan_rel:.2f}, Orth={expected_orth_rel:.2f} | "
+            f"Calculated: Scan={actual_scan:.2f}, Orth={actual_orth:.2f}"
         )
 
-        assert calc_x_um == pytest.approx(expected_x, abs=1.5)
-        assert calc_y_um == pytest.approx(expected_y, abs=1.5)
+        assert actual_scan == pytest.approx(expected_scan_rel, abs=1.5)
+        assert actual_orth == pytest.approx(expected_orth_rel, abs=1.5)
+
+        # Ensure rotation is forced to 0.0 in 2D mode
+        assert actual_angle == 0.0

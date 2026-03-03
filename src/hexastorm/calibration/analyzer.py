@@ -321,44 +321,6 @@ def calculate_facet_shifts(rect_dots_list):
     return facet_data, virtual_reference
 
 
-def calculate_2d_grid_shifts(ref_dots, target_dots, pixel_size_um):
-    """
-    Calculates the X and Y translation shifts between two 2D point clouds
-    (e.g., a reference grid and a target grid) using nearest-neighbor matching.
-    Returns the average shift in micrometers.
-    """
-    if len(ref_dots) == 0 or len(target_dots) == 0:
-        logger.error("Empty dot array provided for 2D shift calculation.")
-        return 0.0, 0.0
-
-    x_diffs = []
-    y_diffs = []
-
-    # Physical constraint to avoid matching a dot to the WRONG grid neighbor
-    # (Assuming spacing is 300um, a shift of > 150um is physically impossible
-    # without aliasing onto the next dot).
-    max_shift_px = 150.0 / abs(pixel_size_um)
-
-    for target_pt in target_dots:
-        distances = np.linalg.norm(ref_dots - target_pt, axis=1)
-        closest_idx = np.argmin(distances)
-
-        if distances[closest_idx] <= max_shift_px:
-            dx_px = target_pt[0] - ref_dots[closest_idx][0]
-            dy_px = target_pt[1] - ref_dots[closest_idx][1]
-            x_diffs.append(dx_px)
-            y_diffs.append(dy_px)
-
-    if not x_diffs:
-        logger.error("No valid matching dots found within the 150um physical limit.")
-        return 0.0, 0.0
-
-    mean_shift_x_um = np.mean(x_diffs) * abs(pixel_size_um)
-    mean_shift_y_um = np.mean(y_diffs) * abs(pixel_size_um)
-
-    return mean_shift_x_um, mean_shift_y_um
-
-
 def verify_calibration(
     image_paths,
     master_report,
@@ -479,35 +441,34 @@ def calibration(
     filename_pattern="facet{}.jpg",
     debug=False,
     store_log=True,
-    min_diameter_mm=0.01,  # Default 0.01 mm (10 um)
-    max_diameter_mm=0.20,  # Default 0.20 mm (200 um)
+    min_diameter_mm=0.01,
+    max_diameter_mm=0.20,
+    compute_rotation=True,  # Toggle: True for 1D lines, False for 2D grids
 ):
     """
     Orchestrates the loading, analysis, and verification of calibration images.
+    Handles both 1D lines (with rotation) and 2D grids (pure translation).
     """
     cfg = PlatformConfig(test=False)
-    num_facets = cfg.laser_timing["facets"]
+    # num_facets = cfg.laser_timing["facets"] # Use if needed from config
     if image_dir is None:
         image_dir = cfg.paths["images"]
     else:
         image_dir = Path(image_dir)
 
-    logger.info(f"Starting Calibration Analysis on: {image_dir}")
+    mode_str = "1D Line" if compute_rotation else "2D Grid"
+    logger.info(f"Starting {mode_str} Calibration Analysis on: {image_dir}")
 
-    # --- Convert mm inputs to microns for internal processing ---
     min_diameter_um = min_diameter_mm * 1000.0
     max_diameter_um = max_diameter_mm * 1000.0
 
-    image_paths = []
-    for i in range(num_facets):
-        p = image_dir / filename_pattern.format(i)
-        image_paths.append(p)
+    image_paths = [image_dir / filename_pattern.format(i) for i in range(num_facets)]
 
     all_raw_dots = []
     all_spot_stats = []
     all_angles = []
 
-    # 1. Process each image to find dots and individual angles
+    # 1. Process each image to find dots
     for i, path in enumerate(image_paths):
         logger.debug(f"Processing Facet {i}...")
         path = path.resolve()
@@ -523,37 +484,49 @@ def calibration(
         all_raw_dots.append(dots_facet)
         all_spot_stats.append(stat)
 
-        angle = compute_angle(dots_facet)
-        all_angles.append(angle)
+        # Compute angle only if requested
+        if compute_rotation:
+            angle = compute_angle(dots_facet)
+            all_angles.append(angle)
 
-    # 2. Find the Global Truth (Median Angle)
-    global_angle = np.median(all_angles)
-    logger.debug(f"Global median rotation angle calculated: {global_angle:.4f}")
+    # 2. Handle Rotation Logic
+    if compute_rotation:
+        global_angle = np.median(all_angles)
+        logger.debug(f"Global median rotation angle calculated: {global_angle:.4f}")
+        all_processed_dots = [rotate_dots(dots, global_angle) for dots in all_raw_dots]
+    else:
+        global_angle = 0.0
+        all_processed_dots = all_raw_dots  # Use raw 2D grid dots directly
 
-    # 3. Apply Global Rotation
-    all_rect_dots = [rotate_dots(dots, global_angle) for dots in all_raw_dots]
+    # 3. Calculate Shifts against the virtual mean
+    shift_data, virtual_ref = calculate_facet_shifts(all_processed_dots)
 
-    # 4. Calculate Shifts against the virtual mean
-    shift_data, virtual_ref = calculate_facet_shifts(all_rect_dots)
+    if shift_data is None:
+        logger.error("Shift calculation failed.")
+        return {}
 
-    # 5. Create Master Report
+    # 4. Create Master Report
     master_report = {}
     for i in range(num_facets):
         s_data = shift_data[str(i)]
         spot_data = all_spot_stats[i]
-        angle_data = {"rotation_angle_deg": round(all_angles[i], 4)}
+
+        # If we computed rotation, report the individual angle, else 0.0
+        ind_angle = all_angles[i] if compute_rotation else 0.0
+        angle_data = {"rotation_angle_deg": round(ind_angle, 4)}
+
         master_report[str(i)] = {**s_data, **spot_data, **angle_data}
 
-    # Save History optionally
+    # 5. Save History optionally
     if store_log:
         update_calibration_history(master_report)
 
-    # Verify Visuals
+    # 6. Verify Visuals
     verify_calibration(
         image_paths,
         master_report,
         global_angle,
-        all_rect_dots,
+        all_processed_dots,
         virtual_ref,
         visual_debug=debug,
     )

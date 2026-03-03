@@ -81,7 +81,7 @@ def _jit_fypos(
     # 2. Mechanical Component: Stage movement over time
     # time = pixel / LASER_HZ
     # distance = time * stagespeed
-    stage_component = (line_pixel / params["LASER_HZ"]) * params["stagespeed"]
+    stage_component = (line_pixel / params["laser_hz"]) * params["stagespeed"]
 
     if direction:
         ypos = base_y + stage_component + ystart
@@ -118,7 +118,7 @@ def _jit_calculate_grid(params: Any) -> Tuple[np.ndarray, Dict[str, float]]:
     # Calculate required facets
     facets_inlane = math.ceil(
         params["rotationfrequency"]
-        * params["FACETS"]
+        * params["facets"]
         * (params["sampleysize"] / params["stagespeed"])
     )
 
@@ -139,7 +139,7 @@ def _jit_calculate_grid(params: Any) -> Tuple[np.ndarray, Dict[str, float]]:
     )
 
     y_shift_per_facet = (params["stagespeed"]) / (
-        params["FACETS"] * params["rotationfrequency"] * params["samplegridsize"]
+        params["facets"] * params["rotationfrequency"] * params["samplegridsize"]
     )
 
     x_width_pixels = _jit_fxpos(0, params, 0) - _jit_fxpos(
@@ -147,7 +147,7 @@ def _jit_calculate_grid(params: Any) -> Tuple[np.ndarray, Dict[str, float]]:
     )
 
     # 3. Coordinate Generation
-    num_physical_facets = int(params["FACETS"])
+    num_physical_facets = int(params["facets"])
 
     # Track where we are inserting data into the final arrays
     current_idx = 0

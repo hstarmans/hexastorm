@@ -57,7 +57,6 @@ class Interpolator:
         # Link self.params to the JIT class params so we can read them easily
         self.params = self.geo.params
 
-
     def svgtopil(self, svg_filepath: Path) -> Image.Image:
         """
         Converts SVG vector graphics to a raster PIL Image.
@@ -317,9 +316,9 @@ class Interpolator:
 
         # C. Reverse-Engineer 'sampleysize'
         # The formula used to create facets was:
-        # facets = ceil( rot_freq * FACETS * (y_size / speed) )
-        # So we invert it: y_size = (facets * speed) / (rot_freq * FACETS)
-        term = local_params["rotationfrequency"] * local_params["FACETS"]
+        # facets = ceil( rot_freq * facets * (y_size / speed) )
+        # So we invert it: y_size = (facets * speed) / (rot_freq * facets)
+        term = local_params["rotationfrequency"] * local_params["facets"]
         local_params["sampleysize"] = float(
             metadata["facetsinlane"] * local_params["stagespeed"] / term
         )
@@ -439,7 +438,7 @@ class Interpolator:
         return rotated_canvas
 
 
-if __name__ == "__main__":
+def main():
     from ..log_setup import configure_logging
 
     configure_logging(logging.DEBUG)
@@ -467,3 +466,7 @@ if __name__ == "__main__":
         * np.ceil(interpolator.params["bitsinscanline"])
     )
     interpolator.plotptrn(pattern_data)
+
+
+if __name__ == "__main__":
+    main()
