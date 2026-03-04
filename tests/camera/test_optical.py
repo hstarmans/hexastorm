@@ -15,6 +15,7 @@ from hexastorm.calibration import (
     calibration,
     get_dots,
     append_history_record,
+    LaserStackSimulator,
 )
 from hexastorm.esp32_controller import ESP32Controller
 from hexastorm.config import PlatformConfig
@@ -143,13 +144,13 @@ class StaticTests:
         last_img = None
         for i in range(count):
             img = self.cam.capture()
+            grey = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
             if img is None:
                 continue
 
-            last_img = img
+            last_img = grey
 
             if save:
-                grey = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
                 if name:
                     if count > 1:
                         stem = Path(name).stem
@@ -349,19 +350,13 @@ class DynamicTests(StaticTests):
 
         append_history_record("scan_visibility.json", payload)
 
-    def scan_error(self):
+    def _setup_camera_calibration(self):
         """
-        Retrieves the scan by error by projecting a vertical jitter pattern
-        and analyzing the resulting image.
+        Helper method to initialize the camera calibration generator
+        and return shared sizing constants to avoid repetition.
         """
         pix_margin = 20
-        fpattern = "scan_error_facet_{}.jpg"
-
-        history_file = self.cfg.paths["calibration"] / "scan_visibility.json"
-        with open(history_file, "r") as f:
-            history = json.load(f)
-            last_record = history[-1]
-            visible_pixels = last_record.get("visible_pixels", [])
+        visible_pixels = self.cfg.get_visible_pixels()
 
         lower_pixel = min(visible_pixels) + pix_margin
         upper_pixel = max(visible_pixels) - pix_margin
@@ -375,14 +370,151 @@ class DynamicTests(StaticTests):
             upper_pixel=upper_pixel,
             line_thickness_mm=line_thickness_mm,
         )
+        return cam_pat, min_size_mm, max_size_mm
 
-        def dispatch(storelog=False):
+    def pattern_error(self):
+        """
+        Measures the scan and orthogonal error by projecting a 2D dot grid pattern per facet.
+
+        This method generates an SVG pattern and exposes it onto the camera chip.
+        It simulates the physical movement of the stage by stacking multiple virtual
+        exposures to form a 2D dot pattern. The calibration process then verifies
+        if the corresponding dots align at their expected locations, both with and
+        without optical correction.
+        """
+        cam_pat, min_size_mm, max_size_mm = self._setup_camera_calibration()
+        fpattern = "pattern_error_facet_{}_{}.jpg"
+        calib_dct = self.cfg.load_latest_calibration()
+
+        def dispatch(correction, storelog=False):
+            facets = self.cfg.laser_timing["facets"]
+            for facet in range(facets):
+                if correction:
+                    correc_dct = {}
+                    for i in range(facets):
+                        correc_dct[str(i)] = {
+                            "scan": calib_dct[facet]["scan"],
+                            "orth": calib_dct[facet]["orth"],
+                        }
+                else:
+                    correc_dct = False
+
+                cam_pat.set_correction(correction=correc_dct)
+                cam_pat.generate_dot_grid_test()
+                pattern_bits = cam_pat.interpolator.readbin()["data"]
+                ptrn = pattern_bits.reshape(
+                    -1, self.cfg.laser_timing["scanline_length"]
+                )
+                lines = len(ptrn)
+                stacker = LaserStackSimulator(expected_total_steps=lines)
+                for row in range(lines):
+                    line = ptrn[row].tolist()[::-1]  # Reverse the line
+                    if max(line) == 0:  # skip empty liines
+                        continue
+                    img = self.picture_line(
+                        line=line, fct=facet, save_image=False, preview=False
+                    )
+                    stacker.add_exposures(img, num_steps=row)
+                res = stacker.get_result()
+                file_path = self.cfg.paths["images"] / fpattern.format(
+                    facet, bool(correction)
+                )
+                cv.imwrite(str(file_path), res)
+            results = calibration(
+                filename_pattern=fpattern.format("{}", bool(correction)),
+                min_diameter_mm=min_size_mm,
+                max_diameter_mm=max_size_mm,
+                debug=False,
+                store_log=storelog,
+                compute_rotation=False,
+            )
+            return [
+                [
+                    results[str(facet)]["Scan_shift_um"],
+                    results[str(facet)]["Orth_shift_um"],
+                ]
+                for facet in range(facets)
+            ]
+
+        errors = dispatch(correction=False)
+        errors_correct = dispatch(correction=True)
+
+        errors = dispatch(correction=False)
+        errors_correct = dispatch(correction=True)
+
+        logger.info(f"Uncorrected 2D Errors (um) [Scan, Orth]: {errors}")
+        logger.info(f"Corrected 2D Errors (um) [Scan, Orth]:   {errors_correct}")
+
+        # Convert to numpy arrays (Shape: [num_facets, 2])
+        err_before = np.array(errors)
+        err_after = np.array(errors_correct)
+
+        abs_before = np.abs(err_before)
+        abs_after = np.abs(err_after)
+
+        # Calculate overall worst-case error across BOTH scan and orth axes
+        max_err_before = np.max(abs_before)
+        max_err_after = np.max(abs_after)
+
+        # Calculate overall Mean Absolute Error (MAE)
+        mae_before = np.mean(abs_before)
+        mae_after = np.mean(abs_after)
+
+        # Extract axis-specific max errors for detailed logging
+        max_scan_after = np.max(abs_after[:, 0])
+        max_orth_after = np.max(abs_after[:, 1])
+
+        logger.info("\n--- 2D Calibration Summary ---")
+        logger.info(
+            f"Overall MAE Before: {mae_before:.2f} um | MAE After: {mae_after:.2f} um"
+        )
+        logger.info(
+            f"Overall Max Error Before: {max_err_before:.2f} um | Max Error After: {max_err_after:.2f} um"
+        )
+        logger.info(
+            f"Post-Correction Max Scan: {max_scan_after:.2f} um | Max Orth: {max_orth_after:.2f} um"
+        )
+
+        # 1. Assert the system actually improved overall
+        assert max_err_after < max_err_before, (
+            "Calibration Failure: Correction increased the maximum 2D error!"
+        )
+
+        # 2. Assert the system meets the final engineering tolerance
+        TOLERANCE_UM = 30.0
+        assert max_err_after <= TOLERANCE_UM, (
+            f"Tolerance Failure: Worst facet 2D error ({max_err_after:.2f} um) exceeds {TOLERANCE_UM} um limit."
+        )
+
+        logger.info(
+            f"SUCCESS: 2D System calibrated to within +/- {TOLERANCE_UM} microns."
+        )
+
+        return errors, errors_correct
+
+    def line_error(self):
+        """
+        Measures the 1D scan error by projecting a vertical line pattern.
+
+        Generates an SVG representing a set of vertical lines. For each facet,
+        the first line of this pattern is projected and captured. The center of
+        the resulting dots should ideally align across facets. The alignment is
+        measured to evaluate the improvement provided by optical correction.
+        """
+        cam_pat, min_size_mm, max_size_mm = self._setup_camera_calibration()
+        fpattern = "scan_error_facet_{}.jpg"
+
+        def dispatch(
+            correction,
+            storelog=False,
+        ):
+            cam_pat.set_correction(correction=correction)
+            cam_pat.generate_vertical_jitter_test()
             pattern_bits = cam_pat.interpolator.readbin()["data"]
             ptrn = pattern_bits.reshape(-1, self.cfg.laser_timing["scanline_length"])
             facets = self.cfg.laser_timing["facets"]
             for facet in range(facets):
-                line = ptrn[facet].tolist()
-                line = line[::-1]  # Reverse the line
+                line = ptrn[facet].tolist()[::-1]
                 self.picture_line(
                     line=line, fct=facet, name=fpattern.format(facet), preview=False
                 )
@@ -393,17 +525,10 @@ class DynamicTests(StaticTests):
                 debug=False,
                 store_log=storelog,
             )
-            scan_errors = []
-            for facet in range(facets):
-                scan_errors.append(float(results[str(facet)]["Scan_shift_um"]))
-            return scan_errors
+            return [results[str(facet)]["Scan_shift_um"] for facet in range(facets)]
 
-        cam_pat.set_correction(correction=False)
-        cam_pat.generate_vertical_jitter_test()
-        scan_errors = dispatch(storelog=True)
-        cam_pat.set_correction(correction=True)
-        cam_pat.generate_vertical_jitter_test()
-        scan_errors_new = dispatch()
+        scan_errors = dispatch(correction=False)
+        scan_errors_new = dispatch(correction=True)
 
         logger.info(f"Uncorrected Errors (um): {scan_errors}")
         logger.info(f"Corrected Errors (um):   {scan_errors_new}")
@@ -441,34 +566,50 @@ class DynamicTests(StaticTests):
 
         logger.info(f"SUCCESS: System calibrated to within +/- {TOLERANCE_UM} microns.")
 
-    def stability_pattern(self, facet=3, preview=True):
+    def direct_pattern(self, facet=3, preview=True):
         """
-        Line with a given pattern is projected and photo is taken.
-        """
-        assert facet in (0, 1, 2, 3), "facet must be 0, 1, 2, or 3"
+        Repeating line pattern is exposed on to the camera
+        using the full scanline. The pattern is bigger than the camera.
 
-        # Python list is compatible with MicroPython
+        Args:
+            facet (int): The index of the polygon scanner facet to expose.
+            preview (bool): If True, displays a preview of the captured image.
+        """
+        num_facets = self.cfg.laser_timing["facets"]
+
+        assert facet in range(num_facets), (
+            f"Facet must be between 0 and {num_facets - 1}"
+        )
+
         fname = f"facet{facet}.jpg"
         pat = [1] * 1 + [0] * 39
         bits = self.cfg.laser_timing["scanline_length"]
-        # extend pattern to line
+        # extend pattern to cover full line
         line = pat * (bits // len(pat)) + pat[: bits % len(pat)]
 
         self.picture_line(line=line, fct=facet, name=fname, preview=preview)
 
-    def full_calibration_cycle(self):
+    def baseline_calibration_cycle(self, capture=True):
         """
-        Automated sequence:
-        1. Capture images for all 4 facets.
-        2. Run calibration analysis.
+        Executes an automated direct calibration sequence for all facets.
+
+        This acts as a baseline hardware test, bypassing the slicer to project
+        a raw repeating pattern and analyze the resulting optical alignment.
+
+        Args:
+            capture (bool): If True, physical hardware will capture new images
+                            for all facets. If False, the analysis will run
+                            on the existing images in the directory.
+
+        Returns:
+            dict: The calibration results payload.
         """
-        capture = False
         num_facets = self.cfg.laser_timing["facets"]
 
         if capture:
             for facet in range(num_facets):
                 logger.info(f"--- Capturing Calibration Image for Facet {facet} ---")
-                self.stability_pattern(facet=facet, preview=False)
+                self.direct_pattern(facet=facet, preview=False)
 
         logger.info("--- Starting Calibration Analysis ---")
         calibration(
