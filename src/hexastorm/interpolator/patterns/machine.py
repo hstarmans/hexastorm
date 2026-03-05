@@ -45,7 +45,7 @@ class LaserCalibrationGen:
         self.interpolator = Interpolator(correction=correction, exposures=exposures)
         # Determine output directory
         self.script_directory = config.paths["svgs"]
-
+        self.camera = False
         # Ensure directory exists
         os.makedirs(self.script_directory, exist_ok=True)
 
@@ -297,7 +297,7 @@ class LaserCalibrationGen:
         fig.savefig(output_path, dpi=fig.dpi, pad_inches=0, bbox_inches=self.tight)
         plt.close(fig)
         logger.info(f"Saved {filename}")
-        self.interpolator.img_to_bin(filename)
+        self.interpolator.img_to_bin(filename, camera=self.camera)
 
     def _clean_axes(self, ax, x_label: str, y_label: str):
         """
@@ -449,7 +449,7 @@ class LaserCalibrationGen:
         self.save_final(fig, "combined_grid_test.svg")
 
 
-if __name__ == "__main__":
+def main():
     from ...log_setup import configure_logging
 
     configure_logging(logging.DEBUG)
@@ -458,3 +458,7 @@ if __name__ == "__main__":
     # Generate all patterns
     generator.generate_combined_test()
     logger.debug("All patterns generated successfully.")
+
+
+if __name__ == "__main__":
+    main()

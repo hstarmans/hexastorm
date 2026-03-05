@@ -233,15 +233,65 @@ class Interpolator:
         ptrn = np.packbits(ptrn, bitorder=self.bitorder)
         return ptrn
 
-    def img_to_bin(self, img_name: Path, bin_name: Path = None):
-        """Convenience method to convert IMG directly to BIN."""
+    def img_to_bin(
+        self, img_name: Path, bin_name: Path = None, camera: bool = False
+    ) -> float:
+        """Convenience method to convert IMG directly to BIN and return job duration in minutes."""
         img_name = Path(img_name)
 
         if not bin_name:
             bin_name = img_name.with_suffix(".pat")
 
+        # Generate the packed bits
         ptrn = self.patternfile(img_name)
+
+        # Write to disk
         self.writebin(ptrn, bin_name)
+
+        # Calculate and log duration statelessly
+        duration_min = self.estimate_job_duration(ptrn, camera=camera)
+        device = "camera" if camera else "machine"
+        logger.info(
+            f"Estimated Job Duration: {duration_min:.2f} minutes using {device}"
+        )
+
+        return duration_min
+
+    def estimate_job_duration(
+        self, ptrn_packed: np.ndarray, camera: bool = False
+    ) -> float:
+        """
+        Calculates expected job duration in minutes directly from the pattern array.
+        """
+        if camera:
+            # Unpack the bytes back to bits to easily check line by line
+            data_bits = np.unpackbits(ptrn_packed, bitorder=self.bitorder)
+            scanline_length = self.cfg.laser_timing["scanline_length"]
+
+            # Reshape into a 2D array: (total_lines, bits_per_line)
+            lines2d = data_bits.reshape(-1, scanline_length)
+
+            # Count rows where the sum of bits is greater than 0
+            active_lines = np.count_nonzero(lines2d.sum(axis=1) > 0)
+
+            # 3 lines per second = 180 lines per minute
+            total_min = active_lines / 180.0
+
+        else:
+            # Machine physical calculation
+            laz_tim = self.cfg.laser_timing
+            lanes = self.params["lanes"]
+            facets = self.params["facetsinlane"]
+
+            line_min = laz_tim["facets"] * laz_tim["rpm"]
+
+            expose_time = (lanes * facets) / line_min
+            startup_time = 0.8
+            lane_change_time = lanes * 0.2
+
+            total_min = startup_time + expose_time + lane_change_time
+
+        return total_min
 
     def writebin(self, pixeldata: np.ndarray, filename: Union[str, Path] = "test.bin"):
         """Wrapper for io.write_binary_file"""

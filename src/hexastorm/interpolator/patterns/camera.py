@@ -27,6 +27,7 @@ class CameraCalibrationGen(LaserCalibrationGen):
         # IMPORTANT: Disable 'tight' cropping.
         # We will manually control the canvas size to include the whitespace at X=0.
         self.tight = None
+        self.camera = True
 
         self.line_thickness_mm = line_thickness_mm
         self.calculate_view_bounds(lower_pixel, upper_pixel)
@@ -49,6 +50,10 @@ class CameraCalibrationGen(LaserCalibrationGen):
         Configures the figure to match the physical dimensions exactly,
         starting from X=0 and Y=0.
         """
+        # Force the figure's initial dimensions to match the physical aspect ratio
+        # (1 inch = 25.4 mm)
+        fig.set_size_inches(width_mm / 25.4, height_mm / 25.4)
+
         ax.set_xlim(0, width_mm)
         ax.set_ylim(0, height_mm)
         ax.axis("off")
@@ -143,7 +148,7 @@ class CameraCalibrationGen(LaserCalibrationGen):
         spacing_x = self.view_width / num_dots_x
 
         # Vertical settings remain fixed per requirements
-        num_dots_y = 10
+        num_dots_y = 2
         spacing_y = dot_radius * 4.0
         pattern_height = spacing_y * num_dots_y  # mm
 

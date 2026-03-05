@@ -437,7 +437,6 @@ def verify_calibration(
 
 def calibration(
     image_dir=None,
-    num_facets=4,
     filename_pattern="facet{}.jpg",
     debug=False,
     store_log=True,
@@ -446,11 +445,42 @@ def calibration(
     compute_rotation=True,  # Toggle: True for 1D lines, False for 2D grids
 ):
     """
-    Orchestrates the loading, analysis, and verification of calibration images.
-    Handles both 1D lines (with rotation) and 2D grids (pure translation).
+    Orchestrates the loading, analysis, and verification of laser calibration images.
+
+    This function processes images containing either a 1D line or a 2D grid of laser dots
+    to calculate spatial deviations for each facet of the laser system. The resulting
+    calibration data can then be used by the slicer to correct physical distortions.
+
+    **Calibration Flow:**
+    1. **Dot Detection:** Loads one image per facet (via `filename_pattern`) and extracts
+       dot centroids by finding contours within the `min_diameter_mm` to `max_diameter_mm` range.
+    2. **Rotation Alignment (1D Mode):** If the laser head is rotated relative to the camera,
+       this is detected and corrected so the scanline is mathematically flat.
+    3. **Virtual Reference Calculation:** Averages the aligned dot patterns across all
+       facets to create a "perfect" target pattern.
+    4. **Error Measurement:** Calculates the deviation—both parallel (scan) and orthogonal—of
+       each facet's dots against the virtual reference.
+    5. **Slicer Verification (2D Mode):** To verify the slicer's correction, a 2D grid
+       pattern (multiple stacked scanlines) is generated. Here, `compute_rotation` is disabled,
+       and the function measures pure translational errors to confirm that distortion has decreased.
+
+    Args:
+        image_dir (str | Path, optional): Directory containing the images. Defaults to config path.
+        filename_pattern (str): String format to locate facet images. Defaults to "facet{}.jpg".
+        debug (bool): If True, pauses execution to display visual debugging windows.
+        store_log (bool): If True, appends the payload to 'calibration_history.json'.
+        min_diameter_mm (float): Minimum physical diameter of a valid dot in millimeters.
+        max_diameter_mm (float): Maximum physical diameter of a valid dot in millimeters.
+        compute_rotation (bool): Toggle for calibration mode. True for 1D single lines
+            (computes rotation); False for 2D stacked grids (pure translation).
+
+    Returns:
+        dict: A master report mapping each facet index to its calculated metrics:
+            `Scan_shift_um`, `Orth_shift_um`, `rotation_angle_deg`, `mean_spot_size_um`,
+            and `mean_eccentricity`.
     """
     cfg = PlatformConfig(test=False)
-    # num_facets = cfg.laser_timing["facets"] # Use if needed from config
+    num_facets = cfg.laser_timing["facets"]
     if image_dir is None:
         image_dir = cfg.paths["images"]
     else:
