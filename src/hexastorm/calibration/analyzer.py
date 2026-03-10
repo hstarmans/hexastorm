@@ -333,7 +333,7 @@ def verify_calibration(
     base_img = None
     loaded_count = 0
     for path in image_paths:
-        img = cv.imread(str(path))
+        img = cv.imread(str(path), cv.IMREAD_GRAYSCALE)
         if img is None:
             continue
 

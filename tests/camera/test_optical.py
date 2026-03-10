@@ -429,12 +429,12 @@ class DynamicTests(StaticTests):
                 compute_rotation=False,
             )
             return [
-                [
-                    results[str(facet)]["Scan_shift_um"],
-                    results[str(facet)]["Orth_shift_um"],
+                    [
+                        float(results[str(facet)]["Scan_shift_um"]),
+                        float(results[str(facet)]["Orth_shift_um"]),
+                    ]
+                    for facet in range(facets)
                 ]
-                for facet in range(facets)
-            ]
 
         errors = dispatch(correction=False)
         errors_correct = dispatch(correction=True)
@@ -514,7 +514,8 @@ class DynamicTests(StaticTests):
             ptrn = pattern_bits.reshape(-1, self.cfg.laser_timing["scanline_length"])
             facets = self.cfg.laser_timing["facets"]
             for facet in range(facets):
-                line = ptrn[facet].tolist()[::-1]
+                offset = 16 # orthogonal error can move lines of image
+                line = ptrn[facet+offset].tolist()[::-1]
                 self.picture_line(
                     line=line, fct=facet, name=fpattern.format(facet), preview=False
                 )
@@ -525,7 +526,7 @@ class DynamicTests(StaticTests):
                 debug=False,
                 store_log=storelog,
             )
-            return [results[str(facet)]["Scan_shift_um"] for facet in range(facets)]
+            return [float(results[str(facet)]["Scan_shift_um"]) for facet in range(facets)]
 
         scan_errors = dispatch(correction=False)
         scan_errors_new = dispatch(correction=True)

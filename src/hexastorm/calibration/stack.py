@@ -100,52 +100,28 @@ class LaserStackSimulator:
         self.current_step += 1
 
     def get_result(self):
-        """Normalizes and returns a tightly cropped image using Otsu's thresholding."""
+        """Normalizes and returns the fixed-size canvas to preserve absolute spatial coordinates."""
         if self.accumulator is None:
             return None
 
         acc = self.accumulator
 
-        # 1. Convertt accumator to 8-bit for thresholding
-        # We sacle to to 0-255 for the thresholding step,
-        acc_min, acc_max = np.min(acc), np.max(acc)
-        if acc_max == acc_min:
-            return None
+        # Normalize the full, uncropped accumulator to 0-255
+        final_min, final_max = np.min(acc), np.max(acc)
+        
+        # Guard against a completely blank canvas
+        if final_max == final_min:
+            return np.zeros_like(acc, dtype=np.uint8)
+            
+        normalized = (acc - final_min) / (final_max - final_min) * 255.0
 
-        temp_8bit = ((acc - acc_min) / (acc_max - acc_min) * 255).astype(np.uint8)
-
-        # 2. Apply otsu's thresholding with the calculated threshold
-        ret, thresh_img = cv.threshold(
-            temp_8bit, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU
-        )
-
-        logger.debug(f"Debug -> Otsu berekende drempelwaarde: {ret}")
-
-        # 3. Vind de coördinaten van de witte pixels (de laserlijnen)
-        coords = np.argwhere(thresh_img > 0)
-
-        if coords.size == 0:
-            return temp_8bit  # Fallback
-
-        y_min, x_min = coords.min(axis=0)
-        y_max, x_max = coords.max(axis=0)
-
-        # 4. Crop but keep a small margin
-        pad = self.pad
-        y_start, y_end = max(0, y_min - pad), min(acc.shape[0], y_max + pad)
-        x_start, x_end = max(0, x_min - pad), min(acc.shape[1], x_max + pad)
-
-        cropped_acc = acc[y_start:y_end, x_start:x_end]
-
-        # 5. Finale normalisatie voor opslaan
-        final_min, final_max = np.min(cropped_acc), np.max(cropped_acc)
-        normalized = (cropped_acc - final_min) / (final_max - final_min) * 255.0
-
-        logger.debug(f"Final Crop Size: {cropped_acc.shape[1]}x{cropped_acc.shape[0]}")
+        logger.debug(f"Final Canvas Size: {normalized.shape[1]}x{normalized.shape[0]}")
         return normalized.astype(np.uint8)
 
 
 if __name__ == "__main__":
+    from ..log_setup import configure_logging
+    configure_logging()
     cfg = PlatformConfig(test=False)
 
     # 1. Setup Data
