@@ -22,7 +22,7 @@ Unlike traditional galvanometer scanners, Hexastorm uses a high-speed rotating p
 [![Making PCB with Hexastorm](https://img.youtube.com/vi/dR09Tev0cPk/mqdefault.jpg)](http://www.youtube.com/watch?v=dR09Tev0cPk "Making PCB with Laser Direct Imaging")
 
 # Install
-First, install the [uv](https://github.com/astral-sh/uv) dependency manager:
+First, install the [uv](https://github.com/astral.sh/uv) dependency manager:
 ```console
 curl -LsSf https://astral-sh/uv/install.sh | sh
 ```
@@ -44,5 +44,6 @@ uv run pytest tests/test_core.py
 uv run python -m hexastorm.interpolator.patterns.machine
 uv run python -m hexastorm.interpolator.interpolator
 ```
+
 
 
