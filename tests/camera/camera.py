@@ -1,6 +1,6 @@
 import os
 
-# Vertel Qt dat hij de systeemfonts moet gebruiken in plaats van de ontbrekende venv fonts
+# Qt fonts cannot be found on the pi, use system fonts
 os.environ["QT_QPA_FONTDIR"] = "/usr/share/fonts"
 import cv2 as cv
 import subprocess
@@ -97,7 +97,6 @@ class Cam:
         Capture a frame. For long exposures, we manually retry
         to compensate for the lack of a backend timeout.
         """
-        # Hoe lang moeten we maximaal wachten? (Exposure + 1 seconde marge)
         max_wait = (self._current_exposure_ms / 1000.0) + 1.0
         start_time = time.time()
 
@@ -105,8 +104,6 @@ class Cam:
             ret, frame = self.cap.read()
             if ret and frame is not None:
                 return frame
-
-            # Geef de CPU wat ademruimte tijdens het wachten
             time.sleep(0.1)
 
         logger.error(f"Capture timed out after {max_wait:.1f}s")
@@ -116,22 +113,17 @@ class Cam:
         logger.info(f"Starting live view (Scale: {scale}). Press ESC to stop.")
         window_name = "Hexastorm Live View"
 
-        # WINDOW_NORMAL laat ons het venster handmatig herschalen
         cv.namedWindow(window_name, cv.WINDOW_NORMAL)
 
-        # Bereken de doelgrootte op basis van de sensorresolutie
         target_w = int(self.width * scale)
         target_h = int(self.height * scale)
 
-        # Forceer het venster naar deze grootte op je scherm
         cv.resizeWindow(window_name, target_w, target_h)
 
         try:
             while True:
                 frame = self.capture()
                 if frame is not None:
-                    # We laten OpenCV de schaling van de pixels afhandelen IN het venster
-                    # Dit is vaak sneller en soepeler dan cv.resize() op elke frame-loop
                     cv.imshow(window_name, frame)
 
                 key = cv.waitKey(1) & 0xFF
