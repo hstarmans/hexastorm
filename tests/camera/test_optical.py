@@ -36,7 +36,6 @@ class StaticTests:
         self.cfg = PlatformConfig(test=False)
 
         self.cam = camera.Cam()
-        self.cam.init()
 
         # Initialize Controller
         self.esp = ESP32Controller(timeout=4.0)
@@ -242,7 +241,7 @@ class DynamicTests(StaticTests):
         # Start the remote loop (wait=False is crucial here)
         self.esp.exec_func(remote_pattern, wait=False, line=line, fct=fct)
 
-        self.cam.set_exposure_ms(1_000)
+        self.cam.set_exposure_ms(300)
 
         # 1. Request Picture
         self.esp.serial.reset_input_buffer()
@@ -399,8 +398,8 @@ class DynamicTests(StaticTests):
                     correc_dct = {}
                     for i in range(facets):
                         correc_dct[str(i)] = {
-                            "scan": calib_dct[facet]["scan"],
-                            "orth": calib_dct[facet]["orth"],
+                            "scan": calib_dct[str(facet)]["scan"],
+                            "orth": calib_dct[str(facet)]["orth"],
                         }
                 else:
                     correc_dct = False
@@ -441,9 +440,6 @@ class DynamicTests(StaticTests):
                 ]
                 for facet in range(facets)
             ]
-
-        errors = dispatch(correction=False)
-        errors_correct = dispatch(correction=True)
 
         errors = dispatch(correction=False)
         errors_correct = dispatch(correction=True)

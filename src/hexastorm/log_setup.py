@@ -59,3 +59,4 @@ def configure_logging(level=logging.INFO):
     logging.getLogger("matplotlib").setLevel(logging.WARNING)
     logging.getLogger("numba").setLevel(logging.WARNING)
     logging.getLogger("PIL").setLevel(logging.WARNING)
+    logging.getLogger("tests.camera.camera").setLevel(logging.INFO)

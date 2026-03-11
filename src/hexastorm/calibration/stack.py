@@ -73,12 +73,18 @@ class LaserStackSimulator:
     def add_exposures(self, img, num_steps=1):
         h, w = img.shape[:2]
 
+        # otsu binarization, check for blankimage
+        if np.max(img) < 50:
+            clean_img = np.zeros_like(img)
+        else:
+            _, clean_img = cv.threshold(img, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU)
+
         if self.accumulator is None:
             self._prepare_transforms(h, w)
 
         # Step 1: Rotate the source image so the line is vertical
         rotated_img = cv.warpAffine(
-            img, self.rotation_matrix, (w, h), flags=cv.INTER_LINEAR
+            clean_img, self.rotation_matrix, (w, h), flags=cv.INTER_LINEAR
         )
 
         # Step 2: Calculate pure X shift
@@ -96,7 +102,9 @@ class LaserStackSimulator:
             flags=cv.INTER_LINEAR,
         )
 
-        self.accumulator += shifted_img
+        # np.maximum prevents accumulating background noise
+        # it is now also prevented by otsu thresholding
+        self.accumulator = np.maximum(self.accumulator, shifted_img)
         self.current_step += 1
 
     def get_result(self):
@@ -108,11 +116,11 @@ class LaserStackSimulator:
 
         # Normalize the full, uncropped accumulator to 0-255
         final_min, final_max = np.min(acc), np.max(acc)
-        
+
         # Guard against a completely blank canvas
         if final_max == final_min:
             return np.zeros_like(acc, dtype=np.uint8)
-            
+
         normalized = (acc - final_min) / (final_max - final_min) * 255.0
 
         logger.debug(f"Final Canvas Size: {normalized.shape[1]}x{normalized.shape[0]}")
@@ -121,6 +129,7 @@ class LaserStackSimulator:
 
 if __name__ == "__main__":
     from ..log_setup import configure_logging
+
     configure_logging()
     cfg = PlatformConfig(test=False)
 

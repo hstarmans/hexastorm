@@ -24,6 +24,7 @@ class Cam:
         self.subdev_node = "/dev/v4l-subdev0"
         self.cap = None
         self._current_exposure_ms = 300  # Standaard waarde
+        self.init()
 
     def _run_hw_cmd(self, cmd):
         """Execute v4l2 commands without crashing on stderr."""
@@ -83,20 +84,27 @@ class Cam:
                 ],
                 capture_output=True,
             )
-            logger.info(f"VBlank increased to {vblank_value} to support long exposure.")
+            logger.debug(
+                f"VBlank increased to {vblank_value} to support long exposure."
+            )
 
         # 3. Apply the actual exposure lines
         self._run_hw_cmd(
             ["v4l2-ctl", "-d", "/dev/v4l-subdev0", "-c", f"exposure={lines}"]
         )
 
-        logger.info(f"Hardware exposure locked at {exposure_ms}ms ({lines} lines)")
+        logger.debug(f"Hardware exposure locked at {exposure_ms}ms ({lines} lines)")
 
-    def capture(self):
+    def capture(self, drop_stale=True):
         """
         Capture a frame. For long exposures, we manually retry
         to compensate for the lack of a backend timeout.
+        drop_stale (bool): If True, discards the current frame in the V4L2 buffer
+                               to guarantee the returned frame was exposed AFTER this method was called.
         """
+        if drop_stale and self.cap:
+            self.cap.grab()  # Gooi de 'stale' buffer direct weg
+
         max_wait = (self._current_exposure_ms / 1000.0) + 1.0
         start_time = time.time()
 
@@ -122,7 +130,7 @@ class Cam:
 
         try:
             while True:
-                frame = self.capture()
+                frame = self.capture(drop_stale=False)
                 if frame is not None:
                     cv.imshow(window_name, frame)
 
