@@ -24,7 +24,7 @@ Unlike traditional galvanometer scanners, Hexastorm uses a high-speed rotating p
 # Install
 First, install the [uv](https://github.com/astral-sh/uv) dependency manager:
 ```console
-curl -LsSf https://astral-sh/uv/install.sh | sh
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 Sync the project dependencies from [pyproject.toml](./pyproject.toml).
 ```console
@@ -44,5 +44,6 @@ uv run pytest tests/test_core.py
 uv run python -m hexastorm.interpolator.patterns.machine
 uv run python -m hexastorm.interpolator.interpolator
 ```
+
 
 
