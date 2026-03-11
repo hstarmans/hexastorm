@@ -1,14 +1,13 @@
 import time
 from pathlib import Path
 import logging
-import json
 
 import fire
 import cv2 as cv
 from tqdm import tqdm
 import numpy as np
 
-import camera
+from . import camera
 from hexastorm.log_setup import configure_logging
 from hexastorm.interpolator.patterns import camera as cam_patterns
 from hexastorm.calibration import (
@@ -93,7 +92,7 @@ class StaticTests:
 
         # 3000 rpm 4 facets --> 200 hertz
         # one facet per 1/200 = 5 ms
-        self.cam.set_exposure(10_000)
+        self.cam.set_exposure_ms(1_000)
         logger.info("This will open up a window")
         logger.info("Press escape to quit live view")
 
@@ -118,7 +117,7 @@ class StaticTests:
 
         self.esp.exec_func(start_spot)
 
-        self.cam.set_exposure(300)
+        self.cam.set_exposure_ms(300)
         logger.info(
             "Calibrate the camera with live view "
             "and press escape to confirm spot in vision"
@@ -144,9 +143,16 @@ class StaticTests:
         last_img = None
         for i in range(count):
             img = self.cam.capture()
-            grey = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+
             if img is None:
+                logger.error(f"Capture {i} failed, skipping...")
                 continue
+
+            # if image is already gray
+            if len(img.shape) == 2:
+                grey = img
+            else:
+                grey = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
 
             last_img = grey
 
@@ -236,7 +242,7 @@ class DynamicTests(StaticTests):
         # Start the remote loop (wait=False is crucial here)
         self.esp.exec_func(remote_pattern, wait=False, line=line, fct=fct)
 
-        self.cam.set_exposure(10_000)
+        self.cam.set_exposure_ms(1_000)
 
         # 1. Request Picture
         self.esp.serial.reset_input_buffer()
@@ -429,12 +435,12 @@ class DynamicTests(StaticTests):
                 compute_rotation=False,
             )
             return [
-                    [
-                        float(results[str(facet)]["Scan_shift_um"]),
-                        float(results[str(facet)]["Orth_shift_um"]),
-                    ]
-                    for facet in range(facets)
+                [
+                    float(results[str(facet)]["Scan_shift_um"]),
+                    float(results[str(facet)]["Orth_shift_um"]),
                 ]
+                for facet in range(facets)
+            ]
 
         errors = dispatch(correction=False)
         errors_correct = dispatch(correction=True)
@@ -514,8 +520,8 @@ class DynamicTests(StaticTests):
             ptrn = pattern_bits.reshape(-1, self.cfg.laser_timing["scanline_length"])
             facets = self.cfg.laser_timing["facets"]
             for facet in range(facets):
-                offset = 16 # orthogonal error can move lines of image
-                line = ptrn[facet+offset].tolist()[::-1]
+                offset = 16  # orthogonal error can move lines of image
+                line = ptrn[facet + offset].tolist()[::-1]
                 self.picture_line(
                     line=line, fct=facet, name=fpattern.format(facet), preview=False
                 )
@@ -526,7 +532,9 @@ class DynamicTests(StaticTests):
                 debug=False,
                 store_log=storelog,
             )
-            return [float(results[str(facet)]["Scan_shift_um"]) for facet in range(facets)]
+            return [
+                float(results[str(facet)]["Scan_shift_um"]) for facet in range(facets)
+            ]
 
         scan_errors = dispatch(correction=False)
         scan_errors_new = dispatch(correction=True)
