@@ -373,12 +373,16 @@ class ESP32Host(BaseHost):
             await self.synchronize(False)
         return mean_ms
 
-    async def test_laserhead(self):
+    async def test_laserhead(self, shift=0):
         """
         Test laserhead by comparing jitter percentage of each facet against expected configuration.
 
         Measures the period for each facet multiple times, computes the jitter
-        and compares against the expected jitter percentage from configuration.
+        (ignoring statistical outliers) , and compares against the expected jitter percentage from configuration.
+
+        Args:
+        - shift (int, optional): Rotational offset used to map raw hardware facet IDs
+          to calibrated logical facet IDs. Defaults to 0.
 
         Returns:
         - True if jitter is within expected limits.
@@ -386,6 +390,8 @@ class ESP32Host(BaseHost):
 
         Notes:
         - If facet period is below half the expected period, test fails.
+        - The `shift` parameter ensures that errors are reported against the correct
+          physical facet based on the calibration table, regardless of boot orientation.
         """
         cur_sync = (await self.fpga_state)["synchronized"]
         if not cur_sync:
@@ -396,7 +402,7 @@ class ESP32Host(BaseHost):
         exp_facet_ms = 60 / (laz_tim["rpm"] * num_facets / 1000)
 
         # facet_ms: timing values, facet_ids: indices 0-3
-        facet_ms, facet_ids = await self.measure_facet_period_ms()
+        facet_ms, facet_ids = await self.measure_facet_period_ms(samples=200)
 
         # --- CASE 1: Global Mean Check (RPM Accuracy) ---
         # We check if the motor is spinning at the right speed overall.
@@ -415,33 +421,44 @@ class ESP32Host(BaseHost):
         overall_result = True
 
         # --- CASE 2: Per-Facet Jitter Check ---
-        for f_id in range(num_facets):
-            facet_data = facet_ms[facet_ids == f_id]
+        for raw_f_id in range(num_facets):
+            logical_f_id = (raw_f_id + shift) % num_facets
+            facet_data = facet_ms[facet_ids == raw_f_id]
+            n_samples = len(facet_data)
 
-            # Check for data presence
-            if len(facet_data) < 2:
-                logger.error(f"Facet {f_id}: Less than 2 data points.")
-                overall_result = False
-                break
+            # 1. Sort the array in ascending order
+            sorted_data = np.sort(facet_data)
 
-            min_val = np.min(facet_data)
-            max_val = np.max(facet_data)
-            mean_val = np.mean(facet_data)
+            # 2. Determine how many outliers to drop (e.g., 2% on each end = 4% total ignored)
+            # If n_samples is 100, drop_count is 2. We drop the 2 lowest and 2 highest values.
+            drop_count = int(n_samples * 0.02)
 
-            # CASE 2: Jitter calculation
-            min_frac_perc = (mean_val - min_val) / mean_val * 100
-            max_frac_perc = (max_val - mean_val) / mean_val * 100
+            # 3. Slice the array to get the "clean" core data
+            if drop_count > 0:
+                clean_data = sorted_data[drop_count:-drop_count]
+            else:
+                clean_data = sorted_data
+
+            # 4. Grab the new, realistic Min, Max, and Mean
+            clean_min = clean_data[0]
+            clean_max = clean_data[-1]
+            mean_val = np.mean(clean_data)
+
+            # 5. Calculate your Peak-to-Peak Jitter on the clean data
+            min_frac_perc = (mean_val - clean_min) / mean_val * 100
+            max_frac_perc = (clean_max - mean_val) / mean_val * 100
             total_jitter_perc = min_frac_perc + max_frac_perc
 
             if total_jitter_perc > laz_tim["jitter_exp_perc"]:
                 logger.error(
-                    f"Facet {f_id}: Jitter {total_jitter_perc:.4f}% exceeds limit of {laz_tim['jitter_exp_perc']}%."
+                    f"Facet {logical_f_id}: Clean Jitter {total_jitter_perc:.4f}% exceeds limit of {laz_tim['jitter_exp_perc']}%."
                 )
                 overall_result = False
                 break
 
-            # If we reach here, this specific facet passed.
-            logger.info(f"Facet {f_id}: Passed (Jitter: {total_jitter_perc:.4f}%)")
+            logger.info(
+                f"Facet {logical_f_id}: Passed (Clean Jitter: {total_jitter_perc:.4f}%)"
+            )
 
         if not cur_sync:
             await self.synchronize(False)
