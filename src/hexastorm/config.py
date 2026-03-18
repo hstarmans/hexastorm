@@ -219,7 +219,7 @@ class PlatformConfig:
             logging.error("Calibration correction not supported in MicroPython.")
             return {}
 
-        history_file = self.cfg.paths["calibration"] / "scan_visibility.json"
+        history_file = self.paths["calibration"] / "scan_visibility.json"
         with open(history_file, "r") as f:
             history = json.load(f)
             last_record = history[-1]

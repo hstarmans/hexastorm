@@ -31,10 +31,6 @@ dependencies = [
     "pyserial>=3.5",
 ]
 
-[dependency-groups]
-camera = [
-    "arducampython",
-]
 
 [tool.ruff]
 line-length = 88
@@ -43,8 +39,7 @@ line-length = 88
 quote-style = "double"
 
 [tool.uv.sources]
-amaranth-boards = { git = "https://github.com/amaranth-lang/amaranth-boards.git", rev = "c26a72e59c786b38e0e989ae64c6c2560ca7c29c" }
-arducampython = { git = "https://github.com/hstarmans/Arducampython.git" }
+amaranth-boards = { git = "https://github.com/amaranth-lang/amaranth-boards.git", rev = "main" }
 
 [project.scripts]
 cam = "tests.camera.test_optical:main"

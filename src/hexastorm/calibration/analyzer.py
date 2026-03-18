@@ -108,7 +108,10 @@ def get_dots(
     if img is None:
         raise ValueError("Image data is None")
 
-    gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+    if len(img.shape) == 2:
+        gray = img
+    else:
+        gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
 
     # Ask Otsu to calculate the ideal threshold mathematically
     otsu_val, _ = cv.threshold(gray, 0, 255, cv.THRESH_OTSU)
@@ -333,7 +336,7 @@ def verify_calibration(
     base_img = None
     loaded_count = 0
     for path in image_paths:
-        img = cv.imread(str(path))
+        img = cv.imread(str(path), cv.IMREAD_GRAYSCALE)
         if img is None:
             continue
 

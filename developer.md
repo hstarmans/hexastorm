@@ -1,59 +1,140 @@
 # Dev Notes
 
-## Camera Setup
+# Camera Setup & Configuration
 
-The operation of the laser scanner can be verified with a camera. We use the [Arducam Global shutter](https://www.arducam.com/products/camera-breakout-board/global-shutter-camera/) which uses the OV2311 chip. Note that the older UC-621 version is not compatible with the latest Raspberry Pi versions and drivers.
+The operation of the laser scanner is verified using an **Arducam Global Shutter** camera (OV2311 chip). This setup utilizes the standard Linux kernel drivers (V4L2) 
+instead of libcam.
 
-The camera must be enabled via `raspi-config`. Note that `raspi-config` states this will no longer be supported in future versions and denotes the camera as legacy. You may need to leave `i2c-dev` in `/etc/modules-load.d/modules.conf` for the I2C to load properly.
+## System Requirements
+* **Hardware:** Arducam OV2311 (Global Shutter).
+* **OS:** Raspberry Pi OS / Debian 12 or 13 (**Bookworm/Trixie**) 64-bit.
+* **Driver Model:** V4L2 (Video4Linux2) with Media Controller support.
 
-## Arducam Configuration
+## 1. Boot Configuration
+The camera is configured via Device Tree overlays in `/boot/firmware/config.txt`. This forces the Pi to use the correct I2C bus and load the `ov2311` driver without relying on the deprecated `start_x` legacy stack.
 
-Laser spots are measured using the Arducam UC-621. There is a binary available for 64-bit systems, but this binary only works on GNU/Linux 11 (Bullseye). No sources are available, so it cannot be recompiled. Arducam has released a newer version of this camera that uses the `libcam` driver, but the UC-621 is not `libcam` compatible. For more information, see the [ArduCAM MIPI_Camera GitHub repository](https://github.com/ArduCAM/MIPI_Camera).
-
-Before installing the Python wrapper, ensure the following lines are in your `/boot/config.txt` for the Arducam to work. If successful, the camera should be visible via `i2cdetect -y 10`:
+Add the following lines to `/boot/firmware/config.txt`:
 
 ```ini
-dtparam=i2c_arm=on
-dtoverlay=spi0-1cs,cs0_pin=18
-dtoverlay=spi1-1cs,cs0_pin=7
-dtparam=audio=on
-start_x=1
-display_auto_detect=1
+# Disable auto-detection to ensure manual control via V4L2
+camera_auto_detect=0
+
+# Enable I2C bus for camera/display
+dtparam=i2c_vc=on
+dtparam=i2c_vc_baudrate=100000
+
+# Kernel DRM driver for video/graphics
 dtoverlay=vc4-kms-v3d
 max_framebuffers=2
-dtoverlay=gpio-poweroff,gpiopin=17,active_low
-arm_64bit=1
-disable_overscan=1
-
-[cm4]
-otg_mode=1
-
-[pi4]
-arm_boost=1
 
 [all]
-dtparam=i2c_vc=on
+# Hardware-specific overlay for OV2311
+# cam1 forces the port on CM4/Pi4; media-controller=1 is essential for RAW access
+dtoverlay=ov2311,cam1,media-controller=1
 gpu_mem=300
-dtparam=i2c_arm_baudrate=400000
-```
+arm_64bit=1
+arm_boost=1
 
-**Important:** There should not be `dtparam=spi=on` anywhere else in the file. This would enable two chip selects for SPI0 and create a conflict with the pin select of SPI1.
+# Disable Bluetooth to prevent WiFi interference and terminal latency
+dtoverlay=disable-bt
+---
 
-The correct Python dependencies for Bullseye can be obtained using Conda. Use `uv` to install the remaining packages in your Conda environment:
+Je hebt gelijk, de weergave versprong daar doordat er een codeblok *binnen* een codeblok stond. Dat vindt de interface niet leuk.
 
-```bash
-wget "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-aarch64.sh"
-bash Miniforge3-Linux-aarch64.sh
-source .bashrc
-conda create -n hexastorm python=3.12 numba "numpy>=2.0.0"
-conda install "opencv>=4.10.0"
-conda activate hexastorm
-uv pip install --system -e ".[camera,desktop]"
-```
+Hier is de tekst nogmaals, maar nu in een "raw" format zonder nesten, zodat je het veilig kunt kopiëren:
 
 ---
 
-# Brief Description
+# Camera Setup & Configuration
+
+The operation of the laser scanner is verified using an **Arducam Global Shutter** camera (OV2311 chip). Unlike legacy implementations, this setup utilizes the standard Linux kernel drivers (V4L2) for maximum stability, low latency, and full resolution support on modern Raspberry Pi systems.
+
+## System Requirements
+
+* **Hardware:** Arducam OV2311 (Global Shutter).
+* **OS:** Raspberry Pi OS / Debian 12 or 13 (**Bookworm/Trixie**) 64-bit.
+* **Driver Model:** V4L2 (Video4Linux2) with Media Controller support.
+
+## 1. Boot Configuration
+
+The camera is configured via Device Tree overlays in `/boot/firmware/config.txt`. This forces the Pi to use the correct I2C bus and load the `ov2311` driver without relying on the deprecated `start_x` legacy stack.
+
+Add the following lines to `/boot/firmware/config.txt`:
+
+```ini
+# Disable auto-detection to ensure manual control via V4L2
+camera_auto_detect=0
+
+# Enable I2C bus for camera/display
+dtparam=i2c_vc=on
+dtparam=i2c_vc_baudrate=100000
+
+# Kernel DRM driver for video/graphics
+dtoverlay=vc4-kms-v3d
+max_framebuffers=2
+
+[all]
+# Hardware-specific overlay for OV2311
+# cam1 forces the port on CM4/Pi4; media-controller=1 is essential for RAW access
+dtoverlay=ov2311,cam1,media-controller=1
+gpu_mem=300
+arm_64bit=1
+arm_boost=1
+
+# Disable Bluetooth to prevent WiFi interference and terminal latency
+dtoverlay=disable-bt
+
+```
+
+## 2. Automatic Initialization (Systemd)
+
+Because the OV2311 is an industrial sensor, the "pipeline" (pixel format and resolution) must be initialized at every boot. This is handled by a bash script and a managed systemd service.
+
+### Initialization Script
+
+Create the script at `/usr/local/bin/camera-init.sh`:
+
+```bash
+#!/bin/bash
+# Find the correct media node (typically /dev/media3 or 4 on Pi 4)
+MEDIA_NODE=$(media-ctl -d /dev/media* -p | grep -l "ov2311" | head -n 1)
+
+# Configure the hardware pipeline to 8-bit RAW (GREY)
+media-ctl -d $MEDIA_NODE --set-v4l2 '"ov2311 10-0060":0[fmt:Y8_1X8/1600x1300]'
+v4l2-ctl -d /dev/video0 --set-fmt-video=width=1600,height=1300,pixelformat=GREY
+
+# Optimize system stability
+/sbin/iwconfig wlan0 power off  # Disable WiFi Power Management to prevent SSH freezes
+v4l2-ctl -d /dev/v4l-subdev0 -c exposure=500  # Set a default baseline exposure
+
+```
+
+*Ensure the script is executable: `sudo chmod +x /usr/local/bin/camera-init.sh*`
+
+### Systemd Service
+
+Create the service unit at `/etc/systemd/system/camera-init.service`:
+
+```ini
+[Unit]
+Description=Initialize Arducam OV2311 V4L2 Pipeline
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/camera-init.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+
+```
+
+*Enable the service: `sudo systemctl enable --now camera-init.service*`
+
+
+
+# FPGA description
 
 The controller sends a command with a word to the FPGA, which stores it in SRAM. The command is 8 bits long, and the word is 64 bits. The word is only non-empty for write commands. If the memory is full, the FPGA sends a notification back to the host. The instructions are parsed from the SRAM if execution is enabled.
 
