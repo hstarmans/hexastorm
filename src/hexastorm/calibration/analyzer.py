@@ -71,26 +71,38 @@ def append_history_record(filename, payload_dict, max_records=10000):
     logger.info(f"History updated: {history_file}")
 
 
-def update_calibration_history(master_report):
+def update_statistical_history(stats_report):
     """
-    Appends the new calibration results to 'calibration_history.json'
-    ONLY if the data is different from the previous run.
+    Appends the statistical calibration results to 'calibration_history.json'.
+    Converts mean um shifts to mm for the slicer, while keeping the std/ptp
+    data for quality tracking.
     """
-    # 1. Prepare the new data payload (without timestamp yet)
     new_facets_data = {}
 
-    # Iterate through facets in the report
-    for facet_key, data in master_report.items():
-        if "Scan_shift_um" in data:
+    for facet_key, data in stats_report.items():
+        if "scan_mean_um" in data:
             new_facets_data[facet_key] = {
-                "scan": round(data["Scan_shift_um"] / 1000.0, 6),
-                "orth": round(data["Orth_shift_um"] / 1000.0, 6),
-                "rotation_angle": data.get("rotation_angle_deg", 0.0),
-                "spot_size_um": data.get("mean_spot_size_um", 0),
-                "eccentricity": data.get("mean_eccentricity", 0),
+                # The slicer uses these core keys (converted to mm)
+                "scan": round(data["scan_mean_um"] / 1000.0, 6),
+                "orth": round(data["orth_mean_um"] / 1000.0, 6),
+                "rotation_angle": data.get("rotation_angle_mean", 0.0),
+                # Keep the stats for hardware health tracking
+                "scan_std_um": data["scan_std_um"],
+                "orth_std_um": data["orth_std_um"],
+                "scan_ptp_um": data["scan_ptp_um"],
+                "orth_ptp_um": data["orth_ptp_um"],
+                # Add the spot metrics
+                "spot_size_um": data.get("spot_size_mean", 0),
+                "eccentricity": data.get("eccentricity_mean", 0),
+                "samples": data["samples"],
             }
 
-    payload = {"facets": new_facets_data}
+    payload = {
+        "type": "statistical_calibration",
+        "iterations": list(stats_report.values())[0]["samples"],
+        "facets": new_facets_data,
+    }
+
     append_history_record("calibration_history.json", payload)
 
 
@@ -246,8 +258,9 @@ def rotate_dots(dots, angle_deg):
 
 def calculate_facet_shifts(rect_dots_list):
     """
-    Calculates shifts against a 'virtual reference' which is the spatial mean
-    of matching dots across all facets.
+    Calculates shifts against a 'virtual reference'.
+    which is the spatial median position to prevent highly unstable facets
+    from skewing the baseline.
     """
     num_facets = len(rect_dots_list)
     if num_facets == 0 or any(len(f) < 3 for f in rect_dots_list):
@@ -259,21 +272,26 @@ def calculate_facet_shifts(rect_dots_list):
     max_shift_px = max_shift_um / abs(Camera.DEFAULT_PIXEL_SIZE_UM)
 
     # 1. Build the Virtual Reference Facet
-    # Use the first facet as an anchor just to identify matching dot groupings
-    anchor_facet = rect_dots_list[0]
-    virtual_reference = []
+    # Pick the facet with the most dots as the anchor.
+    anchor_idx = max(range(num_facets), key=lambda i: len(rect_dots_list[i]))
+    anchor_facet = rect_dots_list[anchor_idx]
 
+    virtual_reference = []
     # Keep track of the aligned dots for each facet so we can compute math easily
     facet_matched_dots = {i: [] for i in range(num_facets)}
 
     for anchor_dot in anchor_facet:
-        group = [anchor_dot]
-        matched_for_this_dot = {0: anchor_dot}
+        group = []
+        matched_for_this_dot = {}
         is_valid_group = True
 
-        # Find the corresponding dot in the other facets
-        for i in range(1, num_facets):
+        # Find the corresponding dot in ALL facets (including the anchor itself)
+        for i in range(num_facets):
             facet = rect_dots_list[i]
+            if len(facet) == 0:
+                is_valid_group = False
+                break
+
             distances = np.linalg.norm(facet - anchor_dot, axis=1)
             closest_idx = np.argmin(distances)
 
@@ -286,9 +304,9 @@ def calculate_facet_shifts(rect_dots_list):
                 break
 
         if is_valid_group:
-            # Calculate the MEAN spatial position for this dot across all facets
-            mean_dot = np.mean(group, axis=0)
-            virtual_reference.append(mean_dot)
+            # If a facet is wildly off, the median stays with the tight cluster of 1, 2, and 3.
+            ideal_dot = np.median(group, axis=0)
+            virtual_reference.append(ideal_dot)
             for i in range(num_facets):
                 facet_matched_dots[i].append(matched_for_this_dot[i])
 
@@ -305,18 +323,22 @@ def calculate_facet_shifts(rect_dots_list):
     for i in range(num_facets):
         target_dots = np.array(facet_matched_dots[i])
 
-        # Deviations from the ideal mean
+        # Deviations from the ideal median
         x_diffs = target_dots[:, 0] - virtual_reference[:, 0]
         y_diffs = target_dots[:, 1] - virtual_reference[:, 1]
 
         facet_data[str(i)] = {
-            "Scan_shift_um": round(np.mean(x_diffs) * Camera.DEFAULT_PIXEL_SIZE_UM, 3),
-            "Orth_shift_um": round(np.mean(y_diffs) * Camera.DEFAULT_PIXEL_SIZE_UM, 3),
+            "Scan_shift_um": round(
+                float(np.mean(x_diffs) * Camera.DEFAULT_PIXEL_SIZE_UM), 3
+            ),
+            "Orth_shift_um": round(
+                float(np.mean(y_diffs) * Camera.DEFAULT_PIXEL_SIZE_UM), 3
+            ),
             "std_scan_um": round(
-                np.std(x_diffs) * abs(Camera.DEFAULT_PIXEL_SIZE_UM), 3
+                float(np.std(x_diffs) * abs(Camera.DEFAULT_PIXEL_SIZE_UM)), 3
             ),
             "std_orth_um": round(
-                np.std(y_diffs) * abs(Camera.DEFAULT_PIXEL_SIZE_UM), 3
+                float(np.std(y_diffs) * abs(Camera.DEFAULT_PIXEL_SIZE_UM)), 3
             ),
             "dots_matched": len(virtual_reference),
         }
@@ -442,7 +464,6 @@ def calibration(
     image_dir=None,
     filename_pattern="facet{}.jpg",
     debug=False,
-    store_log=True,
     min_diameter_mm=0.01,
     max_diameter_mm=0.20,
     compute_rotation=True,  # Toggle: True for 1D lines, False for 2D grids
@@ -490,7 +511,7 @@ def calibration(
         image_dir = Path(image_dir)
 
     mode_str = "1D Line" if compute_rotation else "2D Grid"
-    logger.info(f"Starting {mode_str} Calibration Analysis on: {image_dir}")
+    logger.debug(f"Starting {mode_str} Calibration Analysis on: {image_dir}")
 
     min_diameter_um = min_diameter_mm * 1000.0
     max_diameter_um = max_diameter_mm * 1000.0
@@ -550,10 +571,6 @@ def calibration(
 
         master_report[str(i)] = {**s_data, **spot_data, **angle_data}
 
-    # 5. Save History optionally
-    if store_log:
-        update_calibration_history(master_report)
-
     # 6. Verify Visuals
     verify_calibration(
         image_paths,
@@ -570,14 +587,13 @@ def calibration(
 if __name__ == "__main__":
     from ..log_setup import configure_logging
 
-    configure_logging(logging.DEBUG)
+    configure_logging(logging.INFO)
 
     # Run the analysis, passing the size thresholds in mm
     results = calibration(
         image_dir=None,  # Use default from config
         filename_pattern="facet{}.jpg",
         debug=False,
-        store_log=False,  # Set to True to save to calibration_history.json
         min_diameter_mm=0.01,  # Equivalent to 10 um
         max_diameter_mm=0.20,  # Equivalent to 200 um
     )

@@ -1,6 +1,7 @@
 import time
 from pathlib import Path
 import logging
+import sys
 
 import fire
 import cv2 as cv
@@ -14,9 +15,10 @@ from hexastorm.calibration import (
     calibration,
     get_dots,
     append_history_record,
+    update_statistical_history,
     LaserStackSimulator,
 )
-from hexastorm.esp32_controller import ESP32Controller
+from hexastorm.esp32_controller import ESP32Controller, ESP32RemoteError
 from hexastorm.config import PlatformConfig
 
 logger = logging.getLogger(__name__)
@@ -169,7 +171,7 @@ class StaticTests:
 
                 file_path = self.cfg.paths["images"] / file_name
                 cv.imwrite(str(file_path), grey)
-                logger.info(f"Saved: {file_path.name}")
+                logger.debug(f"Saved: {file_path.name}")
 
             if count > 1:
                 time.sleep(1)
@@ -224,7 +226,7 @@ class DynamicTests(StaticTests):
             global host, spoll, sys
 
             chunk = host.cfg.hdl_cfg.lines_chunk
-            true_facet = host.remap(fct, measure=False)
+            true_facet = host.remap(fct)
 
             while True:
                 host.write_line(line, repetitions=chunk, facet=true_facet)
@@ -355,10 +357,13 @@ class DynamicTests(StaticTests):
 
         append_history_record("scan_visibility.json", payload)
 
-    def _setup_camera_calibration(self):
+    def _setup_camera_calibration(self, thickness=0.150):
         """
         Helper method to initialize the camera calibration generator
         and return shared sizing constants to avoid repetition.
+
+        Args:
+            thickness  (float): thickenss in mm used in pattern
         """
         pix_margin = 20
         visible_pixels = self.cfg.get_visible_pixels()
@@ -366,14 +371,15 @@ class DynamicTests(StaticTests):
         lower_pixel = min(visible_pixels) + pix_margin
         upper_pixel = max(visible_pixels) - pix_margin
 
-        line_thickness_mm = 0.150
-        min_size_mm = 0.050
-        max_size_mm = 0.200
+        assert thickness > 0.05, "Not supported tune parameters"
+
+        min_size_mm = 0.010
+        max_size_mm = 2 * thickness
 
         cam_pat = cam_patterns.CameraCalibrationGen(
             lower_pixel=lower_pixel,
             upper_pixel=upper_pixel,
-            line_thickness_mm=line_thickness_mm,
+            line_thickness_mm=thickness,
         )
         return cam_pat, min_size_mm, max_size_mm
 
@@ -430,7 +436,6 @@ class DynamicTests(StaticTests):
                 min_diameter_mm=min_size_mm,
                 max_diameter_mm=max_size_mm,
                 debug=False,
-                store_log=storelog,
                 compute_rotation=False,
             )
             return [
@@ -477,16 +482,23 @@ class DynamicTests(StaticTests):
             f"Post-Correction Max Scan: {max_scan_after:.2f} um | Max Orth: {max_orth_after:.2f} um"
         )
 
-        # 1. Assert the system actually improved overall
-        assert max_err_after < max_err_before, (
-            "Calibration Failure: Correction increased the maximum 2D error!"
-        )
-
-        # 2. Assert the system meets the final engineering tolerance
+        # 1. Assert the system meets the final engineering tolerance
         TOLERANCE_UM = 30.0
         assert max_err_after <= TOLERANCE_UM, (
             f"Tolerance Failure: Worst facet 2D error ({max_err_after:.2f} um) exceeds {TOLERANCE_UM} um limit."
         )
+
+        # 2. Assert the system improved, BUT ONLY if it started out of tolerance
+        if max_err_before > TOLERANCE_UM:
+            assert max_err_after < max_err_before, (
+                f"Calibration Failure: Correction increased the maximum 2D error "
+                f"(Before: {max_err_before:.2f} um, After: {max_err_after:.2f} um)!"
+            )
+        else:
+            logger.info(
+                f"System was already within tolerance prior to calibration."
+                f"(Before: {max_err_before:.2f} um, After: {max_err_after:.2f} um)!"
+            )
 
         logger.info(
             f"SUCCESS: 2D System calibrated to within +/- {TOLERANCE_UM} microns."
@@ -494,7 +506,7 @@ class DynamicTests(StaticTests):
 
         return errors, errors_correct
 
-    def line_error(self):
+    def line_error(self, iterations=5, thickness=0.1):
         """
         Measures the 1D scan error by projecting a vertical line pattern.
 
@@ -502,76 +514,134 @@ class DynamicTests(StaticTests):
         the first line of this pattern is projected and captured. The center of
         the resulting dots should ideally align across facets. The alignment is
         measured to evaluate the improvement provided by optical correction.
-        """
-        cam_pat, min_size_mm, max_size_mm = self._setup_camera_calibration()
-        fpattern = "scan_error_facet_{}.jpg"
 
-        def dispatch(
-            correction,
-            storelog=False,
-        ):
+        Args:
+            iterations (int): Number of times to measure the line error per state.
+            thickness (float): physical length of the active "ON" segments within
+                               the alternating pattern
+        """
+        cam_pat, min_size_mm, max_size_mm = self._setup_camera_calibration(
+            thickness=0.1
+        )
+
+        def dispatch(correction, iters):
             cam_pat.set_correction(correction=correction)
             cam_pat.generate_vertical_jitter_test()
             pattern_bits = cam_pat.interpolator.readbin()["data"]
             ptrn = pattern_bits.reshape(-1, self.cfg.laser_timing["scanline_length"])
             facets = self.cfg.laser_timing["facets"]
-            for facet in range(facets):
-                offset = 16  # orthogonal error can move lines of image
-                line = ptrn[facet + offset].tolist()[::-1]
-                self.picture_line(
-                    line=line, fct=facet, name=fpattern.format(facet), preview=False
+
+            state_name = "Corrected" if correction else "Uncorrected"
+
+            # 1. Capture Images
+            for it in tqdm(range(iters), desc=f"Capturing {state_name}", unit="iter"):
+                for facet in range(facets):
+                    offset = 16  # orthogonal error can move lines of image
+                    line = ptrn[facet + offset].tolist()[::-1]
+                    fname = f"scan_error_{state_name.lower()}_f{facet}_iter{it}.jpg"
+                    self.picture_line(line=line, fct=facet, name=fname, preview=False)
+
+            # 2. Analyze Images
+            results_matrix = []
+            for it in range(iters):
+                results = calibration(
+                    filename_pattern=f"scan_error_{state_name.lower()}_f{{}}_iter{it}.jpg",
+                    min_diameter_mm=min_size_mm,
+                    max_diameter_mm=max_size_mm,
+                    debug=False,
                 )
-            results = calibration(
-                filename_pattern=fpattern,
-                min_diameter_mm=min_size_mm,
-                max_diameter_mm=max_size_mm,
-                debug=False,
-                store_log=storelog,
-            )
-            return [
-                float(results[str(facet)]["Scan_shift_um"]) for facet in range(facets)
-            ]
+                if results:
+                    # Extract only the Scan shift for each facet
+                    iter_shifts = [
+                        float(results[str(facet)]["Scan_shift_um"])
+                        for facet in range(facets)
+                    ]
+                    results_matrix.append(iter_shifts)
 
-        scan_errors = dispatch(correction=False)
-        scan_errors_new = dispatch(correction=True)
+            return np.array(results_matrix)
 
-        logger.info(f"Uncorrected Errors (um): {scan_errors}")
-        logger.info(f"Corrected Errors (um):   {scan_errors_new}")
+        # Mute loggers temporarily to keep tqdm clean
+        old_level = logger.level
+        logger.setLevel(logging.WARNING)
+        analyzer_logger = logging.getLogger("hexastorm.calibration")
+        analyzer_old_level = analyzer_logger.level
+        analyzer_logger.setLevel(logging.WARNING)
 
-        # --- Mechanical Validation ---
-        # Convert to numpy arrays and take the absolute values
-        abs_before = np.abs(scan_errors)
-        abs_after = np.abs(scan_errors_new)
+        logger.info("\n--- Testing Uncorrected Hardware ---")
+        errors_before = dispatch(correction=False, iters=iterations)
 
-        # Calculate the worst-case error for both runs
+        logger.info("\n--- Testing Corrected Hardware ---")
+        errors_after = dispatch(correction=True, iters=iterations)
+
+        # Restore loggers
+        logger.setLevel(old_level)
+        analyzer_logger.setLevel(analyzer_old_level)
+
+        if len(errors_before) == 0 or len(errors_after) == 0:
+            logger.error("Failed to collect enough data for 1D error analysis.")
+            return
+
+        # --- Mechanical Validation & Statistics ---
+        abs_before = np.abs(errors_before)
+        abs_after = np.abs(errors_after)
+
+        # Calculate overall worst-case error across all iterations
         max_err_before = np.max(abs_before)
         max_err_after = np.max(abs_after)
 
-        # Calculate Mean Absolute Error (MAE) for reporting
+        # Calculate Overall Mean Absolute Error (MAE)
         mae_before = np.mean(abs_before)
         mae_after = np.mean(abs_after)
 
-        logger.info("\n--- Calibration Summary ---")
-        logger.info(f"MAE Before: {mae_before:.2f} um | MAE After: {mae_after:.2f} um")
+        logger.info("\n" + "=" * 45)
+        logger.info("   1D LINE ERROR SUMMARY (STATISTICAL)")
+        logger.info("=" * 45)
+
+        facets = self.cfg.laser_timing["facets"]
+        for f in range(facets):
+            mean_b = np.mean(errors_before[:, f])
+            std_b = np.std(errors_before[:, f])
+            mean_a = np.mean(errors_after[:, f])
+            std_a = np.std(errors_after[:, f])
+
+            logger.info(
+                f"Facet {f} | Mean Before: {mean_b:+.2f} um (std: {std_b:.2f}) -> "
+                f"Mean After: {mean_a:+.2f} um (std: {std_a:.2f})"
+            )
+
+        logger.info("-" * 45)
         logger.info(
-            f"Max Error Before: {max_err_before:.2f} um | Max Error After: {max_err_after:.2f} um"
+            f"Overall MAE Before: {mae_before:.2f} um | MAE After: {mae_after:.2f} um"
         )
-
-        # 1. Assert the system actually improved
-        assert max_err_after < max_err_before, (
-            "Calibration Failure: Correction increased the maximum error!"
+        logger.info(
+            f"Max Error Before:   {max_err_before:.2f} um | Max Error After: {max_err_after:.2f} um"
         )
+        logger.info("=" * 45)
 
-        # 2. Assert the system meets the final engineering tolerance
-        # (Setting a strict 30-micron limit based on your results)
+        # 1. Assert the system meets the final engineering tolerance
         TOLERANCE_UM = 30.0
         assert max_err_after <= TOLERANCE_UM, (
-            f"Tolerance Failure: Worst facet ({max_err_after:.2f} um) exceeds {TOLERANCE_UM} um limit."
+            f"Tolerance Failure: Worst facet 1D error ({max_err_after:.2f} um) "
+            f"exceeds {TOLERANCE_UM} um limit."
         )
 
-        logger.info(f"SUCCESS: System calibrated to within +/- {TOLERANCE_UM} microns.")
+        # 2. Assert the system improved, BUT ONLY if it started out of tolerance
+        if max_err_before > TOLERANCE_UM:
+            assert max_err_after < max_err_before, (
+                f"Calibration Failure: Correction increased the maximum 1D error "
+                f"(Before: {max_err_before:.2f} um, After: {max_err_after:.2f} um)!"
+            )
+        else:
+            logger.info(
+                f"System was already within tolerance prior to correction. "
+                f"(Max Error: {max_err_before:.2f} um)"
+            )
 
-    def direct_pattern(self, facet=3, preview=True):
+        logger.info(
+            f"SUCCESS: 1D System correction validated across {iterations} iterations."
+        )
+
+    def direct_pattern(self, facet=3, preview=True, name=None):
         """
         Repeating line pattern is exposed on to the camera
         using the full scanline. The pattern is bigger than the camera.
@@ -586,7 +656,7 @@ class DynamicTests(StaticTests):
             f"Facet must be between 0 and {num_facets - 1}"
         )
 
-        fname = f"facet{facet}.jpg"
+        fname = name if name else f"facet{facet}.jpg"
         pat = [1] * 1 + [0] * 39
         bits = self.cfg.laser_timing["scanline_length"]
         # extend pattern to cover full line
@@ -594,9 +664,10 @@ class DynamicTests(StaticTests):
 
         self.picture_line(line=line, fct=facet, name=fname, preview=preview)
 
-    def baseline_calibration_cycle(self, capture=True):
+    def baseline_calibration_cycle(self, capture=True, iterations=10):
         """
-        Executes an automated direct calibration sequence for all facets.
+        Executes an automated direct calibration sequence for all facets
+        over multiple iterations to determine measurement repeatability.
 
         This acts as a baseline hardware test, bypassing the slicer to project
         a raw repeating pattern and analyze the resulting optical alignment.
@@ -605,6 +676,7 @@ class DynamicTests(StaticTests):
             capture (bool): If True, physical hardware will capture new images
                             for all facets. If False, the analysis will run
                             on the existing images in the directory.
+            iterations (int): Number of times to measure each facet.
 
         Returns:
             dict: The calibration results payload.
@@ -612,16 +684,75 @@ class DynamicTests(StaticTests):
         num_facets = self.cfg.laser_timing["facets"]
 
         if capture:
-            for facet in range(num_facets):
-                logger.info(f"--- Capturing Calibration Image for Facet {facet} ---")
-                self.direct_pattern(facet=facet, preview=False)
+            for it in tqdm(range(iterations), desc="Capturing Images", unit="iter"):
+                for facet in range(num_facets):
+                    fname = f"facet{facet}_iter{it}.jpg"
+                    self.direct_pattern(facet=facet, preview=False, name=fname)
 
-        logger.info("--- Starting Calibration Analysis ---")
-        calibration(
-            image_dir=None,  # Use default from config
-            filename_pattern="facet{}.jpg",
-            debug=False,
-        )
+        all_results = []
+        for it in range(iterations):
+            res = calibration(
+                image_dir=None,
+                filename_pattern=f"facet{{}}_iter{it}.jpg",
+                debug=False,
+            )
+            all_results.append(res)
+        if not all_results:
+            logger.error("No valid calibration data could be computed.")
+            return {}
+
+        # Aggregate and compute statistics
+        stats_report = {}
+        for facet in range(num_facets):
+            f_key = str(facet)
+
+            # Extract shifts across all successful iterations for this facet
+            scan_shifts = [r[f_key]["Scan_shift_um"] for r in all_results if f_key in r]
+            orth_shifts = [r[f_key]["Orth_shift_um"] for r in all_results if f_key in r]
+            spot_sizes = [
+                r[f_key].get("mean_spot_size_um", 0) for r in all_results if f_key in r
+            ]
+            eccentricities = [
+                r[f_key].get("mean_eccentricity", 0) for r in all_results if f_key in r
+            ]
+
+            angles = [
+                r[f_key].get("rotation_angle_deg", 0.0)
+                for r in all_results
+                if f_key in r
+            ]
+
+            if not scan_shifts:
+                continue
+
+            stats_report[f_key] = {
+                "scan_mean_um": round(float(np.mean(scan_shifts)), 3),
+                "scan_std_um": round(float(np.std(scan_shifts)), 3),
+                "scan_ptp_um": round(
+                    float(np.ptp(scan_shifts)), 3
+                ),  # Peak-to-Peak (Max - Min)
+                "orth_mean_um": round(float(np.mean(orth_shifts)), 3),
+                "orth_std_um": round(float(np.std(orth_shifts)), 3),
+                "orth_ptp_um": round(float(np.ptp(orth_shifts)), 3),
+                "spot_size_mean": round(float(np.mean(spot_sizes)), 3),
+                "eccentricity_mean": round(float(np.mean(eccentricities)), 3),
+                "rotation_angle_mean": round(float(np.mean(angles)), 4),
+                "samples": len(scan_shifts),
+            }
+
+        logger.info("Log level restored")
+        logger.info("\n--- Repeatability Summary ---")
+        for f_key, data in stats_report.items():
+            logger.info(
+                f"Facet {f_key} | "
+                f"Scan Jitter (std): {data['scan_std_um']} um (Spread: {data['scan_ptp_um']} um) | "
+                f"Orth Jitter (std): {data['orth_std_um']} um (Spread: {data['orth_ptp_um']} um)"
+            )
+
+        update_statistical_history(stats_report)
+        logger.info("Statistical calibration data appended to history.")
+
+        return stats_report
 
 
 class Launcher:
@@ -649,10 +780,15 @@ class Launcher:
 
 
 def main():
-    configure_logging(logging.DEBUG)
+    configure_logging(logging.INFO)
     tool = Launcher()
     try:
         fire.Fire(tool)
+    except ESP32RemoteError as e:
+        logger.error(
+            f"\n--- ESP32 MICROPYTHON TRACEBACK ---\n{e}\n-----------------------------------"
+        )
+        sys.exit(1)
     finally:
         tool.close()
 

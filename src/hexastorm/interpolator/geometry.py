@@ -41,7 +41,7 @@ def _jit_fxpos(
 
     # Project displacement onto X axis based on polygon tilt
     xpos = (
-        (np.sin(params["tiltangle"]) * displacement(line_pixel, params)) + xstart + dx
+        (np.sin(params["tiltangle"]) * displacement(line_pixel, params)) + xstart - dx
     )
 
     # Convert mm to grid pixels
