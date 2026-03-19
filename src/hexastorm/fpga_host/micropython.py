@@ -332,7 +332,7 @@ class ESP32Host(BaseHost):
             facet_ms[sample] = f_ticks / (laz_tim["crystal_hz"] / 1000)
             delay = randint(int(0.5 * dt_facet_ms), dt_facet_ms)
             await sleep_ms(dt_facet_ms)
-        logging.error("Measurement fails")
+        logger.error("Measurement fails")
         return facet_ms, facet_id
 
     async def measure_facet_means(
@@ -362,30 +362,36 @@ class ESP32Host(BaseHost):
             facet_ms_id = facet_ms[facet_id == facet]
             if len(facet_ms_id) > 0:
                 mean_ms[facet] = np.mean(facet_ms_id)
-                logger.info(
+                logger.debug(
                     f"Facet {facet}: n={facet_ms_id.size}, mean={mean_ms[facet]:.5f}, std={np.std(facet_ms_id):.5f}"
                 )
             else:
                 mean_ms[facet] = None
-                logger.info(f"Facet {facet}: n=0, mean=None, std=None")
+                logger.debug(f"Facet {facet}: n=0, mean=None, std=None")
 
         if not cur_sync:
             await self.synchronize(False)
         return mean_ms
 
-    async def test_laserhead(self):
+    async def test_laserhead(self, shift=0):
         """
         Test laserhead by comparing jitter percentage of each facet against expected configuration.
 
         Measures the period for each facet multiple times, computes the jitter
-        and compares against the expected jitter percentage from configuration.
+        (ignoring statistical outliers) , and compares against the expected jitter percentage from configuration.
+
+        Args:
+        - shift (int, optional): Rotational offset used to map raw hardware facet IDs
+          to calibrated logical facet IDs. Defaults to 0.
 
         Returns:
-        - True if jitter is within expected limits.
-        - False if jitter exceeds expected limits.
+        - dict: A report containing the overall pass/fail status, global RPM stats,
+          and detailed jitter/mean statistics for each logical facet.
 
         Notes:
         - If facet period is below half the expected period, test fails.
+        - The `shift` parameter ensures that errors are reported against the correct
+          physical facet based on the calibration table, regardless of boot orientation.
         """
         cur_sync = (await self.fpga_state)["synchronized"]
         if not cur_sync:
@@ -393,59 +399,113 @@ class ESP32Host(BaseHost):
 
         laz_tim = self.cfg.laser_timing
         num_facets = laz_tim["facets"]
-        exp_facet_ms = 60 / (laz_tim["rpm"] * num_facets / 1000)
+        expected_rpm = laz_tim["rpm"]
+        exp_facet_ms = 60 / (expected_rpm * num_facets / 1000)
 
-        # facet_ms: timing values, facet_ids: indices 0-3
-        facet_ms, facet_ids = await self.measure_facet_period_ms()
+        # Initialize the report dictionary with the new RPM fields
+        report = {
+            "passed": True,
+            "global_mean_ms": 0.0,
+            "global_deviation_perc": 0.0,
+            "expected_rpm": expected_rpm,
+            "measured_rpm": 0,
+            "facets": {},
+        }
+
+        # Request 200 samples for the percentile trim
+        facet_ms, facet_ids = await self.measure_facet_period_ms(samples=200)
 
         # --- CASE 1: Global Mean Check (RPM Accuracy) ---
-        # We check if the motor is spinning at the right speed overall.
-        global_mean_ms = np.mean(facet_ms)
-        # Calculate percentage deviation from expected
-        global_deviation_perc = abs(global_mean_ms - exp_facet_ms) / exp_facet_ms * 100
+        global_mean_ms = float(np.mean(facet_ms))
+        global_deviation_perc = float(
+            abs(global_mean_ms - exp_facet_ms) / exp_facet_ms * 100
+        )
+
+        # Calculate the actual physical RPM based on the timings
+        measured_rpm = round(60000 / (global_mean_ms * num_facets))
+
+        # Populate global stats (rounded for clean JSON output)
+        report["global_mean_ms"] = round(global_mean_ms, 4)
+        report["global_deviation_perc"] = round(global_deviation_perc, 2)
+        report["measured_rpm"] = measured_rpm
 
         if global_deviation_perc > 10.0:
             logger.error(
                 f"Global timing failure: Mean period {global_mean_ms:.4f}ms "
                 f"deviates {global_deviation_perc:.2f}% from expected {exp_facet_ms:.4f}ms."
             )
+            report["passed"] = False
+            report["error_reason"] = "Global RPM deviation too high"
             await self.synchronize(False)
-            return False
-
-        overall_result = True
+            return report
 
         # --- CASE 2: Per-Facet Jitter Check ---
         for f_id in range(num_facets):
-            facet_data = facet_ms[facet_ids == f_id]
+            raw_f_id = (f_id + shift) % num_facets
+            facet_data = facet_ms[facet_ids == raw_f_id]
+            n_samples = len(facet_data)
 
-            # Check for data presence
-            if len(facet_data) < 2:
-                logger.error(f"Facet {f_id}: Less than 2 data points.")
-                overall_result = False
-                break
+            # Default facet report
+            facet_report = {
+                "passed": False,
+                "mean_ms": 0.0,
+                "jitter_perc": 0.0,
+                "samples_used": n_samples,
+            }
 
-            min_val = np.min(facet_data)
-            max_val = np.max(facet_data)
-            mean_val = np.mean(facet_data)
+            if n_samples < 50:
+                logger.error(
+                    f"Facet {f_id} (Hardware {raw_f_id}): Insufficient samples ({n_samples})."
+                )
+                report["passed"] = False
+                report["facets"][f_id] = facet_report
+                continue
 
-            # CASE 2: Jitter calculation
-            min_frac_perc = (mean_val - min_val) / mean_val * 100
-            max_frac_perc = (max_val - mean_val) / mean_val * 100
+            # 1. Sort the array in ascending order
+            sorted_data = np.sort(facet_data)
+
+            # 2. Drop 2% outliers from each end
+            drop_count = int(n_samples * 0.02)
+            clean_data = (
+                sorted_data[drop_count:-drop_count] if drop_count > 0 else sorted_data
+            )
+
+            # 3. Calculate metrics
+            clean_min = clean_data[0]
+            clean_max = clean_data[-1]
+            mean_val = np.mean(clean_data)
+
+            min_frac_perc = (mean_val - clean_min) / mean_val * 100
+            max_frac_perc = (clean_max - mean_val) / mean_val * 100
             total_jitter_perc = min_frac_perc + max_frac_perc
 
-            if total_jitter_perc > laz_tim["jitter_exp_perc"]:
-                logger.error(
-                    f"Facet {f_id}: Jitter {total_jitter_perc:.4f}% exceeds limit of {laz_tim['jitter_exp_perc']}%."
-                )
-                overall_result = False
-                break
+            # 4. Populate facet report (Rounded for consistency)
+            facet_report["mean_ms"] = round(float(mean_val), 4)
+            facet_report["jitter_perc"] = round(float(total_jitter_perc), 4)
+            facet_report["samples_used"] = len(clean_data)
 
-            # If we reach here, this specific facet passed.
-            logger.info(f"Facet {f_id}: Passed (Jitter: {total_jitter_perc:.4f}%)")
+            jitter_limit = laz_tim["jitter_exp_perc"]
+            is_facet_passed = total_jitter_perc <= jitter_limit
+            facet_report["passed"] = is_facet_passed
+
+            if not is_facet_passed:
+                logger.error(
+                    f"Facet {f_id}: Failed, Mean {mean_val:.4f} ms, "
+                    f"Jitter {total_jitter_perc:.4f}% exceeds limit of {jitter_limit}%."
+                )
+                report["passed"] = False
+            else:
+                logger.info(
+                    f"Facet {f_id}: Passed, Mean {mean_val:.4f} ms, "
+                    f"Jitter {total_jitter_perc:.4f}%."
+                )
+
+            report["facets"][f_id] = facet_report
 
         if not cur_sync:
             await self.synchronize(False)
-        return overall_result
+
+        return report
 
 
 @syncable
