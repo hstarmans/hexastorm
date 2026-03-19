@@ -22,7 +22,7 @@ class Cam:
         self.height = height
         self.video_node = f"/dev/video{device_index}"
         self.subdev_node = "/dev/v4l-subdev0"
-        self.cap = None
+        self.cap = True
         self._current_exposure_ms = 300  # Standaard waarde
         self.init()
 
@@ -60,7 +60,7 @@ class Cam:
 
     def set_exposure_ms(self, exposure_ms):
         """Sets hardware exposure and adjusts vblank to allow long shutter speeds."""
-        self._exposure_ms = exposure_ms
+        self._current_exposure_ms = exposure_ms
         lines = max(1, int(exposure_ms / self.LINE_TIME_MS))
 
         # 1. Disable Auto Exposure
@@ -99,11 +99,13 @@ class Cam:
         """
         Capture a frame. For long exposures, we manually retry
         to compensate for the lack of a backend timeout.
-        drop_stale (bool): If True, discards the current frame in the V4L2 buffer
+        drop_stale (bool): If True, clears the V4L2 buffer
                                to guarantee the returned frame was exposed AFTER this method was called.
         """
         if drop_stale and self.cap:
-            self.cap.grab()  # Gooi de 'stale' buffer direct weg
+            # V4L2 buffers are max 5 frames deep. This aggressively empties it.
+            for _ in range(5):
+                self.cap.grab()
 
         max_wait = (self._current_exposure_ms / 1000.0) + 1.0
         start_time = time.time()
