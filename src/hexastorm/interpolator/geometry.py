@@ -36,12 +36,11 @@ def _jit_fxpos(
     """
     # Get the correction for the current facet
     dx = params["f" + str(facet_idx) + "_scan"]
-
     line_pixel = params["startpixel"] + pixel % params["bitsinscanline"]
 
     # Project displacement onto X axis based on polygon tilt
     xpos = (
-        (np.sin(params["tiltangle"]) * displacement(line_pixel, params)) + xstart - dx
+        (np.sin(params["tiltangle"]) * displacement(line_pixel, params)) + xstart + dx
     )
 
     # Convert mm to grid pixels

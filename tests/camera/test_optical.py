@@ -196,27 +196,29 @@ class DynamicTests(StaticTests):
             return true_facet
 
         self.esp.exec_func(get_facet_zero_mapping)
-        self.facet_zero = 0
 
-        logger.info(f"TestDynamic Setup Complete. Facet 0 maps to: {self.facet_zero}")
-
-    def picture_line(
-        self, line, fct=None, preview=True, takepicture=True, name=None, save_image=True
-    ):
+    def picture_line(self, line, fct=0, preview=True, name=None, save_image=True):
         """
-        Projects a line pattern on a specific facet and takes a picture.
-        Uses serial handshaking (P -> R) to ensure synchronization.
+        Projects a 1D binary pattern with a specific polygon facet and captures the result.
+
+        This method manages a synchronous hardware handshake over serial. It offloads
+        a continuous projection loop to the ESP32, waits for the ESP32 to signal ('R')
+        that the polygon scanner is stable and exposing the correct facet, and only
+        then triggers the camera capture.
 
         Args:
-            save_image (bool): If True, saves the captured image to disk.
-                               If False, keeps it in memory only.
-        Returns:
-            image (numpy array) or None
-        """
-        # Default to the dynamically mapped facet 0 found in setUpClass
-        if fct is None:
-            fct = self.facet_zero
+            line (list[int]): 1D binary array representing the laser firing pattern (1s and 0s).
+            fct (int): The logical index of the polygon facet to target (e.g., 0-3).
+            preview (bool): If True, pauses to display a live camera feed before capture.
+            name (str, optional): The filename for the captured image (e.g., 'facet_0.jpg').
+            save_image (bool): If True, writes the image to disk. If False, keeps it in memory.
 
+        Returns:
+            numpy.ndarray | None: The captured grayscale image, or None if the capture failed.
+
+        Raises:
+            Exception: If the ESP32 fails to respond with the 'R' ready signal within the timeout.
+        """
         # Default filename
         if name is None:
             name = f"dynamic_facet_{fct}.jpg"
@@ -263,9 +265,8 @@ class DynamicTests(StaticTests):
         if ready:
             if preview:
                 self.cam.live_view(0.6)
-            if takepicture:
-                # Pass the save flag down to take_picture
-                result_img = self.take_picture(count=1, name=name, save=save_image)
+            # Pass the save flag down to take_picture
+            result_img = self.take_picture(count=1, name=name, save=save_image)
         else:
             raise Exception("Timeout: ESP32 did not respond with 'R'")
 
@@ -357,13 +358,14 @@ class DynamicTests(StaticTests):
 
         append_history_record("scan_visibility.json", payload)
 
-    def _setup_camera_calibration(self, thickness=0.150):
+    def _setup_camera_calibration(self, thickness=0.150, exposures=1):
         """
-        Helper method to initialize the camera calibration generator
+        Helper method to initialize the camera pattern calibration generator
         and return shared sizing constants to avoid repetition.
 
         Args:
             thickness  (float): thickenss in mm used in pattern
+            exposures (int): number of exposures per step
         """
         pix_margin = 20
         visible_pixels = self.cfg.get_visible_pixels()
@@ -380,50 +382,65 @@ class DynamicTests(StaticTests):
             lower_pixel=lower_pixel,
             upper_pixel=upper_pixel,
             line_thickness_mm=thickness,
+            exposures=exposures,
         )
         return cam_pat, min_size_mm, max_size_mm
 
-    def pattern_error(self):
+    def pattern_error(self, debug_frames=False, thickness=0.06, num_dots_y=1):
         """
-        Measures the scan and orthogonal error by projecting a 2D dot grid pattern per facet.
+        Measures the scan and orthogonal error by projecting a dot grid pattern per facet.
 
-        This method generates an SVG pattern and exposes it onto the camera chip.
-        It simulates the physical movement of the stage by stacking multiple virtual
-        exposures to form a 2D dot pattern. The calibration process then verifies
-        if the corresponding dots align at their expected locations, both with and
-        without optical correction.
+        This method generates an SVG dot grid and projects it onto the camera sensor line by line.
+        Because the camera is stationary, it simulates the physical movement of the stage by
+        stacking these individual 1D exposures into a single 2D image using the LaserStackSimulator.
+
+        The routine evaluates the hardware twice: once without correction and once with the
+        active calibration profile applied. It verifies that optical correction forces the dots
+        to align across all facets, and asserts that the final maximum error falls within the
+        system's engineering tolerance.
+
+        Args:
+            debug_frames (bool): If True, saves every individual row capture to disk
+                                 before stacking (useful for isolating sync/exposure errors).
+            thickness (float): Physical diameter of the projected dots in millimeters.
+            num_dots_y (int): Number of vertical rows of dots to generate.
+
+        Returns:
+            tuple: (errors_before, errors_after) containing lists of the calculated
+                   2D shifts [Scan, Orth] in micrometers for each facet.
         """
-        cam_pat, min_size_mm, max_size_mm = self._setup_camera_calibration()
         fpattern = "pattern_error_facet_{}_{}.jpg"
-        calib_dct = self.cfg.load_latest_calibration()
 
-        def dispatch(correction, storelog=False):
-            facets = self.cfg.laser_timing["facets"]
-            for facet in range(facets):
-                if correction:
-                    correc_dct = {}
-                    for i in range(facets):
-                        correc_dct[str(i)] = {
-                            "scan": calib_dct[str(facet)]["scan"],
-                            "orth": calib_dct[str(facet)]["orth"],
-                        }
-                else:
-                    correc_dct = False
+        tot_facets = self.cfg.laser_timing["facets"]
+        facet_list = list(range(tot_facets))
 
-                cam_pat.set_correction(correction=correc_dct)
-                cam_pat.generate_dot_grid_test()
-                pattern_bits = cam_pat.interpolator.readbin()["data"]
+        def dispatch(correction):
+            for facet in facet_list:
+                cam_pat, min_size_mm, max_size_mm = self._setup_camera_calibration(
+                    thickness,
+                    exposures=4,
+                )
+                cam_pat.set_correction(correction=correction)
+                cam_pat.generate_dot_grid_test(num_dots_y)
+                pattern_data = cam_pat.interpolator.readbin()
+                pattern_bits = pattern_data["data"]
                 ptrn = pattern_bits.reshape(
                     -1, self.cfg.laser_timing["scanline_length"]
                 )
                 lines = len(ptrn)
-                stacker = LaserStackSimulator(expected_total_steps=lines)
-                for row in range(lines):
+                stacker = LaserStackSimulator(
+                    exposures=tot_facets, expected_total_steps=lines
+                )
+                for row in range(facet, lines, tot_facets):
                     line = ptrn[row].tolist()[::-1]  # Reverse the line
                     if max(line) == 0:  # skip empty liines
                         continue
                     img = self.picture_line(
-                        line=line, fct=facet, save_image=False, preview=False
+                        line=line,
+                        fct=facet,
+                        save_image=debug_frames,
+                        name=False,
+                        preview=False,
                     )
                     stacker.add_exposures(img, num_steps=row)
                 res = stacker.get_result()
@@ -443,7 +460,7 @@ class DynamicTests(StaticTests):
                     float(results[str(facet)]["Scan_shift_um"]),
                     float(results[str(facet)]["Orth_shift_um"]),
                 ]
-                for facet in range(facets)
+                for facet in facet_list
             ]
 
         errors = dispatch(correction=False)
@@ -506,12 +523,12 @@ class DynamicTests(StaticTests):
 
         return errors, errors_correct
 
-    def line_error(self, iterations=5, thickness=0.1):
+    def line_error(self, iterations=5, thickness=0.06):
         """
         Measures the 1D scan error by projecting a vertical line pattern.
 
         Generates an SVG representing a set of vertical lines. For each facet,
-        the first line of this pattern is projected and captured. The center of
+        a small part, i.e one line,  of this pattern is projected and captured. The center of
         the resulting dots should ideally align across facets. The alignment is
         measured to evaluate the improvement provided by optical correction.
 
@@ -521,7 +538,7 @@ class DynamicTests(StaticTests):
                                the alternating pattern
         """
         cam_pat, min_size_mm, max_size_mm = self._setup_camera_calibration(
-            thickness=0.1
+            thickness=thickness
         )
 
         def dispatch(correction, iters):
@@ -751,8 +768,6 @@ class DynamicTests(StaticTests):
 
         update_statistical_history(stats_report)
         logger.info("Statistical calibration data appended to history.")
-
-        return stats_report
 
 
 class Launcher:

@@ -62,7 +62,16 @@ class CameraCalibrationGen(LaserCalibrationGen):
         ax.set_position([0, 0, 1, 1])
 
     def generate_vertical_jitter_test(self):
-        """Generates test and returns the filename used."""
+        """
+        Generates a set of lines perpendicular to the scanline.
+
+        The set completely fills the camera bounds. The lines have a thickness
+        and spacing equal to `line_thickness_mm`.
+
+        Note: This test only isolates jitter (movement along the scanline X-axis).
+        The 2D dot grid test is more comprehensive, making this test somewhat
+        redundant, but useful for isolated 1D debugging.
+        """
         filename = f"cam_test_vertical_{self.line_thickness_mm * 1000:.0f}um.svg"
         logger.info(f"Generating Vertical Jitter Test ({filename})...")
         pattern_height = 2  # mm
@@ -118,10 +127,18 @@ class CameraCalibrationGen(LaserCalibrationGen):
         self.resize_to_mm_scale(fig, ax)
         self.save_final(fig, filename)
 
-    def generate_dot_grid_test(self):
+    def generate_dot_grid_test(self, num_dots_y=2):
         """
-        Generates a 2D grid of dots over the view width and returns the filename.
-        Dynamically calculates the number of dots to maintain a minimum 4x spacing.
+        Generates a 2D grid of calibration dots mapped to the camera's visible domain.
+
+        This uses the scanline visible to the camera and
+        fills it with evenly spaced circles (diameter = `line_thickness_mm`). By
+        projecting this identical pattern for each polygon facet, we can visually
+        verify alignment: in a perfectly calibrated system, the dots from every
+        facet will land at the exact same physical coordinates on the sensor.
+
+        Args:
+            num_dots_y (int): The number of vertical rows to generate.
         """
         filename = f"cam_test_grid_{self.line_thickness_mm * 1000:.0f}um.svg"
         logger.info(f"Generating Dot Grid Test ({filename})...")
@@ -148,16 +165,19 @@ class CameraCalibrationGen(LaserCalibrationGen):
         spacing_x = self.view_width / num_dots_x
 
         # Vertical settings remain fixed per requirements
-        num_dots_y = 2
+        y_offset = 0.2
         spacing_y = dot_radius * 4.0
-        pattern_height = spacing_y * num_dots_y  # mm
+        if spacing_y < 0.2:
+            spacing_y = 0.2
+        pattern_height = spacing_y * num_dots_y + y_offset  # mm
 
         for i in range(num_dots_x):
             for j in range(num_dots_y):
                 if digital_dot_diameter > 0:
                     # Center the dot within its respective grid cell
                     center_x = self.x_min + (i * spacing_x) + (spacing_x / 2.0)
-                    center_y = (j * spacing_y) + (spacing_y / 2.0)
+                    # small additional offset needed to see full dot on cam, now 0.1
+                    center_y = (j * spacing_y) + (spacing_y / 2.0) + y_offset
 
                     # Replace Rectangle with a true Circle
                     circle = Circle(
@@ -174,7 +194,13 @@ class CameraCalibrationGen(LaserCalibrationGen):
         self.save_final(fig, filename)
 
     def test_view_bounds(self):
-        """Generates a test pattern to verify view bounds."""
+        """
+        Reads the generated binary pattern and prints an ASCII histogram to the
+        shell so a user can verify where pixels land.
+
+        Useful for debugging the interpolator output to verify exactly where
+        the active laser pixels are falling within the target camera bounds.
+        """
         scanline_length = self.interpolator.cfg.laser_timing["scanline_length"]
         pattern_bits = self.interpolator.readbin()["data"]
         ptrn = pattern_bits.reshape(-1, scanline_length)

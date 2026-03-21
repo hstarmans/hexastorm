@@ -457,6 +457,8 @@ def main():
 
     # Generate all patterns
     generator.generate_combined_test()
+    pattern_data = generator.interpolator.readbin()
+    generator.interpolator.plotptrn(pattern_data, filename="combined_test")
     logger.debug("All patterns generated successfully.")
 
 
