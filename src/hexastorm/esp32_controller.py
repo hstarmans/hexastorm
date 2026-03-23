@@ -2,6 +2,7 @@ import serial
 import time
 import textwrap
 import inspect
+import ast
 
 
 class ESP32RemoteError(Exception):
@@ -108,9 +109,35 @@ class ESP32Controller:
         args_str = ", ".join(f"{k}={v!r}" for k, v in kwargs.items())
 
         # 4. Construct the full payload: Define it, then call it.
-        full_command = f"{source}\n{func_name}({args_str})"
+
+        # Define unique markers
+        start_marker = "_HS_START_"
+        end_marker = "_HS_END_"
+        full_command = (
+            f"{source}\n"
+            f"print('{start_marker}' + repr({func_name}({args_str})) + '{end_marker}')"
+        )
 
         if wait:
-            return self.exec_wait(full_command)
+            raw_output = self.exec_wait(full_command)
+
+            # Use string slicing to find the data between the markers
+            if start_marker in raw_output and end_marker in raw_output:
+                # Extract only the part between the markers
+                data_str = raw_output.split(start_marker)[1].split(end_marker)[0]
+
+                try:
+                    return ast.literal_eval(data_str.strip())
+                except (ValueError, SyntaxError) as e:
+                    raise RuntimeError(
+                        f"Found markers, but data was corrupt.\nData: {data_str!r}\nError: {e}"
+                    )
+            else:
+                # If markers aren't found, the function might have crashed
+                # or logs drowned out the output.
+                raise RuntimeError(
+                    f"Could not find data markers in ESP32 output.\n"
+                    f"Full Raw Output: {raw_output!r}"
+                )
         else:
-            return self.exec_no_wait(full_command)
+            self.exec_no_wait(full_command)

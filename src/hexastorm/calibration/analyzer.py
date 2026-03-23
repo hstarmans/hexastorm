@@ -86,6 +86,8 @@ def update_statistical_history(stats_report):
                 "scan": round(data["scan_mean_um"] / 1000.0, 6),
                 "orth": round(data["orth_mean_um"] / 1000.0, 6),
                 "rotation_angle": data.get("rotation_angle_mean", 0.0),
+                # Timing per facet measured by photodiode
+                "facet_period_ms": data.get("period_ms"),
                 # Keep the stats for hardware health tracking
                 "scan_std_um": data["scan_std_um"],
                 "orth_std_um": data["orth_std_um"],

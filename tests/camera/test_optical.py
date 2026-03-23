@@ -700,6 +700,16 @@ class DynamicTests(StaticTests):
         """
         num_facets = self.cfg.laser_timing["facets"]
 
+        def get_remote_means():
+            global host
+
+            shift = host.remap(0)
+            # remap means to stored facet
+            cur_means = host.cur_facet_means[shift:] + host.cur_facet_means[:shift]
+            return cur_means
+
+        live_means = self.esp.exec_func(get_remote_means)
+
         if capture:
             for it in tqdm(range(iterations), desc="Capturing Images", unit="iter"):
                 for facet in range(num_facets):
@@ -745,6 +755,7 @@ class DynamicTests(StaticTests):
             stats_report[f_key] = {
                 "scan_mean_um": round(float(np.mean(scan_shifts)), 3),
                 "scan_std_um": round(float(np.std(scan_shifts)), 3),
+                "period_ms": live_means[facet],
                 "scan_ptp_um": round(
                     float(np.ptp(scan_shifts)), 3
                 ),  # Peak-to-Peak (Max - Min)
