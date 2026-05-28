@@ -327,8 +327,8 @@ class PlatformConfig:
                     id=2,
                     ctor=dict(
                         baudrate=115200,
-                        tx=43,
-                        rx=44,
+                        tx=15,
+                        rx=7,
                     ),
                     init=dict(
                         bits=8,
@@ -349,16 +349,15 @@ class PlatformConfig:
                     ("motor_enabled", False),
                 ],
             ),
-            # sda pin digipot TODO: should be 4, hotfix to 46
             i2c=dict(
-                scl=5,
-                sda=4,  # 4 pcb, 46 printer
+                scl=17,
+                sda=18,
                 digipot_addr=0x28,
             ),
             spi=dict(
-                sck=12,
-                miso=11,
-                mosi=13,
+                sck=6,
+                miso=5,
+                mosi=4,
                 phase=1,
                 polarity=0,
                 baudrate=int(5e6),
@@ -368,15 +367,13 @@ class PlatformConfig:
                 pin=16,
                 duty=512,  # 50 percent
             ),
-            fpga_cs=9,
-            fpga_reset=47,
-            flash_cs=10,
-            mem_full=15,
-            device="/dev/ttyACM0",
-            leds=dict(
-                blue=18,
-                red=8,
+            fpga=dict(
+                cs=2,
+                reset=43,
+                done=44,
+                mem_full=1,
             ),
+            device="/dev/ttyACM0",
         )
 
     @property

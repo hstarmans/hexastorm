@@ -16,7 +16,7 @@ class TestBuild(unittest.TestCase):
         platform = Firestarter()
         platform.build(
             Dispatcher(PlatformConfig(test=False)),
-            do_program=False,
+            do_program=True,
             verbose=True,
         )
 

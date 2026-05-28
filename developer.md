@@ -39,12 +39,6 @@ arm_boost=1
 dtoverlay=disable-bt
 ---
 
-Je hebt gelijk, de weergave versprong daar doordat er een codeblok *binnen* een codeblok stond. Dat vindt de interface niet leuk.
-
-Hier is de tekst nogmaals, maar nu in een "raw" format zonder nesten, zodat je het veilig kunt kopiëren:
-
----
-
 # Camera Setup & Configuration
 
 The operation of the laser scanner is verified using an **Arducam Global Shutter** camera (OV2311 chip). Unlike legacy implementations, this setup utilizes the standard Linux kernel drivers (V4L2) for maximum stability, low latency, and full resolution support on modern Raspberry Pi systems.

@@ -67,7 +67,7 @@ class SPIParser(Elaboratable):
         m.submodules.fifo = fifo = self.fifo
 
         if platform is not None:  # Building module
-            board_spi = platform.request("debug_spi", dir="-")
+            board_spi = platform.request("fpga_spi", dir="-")
             connect_synchronized_spi(m, board_spi, spi_cmd)
             m.submodules += [
                 fifo_full_buf := Buffer("o", board_spi.fifo_full),

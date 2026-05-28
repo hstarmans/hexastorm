@@ -2,6 +2,7 @@ from asyncio import sleep, sleep_ms, wait_for
 import time
 import logging
 import sys
+import os
 from random import randint
 from machine import Pin, SPI, I2C, SoftSPI, PWM
 
@@ -28,9 +29,7 @@ class ESP32Host(BaseHost):
     def __init__(self):
         super().__init__(test=False)
         self.steppers_init = False
-        self.init_micropython()
         self.reset()
-        self.init_steppers()
 
     def init_micropython(self):
         """Initialize hardware peripherals in a MicroPython environment.
@@ -46,7 +45,7 @@ class ESP32Host(BaseHost):
                 freq=int(ice40_cfg["clks"][ice40_cfg["hfosc_div"]] * 1e6),
                 duty=cfg["clk"]["duty"],
             )
-        self.fpga_reset = Pin(cfg["fpga_reset"], Pin.OUT)
+        self.fpga_reset = Pin(cfg["fpga"]["reset"], Pin.OUT)
         self.fpga_reset.value(1)
         self.i2c = I2C(scl=cfg["i2c"]["scl"], sda=cfg["i2c"]["sda"])
         # hardware SPI works partly, set speed to 3e6
@@ -61,14 +60,10 @@ class ESP32Host(BaseHost):
             mosi=Pin(spi["mosi"], Pin.OUT),
             miso=Pin(spi["miso"], Pin.IN),
         )
-        # keep for hardware SPI
-        self.spi.deinit()
-        self.spi.init()
-        self.flash_cs = Pin(cfg["flash_cs"], Pin.OUT)
-        self.flash_cs.value(1)
-        self.fpga_cs = Pin(cfg["fpga_cs"], Pin.OUT)
+        self.fpga_cs = Pin(cfg["fpga"]["cs"], Pin.OUT)
+        self.fpga_done = Pin(cfg["fpga"]["done"], Pin.IN)
         self.stepper_cs = Pin(cfg["stepper_cs"], Pin.OUT)
-        self._mem_full = Pin(cfg["mem_full"], Pin.IN)
+        self._mem_full = Pin(cfg["fpga"]["mem_full"], Pin.IN)
 
     @property
     def mem_full(self):
@@ -148,51 +143,68 @@ class ESP32Host(BaseHost):
                     failed = True
             self.steppers_init = not failed
 
-    async def flash_fpga(self, filename):
-        """Flash a bitstream file to the FPGA using SoftSPI and W25QFlash.
+    def flash_fpga(self, filename="sd/fpga/fpga.bit"):
+        """Flash a bitstream file to the FPGA directly using SPI.
 
-        Resets the FPGA, writes the file to flash memory in blocks, and resets again
-        after completion.
+        Resets the FPGA and writes to it via SPI. The file is read in
+        512-byte chunks to manage memory usage. Blocks execution until done.
 
         Args:
             filename (str): Path to the bitstream file (e.g. .bin) to be flashed.
         """
-        cfg = self.cfg.esp32_cfg
+        # 1. Check if file exists
+        try:
+            os.stat(filename)
+        except OSError:
+            logger.error(f"Cannot flash FPGA: Bitstream file '{filename}' not found.")
+            return False
+
+        logger.info("Starting FPGA configuration sequence...")
+
+        self.spi.deinit()
+        self.spi.init()
+
+        # 2. Hardware Reset Sequence
+        self.fpga_cs.value(1)
         self.fpga_reset.value(0)
-        self.flash_cs.value(1)
-        await sleep(1)
-        # can't get hardware spi working with memory
-        spi = SoftSPI(
-            polarity=cfg["spi"]["polarity"],
-            phase=cfg["spi"]["phase"],
-            sck=Pin(cfg["spi"]["sck"], Pin.OUT),
-            mosi=Pin(cfg["spi"]["mosi"], Pin.OUT),
-            miso=Pin(cfg["spi"]["miso"], Pin.IN),
-        )
-        spi.deinit()
-        spi.init()
+        time.sleep(0.5)  # Synchronous sleep
+        self.fpga_cs.value(0)
+        time.sleep(0.5)
+        self.fpga_reset.value(1)
+        time.sleep(0.5)
 
-        f = W25QFlash(
-            spi=spi,
-            cs=self.flash_cs,
-            baud=cfg["spi"]["baudrate"],
-            software_reset=True,
-        )
+        # 3. Send 8 dummy clocks BEFORE the bitstream to wake up the FPGA.
+        self.spi.write(b"\x00")
 
-        with open(filename, "rb") as infile:
-            buffsize = f.BLOCK_SIZE
-            blocknum = 0
-            while True:
-                buf = infile.read(buffsize)
-                if blocknum % 10 == 0:
-                    logger.info(f"Writing block {blocknum}.")
-                f.writeblocks(blocknum, buf)
-                if len(buf) < buffsize:
-                    logger.info(f"Final block {blocknum}")
-                    break
-                blocknum += 1
-        self.reset()
-        logger.info("Flashed fpga.")
+        # 4. Stream the file
+        try:
+            with open(filename, "rb") as f:
+                while True:
+                    chunk = f.read(512)
+                    if not chunk:
+                        break
+                    self.spi.write(chunk)
+        except OSError as e:
+            logger.error(f"Error reading bitstream file: {e}")
+            return False
+
+        # 5. Finish configuration
+        # Send a few clocks while CS is still low
+        self.spi.write(bytes([0x00] * 10))
+
+        # Raise CS and send >49 dummy clocks (13 bytes = 104 clocks)
+        self.fpga_cs.value(1)
+        time.sleep(0.5)
+        self.spi.write(bytes([0x00] * 13))
+        time.sleep(0.5)  # Give CDONE a moment to pull up
+
+        # 6. Verification
+        if self.fpga_done.value():
+            logger.info("Successfully flashed FPGA!")
+            return True
+        else:
+            logger.error("FPGA flash failed. CDONE pin not asserted.")
+            return False
 
     async def synchronize(self, value=True):
         """Synchronize laser with phodiode.
@@ -212,14 +224,9 @@ class ESP32Host(BaseHost):
     def reset(self):
         "restart the FPGA by toggling the reset pin and initializing communication"
         # free all lines
-        self.spi.deinit()
-        self.flash_cs.init(Pin.IN)
-
-        self.fpga_reset.value(0)
-        time.sleep(1)
-        self.fpga_reset.value(1)
-        time.sleep(1)
         self.init_micropython()
+        self.init_steppers()
+        self.flash_fpga()
         length = Spi.word_bytes + Spi.command_bytes
         command = bytearray(length)
         response = bytearray(length)

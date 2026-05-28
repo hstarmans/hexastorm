@@ -25,7 +25,9 @@ class Firestarter(LatticeICE40Platform):
     default_clk = ice40_cfg["default_clk"]  # or "clk" for the esp32s3 external clock
     hfosc_div = ice40_cfg["hfosc_div"]
     resources = [
-        *LEDResources(pins="39", invert=True, attrs=Attrs(IO_STANDARD="SB_LVCMOS")),
+        *LEDResources(
+            pins="39 40 41", invert=True, attrs=Attrs(IO_STANDARD="SB_LVCMOS")
+        ),
         Resource(
             "clk",
             0,
@@ -34,35 +36,26 @@ class Firestarter(LatticeICE40Platform):
             Attrs(IO_STANDARD="SB_LVCMOS"),
         ),
         Resource(
-            "debug_spi",
-            0,
-            Subsignal("sck", Pins("19")),
-            Subsignal("sdi", Pins("13")),
-            Subsignal("sdo", Pins("18")),
-            Subsignal("cs", PinsN("25")),
-            Subsignal("fifo_full", Pins("31")),
-            Attrs(IO_STANDARD="SB_LVCMOS"),
-        ),
-        Resource(
-            "flash_spi",
+            "fpga_spi",
             0,
             Subsignal("sck", Pins("15")),
             Subsignal("sdi", Pins("17")),
             Subsignal("sdo", Pins("14")),
             Subsignal("cs", PinsN("16")),
+            Subsignal("fifo_full", Pins("25")),
             Attrs(IO_STANDARD="SB_LVCMOS"),
         ),
         # Laserscanner resource
         LaserscannerResource(
             number=0,
-            lasers="12 11",  # bit 1, bit 0 !
-            pwm="6",
-            enable="4",
+            lasers="4 3",  # bit 1, bit 0 !
+            pwm="11",
+            enable="13",
         ),
         Resource(
             "photodiode",
             0,
-            Subsignal("photodiode", Pins("46", dir="i")),
+            Subsignal("photodiode", Pins("21", dir="i")),
             Attrs(IO_STANDARD="SB_LVCMOS"),
         ),
         # # BLDC driver
@@ -82,22 +75,22 @@ class Firestarter(LatticeICE40Platform):
         StepperResource(
             number=0,
             step_pin="26",
-            dir_pin="20",
-            limit_pin="42",
+            dir_pin="23",
+            limit_pin="2",
         ),
         # y-stepper
         StepperResource(
             number=1,
-            step_pin="37",
-            dir_pin="36",
-            limit_pin="21",
+            step_pin="47",
+            dir_pin="46",
+            limit_pin="48",
         ),
         # z-stepper
         StepperResource(
             number=2,
-            step_pin="35",
-            dir_pin="27",
-            limit_pin="23",
+            step_pin="44",
+            dir_pin="43",
+            limit_pin="45",
         ),
     ]
     connectors = []
