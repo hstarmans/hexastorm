@@ -1,6 +1,7 @@
 from struct import unpack
 import sys
 import logging
+from asyncio import sleep
 
 from .. import ulabext
 from ..config import Spi, PlatformConfig
@@ -35,8 +36,9 @@ class BaseHost:
         # mpy requires np.float
         self._position = np.array([0] * self.cfg.hdl_cfg.motors, dtype=NP_FLOAT)
 
+    # TODO: doesn't work well with homing
     @property
-    async def position(self):
+    async def fpga_position(self):
         """
         Retrieve the current stepper motor positions from the FPGA and update internal state.
 
@@ -389,20 +391,54 @@ class BaseHost:
         command = [cmd] + [0] * Spi.word_bytes
         return await self.send_command(command)
 
-    async def home_axes(self, axes, speed=None, displacement=-200):
+    async def home_axes(self, axes, speed=None, displacement=-200, pull_off=10):
         """Home given axes, i.e. [1,0,1] homes x, z and not y.
 
         Args:
-        axes         -- list with axes to home
+        axes         -- list with axes to home (e.g., [1, 0, 1])
         speed        -- speed in mm/s used to home
         displacement -- displacement used to touch home switch
+        pull_off     -- displacement in mm to back off after hitting the switch
         """
         mtrs = self.cfg.hdl_cfg.motors
         assert len(axes) == mtrs
-        dist = np.array(axes) * np.array([displacement] * mtrs)
-        await self.gotopoint(position=dist.tolist(), speed=speed, absolute=False)
 
-    async def gotopoint(self, position, speed=None, absolute=True):
+        axis_names = list(self.cfg.motor_cfg["steps_mm"].keys())
+        ax_cfg = self.cfg.esp32_cfg.get("axis_settings", {})
+
+        # 1. Quickly extract homing directions using a list comprehension
+        # Defaults to -1 if the axis or 'homing_dir' isn't explicitly defined
+        homing_dirs = [ax_cfg.get(ax, {}).get("homing_dir", -1) for ax in axis_names]
+
+        # 2. Use numpy/ulab for vectorized displacement calculation
+        # e.g., [1, 0, 1] * [-1, -1, 1] * 200 = [-200, 0, 200]
+        dist = np.array(axes) * np.array(homing_dirs) * abs(displacement)
+
+        # Execute the move to the home switches
+        hit_array = await self.gotopoint(
+            position=dist.tolist(), speed=speed, absolute=False, check_sensors=True
+        )
+        valid_hits = np.array(axes) * np.array(hit_array)
+        multiplier = 1 - valid_hits
+        self._position = self._position * multiplier
+
+        if self.cfg.test:
+            # skipping back-off after homing
+            return
+        else:
+            # 3. Pull-off in the EXACT OPPOSITE direction of the homing move
+            # We multiply by -abs(pull_off) to invert the vector
+            # e.g., [1, 0, 1] * [-1, -1, 1] * -10 = [10, 0, -10]
+            back_off_dist = np.array(axes) * np.array(homing_dirs) * -abs(pull_off)
+
+            await self.gotopoint(
+                position=back_off_dist.tolist(),
+                speed=speed,
+                absolute=False,
+                check_sensors=False,
+            )
+
+    async def gotopoint(self, position, speed=None, absolute=True, check_sensors=True):
         """Move machine to position by a displacement at constant speed.
 
         The motion profile is first-order (constant velocity) and each axis
@@ -415,6 +451,7 @@ class BaseHost:
         speed        -- list with speed in mm/s, if None default speeds used
         absolute     -- Position interpreted as absolute (True) or
                         a displacement (False).
+        check_sensors -- If True, aborts motion if stallguard threshold passed (home switch hit).
         """
         await self.set_parsing(True)
         hdl_cfg = self.cfg.hdl_cfg
@@ -454,13 +491,18 @@ class BaseHost:
                 switches = await self.spline_move(int(ticks_chunk), velocity)
                 ticks_remaining -= ticks_chunk
                 # abort home switch hit and speed negative
-                if switches[axis] and (ulabext.sign(disp_mm) < 0):
+                if check_sensors and switches[axis]:
                     homeswitches_hit[axis] = 1
+                    if not self.test:
+                        state = self.enable_steppers
+                        self.enable_steppers = False
+                        # TODO: implement flush FIFO when parsing is stopped
+                        await sleep(2)  # wait for buffer to flush
+                        self.enable_steppers = state
                     break
-
         self._position += displacement
-        self._position[homeswitches_hit == 1] = 0
-        # parsing not disabled !
+
+        return homeswitches_hit
 
     async def read_facet_ticks_and_id(self):
         """

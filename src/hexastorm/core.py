@@ -120,6 +120,7 @@ class SPIParser(Elaboratable):
                             m.next = "WAIT_COMMAND"
                         with m.Case(cmd.stop):
                             m.d.sync += self.parse.eq(0)
+                            # TODO: flush FIFO on stop? (or just discard)
                             m.next = "WAIT_COMMAND"
                         with m.Case(cmd.write):
                             m.d.sync += spi_cmd.word_to_send.eq(state_word)

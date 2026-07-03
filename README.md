@@ -35,7 +35,7 @@ Camera support is outlined in [developer.md](./developer.md).
 You can execute tests and run the main modules as follows:  
 **Core tests**
 ```console
-uv run pytest tests/test_core.py
+uv run pytest -vv tests/fpga/test_core.py
 ```
 **Pattern generation and interpolator**
 ```console

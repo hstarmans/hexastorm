@@ -336,7 +336,7 @@ class PlatformConfig:
                         stop=1,
                     ),
                 ),
-                # ensures settings are applied in correct order
+                # global settings for all motors
                 settings=[
                     ("direction_inverted", False),
                     ("vsense", True),
@@ -345,14 +345,45 @@ class PlatformConfig:
                     ("interpolation", True),
                     ("spread_cycle", False),
                     ("microstep_resolution", 16),
-                    ("internal_rsense", True),
+                    ("internal_rsense", False),
                     ("motor_enabled", False),
+                    ("direction_inverted", False),
+                    ("coolstep_threshold", 5000),
+                    ("stallguard_threshold", 100),
                 ],
+                # axis specific settings
+                axis_settings=dict(
+                    z=dict(
+                        stallguard_threshold=100,
+                        direction_inverted=True,
+                    ),
+                ),
+            ),
+            # axis settings not in tmc 2209
+            axis_settings=dict(
+                x=dict(homing_dir=-1), y=dict(homing_dir=1), z=dict(homing_dir=1)
+            ),
+            camera=dict(
+                d0=12,
+                d1=14,
+                d2=21,
+                d3=13,
+                d4=11,
+                d5=10,
+                d6=9,
+                d7=8,
+                pclk=38,
+                vsync=41,
+                href=40,
+                xclk=39,
+                pwdn=-1,
+                reset=42,
             ),
             i2c=dict(
                 scl=17,
                 sda=18,
                 digipot_addr=0x28,
+                cam_addr=0x30,
             ),
             spi=dict(
                 sck=6,
@@ -362,7 +393,7 @@ class PlatformConfig:
                 polarity=0,
                 baudrate=int(5e6),
             ),
-            stepper_cs=38,  # enable pin stepper motors
+            stepper_cs=16,  # enable pin stepper motors
             clk=dict(
                 pin=16,
                 duty=512,  # 50 percent
@@ -453,9 +484,9 @@ class PlatformConfig:
         else:
             steps = OrderedDict(
                 [
-                    ("x", 76.2),
-                    ("y", 76.2),
-                    ("z", 1600),
+                    ("x", 800),
+                    ("y", 800),
+                    ("z", 800),
                 ]
             )
         return dict(

@@ -47,6 +47,8 @@ class ESP32Host(BaseHost):
             )
         self.fpga_reset = Pin(cfg["fpga"]["reset"], Pin.OUT)
         self.fpga_reset.value(1)
+        self.cam_reset = Pin(cfg["camera"]["reset"], Pin.OUT)
+        self.cam_reset.value(1)
         self.i2c = I2C(scl=cfg["i2c"]["scl"], sda=cfg["i2c"]["sda"])
         # hardware SPI works partly, set speed to 3e6
         # return bytes give issue in retrieving position
@@ -136,6 +138,13 @@ class ESP32Host(BaseHost):
                     self.steppers[ax_name] = tmc
                     for key, value in tmc_cfg["settings"]:
                         setattr(tmc, key, value)
+                    if (
+                        "axis_settings" in tmc_cfg
+                        and ax_name in tmc_cfg["axis_settings"]
+                    ):
+                        for key, value in tmc_cfg["axis_settings"][ax_name].items():
+                            setattr(tmc, key, value)
+
                 except ConnectionFail:
                     logger.error(
                         f"Failed to initialize TMC2209 for {ax_name} (ID {mtr_id})."
@@ -274,6 +283,8 @@ class ESP32Host(BaseHost):
         - 0 represents no current; 255 represents full driver current.
         """
         adr = self.cfg.esp32_cfg["i2c"]["digipot_addr"]
+        # cam reset needs to be high to read the current value from the digipot
+        # assumed this is done during intialization
         return list(self.i2c.readfrom_mem(adr, 0, 1))[0]
 
     @laser_current.setter
@@ -300,6 +311,8 @@ class ESP32Host(BaseHost):
                 f"Laser current must be between 0 and {MAX_SAFE_CURRENT} (inclusive)"
             )
         adr = self.cfg.esp32_cfg["i2c"]["digipot_addr"]
+        # cam reset needs to be high to write to the digipot
+        # assumed this is done during initialization
         self.i2c.writeto_mem(adr, 0, bytes([val]))
 
     async def measure_facet_period_ms(self, samples=30, max_trials=10_000):

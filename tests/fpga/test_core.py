@@ -58,7 +58,7 @@ class TestParser(SPIGatewareTestCase):
         for idx, pos in enumerate(self.dut.positions_in):
             sim.set(pos, position[idx])
         await sim.tick()
-        lst = (await self.host.position).round(decimals)
+        lst = (await self.host.fpga_position).round(decimals)
         steps_mm = np.array(list(self.host.cfg.motor_cfg["steps_mm"].values()))
         assert_array_equal(lst, (np.array(position) / steps_mm).round(decimals))
 
@@ -356,14 +356,14 @@ class TestDispatcher(SPIGatewareTestCase):
         await self.host.gotopoint(mm.tolist(), speed.tolist())
         await self.wait_complete()
         # if 76.3 steps per mm then 1/76.3 = 0.013 is max resolution
-        assert_array_almost_equal(await self.host.position, mm, decimal=1)
+        assert_array_almost_equal(await self.host.fpga_position, mm, decimal=1)
 
         # TODO: they are not symmetric! if start with mm does not work
         mm = -mm
         await self.host.gotopoint(mm.tolist(), speed.tolist(), absolute=False)
         await self.wait_complete()
         assert_array_almost_equal(
-            await self.host.position, np.zeros(hdl_cfg.motors), decimal=1
+            await self.host.fpga_position, np.zeros(hdl_cfg.motors), decimal=1
         )
 
     @async_test_case
@@ -391,14 +391,16 @@ class TestDispatcher(SPIGatewareTestCase):
         dist = num_lines * steps_line / steps_mm
         idx = list(motor_cfg["steps_mm"].keys()).index(motor_cfg["orth2lsrline"])
         # TODO: the x position changes as well!?
-        assert_array_almost_equal(-dist, (await host.position)[idx], decimal=decimals)
+        assert_array_almost_equal(
+            -dist, (await host.fpga_position)[idx], decimal=decimals
+        )
         for _ in range(num_lines):
             await host.write_line([1] * laz_tim["scanline_length"], steps_line, 1)
         await host.write_line([])
         await host.enable_comp(synchronize=False)
         await self.wait_until(self.dut.parser.fifo.empty)
         # TODO: y is still lightly positive 0.001
-        assert_array_almost_equal(0, (await host.position)[idx], decimal=decimals)
+        assert_array_almost_equal(0, (await host.fpga_position)[idx], decimal=decimals)
         fpga_state = await host.fpga_state
         self.assertFalse(fpga_state["synchronized"])
         self.assertFalse(fpga_state["error"])
