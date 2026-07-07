@@ -353,16 +353,16 @@ class PlatformConfig:
                 ],
                 # axis specific settings
                 axis_settings=dict(
+                    x=dict(
+                        stallguard_threshold=120,
+                        direction_inverted=False,
+                    ),
                     z=dict(
-                        stallguard_threshold=100,
                         direction_inverted=True,
                     ),
                 ),
             ),
             # axis settings not in tmc 2209
-            axis_settings=dict(
-                x=dict(homing_dir=-1), y=dict(homing_dir=1), z=dict(homing_dir=1)
-            ),
             camera=dict(
                 d0=12,
                 d1=14,
@@ -481,6 +481,13 @@ class PlatformConfig:
         """Returns the steps per mm and axis orthogonal to laserline."""
         if self.test:
             steps = OrderedDict([("x", 400), ("y", 400)])
+            offset_mm = OrderedDict(
+                [
+                    ("x", 0),
+                    ("y", 0),
+                    ("z", 0),
+                ]
+            )
         else:
             steps = OrderedDict(
                 [
@@ -489,8 +496,17 @@ class PlatformConfig:
                     ("z", 800),
                 ]
             )
+            offset_mm = OrderedDict(
+                [
+                    ("x", 10),
+                    ("y", -150),
+                    ("z", -10),
+                ]
+            )
         return dict(
+            homing_dir=dict(x=-1, y=1, z=1),
             steps_mm=steps,
+            offset_mm=offset_mm,
             orth2lsrline="y",
         )
 

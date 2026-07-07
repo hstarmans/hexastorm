@@ -404,11 +404,12 @@ class BaseHost:
         assert len(axes) == mtrs
 
         axis_names = list(self.cfg.motor_cfg["steps_mm"].keys())
-        ax_cfg = self.cfg.esp32_cfg.get("axis_settings", {})
 
         # 1. Quickly extract homing directions using a list comprehension
         # Defaults to -1 if the axis or 'homing_dir' isn't explicitly defined
-        homing_dirs = [ax_cfg.get(ax, {}).get("homing_dir", -1) for ax in axis_names]
+        homing_dirs = [
+            self.cfg.motor_cfg.get("homing_dir", -1)[ax] for ax in axis_names
+        ]
 
         # 2. Use numpy/ulab for vectorized displacement calculation
         # e.g., [1, 0, 1] * [-1, -1, 1] * 200 = [-200, 0, 200]
@@ -429,7 +430,10 @@ class BaseHost:
             # 3. Pull-off in the EXACT OPPOSITE direction of the homing move
             # We multiply by -abs(pull_off) to invert the vector
             # e.g., [1, 0, 1] * [-1, -1, 1] * -10 = [10, 0, -10]
-            back_off_dist = np.array(axes) * np.array(homing_dirs) * -abs(pull_off)
+            offset_mm = np.array(
+                [self.cfg.motor_cfg.get("offset_mm", -1)[ax] for ax in axis_names]
+            )
+            back_off_dist = np.array(axes) * offset_mm
 
             await self.gotopoint(
                 position=back_off_dist.tolist(),
