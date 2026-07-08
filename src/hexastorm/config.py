@@ -348,7 +348,7 @@ class PlatformConfig:
                     ("internal_rsense", False),
                     ("motor_enabled", False),
                     ("direction_inverted", False),
-                    ("coolstep_threshold", 5000),
+                    ("coolstep_threshold", 2500),
                     ("stallguard_threshold", 100),
                 ],
                 # axis specific settings
@@ -507,7 +507,7 @@ class PlatformConfig:
             homing_dir=dict(x=-1, y=1, z=1),
             steps_mm=steps,
             offset_mm=offset_mm,
-            orth2lsrline="y",
+            orth2lsrline="x",
         )
 
     def update_laser_timing(self):

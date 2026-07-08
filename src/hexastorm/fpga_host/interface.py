@@ -264,6 +264,17 @@ class BaseHost:
         count = (steps << (1 + bit_shift)) + (1 << (bit_shift - 1))
         return count
 
+    async def read_switches(self):
+        """
+        Read the state of the home switches for all axes.
+
+        Returns:
+            np.ndarray: Boolean array indicating the state of each axis's home switch.
+        """
+        state = await self._read_fpga_state()
+        axis_names = list(self.cfg.motor_cfg["steps_mm"].keys())
+        return np.array([state[key] for key in axis_names])
+
     async def spline_move(self, ticks, coefficients):
         """
         Send a spline move instruction to the FPGA FIFO.
@@ -391,7 +402,7 @@ class BaseHost:
         command = [cmd] + [0] * Spi.word_bytes
         return await self.send_command(command)
 
-    async def home_axes(self, axes, speed=None, displacement=-200, pull_off=10):
+    async def home_axes(self, axes, speed=None, displacement=200, pull_off=10):
         """Home given axes, i.e. [1,0,1] homes x, z and not y.
 
         Args:
@@ -496,14 +507,34 @@ class BaseHost:
                 ticks_remaining -= ticks_chunk
                 # abort home switch hit and speed negative
                 if check_sensors and switches[axis]:
-                    homeswitches_hit[axis] = 1
-                    if not self.test:
-                        state = self.enable_steppers
-                        self.enable_steppers = False
-                        # TODO: implement flush FIFO when parsing is stopped
-                        await sleep(2)  # wait for buffer to flush
-                        self.enable_steppers = state
-                    break
+                    if self.test:
+                        homeswitches_hit[axis] = 1
+                        break
+                    else:
+                        extra_samples = 4
+                        hits_count = 1
+
+                        for _ in range(extra_samples):
+                            await sleep(0.010)  # Wacht 10 milliseconden
+                            new_switches = await self.read_switches()
+                            if new_switches[axis]:
+                                hits_count += 1
+
+                        if hits_count >= (extra_samples // 2) + 1:
+                            state = self.enable_steppers
+                            self.enable_steppers = False
+                            # TODO: implement flush FIFO when parsing is stopped
+                            await sleep(2)  # wait for buffer to flush
+                            self.enable_steppers = state
+                            homeswitches_hit[axis] = 1
+                            axis_names = list(self.cfg.motor_cfg["steps_mm"].keys())
+                            logger.warning(
+                                f"Home switch hit on axis {axis_names[axis]} during move. Aborting motion."
+                            )
+                            break
+                        else:
+                            # false trigger
+                            pass
         self._position += displacement
 
         return homeswitches_hit
