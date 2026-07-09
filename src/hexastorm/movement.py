@@ -19,33 +19,37 @@ class Polynomial(Elaboratable):
         a step is sent to the motor.
         In every tick the step can at most increase
         with one count.
-        Non step part of base Counters are kept after segment.
-        A position is also kept internally.
 
-        This code requires a lot of LUT, only order 2 is supported on UP5k
-        It is assumed that the user can completely determine
-        the outcome of the calculation.
-        To ascertain step accuracy, c is submitted with a very high accuracy.
-        For third order, this requires 41 bit wide numbers
-        and is a "weakness" in the code.
-        The code might be sped up via Horner's method and the use of DSPs.
-        The current code does not require a DSP.
+        To achieve high performance and low LUT usage without hardware DSPs,
+        this module uses pipelined Discrete Forward Differencing. The host (e.g., ESP32)
+        must pre-calculate the forward differences (D1, D2, D3) and submit them
+        via the `coeff` array instead of the raw polynomial coefficients.
+
+        The internal accumulators use fixed-point Q-format math. A single large integer
+        represents both the fractional and whole steps. The `bit_shift` configuration
+        defines the boundary: bits below `bit_shift` are fractional (sub-step resolution),
+        and the bit at `bit_shift` triggers a physical motor step when it toggles.
+        Non-step fractional parts are preserved across motion segments for perfect continuity.
+
+        The module also supports external laser control. When `override_laser` is high,
+        the step and direction signals for the configured laser axis are seamlessly
+        hijacked by the external `step_laser` and `dir_laser` inputs.
 
         Assumptions:
-        max ticks per move is 10_000
-        update frequency motor is 1 MHz
+        - Max ticks per move is configured by `move_ticks` (e.g., 10_000).
+        - Base update frequency is typically 1 MHz.
 
         Inputs:
-        - `coeff`:      Array of coefficients [a, b, c] for each motor.
-        - `start`:      Start signal to initiate polynomial evaluation.
-        - `tick_limit`: Maximum number of ticks (duration) for the motion segment.
-        - `step_laser`: External step signal override for the laser axis.
-        - `dir_laser`:  External direction signal override for the laser axis.
+        - `coeff`:          Array of coefficients [a, b, c] for each motor.
+        - `start`:          Start signal to initiate polynomial evaluation.
+        - `tick_limit`:     Maximum number of ticks (duration) for the motion segment.
+        - `step_laser`:     External step signal override for the laser axis.
+        - `dir_laser`:      External direction signal override for the laser axis.
         - `override_laser`: When high, overrides step/dir for the laser motor.
 
     Outputs:
-        - `position`:   Current position of each motor in steps (signed).
-        - `busy`:       High while polynomial evaluation is in progress.
+        - `position`:       Current absolute position of each motor in steps (signed 32-bit).
+        - `busy`:           High while segment evaluation is in progress.
     """
 
     def __init__(self, plf_cfg):
@@ -91,7 +95,6 @@ class Polynomial(Elaboratable):
         max_steps = int(hdl_cfg.move_ticks / 2)  # Nyquist
         max_bits = (max_steps << hdl_cfg.bit_shift).bit_length()
         cntrs = Array(Signal(signed(max_bits + 1)) for _ in range(len(self.coeff)))
-        prev = Array(Signal(signed(max_bits + 1)) for _ in range(hdl_cfg.motors))
         assert max_bits <= 64
 
         if platform is None:
@@ -115,14 +118,10 @@ class Polynomial(Elaboratable):
 
         # Position tracking
         stepper_d = Array(Signal() for _ in range(hdl_cfg.motors))
-        # assuming position is signed and 64 bits signals
-        pos_max = pow(2, 32 - 1) - 2
         for idx, stepper in enumerate(self.steppers):
             pos = self.position[idx]
             m.d.sync += stepper_d[idx].eq(stepper.step)
             with m.If(stepper.limit == 1):
-                m.d.sync += self.position[idx].eq(0)
-            with m.Elif((pos > pos_max) | (pos < -pos_max)):
                 m.d.sync += self.position[idx].eq(0)
             with m.Elif((stepper.step == 1) & (stepper_d[idx] == 0)):
                 with m.If(stepper.dir):
@@ -172,19 +171,20 @@ class Polynomial(Elaboratable):
             with m.Else():
                 m.d.sync += steppers[motor].step.eq(step_motor)
 
-        # Direction signal based on delta between ticks
+        # Direction signal: Purely based on the sign bit of velocity! (0 LUTs)
         for motor in range(hdl_cfg.motors):
             idx = motor * hdl_cfg.pol_degree
-            m.d.sync += prev[motor].eq(cntrs[idx])
-
             with m.If((motor == laser_idx) & self.override_laser):
                 # Override active for laser motor – use external dir
                 m.d.sync += steppers[motor].dir.eq(self.dir_laser)
             with m.Else():
-                with m.If(prev[motor] > cntrs[idx]):
-                    m.d.sync += steppers[motor].dir.eq(0)  # Negative move
-                with m.Elif(prev[motor] < cntrs[idx]):
-                    m.d.sync += steppers[motor].dir.eq(1)  # Positive move
+                if hdl_cfg.pol_degree >= 2:
+                    # Velocity is stored in cntrs[idx + 1]
+                    # -1 gets the sign bit. ~ inverts it so positive = 1, negative = 0
+                    m.d.sync += steppers[motor].dir.eq(~cntrs[idx + 1][-1])
+                else:
+                    # Constant velocity is in coeff[idx]
+                    m.d.sync += steppers[motor].dir.eq(~self.coeff[idx][-1])
 
         # State machine for execution
         with m.FSM(init="RESET", name="polynomial_fsm"):
@@ -210,10 +210,7 @@ class Polynomial(Elaboratable):
                             m.d.sync += cntrs[base + 1].eq(a + b + c)
 
                         # Keep the fractional part from the previous segment for position
-                        m.d.sync += [
-                            cntrs[base].eq(cntrs[base][:step_bit]),
-                            prev[motor].eq(prev[motor][:step_bit]),
-                        ]
+                        m.d.sync += cntrs[base].eq(cntrs[base][:step_bit])
 
                     m.d.sync += self.busy.eq(1)
                     m.next = "RUNNING"
