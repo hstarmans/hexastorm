@@ -113,8 +113,7 @@ class Polynomial(Elaboratable):
                     steppers[i].limit.eq(lim_buf.i),
                 ]
 
-        # Position
-        # update position
+        # Position tracking
         stepper_d = Array(Signal() for _ in range(hdl_cfg.motors))
         # assuming position is signed and 64 bits signals
         pos_max = pow(2, 32 - 1) - 2
@@ -147,12 +146,10 @@ class Polynomial(Elaboratable):
                     step_motor_d.eq(step_motor),
                     step_laser_d.eq(self.step_laser),
                 ]
-
                 # 2. Detect Rising (Start) and Falling (End) edges for both sources
                 # Motor source
                 rise_motor = (step_motor == 1) & (step_motor_d == 0)
                 fall_motor = (step_motor == 0) & (step_motor_d == 1)
-
                 # Laser source
                 rise_laser = (self.step_laser == 1) & (step_laser_d == 0)
                 fall_laser = (self.step_laser == 0) & (step_laser_d == 1)
@@ -166,7 +163,6 @@ class Polynomial(Elaboratable):
                     evt_rise.eq(Mux(self.override_laser, rise_laser, rise_motor)),
                     evt_fall.eq(Mux(self.override_laser, fall_laser, fall_motor)),
                 ]
-
                 # 4. Reconstruct the signal (SR Latch behavior)
                 # This preserves the exact pulse width of the chosen source.
                 with m.If(evt_rise):
@@ -199,14 +195,23 @@ class Polynomial(Elaboratable):
             with m.State("WAIT_START"):
                 with m.If(self.start):
                     for motor in range(hdl_cfg.motors):
-                        coef0 = motor * hdl_cfg.pol_degree
+                        base = motor * hdl_cfg.pol_degree
                         step_bit = hdl_cfg.bit_shift + 1
 
-                        for degree in range(1, hdl_cfg.pol_degree):
-                            m.d.sync += cntrs[coef0 + degree].eq(0)
+                        a = self.coeff[base]
+                        b = self.coeff[base + 1] if hdl_cfg.pol_degree > 1 else 0
+                        c = self.coeff[base + 2] if hdl_cfg.pol_degree > 2 else 0
 
+                        # Calculate initial Forward Differences based on degree
+                        # This happens once per line segment.
+                        if hdl_cfg.pol_degree >= 3:
+                            m.d.sync += cntrs[base + 2].eq((b * 2) + (c * 6))
+                        if hdl_cfg.pol_degree >= 2:
+                            m.d.sync += cntrs[base + 1].eq(a + b + c)
+
+                        # Keep the fractional part from the previous segment for position
                         m.d.sync += [
-                            cntrs[coef0].eq(cntrs[coef0][:step_bit]),
+                            cntrs[base].eq(cntrs[base][:step_bit]),
                             prev[motor].eq(prev[motor][:step_bit]),
                         ]
 
@@ -222,29 +227,27 @@ class Polynomial(Elaboratable):
 
                     for motor in range(hdl_cfg.motors):
                         base = motor * hdl_cfg.pol_degree
-                        acc = [
-                            Signal.like(cntrs[base + i])
-                            for i in range(hdl_cfg.pol_degree)
-                        ]
 
-                        if hdl_cfg.pol_degree > 2:
-                            acc[2] = 3 * 2 * self.coeff[base + 2] + cntrs[base + 2]
-                            m.d.sync += cntrs[base + 2].eq(acc[2])
-                            acc[1] = cntrs[base + 2]
+                        # Pipelined Forward Differencing (1 adder per layer per clock tick)
 
-                        if hdl_cfg.pol_degree > 1:
-                            acc[1] = acc[1] + 2 * self.coeff[base + 1] + cntrs[base + 1]
-                            m.d.sync += cntrs[base + 1].eq(acc[1])
+                        if hdl_cfg.pol_degree >= 3:
+                            D3 = self.coeff[base + 2] * 6
+                            m.d.sync += cntrs[base + 2].eq(cntrs[base + 2] + D3)
 
-                        acc[0] = (
-                            self.coeff[base]
-                            + self.coeff[base + 1]
-                            + cntrs[base]
-                            + cntrs[base + 1]
+                        if hdl_cfg.pol_degree >= 2:
+                            D2 = (
+                                cntrs[base + 2]
+                                if hdl_cfg.pol_degree >= 3
+                                else (self.coeff[base + 1] * 2)
+                            )
+                            m.d.sync += cntrs[base + 1].eq(cntrs[base + 1] + D2)
+
+                        D1 = (
+                            cntrs[base + 1]
+                            if hdl_cfg.pol_degree >= 2
+                            else self.coeff[base]
                         )
-                        if hdl_cfg.pol_degree > 2:
-                            acc[0] += self.coeff[base + 2] + cntrs[base + 2]
-                        m.d.sync += cntrs[base].eq(acc[0])
+                        m.d.sync += cntrs[base].eq(cntrs[base] + D1)
 
                 with m.Elif(ticks < self.tick_limit):
                     m.d.sync += cntr.eq(cntr + 1)
