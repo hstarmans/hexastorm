@@ -1,4 +1,3 @@
-from struct import unpack
 import sys
 import logging
 from asyncio import sleep
@@ -35,6 +34,11 @@ class BaseHost:
         self.cfg = PlatformConfig(self.test)
         # mpy requires np.float
         self._position = np.array([0] * self.cfg.hdl_cfg.motors, dtype=NP_FLOAT)
+
+        # Track the state of the 8-bit 'write_pin' register locally
+        # Bits 0-4: laser0, laser1, polygon, synchronize, singlefacet
+        # Bits 5-7: led0, led1, led2
+        self._pin_state = 0
 
     async def send_command(self, command, timeout=0):
         """
@@ -186,6 +190,45 @@ class BaseHost:
             repeat = last_index - i
             await self.send_command(cmd_bytes * repeat, timeout=True)
 
+    async def _send_pin_state(self):
+        """Helper to send the current internal pin state to the FPGA."""
+        data = (
+            [Spi.Commands.write]
+            + [0] * (Spi.word_bytes - 2)
+            + [self._pin_state]
+            + [Spi.Instructions.write_pin]
+        )
+        await self.send_command(data)
+
+    async def set_leds(self, blue=None, green=None, red=None):
+        """
+        Turn the debugging LEDs on or off.
+
+        Args:
+            blue (bool): State of the blue LED. If None, remains unchanged.
+            green (bool): State of the green LED. If None, remains unchanged.
+            red (bool): State of the red LED. If None, remains unchanged.
+        """
+        if blue is not None:
+            if blue:
+                self._pin_state |= 1 << 5
+            else:
+                self._pin_state &= ~(1 << 5)
+
+        if green is not None:
+            if green:
+                self._pin_state |= 1 << 6
+            else:
+                self._pin_state &= ~(1 << 6)
+
+        if red is not None:
+            if red:
+                self._pin_state |= 1 << 7
+            else:
+                self._pin_state &= ~(1 << 7)
+
+        await self._send_pin_state()
+
     async def enable_comp(
         self,
         laser0=False,
@@ -207,6 +250,9 @@ class BaseHost:
             synchronize (bool): Enable synchronization feature.
             singlefacet (bool): Enable single-facet mode.
         """
+        # Clear the lower 5 bits (hardware components), but keep the upper 3 bits (LEDs) intact
+        self._pin_state &= 0xE0  # 0xE0 is 11100000 in binary
+
         flags = (
             (int(singlefacet) << 4)
             | (int(synchronize) << 3)
@@ -215,13 +261,9 @@ class BaseHost:
             | int(laser0)
         )
 
-        data = (
-            [Spi.Commands.write]
-            + [0] * (Spi.word_bytes - 2)
-            + [flags]
-            + [Spi.Instructions.write_pin]
-        )
-        await self.send_command(data)
+        # Apply the new hardware flags
+        self._pin_state |= flags
+        await self._send_pin_state()
 
     def steps_to_count(self, steps):
         """Convert a number of motor steps to the corresponding count value.

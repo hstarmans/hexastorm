@@ -298,6 +298,39 @@ class TestDispatcher(SPIGatewareTestCase):
         # self.assertEqual(sim.get(self.dut.laserheadpins.singlefacet), 1)
 
     @async_test_case
+    async def test_set_leds(self, sim):
+        """
+        Test setting individual LEDs via SPI without affecting other pin states.
+        Verifies bits 5, 6, and 7 correspond correctly to blue, green, and red.
+        """
+        # Set some base hardware states to ensure they aren't overwritten
+        await self.host.enable_comp(laser0=True, polygon=True)
+        await self.advance_cycles(10)  # ensure parser consumes it
+
+        # Turn on Blue and Red LEDs
+        await self.host.set_leds(blue=True, green=False, red=True)
+        await self.advance_cycles(10)  # ensure parser consumes it
+
+        pins_val = sim.get(self.dut.pins)
+        # Check LED bits
+        self.assertEqual((pins_val >> 5) & 1, 1)  # Blue (bit 5)
+        self.assertEqual((pins_val >> 6) & 1, 0)  # Green (bit 6)
+        self.assertEqual((pins_val >> 7) & 1, 1)  # Red (bit 7)
+
+        # Check that previous hardware states are maintained
+        self.assertEqual((pins_val >> 0) & 1, 1)  # laser0 (bit 0)
+        self.assertEqual((pins_val >> 2) & 1, 1)  # polygon (bit 2)
+
+        # Modify only Green and Red, keep Blue as is
+        await self.host.set_leds(green=True, red=False)
+        await self.advance_cycles(10)
+
+        pins_val = sim.get(self.dut.pins)
+        self.assertEqual((pins_val >> 5) & 1, 1)  # Blue (unchanged, still 1)
+        self.assertEqual((pins_val >> 6) & 1, 1)  # Green (now 1)
+        self.assertEqual((pins_val >> 7) & 1, 0)  # Red (now 0)
+
+    @async_test_case
     async def test_invalid_write_sets_error_flag(self, sim):
         """
         Push an illegal opcode into the parser FIFO and verify that

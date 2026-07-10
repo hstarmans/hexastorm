@@ -1,6 +1,5 @@
-from amaranth import Cat, Elaboratable, Module, Signal, signed, Mux
+from amaranth import Cat, Elaboratable, Module, Signal
 from amaranth.lib.io import Buffer
-from amaranth import Array
 
 from .config import Spi
 from .spi_helpers import connect_synchronized_spi
@@ -75,7 +74,6 @@ class SPIParser(Elaboratable):
 
         # Internal state
         state = Signal(8)
-        mtr_idx = Signal(range(hdl_cfg.motors))
 
         words_rec = Signal(
             range(
@@ -208,6 +206,7 @@ class Dispatcher(Elaboratable):
         # shared signals
         enable_prism = Signal()
         lasers = Signal(2)
+        leds = Signal(3)
         read_commit = Signal()
         read_en = Signal()
         read_discard = Signal()
@@ -226,6 +225,10 @@ class Dispatcher(Elaboratable):
             )
         else:
             m.submodules.laserhead = lh = Laserhead(self.plf_cfg)
+
+            for i in range(len(leds)):
+                led = platform.request("led", i)
+                m.d.comb += led.o.eq(leds[i])
 
         # connect laser
         m.d.comb += [
@@ -263,7 +266,9 @@ class Dispatcher(Elaboratable):
         ]
 
         # pins you can write to
-        self.pins = pins = Cat(lasers, enable_prism, lh.synchronize, lh.singlefacet)
+        self.pins = pins = Cat(
+            lasers, enable_prism, lh.synchronize, lh.singlefacet, leds
+        )
 
         # poly coeff currently processed
         poly_coeff = Signal(range(len(poly.coeff) + 1))

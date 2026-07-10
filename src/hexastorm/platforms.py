@@ -25,7 +25,7 @@ class Firestarter(LatticeICE40Platform):
     default_clk = ice40_cfg["default_clk"]  # or "clk" for the esp32s3 external clock
     hfosc_div = ice40_cfg["hfosc_div"]
     resources = [
-        *LEDResources(
+        *LEDResources(  # blue, green, red
             pins="39 40 41", invert=True, attrs=Attrs(IO_STANDARD="SB_LVCMOS")
         ),
         Resource(
