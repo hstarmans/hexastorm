@@ -49,20 +49,6 @@ class TestParser(SPIGatewareTestCase):
         #     sim.set(self.dut.fifo.read_en, 0)
 
     @async_test_case
-    async def test_position_readout(self, sim):
-        """
-        Checks that host-reported motor positions match values set on FPGA accounting for mm conversion.
-        """
-        decimals = 3
-        position = [randint(-2000, 2000) for _ in range(self.hdl_cfg.motors)]
-        for idx, pos in enumerate(self.dut.positions_in):
-            sim.set(pos, position[idx])
-        await sim.tick()
-        lst = (await self.host.fpga_position).round(decimals)
-        steps_mm = np.array(list(self.host.cfg.motor_cfg["steps_mm"].values()))
-        assert_array_equal(lst, (np.array(position) / steps_mm).round(decimals))
-
-    @async_test_case
     async def test_scanline_write_to_fifo(self, sim):
         """
         Verifies that writing a full scanline sends the expected number of words to the FIFO.
@@ -174,18 +160,71 @@ class TestDispatcher(SPIGatewareTestCase):
         self.dut.spi = self.dut.parser.spi_command.spi
         self.host.spi_exchange_data = self.spi_exchange_data
         sim.set(self.dut.spi.cs, 0)
+
+        # Initialize absolute position tracker for testing
+        self.motors = self.plf_cfg.hdl_cfg.motors
+        self.simulated_positions = [0] * self.motors
+        self.prev_steps = [0] * self.motors
+
         await sim.tick()
+
+    def _track_steps(self):
+        """Synchronously sample step pins and update position."""
+        steppers = self.dut.pol.steppers
+        for i in range(self.motors):
+            current_step = self.sim.get(steppers[i].step)
+            # Detect rising edge
+            if current_step == 1 and self.prev_steps[i] == 0:
+                current_dir = self.sim.get(steppers[i].dir)
+                if current_dir:
+                    self.simulated_positions[i] += 1
+                else:
+                    self.simulated_positions[i] -= 1
+            self.prev_steps[i] = current_step
+
+    async def tick(self):
+        """Advances the simulator while ensuring steps are tracked."""
+        self._track_steps()
+        await self.sim.tick()
+
+    async def advance_cycles(self, cycles):
+        """
+        Crucial override: ANY delay invoked by LunaGatewareTestCase (like SPI communication)
+        will route through here. This guarantees no steps are dropped during SPI delays.
+        """
+        for _ in range(cycles):
+            await self.tick()
+
+    async def _wait_until_signal(self, signal, target_state=1, timeout=10000):
+        """Custom waiter to ensure steps are tracked while waiting."""
+        cycles = 0
+        while self.sim.get(signal) != target_state:
+            await self.tick()
+            cycles += 1
+            if cycles >= timeout:
+                raise TimeoutError("Timeout during _wait_until_signal")
 
     async def wait_complete(self, max_cycles=100) -> None:
         """Block until the dispatcher is fully idle."""
-        sim = self.sim
         current_cycle = 0
-        while sim.get(self.dut.busy) or current_cycle < max_cycles:
-            if sim.get(self.dut.pol.busy):
+        while self.sim.get(self.dut.busy) or current_cycle < max_cycles:
+            if self.sim.get(self.dut.pol.busy):
                 current_cycle = 0
             else:
                 current_cycle += 1
-            await sim.tick()
+            await self.tick()
+
+    def get_simulated_fpga_position_mm(self):
+        """
+        Converts the manually tracked step counts back into millimeters.
+        Replaces the old `await self.host.fpga_position`.
+        """
+        steps_mm_dict = self.plf_cfg.motor_cfg["steps_mm"]
+        steps_mm = list(steps_mm_dict.values())
+        mm_positions = [
+            self.simulated_positions[i] / steps_mm[i] for i in range(self.motors)
+        ]
+        return np.array(mm_positions)
 
     @async_test_case
     async def test_memfull(self, sim):
@@ -312,28 +351,14 @@ class TestDispatcher(SPIGatewareTestCase):
     @async_test_case
     async def test_home(self, sim):
         """
-        Homing should
-
-        1. detect asserted limit switches for every axis that is asked to home,
-        2. drive those axes to the switch, clear the busy flag, and
-        3. reset the position register to *zero* for each homed axis.
+        Homing done via diagnose pins of the TMC2209. Wether the home is reached is determined
+        by micropython. The FPGA only relays the information.
         """
         motors = self.plf_cfg.hdl_cfg.motors
-        self.host._position = np.array([0.1] * motors)
         for i in range(motors):
             sim.set(self.dut.pol.steppers[i].limit, 1)
         await sim.tick()
         self.assertTrue(sim.get(self.dut.parser.pin_state[0]))
-        await self.host.home_axes(
-            axes=np.array([1] * motors),
-            speed=None,
-            displacement=-0.1,
-        )
-        assert_array_equal(
-            self.host._position,
-            np.array([0] * motors),
-            err_msg="All axes should read position 0 after homing",
-        )
 
     @async_test_case
     async def test_ptpmove(self, sim, steps=None, ticks=30_000):
@@ -344,7 +369,6 @@ class TestDispatcher(SPIGatewareTestCase):
         also test blocking behaviour.
         """
         hdl_cfg = self.plf_cfg.hdl_cfg
-        # TODO: remove this fix
         if steps is None:
             steps = [800] * hdl_cfg.motors
 
@@ -353,17 +377,27 @@ class TestDispatcher(SPIGatewareTestCase):
         )
         time = ticks / hdl_cfg.motor_freq
         speed = np.abs(mm / time)
-        await self.host.gotopoint(mm.tolist(), speed.tolist())
-        await self.wait_complete()
-        # if 76.3 steps per mm then 1/76.3 = 0.013 is max resolution
-        assert_array_almost_equal(await self.host.fpga_position, mm, decimal=1)
 
-        # TODO: they are not symmetric! if start with mm does not work
+        # Reset software tracker before move
+        self.simulated_positions = [0] * self.motors
+        self.prev_steps = [sim.get(s.step) for s in self.dut.pol.steppers]
+
+        await self.host.gotopoint(mm.tolist(), speed.tolist())
+        # wait_complete will passively count the steps while blocking!
+        await self.wait_complete()
+
+        actual_pos = self.get_simulated_fpga_position_mm()
+        # if 76.3 steps per mm then 1/76.3 = 0.013 is max resolution
+        assert_array_almost_equal(actual_pos, mm, decimal=1)
+
+        # Reverse move
         mm = -mm
         await self.host.gotopoint(mm.tolist(), speed.tolist(), absolute=False)
         await self.wait_complete()
+
+        actual_pos_return = self.get_simulated_fpga_position_mm()
         assert_array_almost_equal(
-            await self.host.fpga_position, np.zeros(hdl_cfg.motors), decimal=1
+            actual_pos_return, np.zeros(hdl_cfg.motors), decimal=1
         )
 
     @async_test_case
@@ -379,28 +413,41 @@ class TestDispatcher(SPIGatewareTestCase):
         host = self.host
         laz_tim = self.plf_cfg.laser_timing
         motor_cfg = self.plf_cfg.motor_cfg
+
+        # Reset software tracker before scan
+        self.simulated_positions = [0] * self.motors
+        self.prev_steps = [sim.get(s.step) for s in self.dut.pol.steppers]
+
+        # Queue lines
         for _ in range(num_lines):
             await host.write_line([1] * laz_tim["scanline_length"], steps_line, 0)
         await host.write_line([])
-        # TODO: wrong, synchronized should not go to false!
+
         self.assertFalse((await self.host.fpga_state)["synchronized"])
         self.assertTrue((await self.host.fpga_state)["synchronized"])
-        await self.wait_until(self.dut.parser.fifo.empty)
+
+        # We must use wait_complete here to ensure steps are actively tracked while waiting for FIFO to empty
+        await self.wait_complete()
+
         steps_mm = motor_cfg["steps_mm"][motor_cfg["orth2lsrline"]]
         decimals = int(np.log10(steps_mm))
         dist = num_lines * steps_line / steps_mm
         idx = list(motor_cfg["steps_mm"].keys()).index(motor_cfg["orth2lsrline"])
-        # TODO: the x position changes as well!?
-        assert_array_almost_equal(
-            -dist, (await host.fpga_position)[idx], decimal=decimals
-        )
+
+        actual_pos = self.get_simulated_fpga_position_mm()
+        assert_array_almost_equal(-dist, actual_pos[idx], decimal=decimals)
+
+        # Return pass
         for _ in range(num_lines):
             await host.write_line([1] * laz_tim["scanline_length"], steps_line, 1)
         await host.write_line([])
         await host.enable_comp(synchronize=False)
-        await self.wait_until(self.dut.parser.fifo.empty)
-        # TODO: y is still lightly positive 0.001
-        assert_array_almost_equal(0, (await host.fpga_position)[idx], decimal=decimals)
+
+        await self.wait_complete()
+
+        actual_pos_return = self.get_simulated_fpga_position_mm()
+        assert_array_almost_equal(0, actual_pos_return[idx], decimal=decimals)
+
         fpga_state = await host.fpga_state
         self.assertFalse(fpga_state["synchronized"])
         self.assertFalse(fpga_state["error"])

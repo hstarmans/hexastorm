@@ -40,7 +40,6 @@ class Spi:
         write = 1
         read = 2
         debug = 3
-        position = 4
         start = 5
         stop = 6
 

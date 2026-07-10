@@ -22,12 +22,10 @@ class SPIParser(Elaboratable):
         - write    : Write instruction to FIFO
         - read     : Return system state (used with status)
         - debug    : Return debug word
-        - position : Cycles through and returns motor positions
 
     Interface:
         Inputs:
             - spi         : SPIBus interface
-            - positions   : Array of stepper motor positions
             - pin_state   : External pin state to report
             - fifo_full   : FIFO full flag
             - read_commit, read_en, read_discard : FIFO control
@@ -48,7 +46,6 @@ class SPIParser(Elaboratable):
         self.spi_command = SPICommandInterface(
             command_size=Spi.command_bytes * 8, word_size=Spi.word_bytes * 8
         )
-        self.positions_in = Array(Signal(signed(32)) for _ in range(hdl_cfg.motors))
         self.pin_state = Signal(8)
         self.fifo_full = Signal()
         self.fifo = TransactionalizedFIFO(
@@ -135,19 +132,6 @@ class SPIParser(Elaboratable):
                             m.next = "WAIT_COMMAND"
                         with m.Case(cmd.debug):
                             m.d.sync += spi_cmd.word_to_send.eq(self.debug_word)
-                            m.next = "WAIT_COMMAND"
-                        with m.Case(cmd.position):
-                            # Position requested multiple times
-                            m.d.sync += [
-                                spi_cmd.word_to_send.eq(self.positions_in[mtr_idx]),
-                                mtr_idx.eq(
-                                    Mux(
-                                        mtr_idx < hdl_cfg.motors - 1,
-                                        mtr_idx + 1,
-                                        0,
-                                    )
-                                ),
-                            ]
                             m.next = "WAIT_COMMAND"
 
             with m.State("WAIT_WORD"):
@@ -266,9 +250,8 @@ class Dispatcher(Elaboratable):
             poly.dir_laser.eq(lh.dir),
             poly.override_laser.eq(lh.process_lines),
         ]
-        for i in range(len(poly.position)):
+        for i in range(len(poly.steppers)):
             m.d.comb += [
-                parser.positions_in[i].eq(poly.position[i]),
                 parser.pin_state[i].eq(poly.steppers[i].limit),
             ]
         # parser pin state & busy signal

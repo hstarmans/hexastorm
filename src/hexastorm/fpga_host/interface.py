@@ -36,31 +36,6 @@ class BaseHost:
         # mpy requires np.float
         self._position = np.array([0] * self.cfg.hdl_cfg.motors, dtype=NP_FLOAT)
 
-    # TODO: doesn't work well with homing
-    @property
-    async def fpga_position(self):
-        """
-        Retrieve the current stepper motor positions from the FPGA and update internal state.
-
-        - FPGA stores position in steps (signed 64-bit integers).
-        - Positions are converted to millimeters using steps/mm config.
-        - Internal `_position` is updated and returned as a NumPy array in mm.
-
-        Returns:
-            np.ndarray: Current motor positions in mm, ordered [x, y, z].
-        """
-        cmd = [Spi.Commands.position] + [0] * Spi.word_bytes
-        num_motors = self.cfg.hdl_cfg.motors
-        steps_per_mm = np.array(list(self.cfg.motor_cfg["steps_mm"].values()))
-        for motor in range(num_motors):
-            read_data = await self.send_command(cmd)
-            # Convert steps to mm
-            self._position[motor] = (
-                float(unpack("!i", read_data[-4:])[0]) / steps_per_mm[motor]
-            )
-
-        return self._position
-
     async def send_command(self, command, timeout=0):
         """
         Send a command to the FPGA via SPI and return the response.

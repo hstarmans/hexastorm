@@ -38,6 +38,7 @@ class Polynomial(Elaboratable):
         Assumptions:
         - Max ticks per move is configured by `move_ticks` (e.g., 10_000).
         - Base update frequency is typically 1 MHz.
+        - Absolute position tracking is handled by the host controller.
 
         Inputs:
         - `coeff`:          Array of coefficients [a, b, c] for each motor.
@@ -48,7 +49,6 @@ class Polynomial(Elaboratable):
         - `override_laser`: When high, overrides step/dir for the laser motor.
 
     Outputs:
-        - `position`:       Current absolute position of each motor in steps (signed 32-bit).
         - `busy`:           High while segment evaluation is in progress.
     """
 
@@ -74,7 +74,6 @@ class Polynomial(Elaboratable):
 
         # Output
         self.busy = Signal()
-        self.position = Array(Signal(signed(32)) for _ in range(hdl_cfg.motors))
 
         # Mixed
         self.steppers = [StepperRecord() for _ in range(hdl_cfg.motors)]
@@ -115,19 +114,6 @@ class Polynomial(Elaboratable):
                     dir_buf.o.eq(steppers[i].dir),
                     steppers[i].limit.eq(lim_buf.i),
                 ]
-
-        # Position tracking
-        stepper_d = Array(Signal() for _ in range(hdl_cfg.motors))
-        for idx, stepper in enumerate(self.steppers):
-            pos = self.position[idx]
-            m.d.sync += stepper_d[idx].eq(stepper.step)
-            with m.If(stepper.limit == 1):
-                m.d.sync += self.position[idx].eq(0)
-            with m.Elif((stepper.step == 1) & (stepper_d[idx] == 0)):
-                with m.If(stepper.dir):
-                    m.d.sync += pos.eq(pos + 1)
-                with m.Else():
-                    m.d.sync += pos.eq(pos - 1)
 
         # Generate step pulse based on toggling specific bit
         laser_idx = list(plf_cfg.motor_cfg["steps_mm"].keys()).index(
@@ -209,7 +195,7 @@ class Polynomial(Elaboratable):
                         if hdl_cfg.pol_degree >= 2:
                             m.d.sync += cntrs[base + 1].eq(a + b + c)
 
-                        # Keep the fractional part from the previous segment for position
+                        # Keep the fractional part from the previous segment for position continuity
                         m.d.sync += cntrs[base].eq(cntrs[base][:step_bit])
 
                     m.d.sync += self.busy.eq(1)
