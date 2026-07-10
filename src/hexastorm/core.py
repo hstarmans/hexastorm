@@ -92,7 +92,11 @@ class SPIParser(Elaboratable):
         error_word = Signal()
 
         status = Spi.State
-        # space available equals the max chunk of lines, i.e. data, you are allowed to send
+
+        # Space available: equals the max chunk of lines, i.e. data, you are allowed to send
+        is_fifo_full = Signal()
+        m.d.comb += is_fifo_full.eq(fifo.space_available <= hdl_cfg.space_available)
+
         m.d.sync += [
             state[status.parsing].eq(self.parse),
             state[status.full].eq(fifo.space_available <= hdl_cfg.space_available),
@@ -108,6 +112,7 @@ class SPIParser(Elaboratable):
                     error_word.eq(0),
                 ]
                 m.next = "WAIT_COMMAND"
+
             with m.State("WAIT_COMMAND"):
                 with m.If(spi_cmd.command_ready):
                     state_word = Cat(state, self.pin_state)
@@ -144,6 +149,7 @@ class SPIParser(Elaboratable):
                                 ),
                             ]
                             m.next = "WAIT_COMMAND"
+
             with m.State("WAIT_WORD"):
                 with m.If(spi_cmd.word_complete):
                     byte0 = spi_cmd.word_received[:8]
@@ -169,18 +175,19 @@ class SPIParser(Elaboratable):
                             words_rec.eq(words_rec + 1),
                         ]
                         m.next = "WRITE"
+
             with m.State("WRITE"):
                 m.d.sync += fifo.write_en.eq(0)
 
                 # Define when an instruction is ready to be committed
                 ready_to_commit = Signal()
-
                 instr = Spi.Instructions
+
                 m.d.comb += ready_to_commit.eq(
-                    ((instr_rec == instr.move) & (words_rec >= hdl_cfg.words_move))
+                    ((instr_rec == instr.move) & (words_rec == hdl_cfg.words_move))
                     | (
                         (instr_rec == instr.scanline)
-                        & (words_rec >= hdl_cfg.words_scanline)
+                        & (words_rec == hdl_cfg.words_scanline)
                     )
                     | (instr_rec == instr.write_pin)
                     | (instr_rec == instr.last_scanline)
@@ -191,6 +198,7 @@ class SPIParser(Elaboratable):
                     m.next = "COMMIT"
                 with m.Else():
                     m.next = "WAIT_COMMAND"
+
             with m.State("COMMIT"):
                 m.d.sync += fifo.write_commit.eq(0)
                 m.next = "WAIT_COMMAND"
@@ -273,6 +281,7 @@ class Dispatcher(Elaboratable):
 
         # pins you can write to
         self.pins = pins = Cat(lasers, enable_prism, lh.synchronize, lh.singlefacet)
+
         # poly coeff currently processed
         poly_coeff = Signal(range(len(poly.coeff) + 1))
 
@@ -286,11 +295,13 @@ class Dispatcher(Elaboratable):
                 with m.If(~parser.fifo.empty & parser.parse & ~busy):
                     m.d.sync += read_en.eq(1)
                     m.next = "PARSE_HEAD"
+
             # check which instruction we r handling
             with m.State("PARSE_HEAD"):
                 instruction = parser.fifo.read_data[:8]
                 payload = parser.fifo.read_data[8:]
                 m.d.sync += read_en.eq(0)
+
                 with m.Switch(instruction):
                     instr = Spi.Instructions
                     with m.Case(instr.move):
@@ -315,31 +326,34 @@ class Dispatcher(Elaboratable):
                     with m.Default():
                         m.d.sync += error_instruction.eq(1)
                         m.next = "ERROR"
+
             with m.State("MOVE_POLYNOMIAL"):
-                with m.If(poly_coeff < len(poly.coeff)):
-                    with m.If(read_en == 0):
-                        m.d.sync += read_en.eq(1)
-                    with m.Else():
-                        m.d.sync += [
-                            poly.coeff[poly_coeff].eq(parser.fifo.read_data),
-                            poly_coeff.eq(poly_coeff + 1),
-                            read_en.eq(0),
-                        ]
-                with m.Else():
+                with m.If(poly_coeff == len(poly.coeff)):
                     m.d.sync += [poly.start.eq(1), read_commit.eq(1)]
                     m.next = "WAIT"
+                with m.Elif(read_en == 0):
+                    m.d.sync += read_en.eq(1)
+                with m.Else():
+                    m.d.sync += [
+                        poly.coeff[poly_coeff].eq(parser.fifo.read_data),
+                        poly_coeff.eq(poly_coeff + 1),
+                        read_en.eq(0),
+                    ]
+
             with m.State("SCANLINE"):
                 m.d.sync += [
                     read_discard.eq(0),
                     lh.expose_start.eq(0),
                 ]
                 m.next = "WAIT"
-            # NOTE: you need to wait for busy to be raised
-            #       in time
+
+            # NOTE: you need to wait for busy to be raised in time
             with m.State("WAIT"):
                 m.d.sync += poly.start.eq(0)
                 m.next = "WAIT_INSTRUCTION"
+
             # NOTE: system never recovers user must reset
             with m.State("ERROR"):
                 m.next = "ERROR"
+
         return m

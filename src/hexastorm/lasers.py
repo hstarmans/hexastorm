@@ -1,4 +1,4 @@
-from amaranth import Elaboratable, Module, Signal, Cat
+from amaranth import Elaboratable, Module, Signal, Cat, Mux
 from amaranth.lib.io import Buffer
 
 from .config import Spi
@@ -151,17 +151,18 @@ class Laserhead(Elaboratable):
         stepcnt = Signal.like(stephalfperiod)
 
         # Laser FSM
-        # syncfailed is lowered once synchronized
-        syncfailed_cnt = Signal(range(laz_tim["stable_ticks"]))
         assert laz_tim["facets"] < 2**8, "too many facets"
         facetcnt = Signal(8)  # 1 byte, is sent back
         linecnt = Signal.like(facetcnt)
         lasercnt = Signal(range(laz_tim["laser_ticks"]))
         byte_index = Signal(range(laz_tim["scanline_length"] + 1))
+
+        # Auto-size the tickcounter
         tickcounter_max = max(laz_tim["spinup_ticks"], laz_tim["stable_ticks"])
         assert tickcounter_max < 2**32, "tickcounter too large"
+        tickcounter = Signal(range(tickcounter_max + 1))
 
-        tickcounter = Signal(32)
+        fast_timeout_en = Signal()
 
         read_data = self.read_data
         read_old = Signal.like(read_data)
@@ -175,12 +176,13 @@ class Laserhead(Elaboratable):
                     enable_prism.eq(0),
                     lasers.eq(0),
                     linecnt.eq(0),
+                    fast_timeout_en.eq(0),
                 ]
                 m.next = "STOP"
 
             with m.State("STOP"):
                 m.d.sync += [
-                    syncfailed_cnt.eq(laz_tim["stable_ticks"] - 1),
+                    fast_timeout_en.eq(0),
                     tickcounter.eq(0),
                     facetcnt.eq(0),
                     linecnt.eq(0),
@@ -211,8 +213,28 @@ class Laserhead(Elaboratable):
                     m.d.sync += tickcounter.eq(tickcounter + 1)
 
             with m.State("WAIT_STABLE"):
+                # Calculate constants for timeout (evaluated purely in python -> 0 LUTs)
+                # Timeout limit for synchronization failure when fast_timeout_en is high
+                # Note that that 10 facet ticks is too generous, facet correction doesn't allow a single failure
+                # Once proper tuned, this is the case.
+                syncfailed_sync_max = min(
+                    round(10.1 * laz_tim["facet_ticks"]),
+                    laz_tim["stable_ticks"],
+                )
+
+                # Mux to select active timeout limit based on our fast_timeout_en flag
+                # The timeout check is enabled after the laser is synhronized.
+                timeout_limit = Signal(range(tickcounter_max + 1))
+                m.d.comb += timeout_limit.eq(
+                    Mux(
+                        fast_timeout_en,
+                        syncfailed_sync_max,
+                        laz_tim["stable_ticks"] - 1,
+                    )
+                )
+
                 # Timeout: photodiode didn't fall in time
-                with m.If(tickcounter >= syncfailed_cnt):
+                with m.If(tickcounter >= timeout_limit):
                     m.d.sync += self.error.eq(1)
                     m.next = "STOP"
 
@@ -246,13 +268,8 @@ class Laserhead(Elaboratable):
                             m.next = "WAIT_END"
                         # Proceed to read instruction
                         with m.Elif((linecnt == facetcnt) | self.singlefacet):
-                            # TODO: 10 is too high, should be lower
-                            syncfailed_sync_max = min(
-                                round(10.1 * laz_tim["facet_ticks"]),
-                                laz_tim["stable_ticks"],
-                            )
                             m.d.sync += [
-                                syncfailed_cnt.eq(syncfailed_sync_max),
+                                fast_timeout_en.eq(1),
                                 self.read_en.eq(1),
                             ]
                             m.next = "READ_INSTRUCTION"
@@ -293,6 +310,7 @@ class Laserhead(Elaboratable):
                     with m.Default():
                         m.d.sync += self.error.eq(1)
                         m.next = "READ_INSTRUCTION"
+
             with m.State("WAIT_FOR_DATA_RUN"):
                 m.d.sync += [
                     tickcounter.eq(tickcounter + 1),
