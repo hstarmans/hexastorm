@@ -40,6 +40,9 @@ class BaseHost:
         # Bits 5-7: led0, led1, led2
         self._pin_state = 0
 
+        self._fan_speed = 0
+        self._spindle_speed = 0
+
     async def send_command(self, command, timeout=0):
         """
         Send a command to the FPGA via SPI and return the response.
@@ -470,7 +473,14 @@ class BaseHost:
                 check_sensors=False,
             )
 
-    async def gotopoint(self, position, speed=None, absolute=True, check_sensors=True):
+    async def gotopoint(
+        self,
+        position,
+        speed=None,
+        absolute=True,
+        check_sensors=True,
+        blind_distance_mm=5.0,
+    ):
         """Move machine to position by a displacement at constant speed.
 
         The motion profile is first-order (constant velocity) and each axis
@@ -484,6 +494,7 @@ class BaseHost:
         absolute     -- Position interpreted as absolute (True) or
                         a displacement (False).
         check_sensors -- If True, aborts motion if stallguard threshold passed (home switch hit).
+        blind_distance_mm -- Distance in mm at the start of the move to ignore sensor triggers (overcomes start-up spikes).
         """
         await self.set_parsing(True)
         hdl_cfg = self.cfg.hdl_cfg
@@ -498,8 +509,6 @@ class BaseHost:
             assert len(speed) == num_axes
 
         # precompute
-        # conversions to steps / count gives rounding errors
-        # minimized by setting speed to integer
         position = np.array(position)
         speed = abs(np.array(speed))
         displacement = position - self._position if absolute else position
@@ -509,8 +518,15 @@ class BaseHost:
             if disp_mm == 0:
                 continue
 
+            # Calculate total duration and ticks
             duration_s = abs(disp_mm / speed[axis])
-            ticks_remaining = int(round(duration_s * hdl_cfg.motor_freq))
+            total_ticks = int(round(duration_s * hdl_cfg.motor_freq))
+            ticks_remaining = total_ticks
+
+            # NEW: Calculate how many ticks represent the blind distance
+            # Ensure blind ticks don't exceed total ticks
+            blind_duration_s = min(abs(blind_distance_mm / speed[axis]), duration_s)
+            blind_ticks = int(round(blind_duration_s * hdl_cfg.motor_freq))
 
             speed_steps = int(
                 round(speed[axis] * steps_per_mm[axis] * ulabext.sign(disp_mm))
@@ -522,36 +538,41 @@ class BaseHost:
                 ticks_chunk = min(ticks_remaining, hdl_cfg.move_ticks)
                 switches = await self.spline_move(int(ticks_chunk), velocity)
                 ticks_remaining -= ticks_chunk
-                # abort home switch hit and speed negative
-                if check_sensors and switches[axis]:
-                    if self.test:
-                        homeswitches_hit[axis] = 1
-                        break
-                    else:
-                        extra_samples = 4
-                        hits_count = 1
 
-                        for _ in range(extra_samples):
-                            await sleep(0.010)  # Wacht 10 milliseconden
-                            new_switches = await self.read_switches()
-                            if new_switches[axis]:
-                                hits_count += 1
+                # NEW: Calculate how many ticks we have processed so far
+                ticks_processed = total_ticks - ticks_remaining
 
-                        if hits_count >= (extra_samples // 2) + 1:
-                            state = self.enable_steppers
-                            self.enable_steppers = False
-                            # TODO: implement flush FIFO when parsing is stopped
-                            await sleep(2)  # wait for buffer to flush
-                            self.enable_steppers = state
+                # Check sensors only if we are past the blind distance
+                if check_sensors and (ticks_processed > blind_ticks):
+                    if switches[axis]:
+                        if self.test:
                             homeswitches_hit[axis] = 1
-                            axis_names = list(self.cfg.motor_cfg["steps_mm"].keys())
-                            logger.warning(
-                                f"Home switch hit on axis {axis_names[axis]} during move. Aborting motion."
-                            )
                             break
                         else:
-                            # false trigger
-                            pass
+                            extra_samples = 4
+                            hits_count = 1
+
+                            for _ in range(extra_samples):
+                                await sleep(0.010)  # Wacht 10 milliseconden
+                                new_switches = await self.read_switches()
+                                if new_switches[axis]:
+                                    hits_count += 1
+
+                            if hits_count >= (extra_samples // 2) + 1:
+                                state = self.enable_steppers
+                                self.enable_steppers = False
+                                # TODO: implement flush FIFO when parsing is stopped
+                                await sleep(2)  # wait for buffer to flush
+                                self.enable_steppers = state
+                                homeswitches_hit[axis] = 1
+                                axis_names = list(self.cfg.motor_cfg["steps_mm"].keys())
+                                logger.warning(
+                                    f"Home switch hit on axis {axis_names[axis]} during move. Aborting motion."
+                                )
+                                break
+                            else:
+                                # false trigger
+                                pass
         self._position += displacement
 
         return homeswitches_hit
@@ -572,3 +593,58 @@ class BaseHost:
         facet_cnt = int.from_bytes(payload[word_size - 1 :], "big")
         ticks_facet = int.from_bytes(payload[: word_size - 1], "big")
         return [ticks_facet, facet_cnt]
+
+    @property
+    def fan_speed(self):
+        """
+        Returns the last set fan speed (0-255).
+
+        This value is retrieved from the local host cache to minimize SPI overhead.
+        """
+        return self._fan_speed
+
+    async def set_fan_speed(self, speed: int):
+        """
+        Sets the cooling fan PWM duty cycle.
+
+        Args:
+            speed (int): Target speed / duty cycle value from 0 (Off) to 255 (100% On).
+        """
+        self._fan_speed = max(0, min(255, int(speed)))
+
+        # Structure payload: Opcode inside write command block
+        # Byte layout expects: Write command + Padding + Data payload + Instruction Opcode
+        data = (
+            [Spi.Commands.write]
+            + [0] * (Spi.word_bytes - 2)
+            + [self._fan_speed]
+            + [Spi.Instructions.set_fan]
+        )
+        await self.send_command(data)
+
+    @property
+    def spindle_speed(self):
+        """
+        Returns the last set spindle speed (0-255).
+
+        This value is retrieved from the local host cache to minimize SPI overhead.
+        """
+        return self._spindle_speed
+
+    async def set_spindle_speed(self, speed: int):
+        """
+        Sets the main spindle motor PWM duty cycle.
+
+        Args:
+            speed (int): Target speed / duty cycle value from 0 (Off) to 255 (100% On).
+        """
+        self._spindle_speed = max(0, min(255, int(speed)))
+
+        # Structure payload matching standard instruction layout
+        data = (
+            [Spi.Commands.write]
+            + [0] * (Spi.word_bytes - 2)
+            + [self._spindle_speed]
+            + [Spi.Instructions.set_spindle]
+        )
+        await self.send_command(data)

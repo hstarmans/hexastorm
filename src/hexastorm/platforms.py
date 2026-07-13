@@ -92,6 +92,13 @@ class Firestarter(LatticeICE40Platform):
             dir_pin="43",
             limit_pin="45",
         ),
+        Resource("fan", 0, Pins("38", dir="o"), Attrs(IO_STANDARD="SB_LVCMOS")),
+        Resource(
+            "spindle",
+            0,
+            Pins("42", dir="o"),
+            Attrs(IO_STANDARD="SB_LVCMOS"),
+        ),
     ]
     connectors = []
 

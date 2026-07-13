@@ -148,6 +148,32 @@ class TestParser(SPIGatewareTestCase):
         self.assertTrue(sim.get(self.dut.fifo_full))
         self.assertTrue((await self.host.fpga_state)["mem_full"])
 
+    @async_test_case
+    async def test_set_fan_writes_to_fifo(self, sim):
+        """
+        Verifies that setting the fan speed writes exactly 2 words to the FIFO
+        (Instruction byte + 8-bit duty cycle payload).
+        """
+        self.assertTrue(sim.get(self.dut.fifo.empty))
+
+        # Send an arbitrary speed
+        await self.host.set_fan_speed(128)
+
+        # Verify 2 words hit the FIFO
+        await self.assert_fifo_written(1)
+
+    @async_test_case
+    async def test_set_spindle_writes_to_fifo(self, sim):
+        """
+        Verifies that setting the spindle speed writes exactly 2 words to the FIFO
+        (Instruction byte + 8-bit duty cycle payload).
+        """
+        self.assertTrue(sim.get(self.dut.fifo.empty))
+
+        await self.host.set_spindle_speed(200)
+
+        await self.assert_fifo_written(1)
+
 
 class TestDispatcher(SPIGatewareTestCase):
     plf_cfg = PlatformConfig(test=True)
@@ -225,6 +251,42 @@ class TestDispatcher(SPIGatewareTestCase):
             self.simulated_positions[i] / steps_mm[i] for i in range(self.motors)
         ]
         return np.array(mm_positions)
+
+    @async_test_case
+    async def test_fan_and_spindle_duty_assignment(self, sim):
+        """
+        Verify that set_fan_speed and set_spindle_speed commands are fully parsed
+        and correctly routed to the respective PWM duty cycle registers.
+        """
+        target_fan_speed = 85
+        target_spindle_speed = 210
+
+        # --- Test Fan Routing ---
+        await self.host.set_fan_speed(target_fan_speed)
+
+        # Wait for the FIFO to register the command, then wait for it to empty
+        await self.wait_until(~self.dut.parser.fifo.empty)
+        await self.wait_until(self.dut.parser.fifo.empty)
+
+        # Give the state machine 2 clock cycles to transition and assign the register
+        await self.advance_cycles(2)
+
+        # Assert the dispatcher correctly assigned the payload to the fan_duty register
+        self.assertEqual(sim.get(self.dut.fan_duty), target_fan_speed)
+
+        # --- Test Spindle Routing ---
+        await self.host.set_spindle_speed(target_spindle_speed)
+
+        await self.wait_until(~self.dut.parser.fifo.empty)
+        await self.wait_until(self.dut.parser.fifo.empty)
+        await self.advance_cycles(2)
+
+        # Assert the dispatcher correctly assigned the payload to the spindle_duty register
+        self.assertEqual(sim.get(self.dut.spindle_duty), target_spindle_speed)
+
+        # Verify no error flags were raised by the parser/dispatcher
+        fpga_state = await self.host.fpga_state
+        self.assertFalse(fpga_state["error"])
 
     @async_test_case
     async def test_memfull(self, sim):

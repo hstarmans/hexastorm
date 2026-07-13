@@ -50,6 +50,8 @@ class Spi:
         write_pin = 2
         scanline = 3
         last_scanline = 4
+        set_fan = 5
+        set_spindle = 6
 
     class State:
         """State word returned by SPI. Each bit represent a specific status flag."""
@@ -338,7 +340,7 @@ class PlatformConfig:
                 # global settings for all motors
                 settings=[
                     ("direction_inverted", False),
-                    ("vsense", True),
+                    ("vsense", False),  # use vsense is true for higher currents
                     ("current", 400),
                     ("iscale_analog", False),
                     ("interpolation", True),
@@ -354,7 +356,10 @@ class PlatformConfig:
                 axis_settings=dict(
                     x=dict(
                         stallguard_threshold=120,
-                        direction_inverted=False,
+                    ),
+                    y=dict(
+                        current=600,
+                        stallguard_threshold=80,
                     ),
                     z=dict(
                         direction_inverted=True,

@@ -6,6 +6,7 @@ from .spi_helpers import connect_synchronized_spi
 from .lasers import DiodeSimulator, Laserhead
 from .luna.spi import SPICommandInterface
 from .luna.memory import TransactionalizedFIFO
+from .pwm import HardwarePWM
 
 # from .motor import Driver
 from .movement import Polynomial
@@ -136,7 +137,7 @@ class SPIParser(Elaboratable):
                 with m.If(spi_cmd.word_complete):
                     byte0 = spi_cmd.word_received[:8]
                     with m.If(words_rec == 0):
-                        valid_instr = (byte0 > 0) & (byte0 < 6)
+                        valid_instr = (byte0 > 0) & (byte0 <= 6)
                         with m.If(valid_instr):
                             m.d.sync += [
                                 instr_rec.eq(byte0),
@@ -173,6 +174,8 @@ class SPIParser(Elaboratable):
                     )
                     | (instr_rec == instr.write_pin)
                     | (instr_rec == instr.last_scanline)
+                    | (instr_rec == instr.set_fan)
+                    | (instr_rec == instr.set_spindle)
                 )
 
                 with m.If(ready_to_commit):
@@ -212,10 +215,21 @@ class Dispatcher(Elaboratable):
         read_discard = Signal()
         busy = self.busy  # poly busy or lh processing lines
         error_instruction = Signal()
+        self.fan_duty = fan_duty = Signal(8)
+        self.spindle_duty = spindle_duty = Signal(8)
 
         # submodules
         m.submodules.parser = parser = SPIParser(self.plf_cfg.hdl_cfg)
         m.submodules.polynomial = poly = Polynomial(self.plf_cfg)
+
+        # --- NEW: Instantiate the PWM hardware blocks ---
+        m.submodules.fan_pwm = fan_pwm = HardwarePWM(resolution=8, clock_div_bits=12)
+        m.submodules.spindle_pwm = spindle_pwm = HardwarePWM(resolution=8)
+
+        m.d.comb += [
+            fan_pwm.duty.eq(fan_duty),
+            spindle_pwm.duty.eq(spindle_duty),
+        ]
 
         if platform is None:
             self.parser = parser
@@ -229,6 +243,16 @@ class Dispatcher(Elaboratable):
             for i in range(len(leds)):
                 led = platform.request("led", i)
                 m.d.comb += led.o.eq(leds[i])
+
+            # fan and spindle PWM outputs
+            fan_pin = platform.request("fan", 0)
+            spindle_pin = platform.request("spindle", 0)
+
+            # Connect the PWM output signal to the physical pins
+            m.d.comb += [
+                fan_pin.o.eq(fan_pwm.pwm_out),
+                spindle_pin.o.eq(spindle_pwm.pwm_out),
+            ]
 
         # connect laser
         m.d.comb += [
@@ -311,6 +335,23 @@ class Dispatcher(Elaboratable):
                             lh.expose_start.eq(1),
                         ]
                         m.next = "SCANLINE"
+                    with m.Case(instr.set_fan):
+                        m.d.sync += [
+                            fan_duty.eq(
+                                payload
+                            ),  # Route payload to duty cycle register
+                            read_commit.eq(1),  # Clear from FIFO
+                        ]
+                        m.next = "WAIT"
+
+                    with m.Case(instr.set_spindle):
+                        m.d.sync += [
+                            spindle_duty.eq(
+                                payload
+                            ),  # Route payload to duty cycle register
+                            read_commit.eq(1),  # Clear from FIFO
+                        ]
+                        m.next = "WAIT"
                     with m.Default():
                         m.d.sync += error_instruction.eq(1)
                         m.next = "ERROR"
