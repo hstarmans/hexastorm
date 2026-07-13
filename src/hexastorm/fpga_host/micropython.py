@@ -1,10 +1,9 @@
 from asyncio import sleep, sleep_ms, wait_for
 import time
 import logging
-import sys
 import os
 from random import randint
-from machine import Pin, SPI, I2C, SoftSPI, PWM
+from machine import Pin, SPI, I2C, PWM
 
 from ulab import numpy as np
 from tmc.uart import ConnectionFail
@@ -13,10 +12,6 @@ from tmc.stepperdriver import TMC_2209
 from .syncwrap import syncable
 from .interface import BaseHost
 from ..config import Spi
-
-
-if sys.implementation.name == "micropython":
-    from winbond import W25QFlash
 
 logger = logging.getLogger(__name__)
 
@@ -47,9 +42,11 @@ class ESP32Host(BaseHost):
             )
         self.fpga_reset = Pin(cfg["fpga"]["reset"], Pin.OUT)
         self.fpga_reset.value(1)
-        self.cam_reset = Pin(cfg["camera"]["reset"], Pin.OUT)
-        self.cam_reset.value(1)
-        self.i2c = I2C(scl=cfg["i2c"]["scl"], sda=cfg["i2c"]["sda"])
+        # digipot and camera are on the same i2c bus
+        # not all frequencies work, 100kHz is the most stable
+        self.i2c = I2C(
+            scl=cfg["i2c"]["scl"], sda=cfg["i2c"]["sda"], freq=cfg["i2c"]["freq"]
+        )
         # hardware SPI works partly, set speed to 3e6
         # return bytes give issue in retrieving position
         spi = cfg["spi"]

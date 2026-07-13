@@ -381,6 +381,7 @@ class PlatformConfig:
             i2c=dict(
                 scl=17,
                 sda=18,
+                freq=int(1e5),
                 digipot_addr=0x28,
                 cam_addr=0x30,
             ),
