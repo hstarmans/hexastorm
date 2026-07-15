@@ -335,18 +335,40 @@ class BaseHost:
         command = write_byte + ticks.to_bytes(7, "big") + move_byte
         commands = [command]
 
-        # Add coefficients (pad with zeros if caller gave fewer than FPGA expects)
+        # Add coefficients (converted to forward differences)
         for motor in range(num_motors):
+            # 1. Extract raw A, B, C for the current motor
+            a = (
+                coefficients[0 + motor * coeffs_per_motor]
+                if coeffs_per_motor > 0
+                else 0
+            )
+            b = (
+                coefficients[1 + motor * coeffs_per_motor]
+                if coeffs_per_motor > 1
+                else 0
+            )
+            c = (
+                coefficients[2 + motor * coeffs_per_motor]
+                if coeffs_per_motor > 2
+                else 0
+            )
+
+            # 2. Calculate Forward Differences
+            d1 = a + b + c
+            d2 = (2 * b) + (6 * c)
+            d3 = 6 * c
+            d_diff = [d1, d2, d3]
+
+            # 3. Pack them based on the max order the FPGA expects
             for degree in range(max_order):
-                if degree >= coeffs_per_motor:
-                    coeff = 0
-                else:
-                    idx = degree + motor * coeffs_per_motor
-                    coeff = coefficients[idx]
+                coeff = d_diff[degree] if degree < 3 else 0
+
                 if sys.implementation.name == "micropython":
                     coeff_bytes = int(coeff).to_bytes(8, "big", True)
                 else:
                     coeff_bytes = int(coeff).to_bytes(8, "big", signed=True)
+
                 commands += [write_byte + coeff_bytes]
 
         # Send each command and track final response

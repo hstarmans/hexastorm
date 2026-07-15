@@ -453,15 +453,18 @@ class TestDispatcher(SPIGatewareTestCase):
     async def test_movereceipt(self, sim, ticks=10_000):
         """
         Send one `SPLINE_MOVE` command and verify that
-
-        tick limit & polynomial coefficient are transferred intact,
-        the internal polynomial counters are correct.
+        tick limit & polynomial coefficients (forward differences) are transferred intact,
+        and the internal polynomial counters are correct.
         """
         hdl_cfg = self.plf_cfg.hdl_cfg
         motors = hdl_cfg.motors
         pol_degree = hdl_cfg.pol_degree
-        coeff = [randint(-10, 10)] * motors * pol_degree
-        await self.host.spline_move(ticks, coeff)
+
+        # 1. Generate Raw Coefficients: [A, B, C] for each motor
+        raw_coeff = [randint(-10, 10) for _ in range(motors * pol_degree)]
+
+        await self.host.spline_move(ticks, raw_coeff)
+
         # wait till instruction is received
         await self.wait_until(self.dut.pol.start)
         await sim.tick()
@@ -470,17 +473,31 @@ class TestDispatcher(SPIGatewareTestCase):
         # confirm receipt tick limit of segment
         self.assertEqual(sim.get(self.dut.pol.tick_limit), ticks)
 
-        # confirm receipt coefficients
+        # 2. Calculate the expected Forward Differences the host sent
+        expected_d_coeff = []
+        for motor in range(motors):
+            a = raw_coeff[motor * pol_degree + 0] if pol_degree > 0 else 0
+            b = raw_coeff[motor * pol_degree + 1] if pol_degree > 1 else 0
+            c = raw_coeff[motor * pol_degree + 2] if pol_degree > 2 else 0
+
+            # Match the host's math
+            expected_d_coeff.extend([a + b + c, (2 * b) + (6 * c), 6 * c][:pol_degree])
+
+        # 3. Confirm receipt of forward differences
         for motor in range(motors):
             for coef in range(pol_degree):
                 indx = motor * pol_degree + coef
-                self.assertEqual(sim.get(self.dut.pol.coeff[indx]), coeff[indx])
+                self.assertEqual(
+                    sim.get(self.dut.pol.coeff[indx]), expected_d_coeff[indx]
+                )
 
+        # 4. Confirm final position accumulator using raw coefficients
         for motor in range(motors):
             cnt = 0
             for degree in range(pol_degree):
                 indx = motor * pol_degree + degree
-                cnt += ticks ** (degree + 1) * coeff[indx]
+                # The final position is mathematically equivalent to the raw polynomial
+                cnt += (ticks ** (degree + 1)) * raw_coeff[indx]
             self.assertEqual(sim.get(self.dut.pol.cntrs[motor * pol_degree]), cnt)
 
     @async_test_case

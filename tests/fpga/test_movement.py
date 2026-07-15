@@ -38,14 +38,26 @@ class TestPolynomial(LunaGatewareTestCase):
         """
         Send polynomial coefficients to DUT and pulse start.
 
-        Coefficients are for: c·x³ + b·x² + a·x
+        Converts raw coefficients (c·x³ + b·x² + a·x) to forward differences
+        [D1, D2, D3] before sending them to the DUT, matching host behavior.
         """
-        coeffs = [a, b, c]
+        # Calculate Forward Differences
+        d1 = a + b + c
+        d2 = (2 * b) + (6 * c)
+        d3 = 6 * c
+        coeffs = [d1, d2, d3]
+
         hdl_cfg = self.plf_cfg.hdl_cfg
 
-        for _ in range(hdl_cfg.motors):
+        for motor in range(hdl_cfg.motors):
             for idx in range(hdl_cfg.pol_degree):
-                self.sim.set(self.dut.coeff[idx], coeffs[idx])
+                # Ensure we don't index out of bounds if FPGA pol_degree > 3
+                val = coeffs[idx] if idx < 3 else 0
+
+                # Use base offset to assign to the correct motor's coefficients
+                base_idx = motor * hdl_cfg.pol_degree + idx
+                self.sim.set(self.dut.coeff[base_idx], val)
+
         await self.pulse(self.dut.start)
 
     @async_test_case

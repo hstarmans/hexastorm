@@ -184,16 +184,15 @@ class Polynomial(Elaboratable):
                         base = motor * hdl_cfg.pol_degree
                         step_bit = hdl_cfg.bit_shift + 1
 
-                        a = self.coeff[base]
-                        b = self.coeff[base + 1] if hdl_cfg.pol_degree > 1 else 0
-                        c = self.coeff[base + 2] if hdl_cfg.pol_degree > 2 else 0
+                        D1 = self.coeff[base]
+                        D2 = self.coeff[base + 1] if hdl_cfg.pol_degree > 1 else 0
 
-                        # Calculate initial Forward Differences based on degree
-                        # This happens once per line segment.
+                        # Load initial Forward Differences based on degree
+                        # The host now pre-calculates these, saving massive LUT overhead.
                         if hdl_cfg.pol_degree >= 3:
-                            m.d.sync += cntrs[base + 2].eq((b * 2) + (c * 6))
+                            m.d.sync += cntrs[base + 2].eq(D2)
                         if hdl_cfg.pol_degree >= 2:
-                            m.d.sync += cntrs[base + 1].eq(a + b + c)
+                            m.d.sync += cntrs[base + 1].eq(D1)
 
                         # Keep the fractional part from the previous segment for position continuity
                         m.d.sync += cntrs[base].eq(cntrs[base][:step_bit])
@@ -214,14 +213,14 @@ class Polynomial(Elaboratable):
                         # Pipelined Forward Differencing (1 adder per layer per clock tick)
 
                         if hdl_cfg.pol_degree >= 3:
-                            D3 = self.coeff[base + 2] * 6
+                            D3 = self.coeff[base + 2]
                             m.d.sync += cntrs[base + 2].eq(cntrs[base + 2] + D3)
 
                         if hdl_cfg.pol_degree >= 2:
                             D2 = (
                                 cntrs[base + 2]
                                 if hdl_cfg.pol_degree >= 3
-                                else (self.coeff[base + 1] * 2)
+                                else self.coeff[base + 1]
                             )
                             m.d.sync += cntrs[base + 1].eq(cntrs[base + 1] + D2)
 
