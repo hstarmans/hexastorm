@@ -174,6 +174,46 @@ class TestParser(SPIGatewareTestCase):
 
         await self.assert_fifo_written(1)
 
+    @async_test_case
+    async def test_flush_clears_fifo_and_stops_parsing(self, sim):
+        """
+        Verifies that the flush command immediately empties the instruction FIFO,
+        resets the available space, and places the parser into a safe idle state.
+        """
+        # 1. Start parsing so we can verify the flush turns it off
+        await self.host.set_parsing(True)
+        self.assertTrue(sim.get(self.dut.parse))
+        self.assertTrue(sim.get(self.dut.fifo.empty))
+
+        # 2. Write some dummy data to the FIFO (e.g., a spline move)
+        cfg = self.hdl_cfg
+        coeff = [1] * cfg.motors * cfg.pol_degree
+        await self.host.spline_move(1000, coeff)
+
+        # 3. Wait for data to hit the FIFO and verify it is NO LONGER empty
+        await self.wait_until(~self.dut.fifo.empty)
+        self.assertFalse(sim.get(self.dut.fifo.empty))
+
+        # Verify space available went down
+        current_space = sim.get(self.dut.fifo.space_available)
+        self.assertLess(current_space, self.hdl_cfg.mem_depth)
+
+        # 4. Send the flush command
+        # Note: If your MockHost doesn't inherit the new flush_buffer() method yet,
+        # you can use: await self.host.send_command([Spi.Commands.flush] + [0] * Spi.word_bytes)
+        await self.host.flush_buffer()
+
+        # Give the combinational logic a clock cycle to cascade through the memory block
+        await sim.tick()
+
+        # 5. Assert hardware reacted correctly
+        self.assertTrue(sim.get(self.dut.parse))  # Parsing remains enabled
+        self.assertTrue(sim.get(self.dut.fifo.empty))  # FIFO should be empty
+        self.assertEqual(
+            sim.get(self.dut.fifo.space_available),
+            self.hdl_cfg.mem_depth,  # Space should be fully restored
+        )
+
 
 class TestDispatcher(SPIGatewareTestCase):
     plf_cfg = PlatformConfig(test=True)

@@ -45,6 +45,8 @@ class TransactionalizedFIFO(Elaboratable):
         self.write_discard = Signal()
         self.full = Signal()
 
+        self.flush = Signal()
+
         self.space_available = Signal(range(0, depth + 1))
 
     def elaborate(self, platform):
@@ -161,6 +163,14 @@ class TransactionalizedFIFO(Elaboratable):
 
         # Our FIFO is full if we don't have any space available.
         m.d.comb += self.full.eq(next_write_pointer == committed_read_pointer)
+
+        with m.If(self.flush):
+            m.d.sync += [
+                current_write_pointer.eq(0),
+                committed_write_pointer.eq(0),
+                current_read_pointer.eq(0),
+                committed_read_pointer.eq(0),
+            ]
 
         # If we're not supposed to be in the sync domain, rename our sync domain to the target.
         if self.domain != "sync":

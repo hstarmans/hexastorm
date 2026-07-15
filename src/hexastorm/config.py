@@ -40,6 +40,7 @@ class Spi:
         write = 1
         read = 2
         debug = 3
+        flush = 4
         start = 5
         stop = 6
 
@@ -504,12 +505,12 @@ class PlatformConfig:
             offset_mm = OrderedDict(
                 [
                     ("x", 10),
-                    ("y", -150),
+                    ("y", 10),
                     ("z", -10),
                 ]
             )
         return dict(
-            homing_dir=dict(x=-1, y=1, z=1),
+            homing_dir=dict(x=-1, y=-1, z=1),
             steps_mm=steps,
             offset_mm=offset_mm,
             orth2lsrline="x",

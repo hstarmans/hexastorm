@@ -33,7 +33,11 @@ class BaseHost:
         self.test = test
         self.cfg = PlatformConfig(self.test)
         # mpy requires np.float
-        self._position = np.array([0] * self.cfg.hdl_cfg.motors, dtype=NP_FLOAT)
+        self._position = np.array(
+            [0] * self.cfg.hdl_cfg.motors, dtype=NP_FLOAT
+        )  # machine position
+
+        self._work_offset = np.array([0] * self.cfg.hdl_cfg.motors, dtype=NP_FLOAT)
 
         # Track the state of the 8-bit 'write_pin' register locally
         # Bits 0-4: laser0, laser1, polygon, synchronize, singlefacet
@@ -422,6 +426,16 @@ class BaseHost:
         command = [cmd] + [0] * Spi.word_bytes
         return await self.send_command(command)
 
+    async def flush_buffer(self):
+        """
+        Immediately clears the FPGA instruction FIFO buffer.
+
+        This sends a dedicated SPI command that triggers a hardware-level
+        pointer reset, instantly emptying the queue of pending instructions.
+        """
+        command = [Spi.Commands.flush] + [0] * Spi.word_bytes
+        return await self.send_command(command)
+
     async def home_axes(self, axes, speed=None, displacement=200, pull_off=10):
         """Home given axes, i.e. [1,0,1] homes x, z and not y.
 
@@ -479,6 +493,7 @@ class BaseHost:
         speed=None,
         absolute=True,
         check_sensors=True,
+        workspace=False,
         blind_distance_mm=5.0,
     ):
         """Move machine to position by a displacement at constant speed.
@@ -493,7 +508,9 @@ class BaseHost:
         speed        -- list with speed in mm/s, if None default speeds used
         absolute     -- Position interpreted as absolute (True) or
                         a displacement (False).
-        check_sensors -- If True, aborts motion if stallguard threshold passed (home switch hit).
+        check_sensors -- If True, aborts motion if switch threshold is passed (home switch hit).
+        workspace    -- If True, treats absolute targets as workspace coordinates (WPOS)
+                        rather than machine coordinates (MPOS). This has no effect if 'absolute' is False. Defaults to False.
         blind_distance_mm -- Distance in mm at the start of the move to ignore sensor triggers (overcomes start-up spikes).
         """
         await self.set_parsing(True)
@@ -501,29 +518,42 @@ class BaseHost:
         num_axes = hdl_cfg.motors
         steps_per_mm = list(self.cfg.motor_cfg["steps_mm"].values())
 
-        #  validation
+        # Validation
         assert len(position) == num_axes
         if speed is None:
             speed = [10] * num_axes
         else:
             assert len(speed) == num_axes
 
-        # precompute
+        # Precompute
         position = np.array(position)
         speed = abs(np.array(speed))
-        displacement = position - self._position if absolute else position
+
+        if absolute:
+            if workspace:
+                # Target is in workspace coordinates, translate to absolute machine coordinates
+                target_mpos = position + self._work_offset
+                displacement = target_mpos - self._position
+            else:
+                # Target is direct absolute machine coordinates
+                displacement = position - self._position
+        else:
+            # Relative movement (JOG) is unaffected by coordinate system selection
+            displacement = position
 
         homeswitches_hit = [0] * num_axes
+
         for axis, disp_mm in enumerate(displacement):
             if disp_mm == 0:
                 continue
 
             # Calculate total duration and ticks
+            axis_name = list(self.cfg.motor_cfg["steps_mm"].keys())[axis]
             duration_s = abs(disp_mm / speed[axis])
             total_ticks = int(round(duration_s * hdl_cfg.motor_freq))
             ticks_remaining = total_ticks
 
-            # NEW: Calculate how many ticks represent the blind distance
+            # Calculate how many ticks represent the blind distance
             # Ensure blind ticks don't exceed total ticks
             blind_duration_s = min(abs(blind_distance_mm / speed[axis]), duration_s)
             blind_ticks = int(round(blind_duration_s * hdl_cfg.motor_freq))
@@ -539,7 +569,7 @@ class BaseHost:
                 switches = await self.spline_move(int(ticks_chunk), velocity)
                 ticks_remaining -= ticks_chunk
 
-                # NEW: Calculate how many ticks we have processed so far
+                # Calculate how many ticks we have processed so far
                 ticks_processed = total_ticks - ticks_remaining
 
                 # Check sensors only if we are past the blind distance
@@ -553,26 +583,37 @@ class BaseHost:
                             hits_count = 1
 
                             for _ in range(extra_samples):
-                                await sleep(0.010)  # Wacht 10 milliseconden
+                                await sleep(0.010)  # Wait 10 milliseconds
                                 new_switches = await self.read_switches()
                                 if new_switches[axis]:
                                     hits_count += 1
 
                             if hits_count >= (extra_samples // 2) + 1:
+                                await self.set_parsing(
+                                    False
+                                )  # Stop parsing new commands
+                                await (
+                                    self.flush_buffer()
+                                )  # Obliterate the pending buffer
+
                                 state = self.enable_steppers
                                 self.enable_steppers = False
-                                # TODO: implement flush FIFO when parsing is stopped
-                                await sleep(2)  # wait for buffer to flush
+                                await sleep(
+                                    0.5
+                                )  # Let physics settle (buffer is already cleared)
                                 self.enable_steppers = state
+
                                 homeswitches_hit[axis] = 1
-                                axis_names = list(self.cfg.motor_cfg["steps_mm"].keys())
                                 logger.warning(
-                                    f"Home switch hit on axis {axis_names[axis]} during move. Aborting motion."
+                                    f"Home switch hit on axis {axis_name} during move. Aborting motion."
                                 )
                                 break
                             else:
-                                # false trigger
+                                # false trigger, continue moving
                                 pass
+
+        # Note: If a move is aborted via flush, self._position might assume the full
+        # displacement occurred. You may need to query actual position if absolute tracking is required after an abort.
         self._position += displacement
 
         return homeswitches_hit
@@ -648,3 +689,44 @@ class BaseHost:
             + [Spi.Instructions.set_spindle]
         )
         await self.send_command(data)
+
+    @property
+    def mpos(self):
+        """
+        Get the absolute machine position (MPOS) as a standard Python list.
+
+        Returns:
+            list[float]: The absolute machine coordinates for all motor axes.
+        """
+        return self._position.tolist()
+
+    @property
+    def wpos(self):
+        """
+        Get the current workspace position (WPOS) as a standard Python list.
+
+        This calculates the position relative to the established workspace zero point
+        (Machine Position minus Workspace Offset).
+
+        Returns:
+            list[float]: The workspace coordinates for all motor axes.
+        """
+        return (self._position - self._work_offset).tolist()
+
+    def set_workspace_zero(self, axes=None):
+        """
+        Set the workspace zero point (WPOS = 0) at the current machine position.
+
+        This updates the internal work offsets, aligning the workspace coordinate system
+        to zero for the specified axes.
+
+        Args:
+            axes (list[int], optional): A binary mask list (e.g., [1, 1, 0]) indicating which axes
+                to zero. If None, all available axes will be zeroed.
+        """
+        if axes is None:
+            axes = [1] * self.cfg.hdl_cfg.motors
+
+        mask = np.array(axes)
+        # Retain the old offset where mask is 0, update with current mpos where mask is 1
+        self._work_offset = (self._work_offset * (1 - mask)) + (self._position * mask)
