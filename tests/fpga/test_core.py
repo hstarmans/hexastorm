@@ -524,17 +524,23 @@ class TestDispatcher(SPIGatewareTestCase):
         if steps is None:
             steps = [800] * hdl_cfg.motors
 
+        # Displacement vector for all axes
         mm = -np.array(steps) / np.array(
             list(self.plf_cfg.motor_cfg["steps_mm"].values())
         )
+
+        # Calculate the scalar feedrate (Euclidean distance / time)
         time = ticks / hdl_cfg.motor_freq
-        speed = np.abs(mm / time)
+        distance = np.sqrt(np.sum(mm**2))
+        scalar_speed = float(distance / time)
 
         # Reset software tracker before move
         self.simulated_positions = [0] * self.motors
         self.prev_steps = [sim.get(s.step) for s in self.dut.pol.steppers]
 
-        await self.host.gotopoint(mm.tolist(), speed.tolist())
+        # Pass the scalar speed (not a list)
+        await self.host.gotopoint(mm.tolist(), scalar_speed)
+
         # wait_complete will passively count the steps while blocking!
         await self.wait_complete()
 
@@ -544,7 +550,7 @@ class TestDispatcher(SPIGatewareTestCase):
 
         # Reverse move
         mm = -mm
-        await self.host.gotopoint(mm.tolist(), speed.tolist(), absolute=False)
+        await self.host.gotopoint(mm.tolist(), scalar_speed, absolute=False)
         await self.wait_complete()
 
         actual_pos_return = self.get_simulated_fpga_position_mm()

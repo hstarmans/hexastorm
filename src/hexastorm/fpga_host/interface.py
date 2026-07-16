@@ -509,6 +509,101 @@ class BaseHost:
                 check_sensors=False,
             )
 
+    def _calc_coordinated_velocities(self, displacement, speed):
+        """
+        Calculates constant velocity parameters for a coordinated multi-axis move.
+
+        Args:
+            displacement (np.array): Displacement per axis in mm.
+            speed (float): Vector feedrate in mm/s.
+
+        Returns:
+            tuple: (total_ticks, list of constant velocity counts per axis)
+        """
+        hdl_cfg = self.cfg.hdl_cfg
+        num_axes = hdl_cfg.motors
+
+        steps_per_mm = np.array(list(self.cfg.motor_cfg["steps_mm"].values()))
+
+        # Calculate Euclidean distance (Vector magnitude)
+        distance_mm = np.sqrt(np.sum(displacement**2))
+
+        if distance_mm == 0:
+            return 0, [0] * num_axes
+
+        # Total duration and total ticks
+        duration_s = distance_mm / speed
+        total_ticks = int(round(duration_s * hdl_cfg.motor_freq))
+
+        # Vectorized Steps Calculation
+        # Division automatically handles the signs from the displacement array
+        axis_speed_mm_s = displacement / duration_s
+        raw_steps = axis_speed_mm_s * steps_per_mm
+
+        # Map to FPGA fixed-point counts
+        bit_shift = hdl_cfg.bit_shift
+        multiplier = 1 << (1 + bit_shift)
+        offset = 1 << (bit_shift - 1)
+
+        velocity_counts = []
+        for axis in range(num_axes):
+            if displacement[axis] == 0:
+                velocity_counts.append(0)
+            else:
+                # Round to nearest step before applying fixed point multiplier
+                rounded_steps = int(round(raw_steps[axis]))
+                count = (rounded_steps * multiplier) + offset
+                velocity_counts.append(count // hdl_cfg.motor_freq)
+
+        return total_ticks, velocity_counts
+
+    def _pack_linear_segments(self, ticks_remaining, velocities):
+        """
+        Generates a packed SPI byte payload for constant-velocity linear motion.
+
+        Assumes first-order motion (straight line) where acceleration and jerk
+        are zero (D2 = 0, D3 = 0). Splines are chunked to the FPGA's max move limit.
+
+        Args:
+            ticks_remaining (int): Duration of the remaining move in clock ticks.
+            velocities (list[int]): Pre-calculated D1 velocity counts per axis.
+
+        Returns:
+            bytes: Packed SPI payload of 'spline_move' instructions.
+        """
+        hdl_cfg = self.cfg.hdl_cfg
+        write_byte = Spi.Commands.write.to_bytes(1, "big")
+        move_byte = Spi.Instructions.move.to_bytes(1, "big")
+
+        out_buffer = bytearray()
+
+        # Pre-pack the coefficient bytes for this vector (they never change during a linear move)
+        coeff_payload = bytearray()
+        for v_count in velocities:
+            # D1 = velocity (A), D2 = 0, D3 = 0
+            d_diff = [v_count, 0, 0]
+            for degree in range(hdl_cfg.pol_degree):
+                val = d_diff[degree] if degree < 3 else 0
+                if sys.implementation.name == "micropython":
+                    coeff_payload.extend(write_byte + int(val).to_bytes(8, "big", True))
+                else:
+                    coeff_payload.extend(
+                        write_byte + int(val).to_bytes(8, "big", signed=True)
+                    )
+
+        # Chunk the total ticks into max allowed sizes
+        while ticks_remaining > 0:
+            chunk_ticks = min(ticks_remaining, hdl_cfg.move_ticks)
+
+            # Instruction: Write + Ticks + Move Opcode
+            out_buffer.extend(write_byte + chunk_ticks.to_bytes(7, "big") + move_byte)
+            # Coefficients
+            out_buffer.extend(coeff_payload)
+
+            ticks_remaining -= chunk_ticks
+
+        return bytes(out_buffer)
+
     async def gotopoint(
         self,
         position,
@@ -516,127 +611,78 @@ class BaseHost:
         absolute=True,
         check_sensors=True,
         workspace=False,
-        blind_distance_mm=5.0,
     ):
-        """Move machine to position by a displacement at constant speed.
-
-        The motion profile is first-order (constant velocity) and each axis
-        is driven independently, simplifying timing calculations.
+        """Coordinated linear motion (G0/G1) across all axes.
 
         Args:
         position     --
             • If *absolute* is True,  absolute position (mm) for every axis.
             • If *absolute* is False, relative displacement (mm) for every axis.
-        speed        -- list with speed in mm/s, if None default speeds used
+        speed        -- list with speed in mm/s, if None default speeds used 10 mm/s
         absolute     -- Position interpreted as absolute (True) or
                         a displacement (False).
         check_sensors -- If True, aborts motion if switch threshold is passed (home switch hit).
         workspace    -- If True, treats absolute targets as workspace coordinates (WPOS)
                         rather than machine coordinates (MPOS). This has no effect if 'absolute' is False. Defaults to False.
-        blind_distance_mm -- Distance in mm at the start of the move to ignore sensor triggers (overcomes start-up spikes).
         """
         await self.set_parsing(True)
         hdl_cfg = self.cfg.hdl_cfg
         num_axes = hdl_cfg.motors
-        steps_per_mm = list(self.cfg.motor_cfg["steps_mm"].values())
+        homeswitches_hit = [0] * num_axes
 
-        # Validation
-        assert len(position) == num_axes
-        if speed is None:
-            speed = [10] * num_axes
-        else:
-            assert len(speed) == num_axes
-
-        # Precompute
+        # Standardize Inputs
         position = np.array(position)
-        speed = abs(np.array(speed))
+        if speed is None:
+            speed = 10.0
 
         if absolute:
-            if workspace:
-                # Target is in workspace coordinates, translate to absolute machine coordinates
-                target_mpos = position + self._work_offset
-                displacement = target_mpos - self._position
-            else:
-                # Target is direct absolute machine coordinates
-                displacement = position - self._position
+            target_mpos = position + self._work_offset if workspace else position
+            displacement = target_mpos - self._position
         else:
             # Relative movement (JOG) is unaffected by coordinate system selection
             displacement = position
 
-        homeswitches_hit = [0] * num_axes
+        # Math Layer: Get coordinated velocities
+        total_ticks, velocities = self._calc_coordinated_velocities(displacement, speed)
 
-        for axis, disp_mm in enumerate(displacement):
-            if disp_mm == 0:
-                continue
+        # 3. Execution Layer
+        # Define how much time (in ticks) we send to the FPGA before polling sensors
+        # 50,000 ticks at 1MHz = 50ms chunk size. This balances SPI speed with sensor reaction time.
+        MAX_CHUNK_TICKS = 50_000
+        ticks_remaining = total_ticks
 
-            # Calculate total duration and ticks
-            axis_name = list(self.cfg.motor_cfg["steps_mm"].keys())[axis]
-            duration_s = abs(disp_mm / speed[axis])
-            total_ticks = int(round(duration_s * hdl_cfg.motor_freq))
-            ticks_remaining = total_ticks
+        while ticks_remaining > 0:
+            current_chunk_ticks = min(ticks_remaining, MAX_CHUNK_TICKS)
 
-            # Calculate how many ticks represent the blind distance
-            # Ensure blind ticks don't exceed total ticks
-            blind_duration_s = min(abs(blind_distance_mm / speed[axis]), duration_s)
-            blind_ticks = int(round(blind_duration_s * hdl_cfg.motor_freq))
+            # Pack and send a batched chunk
+            payload = self._pack_linear_segments(current_chunk_ticks, velocities)
+            await self.send_command(payload, timeout=True)
 
-            speed_steps = int(
-                round(speed[axis] * steps_per_mm[axis] * ulabext.sign(disp_mm))
-            )
-            velocity = [0] * num_axes
-            velocity[axis] = self.steps_to_count(speed_steps) // hdl_cfg.motor_freq
+            ticks_remaining -= current_chunk_ticks
 
-            while ticks_remaining > 0:
-                ticks_chunk = min(ticks_remaining, hdl_cfg.move_ticks)
-                switches = await self.spline_move(int(ticks_chunk), velocity)
-                ticks_remaining -= ticks_chunk
+            # 4. Sensor Check Interleaving
+            if check_sensors:
+                switches = await self.read_switches()
+                if any(switches):
+                    # We hit a switch! Obliterate pending queue.
+                    await self.set_parsing(False)
+                    await self.flush_buffer()
 
-                # Calculate how many ticks we have processed so far
-                ticks_processed = total_ticks - ticks_remaining
-
-                # Check sensors only if we are past the blind distance
-                if check_sensors and (ticks_processed > blind_ticks):
-                    if switches[axis]:
-                        if self.test:
+                    # Update local state
+                    for axis, state in enumerate(switches):
+                        if state:
                             homeswitches_hit[axis] = 1
-                            break
-                        else:
-                            extra_samples = 4
-                            hits_count = 1
+                            logger.warning(
+                                f"Limit switch hit on axis {axis} during move!"
+                            )
+                    break
 
-                            for _ in range(extra_samples):
-                                await sleep(0.010)  # Wait 10 milliseconds
-                                new_switches = await self.read_switches()
-                                if new_switches[axis]:
-                                    hits_count += 1
-
-                            if hits_count >= (extra_samples // 2) + 1:
-                                await self.set_parsing(
-                                    False
-                                )  # Stop parsing new commands
-                                await (
-                                    self.flush_buffer()
-                                )  # Obliterate the pending buffer
-
-                                state = self.enable_steppers
-                                self.enable_steppers = False
-                                await sleep(
-                                    0.5
-                                )  # Let physics settle (buffer is already cleared)
-                                self.enable_steppers = state
-
-                                homeswitches_hit[axis] = 1
-                                logger.warning(
-                                    f"Home switch hit on axis {axis_name} during move. Aborting motion."
-                                )
-                                break
-                            else:
-                                # false trigger, continue moving
-                                pass
-
-        # Note: If a move is aborted via flush, self._position might assume the full
-        # displacement occurred. You may need to query actual position if absolute tracking is required after an abort.
-        self._position += displacement
+        # Calculate actual displacement if we aborted early
+        if any(homeswitches_hit):
+            percent_completed = 1.0 - (ticks_remaining / total_ticks)
+            self._position += displacement * percent_completed
+        else:
+            self._position += displacement
 
         return homeswitches_hit
 
