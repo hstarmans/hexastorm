@@ -169,6 +169,7 @@ class PlatformConfig:
                 end_frac=0.7,
             )
         self.update_laser_timing()
+        self.motor_cfg = self._init_motor_cfg()
         self.laser_bits = 1  # enables adding pwm to laser (not widely tested)
 
     @property
@@ -338,36 +339,7 @@ class PlatformConfig:
                         stop=1,
                     ),
                 ),
-                # global settings for all motors
-                settings=[
-                    ("direction_inverted", False),
-                    ("vsense", False),  # use vsense is true for higher currents
-                    ("current", 400),
-                    ("iscale_analog", False),
-                    ("interpolation", True),
-                    ("spread_cycle", False),
-                    ("microstep_resolution", 16),
-                    ("internal_rsense", False),
-                    ("motor_enabled", False),
-                    ("direction_inverted", False),
-                    ("coolstep_threshold", 2500),
-                    ("stallguard_threshold", 100),
-                ],
-                # axis specific settings
-                axis_settings=dict(
-                    x=dict(
-                        stallguard_threshold=120,
-                    ),
-                    y=dict(
-                        current=600,
-                        stallguard_threshold=80,
-                    ),
-                    z=dict(
-                        direction_inverted=True,
-                    ),
-                ),
             ),
-            # axis settings not in tmc 2209
             camera=dict(
                 d0=12,
                 d1=14,
@@ -482,9 +454,9 @@ class PlatformConfig:
         self._hdl_cfg = type("Hdl_cfg", (), cfg)()
         return self._hdl_cfg
 
-    @property
-    def motor_cfg(self):
+    def _init_motor_cfg(self):
         """Returns the steps per mm and axis orthogonal to laserline."""
+
         if self.test:
             steps = OrderedDict([("x", 400), ("y", 400)])
             offset_mm = OrderedDict(
@@ -495,6 +467,7 @@ class PlatformConfig:
                 ]
             )
         else:
+            # offset mm and steps are overwritten by esp32_hexastorm!
             steps = OrderedDict(
                 [
                     ("x", 800),

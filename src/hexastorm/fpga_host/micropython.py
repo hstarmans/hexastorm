@@ -30,7 +30,7 @@ class ESP32Host(BaseHost):
         """Initialize hardware peripherals in a MicroPython environment.
 
         Sets up GPIO pins, SPI, I2C, and chip selects required for communication
-        with the FPGA, flash, and stepper drivers. Also triggers init_steppers.
+        with the FPGA, flash, and stepper drivers.
         """
         cfg = self.cfg.esp32_cfg
         ice40_cfg = self.cfg.ice40_cfg
@@ -114,11 +114,7 @@ class ESP32Host(BaseHost):
         return response
 
     def init_steppers(self):
-        """Configure TMC2209 stepper drivers over UART.
-
-        Sets current, interpolation, and microstepping parameters for each stepper motor.
-        Logs failures if drivers are not detected. Only runs once per session.
-        """
+        """Initialize TMC2209 stepper drivers over UART."""
         esp32_cfg = self.cfg.esp32_cfg
         self.steppers = {}
 
@@ -133,14 +129,6 @@ class ESP32Host(BaseHost):
                         uart_dct=tmc_cfg["uart"],
                     )
                     self.steppers[ax_name] = tmc
-                    for key, value in tmc_cfg["settings"]:
-                        setattr(tmc, key, value)
-                    if (
-                        "axis_settings" in tmc_cfg
-                        and ax_name in tmc_cfg["axis_settings"]
-                    ):
-                        for key, value in tmc_cfg["axis_settings"][ax_name].items():
-                            setattr(tmc, key, value)
 
                 except ConnectionFail:
                     logger.error(
