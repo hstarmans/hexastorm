@@ -418,6 +418,7 @@ class BaseHost:
             "parsing": self._bitflag(status_byte, Spi.State.parsing),
             "error": self._bitflag(status_byte, Spi.State.error),
             "mem_full": self._bitflag(status_byte, Spi.State.full),
+            "mem_empty": self._bitflag(status_byte, Spi.State.empty),
         }
 
         motor_keys = list(self.cfg.motor_cfg["steps_mm"].keys())
@@ -457,6 +458,33 @@ class BaseHost:
         """
         command = [Spi.Commands.flush] + [0] * Spi.word_bytes
         return await self.send_command(command)
+
+    async def wait_fifo_empty(self, poll_interval=0.01, check_sensors=False):
+        """
+        Poll status until the FPGA instruction FIFO is empty.
+
+        In test/simulation mode (self.test), this returns immediately as simulator ticks
+        are driven by the test harness.
+
+        Args:
+            poll_interval (float): Delay in seconds between status polling calls.
+            check_sensors (bool): If True, checks limit switches while waiting and aborts if triggered.
+
+        Returns:
+            list[int] or None: Limit switches hit if check_sensors triggered an abort, otherwise None.
+        """
+        if self.test:
+            return None
+
+        while not (await self.fpga_state)["mem_empty"]:
+            if check_sensors:
+                switches = await self.read_switches()
+                if any(switches):
+                    await self.set_parsing(False)
+                    await self.flush_buffer()
+                    return switches
+            await sleep(poll_interval)
+        return None
 
     async def home_axes(self, axes, speed=None, displacement=200, pull_off=10):
         """Home given axes, i.e. [1,0,1] homes x, z and not y.
@@ -676,6 +704,14 @@ class BaseHost:
                                 f"Limit switch hit on axis {axis} during move!"
                             )
                     break
+
+        if check_sensors and not any(homeswitches_hit):
+            switches = await self.wait_fifo_empty(check_sensors=True)
+            if switches and any(switches):
+                for axis, state in enumerate(switches):
+                    if state:
+                        homeswitches_hit[axis] = 1
+                        logger.warning(f"Limit switch hit on axis {axis} during move!")
 
         # Calculate actual displacement if we aborted early
         if any(homeswitches_hit):

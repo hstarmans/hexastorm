@@ -139,6 +139,7 @@ class TestParser(SPIGatewareTestCase):
         """
         self.assertTrue(sim.get(self.dut.fifo.empty))
         self.assertFalse((await self.host.fpga_state)["mem_full"])
+        self.assertTrue((await self.host.fpga_state)["mem_empty"])
 
         for _ in range(self.hdl_cfg.mem_depth):
             try:
@@ -147,6 +148,7 @@ class TestParser(SPIGatewareTestCase):
                 break
         self.assertTrue(sim.get(self.dut.fifo_full))
         self.assertTrue((await self.host.fpga_state)["mem_full"])
+        self.assertFalse((await self.host.fpga_state)["mem_empty"])
 
     @async_test_case
     async def test_set_fan_writes_to_fifo(self, sim):
@@ -184,6 +186,7 @@ class TestParser(SPIGatewareTestCase):
         await self.host.set_parsing(True)
         self.assertTrue(sim.get(self.dut.parse))
         self.assertTrue(sim.get(self.dut.fifo.empty))
+        self.assertTrue((await self.host.fpga_state)["mem_empty"])
 
         # 2. Write some dummy data to the FIFO (e.g., a spline move)
         cfg = self.hdl_cfg
@@ -193,6 +196,7 @@ class TestParser(SPIGatewareTestCase):
         # 3. Wait for data to hit the FIFO and verify it is NO LONGER empty
         await self.wait_until(~self.dut.fifo.empty)
         self.assertFalse(sim.get(self.dut.fifo.empty))
+        self.assertFalse((await self.host.fpga_state)["mem_empty"])
 
         # Verify space available went down
         current_space = sim.get(self.dut.fifo.space_available)
@@ -209,6 +213,7 @@ class TestParser(SPIGatewareTestCase):
         # 5. Assert hardware reacted correctly
         self.assertTrue(sim.get(self.dut.parse))  # Parsing remains enabled
         self.assertTrue(sim.get(self.dut.fifo.empty))  # FIFO should be empty
+        self.assertTrue((await self.host.fpga_state)["mem_empty"])  # Host status should reflect empty
         self.assertEqual(
             sim.get(self.dut.fifo.space_available),
             self.hdl_cfg.mem_depth,  # Space should be fully restored

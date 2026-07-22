@@ -103,6 +103,7 @@ class ESP32Host(BaseHost):
                 start_time = time.ticks_ms()
             # tried IRQ call back with await for --> cannot get it working
             # the call back never propagates even with micropython.schedule
+            # 254 move segments in memory, 2.54 seconds should suffice
             await wait_for(self.wait_mem_empty(), timeout=5)
             if debug:
                 elapsed = (time.ticks_ms() - start_time) / 1000

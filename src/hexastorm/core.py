@@ -97,6 +97,7 @@ class SPIParser(Elaboratable):
             state[status.parsing].eq(self.parse),
             state[status.full].eq(fifo.space_available <= hdl_cfg.space_available),
             state[status.error].eq(self.error_other | error_word),
+            state[status.empty].eq(fifo.empty),
             self.fifo_full.eq(fifo.space_available <= hdl_cfg.space_available),
         ]
 

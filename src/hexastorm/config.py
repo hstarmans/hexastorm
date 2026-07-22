@@ -60,6 +60,7 @@ class Spi:
         full = 0
         parsing = 1
         error = 2
+        empty = 3
 
     def words_scanline(laser_timing):
         """Returns the number of words required for a single scanline instruction."""
@@ -470,9 +471,9 @@ class PlatformConfig:
             # offset mm and steps are overwritten by esp32_hexastorm!
             steps = OrderedDict(
                 [
-                    ("x", 800),
-                    ("y", 800),
-                    ("z", 800),
+                    ("x", 100),
+                    ("y", 100),
+                    ("z", 100),
                 ]
             )
             offset_mm = OrderedDict(
