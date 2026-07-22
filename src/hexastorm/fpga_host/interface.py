@@ -33,11 +33,14 @@ class BaseHost:
         self.test = test
         self.cfg = PlatformConfig(self.test)
         # mpy requires np.float
-        self._position = np.array(
-            [0] * self.cfg.hdl_cfg.motors, dtype=NP_FLOAT
-        )  # machine position
+        # _position is loaded from NVS store in final object
+        if not hasattr(self, "_position"):
+            self._position = np.array(
+                [0] * self.cfg.hdl_cfg.motors, dtype=NP_FLOAT
+            )  # machine position
 
-        self._work_offset = np.array([0] * self.cfg.hdl_cfg.motors, dtype=NP_FLOAT)
+        if not hasattr(self, "_work_offset"):
+            self._work_offset = np.array([0] * self.cfg.hdl_cfg.motors, dtype=NP_FLOAT)
 
         # Track the state of the 8-bit 'write_pin' register locally
         # Bits 0-4: laser0, laser1, polygon, synchronize, singlefacet
