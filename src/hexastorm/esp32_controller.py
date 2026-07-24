@@ -13,7 +13,7 @@ class ESP32RemoteError(Exception):
 
 class ESP32Controller:
     def __init__(self, port="/dev/ttyACM0", baud=115200, timeout=2.0):
-        self.serial = serial.Serial(port, baud)
+        self.serial = serial.Serial(port, baud, timeout=timeout, write_timeout=timeout)
         self._ensure_raw_repl()
 
     def close(self):

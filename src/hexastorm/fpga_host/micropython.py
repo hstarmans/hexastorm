@@ -209,12 +209,16 @@ class ESP32Host(BaseHost):
         """
         if value:
             if not (await self.fpga_state)["synchronized"]:
-                await self.enable_comp(synchronize=True)
+                await self.enable_comp(
+                    synchronize=True, laser0=False, laser1=False, polygon=False
+                )
                 await sleep(2)
                 if not (await self.fpga_state)["synchronized"]:
-                    raise Exception("Laser cannot be synchronized.")
+                    return False
+            return True
         else:
             await self.enable_comp(synchronize=False)
+            return True
 
     def reset(self):
         "restart the FPGA by toggling the reset pin and initializing communication"

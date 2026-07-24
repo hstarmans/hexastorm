@@ -238,11 +238,11 @@ class BaseHost:
 
     async def enable_comp(
         self,
-        laser0=False,
-        laser1=False,
-        polygon=False,
-        synchronize=False,
-        singlefacet=False,
+        laser0=None,
+        laser1=None,
+        polygon=None,
+        synchronize=None,
+        singlefacet=None,
     ):
         """
         Enable or disable hardware components via a direct SPI instruction.
@@ -257,19 +257,36 @@ class BaseHost:
             synchronize (bool): Enable synchronization feature.
             singlefacet (bool): Enable single-facet mode.
         """
-        # Clear the lower 5 bits (hardware components), but keep the upper 3 bits (LEDs) intact
-        self._pin_state &= 0xE0  # 0xE0 is 11100000 in binary
+        if singlefacet is not None:
+            if singlefacet:
+                self._pin_state |= 1 << 4
+            else:
+                self._pin_state &= ~(1 << 4)
 
-        flags = (
-            (int(singlefacet) << 4)
-            | (int(synchronize) << 3)
-            | (int(polygon) << 2)
-            | (int(laser1) << 1)
-            | int(laser0)
-        )
+        if synchronize is not None:
+            if synchronize:
+                self._pin_state |= 1 << 3
+            else:
+                self._pin_state &= ~(1 << 3)
 
-        # Apply the new hardware flags
-        self._pin_state |= flags
+        if polygon is not None:
+            if polygon:
+                self._pin_state |= 1 << 2
+            else:
+                self._pin_state &= ~(1 << 2)
+                
+        if laser1 is not None:
+            if laser1:
+                self._pin_state |= 1 << 1
+            else:
+                self._pin_state &= ~(1 << 1)
+
+        if laser0 is not None:
+            if laser0:
+                self._pin_state |= 1 << 0
+            else:
+                self._pin_state &= ~(1 << 0)
+
         await self._send_pin_state()
 
     def steps_to_count(self, steps):
