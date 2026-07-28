@@ -1,6 +1,7 @@
 import logging
 import os
 import platform as pltf
+import shlex
 import subprocess
 from typing import ClassVar
 
@@ -131,37 +132,22 @@ class Firestarter(LatticeICE40Platform):
                 subprocess.check_call(
                     ["scp", bitstream_filename, f"{self.remote_host}:/tmp/fpga.bit"]
                 )
-                subprocess.check_call(
-                    [
-                        "ssh",
-                        self.remote_host,
-                        "mpremote",
-                        "resume",
-                        "connect",
-                        device,
-                        "fs",
-                        "cp",
-                        "/tmp/fpga.bit",
-                        ":sd/fpga/fpga.bit",
-                    ]
+                path_env = 'export PATH="$HOME/.local/bin:$HOME/.local/share/uv/tools/mpremote/bin:$PATH"; '
+                mpremote_cp = (
+                    path_env
+                    + f"mpremote resume connect {shlex.quote(device)} fs cp /tmp/fpga.bit :sd/fpga/fpga.bit"
                 )
+                subprocess.check_call(["ssh", self.remote_host, mpremote_cp])
                 for cmd in [
                     "from hexastorm.fpga_host.micropython import ESP32HostSync",
                     "hst = ESP32HostSync()",
                     'hst.flash_fpga("sd/fpga/fpga.bit")',
                 ]:
-                    subprocess.check_call(
-                        [
-                            "ssh",
-                            self.remote_host,
-                            "mpremote",
-                            "resume",
-                            "connect",
-                            device,
-                            "exec",
-                            cmd,
-                        ]
+                    mpremote_exec = (
+                        path_env
+                        + f"mpremote resume connect {shlex.quote(device)} exec {shlex.quote(cmd)}"
                     )
+                    subprocess.check_call(["ssh", self.remote_host, mpremote_exec])
                 subprocess.run(
                     ["ssh", self.remote_host, "rm -f /tmp/fpga.bit"], check=False
                 )
