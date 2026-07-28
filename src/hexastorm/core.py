@@ -2,14 +2,14 @@ from amaranth import Cat, Elaboratable, Module, Signal
 from amaranth.lib.io import Buffer
 
 from .config import Spi
-from .spi_helpers import connect_synchronized_spi
 from .lasers import DiodeSimulator, Laserhead
-from .luna.spi import SPICommandInterface
 from .luna.memory import TransactionalizedFIFO
-from .pwm import HardwarePWM
+from .luna.spi import SPICommandInterface
 
 # from .motor import Driver
 from .movement import Polynomial
+from .pwm import HardwarePWM
+from .spi_helpers import connect_synchronized_spi
 
 
 class SPIParser(Elaboratable):
@@ -110,57 +110,55 @@ class SPIParser(Elaboratable):
                 ]
                 m.next = "WAIT_COMMAND"
 
-            with m.State("WAIT_COMMAND"):
-                with m.If(spi_cmd.command_ready):
-                    state_word = Cat(state, self.pin_state)
-                    cmd = Spi.Commands
-                    with m.Switch(spi_cmd.command):
-                        with m.Case(cmd.empty):
-                            m.next = "WAIT_COMMAND"
-                        with m.Case(cmd.start):
-                            m.d.sync += self.parse.eq(1)
-                            m.next = "WAIT_COMMAND"
-                        with m.Case(cmd.stop):
-                            m.d.sync += self.parse.eq(0)
-                            m.next = "WAIT_COMMAND"
-                        with m.Case(cmd.flush):
-                            m.d.comb += fifo.flush.eq(1)
-                            m.next = "WAIT_COMMAND"
-                        with m.Case(cmd.write):
-                            m.d.sync += spi_cmd.word_to_send.eq(state_word)
-                            m.next = "WAIT_WORD"
-                        with m.Case(cmd.read):
-                            m.d.sync += spi_cmd.word_to_send.eq(state_word)
-                            m.next = "WAIT_COMMAND"
-                        with m.Case(cmd.debug):
-                            m.d.sync += spi_cmd.word_to_send.eq(self.debug_word)
-                            m.next = "WAIT_COMMAND"
+            with m.State("WAIT_COMMAND"), m.If(spi_cmd.command_ready):
+                state_word = Cat(state, self.pin_state)
+                cmd = Spi.Commands
+                with m.Switch(spi_cmd.command):
+                    with m.Case(cmd.empty):
+                        m.next = "WAIT_COMMAND"
+                    with m.Case(cmd.start):
+                        m.d.sync += self.parse.eq(1)
+                        m.next = "WAIT_COMMAND"
+                    with m.Case(cmd.stop):
+                        m.d.sync += self.parse.eq(0)
+                        m.next = "WAIT_COMMAND"
+                    with m.Case(cmd.flush):
+                        m.d.comb += fifo.flush.eq(1)
+                        m.next = "WAIT_COMMAND"
+                    with m.Case(cmd.write):
+                        m.d.sync += spi_cmd.word_to_send.eq(state_word)
+                        m.next = "WAIT_WORD"
+                    with m.Case(cmd.read):
+                        m.d.sync += spi_cmd.word_to_send.eq(state_word)
+                        m.next = "WAIT_COMMAND"
+                    with m.Case(cmd.debug):
+                        m.d.sync += spi_cmd.word_to_send.eq(self.debug_word)
+                        m.next = "WAIT_COMMAND"
 
-            with m.State("WAIT_WORD"):
-                with m.If(spi_cmd.word_complete):
-                    byte0 = spi_cmd.word_received[:8]
-                    with m.If(words_rec == 0):
-                        valid_instr = (byte0 > 0) & (byte0 <= 6)
-                        with m.If(valid_instr):
-                            m.d.sync += [
-                                instr_rec.eq(byte0),
-                                fifo.write_en.eq(1),
-                                fifo.write_data.eq(spi_cmd.word_received),
-                                words_rec.eq(words_rec + 1),
-                            ]
-                            m.next = "WRITE"
-                        with m.Else():
-                            # Invalid instruction → mark error and discard
-                            m.d.sync += error_word.eq(1)
-                            m.next = "WAIT_COMMAND"
-                    with m.Else():
-                        # Additional words for multi-word instructions
+            with m.State("WAIT_WORD"), m.If(spi_cmd.word_complete):
+                byte0 = spi_cmd.word_received[:8]
+                with m.If(words_rec == 0):
+                    valid_instr = (byte0 > 0) & (byte0 <= 6)
+                    with m.If(valid_instr):
                         m.d.sync += [
+                            instr_rec.eq(byte0),
                             fifo.write_en.eq(1),
                             fifo.write_data.eq(spi_cmd.word_received),
                             words_rec.eq(words_rec + 1),
                         ]
                         m.next = "WRITE"
+                    with m.Else():
+                        # Invalid instruction → mark error and discard
+                        m.d.sync += error_word.eq(1)
+                        m.next = "WAIT_COMMAND"
+                with m.Else():
+                    # Additional words for multi-word instructions
+                    m.d.sync += [
+                        fifo.write_en.eq(1),
+                        fifo.write_data.eq(spi_cmd.word_received),
+                        words_rec.eq(words_rec + 1),
+                    ]
+                    m.next = "WRITE"
 
             with m.State("WRITE"):
                 m.d.sync += fifo.write_en.eq(0)
@@ -244,17 +242,20 @@ class Dispatcher(Elaboratable):
             m.submodules.laserhead = lh = Laserhead(self.plf_cfg)
 
             for i in range(len(leds)):
-                led = platform.request("led", i)
-                m.d.comb += led.o.eq(leds[i])
+                led_port = platform.request("led", i, dir="-")
+                m.submodules[f"led_buf_{i}"] = led_buf = Buffer("o", led_port)
+                m.d.comb += led_buf.o.eq(leds[i])
 
             # fan and spindle PWM outputs
-            fan_pin = platform.request("fan", 0)
-            spindle_pin = platform.request("spindle", 0)
+            fan_pin = platform.request("fan", 0, dir="-")
+            spindle_pin = platform.request("spindle", 0, dir="-")
+            m.submodules.fan_buf = fan_buf = Buffer("o", fan_pin)
+            m.submodules.spindle_buf = spindle_buf = Buffer("o", spindle_pin)
 
             # Connect the PWM output signal to the physical pins
             m.d.comb += [
-                fan_pin.o.eq(fan_pwm.pwm_out),
-                spindle_pin.o.eq(spindle_pwm.pwm_out),
+                fan_buf.o.eq(fan_pwm.pwm_out),
+                spindle_buf.o.eq(spindle_pwm.pwm_out),
             ]
 
         # connect laser

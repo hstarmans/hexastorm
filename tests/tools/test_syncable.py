@@ -1,5 +1,5 @@
-import unittest
 import asyncio
+import unittest
 
 from hexastorm.fpga_host.syncwrap import syncable
 
@@ -11,7 +11,7 @@ def _is_coro_like(obj):
 
 @syncable
 class MyClass:
-    def __init__(self):
+    def __init__(self, **kwargs):
         self._x = 0
         self.tag = "init"
 

@@ -58,7 +58,7 @@ def test_regression_jittertest(interpolator, tmp_path):
         file_hash = hashlib.md5(f.read()).hexdigest()
 
     if file_hash != expected_hash:
-        print(f"\nHash Mismatch! Logic changed.")
+        print("\nHash Mismatch! Logic changed.")
         print(f"Expected: {expected_hash}")
         print(f"Got:      {file_hash}")
         print(

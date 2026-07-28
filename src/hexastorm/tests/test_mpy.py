@@ -1,16 +1,14 @@
+import logging
 import unittest
 from asyncio import TimeoutError
-from time import ticks_ms, sleep
 from math import isclose
-import logging
-
-from ulab import numpy as np
+from time import sleep, ticks_ms
 
 from hexastorm.config import Spi
 from hexastorm.fpga_host.micropython import ESP32HostSync
-from hexastorm.ulabext import assert_array_almost_equal
 from hexastorm.fpga_host.tools import find_shift
-
+from hexastorm.ulabext import assert_array_almost_equal
+from ulab import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +39,7 @@ class StaticTest(Base):
             coeff = [3] * hdl_cfg.motors
             try:
                 host.spline_move(hdl_cfg.move_ticks, coeff)
-            except TimeoutError:
+            except TimeoutError:  # noqa: UP041  needed for micropython
                 timeout_raised = True
                 break
         self.assertTrue(
@@ -49,10 +47,10 @@ class StaticTest(Base):
             "Timeout exception was not raised when FIFO was full.",
         )
         self.assertTrue((host.fpga_state)["mem_full"])
-        self.assertTrue((host.mem_full))
+        self.assertTrue(host.mem_full)
         host.set_parsing(True)
         fpga_state = host.fpga_state
-        self.assertFalse((host.mem_full))
+        self.assertFalse(host.mem_full)
         self.assertFalse(fpga_state["mem_full"])
         self.assertFalse(fpga_state["error"])
 

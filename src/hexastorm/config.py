@@ -7,10 +7,11 @@ as well as platform-level configuration settings used for FPGA synthesis and fir
 - `PlatformConfig`: High-level platform configuration object for both test and production modes
 """
 
+import logging
+import sys
 from collections import OrderedDict
 from math import ceil, radians
-import sys
-import logging
+from typing import ClassVar
 
 if sys.implementation.name == "micropython":
     from ulab import numpy as np
@@ -19,6 +20,7 @@ if sys.implementation.name == "micropython":
 else:
     import json
     from pathlib import Path
+
     import numpy as np
 
     MICROPYTHON = False
@@ -31,7 +33,7 @@ class Spi:
 
     command_bytes = 1
     word_bytes = 8
-    move_instruction = dict(instruction=1, ticks=7)
+    move_instruction: ClassVar[dict[str, int]] = {"instruction": 1, "ticks": 7}
 
     class Commands:
         """SPI protocol command. Each command is followed by a word."""
@@ -154,21 +156,21 @@ class PlatformConfig:
         self.test = test
         self._hdl_cfg = None
         if test:
-            self.laser_timing = dict(
-                rpm=1000,
-                scanline_length=3,
-                facet_ticks=20,
-                laser_ticks=4,
-            )
+            self.laser_timing = {
+                "rpm": 1000,
+                "scanline_length": 3,
+                "facet_ticks": 20,
+                "laser_ticks": 4,
+            }
         else:
-            self.laser_timing = dict(
-                rpm=3000,
-                spinup_time=1.5,
-                stable_time=1.125,
-                laser_hz=400e3,
-                start_frac=0.35,
-                end_frac=0.7,
-            )
+            self.laser_timing = {
+                "rpm": 3000,
+                "spinup_time": 1.5,
+                "stable_time": 1.125,
+                "laser_hz": 400e3,
+                "start_frac": 0.35,
+                "end_frac": 0.7,
+            }
         self.update_laser_timing()
         self.motor_cfg = self._init_motor_cfg()
         self.laser_bits = 1  # enables adding pwm to laser (not widely tested)
@@ -180,7 +182,7 @@ class PlatformConfig:
         Returns a dictionary of pathlib.Path objects. Auto-creates directories if they don't exist.
         """
         if MICROPYTHON:
-            logging.error(
+            logger.error(
                 "The ESP32 doesn't handle these files natively. Skipping path setup."
             )
             return {}
@@ -198,7 +200,7 @@ class PlatformConfig:
         }
 
         # Auto-create the directories on the Host PC
-        for name, path in dirs.items():
+        for path in dirs.values():
             path.mkdir(parents=True, exist_ok=True)
 
         return dirs
@@ -206,7 +208,7 @@ class PlatformConfig:
     def load_latest_calibration(self):
         """Helper to fetch the latest calibration dictionary from disk."""
         if MICROPYTHON:
-            logging.error("Calibration correction not supported in MicroPython.")
+            logger.error("Calibration correction not supported in MicroPython.")
             return {}
 
         history_path = self.paths["calibration"] / "calibration_history.json"
@@ -214,13 +216,13 @@ class PlatformConfig:
             history = json.load(f)
 
         latest = history[-1]
-        logging.info(f"Applied calibration from: {latest.get('timestamp')}")
+        logger.info(f"Applied calibration from: {latest.get('timestamp')}")
         return latest["facets"]
 
     def get_visible_pixels(self):
         """Retrieves pixels visible on camera"""
         if MICROPYTHON:
-            logging.error("Calibration correction not supported in MicroPython.")
+            logger.error("Calibration correction not supported in MicroPython.")
             return {}
 
         history_file = self.paths["calibration"] / "scan_visibility.json"
@@ -241,7 +243,7 @@ class PlatformConfig:
             correction_data = self.load_latest_calibration()
         elif isinstance(correction, dict):
             correction_data = correction
-            logging.info("Applied custom calibration dictionary.")
+            logger.info("Applied custom calibration dictionary.")
         else:
             correction_data = {}  # Handles False, None, etc.
         laz_tim = self.laser_timing
@@ -324,78 +326,78 @@ class PlatformConfig:
     @property
     def esp32_cfg(self):
         """Connections to esp32S3."""
-        return dict(
-            tmc2209=dict(
-                mtr_ids=dict(x=0, y=1, z=2),
-                uart=dict(
-                    id=2,
-                    ctor=dict(
-                        baudrate=115200,
-                        tx=15,
-                        rx=7,
-                    ),
-                    init=dict(
-                        bits=8,
-                        parity=None,
-                        stop=1,
-                    ),
-                ),
-            ),
-            camera=dict(
-                d0=12,
-                d1=14,
-                d2=21,
-                d3=13,
-                d4=11,
-                d5=10,
-                d6=9,
-                d7=8,
-                pclk=38,
-                vsync=41,
-                href=40,
-                xclk=39,
-                pwdn=-1,
-                reset=42,
-            ),
-            i2c=dict(
-                scl=17,
-                sda=18,
-                freq=int(1e5),
-                digipot_addr=0x28,
-                cam_addr=0x30,
-            ),
-            spi=dict(
-                sck=6,
-                miso=5,
-                mosi=4,
-                phase=1,
-                polarity=0,
-                baudrate=int(5e6),
-            ),
-            stepper_cs=16,  # enable pin stepper motors
-            clk=dict(
-                pin=16,
-                duty=512,  # 50 percent
-            ),
-            fpga=dict(
-                cs=2,
-                reset=43,
-                done=44,
-                mem_full=1,
-            ),
-            device="/dev/ttyACM0",
-        )
+        return {
+            "tmc2209": {
+                "mtr_ids": {"x": 0, "y": 1, "z": 2},
+                "uart": {
+                    "id": 2,
+                    "ctor": {
+                        "baudrate": 115200,
+                        "tx": 15,
+                        "rx": 7,
+                    },
+                    "init": {
+                        "bits": 8,
+                        "parity": None,
+                        "stop": 1,
+                    },
+                },
+            },
+            "camera": {
+                "d0": 12,
+                "d1": 14,
+                "d2": 21,
+                "d3": 13,
+                "d4": 11,
+                "d5": 10,
+                "d6": 9,
+                "d7": 8,
+                "pclk": 38,
+                "vsync": 41,
+                "href": 40,
+                "xclk": 39,
+                "pwdn": -1,
+                "reset": 42,
+            },
+            "i2c": {
+                "scl": 17,
+                "sda": 18,
+                "freq": int(1e5),
+                "digipot_addr": 0x28,
+                "cam_addr": 0x30,
+            },
+            "spi": {
+                "sck": 6,
+                "miso": 5,
+                "mosi": 4,
+                "phase": 1,
+                "polarity": 0,
+                "baudrate": int(5e6),
+            },
+            "stepper_cs": 16,  # enable pin stepper motors
+            "clk": {
+                "pin": 16,
+                "duty": 512,  # 50 percent
+            },
+            "fpga": {
+                "cs": 2,
+                "reset": 43,
+                "done": 44,
+                "mem_full": 1,
+            },
+            "device": "/dev/ttyACM0",
+        }
 
     @property
     def ice40_cfg(self):
         """Required for LatticeICE40Platform."""
-        return dict(
-            device="iCE40UP5K",
-            package="SG48",
-            default_clk="SB_HFOSC",
-            hfosc_div="test" if self.test else 1,
-            clks={0: 48, 1: 24, 2: 12, 3: 6, "esp32s3": 27.978142, "test": 1},
-        )
+        return {
+            "device": "iCE40UP5K",
+            "package": "SG48",
+            "default_clk": "SB_HFOSC",
+            "hfosc_div": "test" if self.test else 1,
+            "clks": {0: 48, 1: 24, 2: 12, 3: 6, "esp32s3": 27.978142, "test": 1},
+        }
 
     @property
     def hdl_cfg(self):
@@ -404,34 +406,34 @@ class PlatformConfig:
         if self._hdl_cfg is not None:
             return self._hdl_cfg
 
-        cfg = dict(
-            single_line=False,
-            motor_freq=1e6,  # motor move interpolation freq in Hz
-            move_ticks=10_000,  # maximum ticks in move segment
-            direction=0,  # axis parallel to laser, here x
-            motors=len(self.motor_cfg["steps_mm"]),
-            motor_divider=pow(2, 8),
-            pol_degree=2,
-            mem_width=Spi.word_bytes * 8,
-            words_scanline=Spi.words_scanline(laz_tim),
-            motor_debug="ticks_in_facet",
-        )
+        cfg = {
+            "single_line": False,
+            "motor_freq": 1e6,  # motor move interpolation freq in Hz
+            "move_ticks": 10_000,  # maximum ticks in move segment
+            "direction": 0,  # axis parallel to laser, here x
+            "motors": len(self.motor_cfg["steps_mm"]),
+            "motor_divider": pow(2, 8),
+            "pol_degree": 2,
+            "mem_width": Spi.word_bytes * 8,
+            "words_scanline": Spi.words_scanline(laz_tim),
+            "motor_debug": "ticks_in_facet",
+        }
         if self.test:
             cfg.update(
-                dict(
-                    test=True,
-                    lines_chunk=2,
-                )
+                {
+                    "test": True,
+                    "lines_chunk": 2,
+                }
             )
         else:
             mem_depth = int((114 * 1000) / (Spi.word_bytes * 8))
             cfg.update(
-                dict(
-                    test=False,
+                {
+                    "test": False,
                     # listed max 120 kbit, practical 114 kbit
                     # you use EBR / sysMEM (Block RAM) 120 kbit
-                    mem_depth=mem_depth,
-                )
+                    "mem_depth": mem_depth,
+                }
             )
             lines_in_mem = int(cfg["mem_depth"] / cfg["words_scanline"])
             lines_per_sec = laz_tim["rpm"] * laz_tim["facets"] / 60
@@ -483,12 +485,12 @@ class PlatformConfig:
                     ("z", -10),
                 ]
             )
-        return dict(
-            homing_dir=dict(x=-1, y=-1, z=1),
-            steps_mm=steps,
-            offset_mm=offset_mm,
-            orth2lsrline="x",
-        )
+        return {
+            "homing_dir": {"x": -1, "y": -1, "z": 1},
+            "steps_mm": steps,
+            "offset_mm": offset_mm,
+            "orth2lsrline": "x",
+        }
 
     def update_laser_timing(self):
         """Update laser timing parameters."""
@@ -539,7 +541,7 @@ class PlatformConfig:
         # Sanity checks
         assert laser_ticks > 2
         if end_frac > round(1 - (jitter_sync_ticks + 1) / facet_ticks):
-            raise Exception("Invalid settings, end_frac too high")
+            raise ValueError("Invalid settings, end_frac too high")
 
         if self.test:
             assert scanline_length == self.laser_timing["scanline_length"]
@@ -547,7 +549,7 @@ class PlatformConfig:
             scanline_length += 8 - scanline_length % 8
 
         if scanline_length <= 0:
-            raise Exception("Bits in scanline invalid")
+            raise ValueError("Bits in scanline invalid")
         # Update dictionary
         self.laser_timing.update(
             {

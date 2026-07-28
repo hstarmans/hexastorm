@@ -1,9 +1,9 @@
-import sys
 import logging
+import sys
 from asyncio import sleep
 
 from .. import ulabext
-from ..config import Spi, PlatformConfig
+from ..config import PlatformConfig, Spi
 
 try:
     import numpy as np
@@ -34,8 +34,8 @@ class BaseHost:
         self.cfg = PlatformConfig(self.test)
         # mpy requires np.float
         self._position = np.array(
-                [0] * self.cfg.hdl_cfg.motors, dtype=NP_FLOAT
-            )  # machine position
+            [0] * self.cfg.hdl_cfg.motors, dtype=NP_FLOAT
+        )  # machine position
 
         self._work_offset = np.array([0] * self.cfg.hdl_cfg.motors, dtype=NP_FLOAT)
 
@@ -58,7 +58,6 @@ class BaseHost:
         Returns:
             bytearray: Response from the FPGA, same length as the input command.
         """
-        pass  # implemented in subclasses
 
     def _bitflag(self, byte, index):
         """Return True if the bit at 'index' in 'byte' is set (0 = LSB)."""
@@ -274,7 +273,7 @@ class BaseHost:
                 self._pin_state |= 1 << 2
             else:
                 self._pin_state &= ~(1 << 2)
-                
+
         if laser1 is not None:
             if laser1:
                 self._pin_state |= 1 << 1
@@ -578,7 +577,7 @@ class BaseHost:
 
         # Total duration and total ticks
         duration_s = distance_mm / speed
-        total_ticks = int(round(duration_s * hdl_cfg.motor_freq))
+        total_ticks = round(duration_s * hdl_cfg.motor_freq)
 
         # Vectorized Steps Calculation
         # Division automatically handles the signs from the displacement array
@@ -596,7 +595,7 @@ class BaseHost:
                 velocity_counts.append(0)
             else:
                 # Round to nearest step before applying fixed point multiplier
-                rounded_steps = int(round(raw_steps[axis]))
+                rounded_steps = round(raw_steps[axis])
                 count = (rounded_steps * multiplier) + offset
                 velocity_counts.append(count // hdl_cfg.motor_freq)
 

@@ -1,13 +1,15 @@
-from hexastorm.utils import LunaGatewareTestCase, async_test_case
-from hexastorm.fpga_host.mock import MockHost
+from typing import Any, ClassVar
+
 from hexastorm.config import PlatformConfig
+from hexastorm.fpga_host.mock import MockHost
 from hexastorm.movement import Polynomial
+from hexastorm.utils import LunaGatewareTestCase, async_test_case
 
 
 class TestPolynomial(LunaGatewareTestCase):
     plf_cfg = PlatformConfig(test=True)
     FRAGMENT_UNDER_TEST = Polynomial
-    FRAGMENT_ARGUMENTS = {"plf_cfg": plf_cfg}
+    FRAGMENT_ARGUMENTS: ClassVar[dict[str, Any]] = {"plf_cfg": plf_cfg}
 
     async def initialize_signals(self, sim) -> None:
         """Initialize simulation environment and signals."""

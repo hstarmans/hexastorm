@@ -1,8 +1,8 @@
 from amaranth import Elaboratable, Module, Mux, Signal, signed
-from amaranth.lib.io import Buffer
 from amaranth.hdl import Array
+from amaranth.lib.io import Buffer
 
-from .resources import get_all_resources, StepperRecord
+from .resources import StepperRecord, get_all_resources
 
 
 class Polynomial(Elaboratable):

@@ -4,8 +4,8 @@
 # Copyright (c) 2020 Great Scott Gadgets <info@greatscottgadgets.com>
 # SPDX-License-Identifier: BSD-3-Clause
 
-import os
 import math
+import os
 import unittest
 from functools import wraps
 

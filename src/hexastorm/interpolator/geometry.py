@@ -1,6 +1,6 @@
 import logging
 import math
-from typing import Dict, Tuple, Any
+from typing import Any
 
 import numpy as np
 from numba import jit, typed, types
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 @jit(nopython=True, cache=True)
 def _jit_fxpos(
-    pixel: float, params: Dict[str, float], facet_idx: int = 0, xstart: float = 0
+    pixel: float, params: dict[str, float], facet_idx: int = 0, xstart: float = 0
 ) -> float:
     """
     Returns the laser diode X-position (Transversal / Scan Direction) in pixels.
@@ -50,7 +50,7 @@ def _jit_fxpos(
 @jit(nopython=True, cache=True)
 def _jit_fypos(
     pixel: float,
-    params: Dict[str, float],
+    params: dict[str, float],
     facet_idx: int,
     direction: bool,
     ystart: float = 0,
@@ -91,7 +91,7 @@ def _jit_fypos(
 
 
 @jit(nopython=True, cache=True)
-def _jit_calculate_grid(params: Any) -> Tuple[np.ndarray, Dict[str, float]]:
+def _jit_calculate_grid(params: Any) -> tuple[np.ndarray, dict[str, float]]:
     """
     Generates the lookup coordinate grid using pre-allocation to avoid
     Numba concatenation errors.
@@ -203,7 +203,7 @@ class ScannerModel:
         self.params = self.to_numba_dict(params)
 
     @staticmethod
-    def to_numba_dict(std_dict: Dict[str, Any]) -> Any:
+    def to_numba_dict(std_dict: dict[str, Any]) -> Any:
         """
         Converts a standard Python dictionary to a Numba-compatible typed dictionary.
         This enables JIT compilation for functions using this data.

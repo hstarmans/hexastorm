@@ -1,14 +1,13 @@
-import serial
-import time
-import textwrap
-import inspect
 import ast
+import inspect
+import textwrap
+import time
+
+import serial
 
 
 class ESP32RemoteError(Exception):
     """Raised when the ESP32 MicroPython environment throws an exception."""
-
-    pass
 
 
 class ESP32Controller:

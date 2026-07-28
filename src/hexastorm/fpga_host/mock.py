@@ -1,4 +1,4 @@
-from asyncio import TimeoutError
+import builtins
 
 from .interface import BaseHost
 
@@ -24,7 +24,7 @@ class MockHost(BaseHost):
                 trial += 1
                 await self.fpga_state
                 if trial >= self.spi_tries - 1:
-                    raise TimeoutError
+                    raise builtins.TimeoutError
         # function is created in Amaranth HDL
         response[:] = await self.spi_exchange_data(command)
         return response

@@ -1,9 +1,10 @@
 from random import randint
 from struct import unpack
+from typing import Any, ClassVar
 
-from hexastorm.lasers import Laserhead, DiodeSimulator
+from hexastorm.config import PlatformConfig, Spi
 from hexastorm.fpga_host.mock import MockHost
-from hexastorm.config import Spi, PlatformConfig
+from hexastorm.lasers import DiodeSimulator, Laserhead
 from hexastorm.utils import LunaGatewareTestCase, async_test_case
 
 
@@ -12,7 +13,7 @@ class BaseTest(LunaGatewareTestCase):
 
     plf_cfg = PlatformConfig(test=True)
     laz_tim = plf_cfg.laser_timing
-    FRAGMENT_ARGUMENTS = {"plf_cfg": plf_cfg}
+    FRAGMENT_ARGUMENTS: ClassVar[dict[str, Any]] = {"plf_cfg": plf_cfg}
 
     async def initialize_signals(self, sim):
         """Initialize signals and host configuration for simulation."""
@@ -142,7 +143,7 @@ class BaseTest(LunaGatewareTestCase):
         sim = self.sim
 
         if sim.get(dut.fifo.space_available) < (len(byte_lst) / Spi.word_bytes):
-            raise Exception("Memory full")
+            raise ValueError("Memory full")
 
         for i in range(0, len(byte_lst), Spi.word_bytes):
             lst = byte_lst[i : i + Spi.word_bytes]
@@ -223,7 +224,7 @@ class SinglelineTest(BaseTest):
     plf_cfg = PlatformConfig(test=True)
     plf_cfg.hdl_cfg.single_line = True
     FRAGMENT_UNDER_TEST = DiodeSimulator
-    FRAGMENT_ARGUMENTS = {"plf_cfg": plf_cfg}
+    FRAGMENT_ARGUMENTS: ClassVar[dict[str, Any]] = {"plf_cfg": plf_cfg}
 
     @async_test_case
     async def test_single_line_exposure_sequence(self, sim):
@@ -363,7 +364,7 @@ class MultilineTest(BaseTest):
         self.assertTrue(sim.get(dut.synchronized))
         self.assertFalse(sim.get(dut.error))
 
-    async def check_no_move(self, thresh: int = None):
+    async def check_no_move(self, thresh: int | None = None):
         """Verify that the scanhead does not move beyond a step threshold."""
         dut = self.dut
         sim = self.sim
@@ -458,7 +459,7 @@ class Loweredge(BaseTest):
     plf_cfg.update_laser_timing()
 
     FRAGMENT_UNDER_TEST = DiodeSimulator
-    FRAGMENT_ARGUMENTS = {"plf_cfg": plf_cfg}
+    FRAGMENT_ARGUMENTS: ClassVar[dict[str, Any]] = {"plf_cfg": plf_cfg}
 
     async def initialize_signals(self, sim):
         """Initialize signals and host configuration for simulation."""
@@ -496,7 +497,7 @@ class Upperedge(Loweredge):
     plf_cfg.update_laser_timing()
 
     FRAGMENT_UNDER_TEST = DiodeSimulator
-    FRAGMENT_ARGUMENTS = {"plf_cfg": plf_cfg}
+    FRAGMENT_ARGUMENTS: ClassVar[dict[str, Any]] = {"plf_cfg": plf_cfg}
 
 
 # NOTE: new class is created to reset settings

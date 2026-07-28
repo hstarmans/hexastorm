@@ -1,8 +1,8 @@
-import math
-from pathlib import Path
 import json
 import logging
-from datetime import datetime
+import math
+from datetime import UTC, datetime
+from pathlib import Path
 
 import cv2 as cv
 import numpy as np
@@ -40,7 +40,7 @@ def append_history_record(filename, payload_dict, max_records=10000):
                 content = f.read()
                 if content:
                     history = json.loads(content)
-        except Exception as e:
+        except (OSError, json.JSONDecodeError) as e:
             logger.error(f"Could not read existing history in {filename}: {e}")
 
     # 2. Check for Duplicate Content
@@ -56,7 +56,7 @@ def append_history_record(filename, payload_dict, max_records=10000):
             return
 
     # 3. Create the new record with a timestamp
-    new_record = {"timestamp": datetime.now().isoformat()}
+    new_record = {"timestamp": datetime.now(UTC).isoformat()}
     new_record.update(payload_dict)
 
     # 4. Append, cap the limit, and save
@@ -101,7 +101,7 @@ def update_statistical_history(stats_report):
 
     payload = {
         "type": "statistical_calibration",
-        "iterations": list(stats_report.values())[0]["samples"],
+        "iterations": next(iter(stats_report.values()))["samples"],
         "facets": new_facets_data,
     }
 
@@ -239,7 +239,7 @@ def compute_angle(dots):
     """Calculates the rotation angle of the dot line."""
     if len(dots) < 2:
         raise ValueError("At least 2 dots are required to compute an angle.")
-    m, c = np.polyfit(dots[:, 0], dots[:, 1], 1)
+    m, _c = np.polyfit(dots[:, 0], dots[:, 1], 1)
     angle_rad = np.arctan(m)
     return np.degrees(angle_rad)
 

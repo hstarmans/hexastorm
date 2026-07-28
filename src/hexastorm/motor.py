@@ -2,12 +2,16 @@
 
 import math
 
-from amaranth import Cat, Elaboratable, Module, Signal, ClockDomain
+from amaranth import Cat, ClockDomain, Elaboratable, Module, Signal
 from amaranth.hdl import Array
-from luna.gateware.interface.spi import SPICommandInterface
-from luna.gateware.utils.cdc import synchronize
 
-from .config import WORD_BYTES, COMMAND_BYTES, params
+# pyrefly: ignore [missing-import]
+from luna.gateware.interface.spi import (
+    SPICommandInterface,
+)
+from luna.gateware.utils.cdc import synchronize  # pyrefly: ignore [missing-import]
+
+from .config import COMMAND_BYTES, WORD_BYTES, params
 from .resources import get_all_resources
 
 
@@ -91,11 +95,11 @@ class Driver(Elaboratable):
         )
 
         if platform and self.top:
-            leds = [res.o for res in get_all_resources(platform, "led")]
+            leds = [res.o for res in get_all_resources(platform, "led", dir="-")]
             for idx in range(len(self.leds)):
                 m.d.comb += self.leds[idx].eq(leds[idx])
-            bldc = platform.request("bldc")
-            board_spi = platform.request("debug_spi")
+            bldc = platform.request("bldc", dir="-")
+            board_spi = platform.request("debug_spi", dir="-")
             spi = synchronize(m, board_spi)
             m.d.comb += self.enable_prism.eq(1)
             m.d.comb += [
@@ -151,7 +155,7 @@ class Driver(Elaboratable):
 
         # counter used in state ROTATION
         start_statetime = get_statetime(start_freq)
-        mtrpulsecntr = Signal(range(int((start_statetime + 1))))
+        mtrpulsecntr = Signal(range(int(start_statetime + 1)))
 
         # if the motor is rotating we switch from
         # rotation to hall and vice versa
@@ -266,7 +270,7 @@ class Driver(Elaboratable):
         clock = int(platform.clks[platform.hfosc_div] * 1e6)
         RPM = platform.laser_var["RPM"]
         # ticks in facet --> divide by 4
-        setpoint_ticks = int(round((clock / (self.divider * 4 * RPM / 60))))
+        setpoint_ticks = round(clock / (self.divider * 4 * RPM / 60))
 
         # desire 10 samples per half rotation
         max_pid_cycle_time = (setpoint_ticks * self.divider) // 6
@@ -279,7 +283,7 @@ class Driver(Elaboratable):
         lowerlimit = get_statetime(100) * states_fullcycle
         upperlimit = get_statetime(start_freq) * states_fullcycle
 
-        if not self.platform.name == "Test":
+        if self.platform.name != "Test":
             assert (upperlimit > lowerlimit) & (setpoint_ticks > 0) & (lowerlimit > 0)
         lower_l = int(-setpoint_ticks)
         upper_l = int(upperlimit - setpoint_ticks)
@@ -311,9 +315,11 @@ class Driver(Elaboratable):
             m.d.slow += [
                 err.eq(ticks_facet_hall - setpoint_ticks),
             ]
-        with m.Elif(hallcntr == 1):
-            with m.If(((intg + err) > int_lower_l) & ((intg + err) < int_upper_l)):
-                m.d.slow += intg.eq(intg + err)
+        with (
+            m.Elif(hallcntr == 1),
+            m.If(((intg + err) > int_lower_l) & ((intg + err) < int_upper_l)),
+        ):
+            m.d.slow += intg.eq(intg + err)
         with m.Else():
             m.d.slow += [duty.eq((err >> K_p) + (intg >> K_i))]
 
@@ -407,7 +413,7 @@ class Driver(Elaboratable):
         elif mode == "PIcontrol":
             m.d.sync += self.debugword.eq(Cat(ticks_facet_hall, duty))
         else:
-            raise Exception(f"{motorstate} not supported")
+            raise ValueError(f"Motor mode '{mode}' is not supported")
 
         return m
 

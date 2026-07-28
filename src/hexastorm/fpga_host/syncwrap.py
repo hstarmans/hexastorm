@@ -10,6 +10,9 @@ Example usage:
 """
 
 import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _is_coro_like(obj):
@@ -25,16 +28,16 @@ def _loop_is_running():
         try:
             if cur_task() is not None:
                 return True
-        except Exception:
-            pass
+        except (RuntimeError, AttributeError) as err:
+            logger.debug("Error checking current_task: %s", err)
     # CPython: get_running_loop()
     get_running_loop = getattr(asyncio, "get_running_loop", None)
     if callable(get_running_loop):
         try:
             get_running_loop()
             return True
-        except Exception:
-            pass
+        except (RuntimeError, AttributeError) as err:
+            logger.debug("Error checking get_running_loop: %s", err)
     # CPython older: get_event_loop().is_running()
     get_event_loop = getattr(asyncio, "get_event_loop", None)
     if callable(get_event_loop):
@@ -43,8 +46,8 @@ def _loop_is_running():
             is_running = getattr(loop, "is_running", None)
             if callable(is_running) and is_running():
                 return True
-        except Exception:
-            pass
+        except (RuntimeError, AttributeError) as err:
+            logger.debug("Error checking get_event_loop: %s", err)
     return False
 
 
@@ -75,12 +78,16 @@ def _run_sync(coro):
         return loop.run_until_complete(coro)
 
     except RuntimeError as e:
+        logger.exception("Error in _run_sync: %s", e)
         # If get_event_loop() raises a RuntimeError (e.g., "no current event loop"),
         # or if run_until_complete fails in a nested context, re-raise it.
         # Ensure coroutine closure to prevent 'never awaited' warning.
         closer = getattr(coro, "close", None)
         if callable(closer):
-            closer()
+            try:
+                closer()
+            except Exception as err:  # noqa: BLE001
+                logger.debug("Error closing coroutine: %s", err)
         raise RuntimeError(
             "Cannot run synchronously while an event loop is running. "
             "If inside an async function, use 'await' directly."
@@ -118,13 +125,19 @@ class SyncProxy:
                     try:
                         return _run_sync(res)
                     except Exception:
+                        logger.exception(
+                            "Error executing synchronous call for '%s'",
+                            name,
+                        )
                         # In case _run_sync didn't get to consume it, ensure closure
                         closer = getattr(res, "close", None)
                         if callable(closer):
                             try:
                                 closer()
-                            except Exception:
-                                pass
+                            except Exception as err:  # noqa: BLE001
+                                logger.debug(
+                                    "Error closing coroutine for '%s': %s", name, err
+                                )
                         raise
                 return res
 
@@ -135,12 +148,18 @@ class SyncProxy:
             try:
                 return _run_sync(attr)
             except Exception:
+                logger.exception(
+                    "Error executing synchronous property '%s'",
+                    name,
+                )
                 closer = getattr(attr, "close", None)
                 if callable(closer):
                     try:
                         closer()
-                    except Exception:
-                        pass
+                    except Exception as err:  # noqa: BLE001
+                        logger.debug(
+                            "Error closing coroutine property for '%s': %s", name, err
+                        )
                 raise
 
         return attr

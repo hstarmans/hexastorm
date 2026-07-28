@@ -1,19 +1,21 @@
+import builtins
 from random import randint
-from asyncio import TimeoutError
-import numpy as np
-from numpy.testing import assert_array_almost_equal, assert_array_equal
+from typing import Any, ClassVar
 
-from hexastorm.config import Spi, PlatformConfig
-from hexastorm.utils import async_test_case
-from hexastorm.luna.spi import SPIGatewareTestCase
+import numpy as np
+from numpy.testing import assert_array_almost_equal
+
+from hexastorm.config import PlatformConfig, Spi
+from hexastorm.core import Dispatcher, SPIParser
 from hexastorm.fpga_host.mock import MockHost
-from hexastorm.core import SPIParser, Dispatcher
+from hexastorm.luna.spi import SPIGatewareTestCase
+from hexastorm.utils import async_test_case
 
 
 class TestParser(SPIGatewareTestCase):
     hdl_cfg = PlatformConfig(test=True).hdl_cfg
     FRAGMENT_UNDER_TEST = SPIParser
-    FRAGMENT_ARGUMENTS = {"hdl_cfg": hdl_cfg}
+    FRAGMENT_ARGUMENTS: ClassVar[dict[str, Any]] = {"hdl_cfg": hdl_cfg}
 
     async def initialize_signals(self, sim):
         self.host = MockHost(self.dut.fifo_full, sim)
@@ -144,7 +146,7 @@ class TestParser(SPIGatewareTestCase):
         for _ in range(self.hdl_cfg.mem_depth):
             try:
                 await self.host.spline_move(1000, [1] * self.hdl_cfg.motors)
-            except TimeoutError:
+            except builtins.TimeoutError:
                 break
         self.assertTrue(sim.get(self.dut.fifo_full))
         self.assertTrue((await self.host.fpga_state)["mem_full"])
@@ -213,7 +215,9 @@ class TestParser(SPIGatewareTestCase):
         # 5. Assert hardware reacted correctly
         self.assertTrue(sim.get(self.dut.parse))  # Parsing remains enabled
         self.assertTrue(sim.get(self.dut.fifo.empty))  # FIFO should be empty
-        self.assertTrue((await self.host.fpga_state)["mem_empty"])  # Host status should reflect empty
+        self.assertTrue(
+            (await self.host.fpga_state)["mem_empty"]
+        )  # Host status should reflect empty
         self.assertEqual(
             sim.get(self.dut.fifo.space_available),
             self.hdl_cfg.mem_depth,  # Space should be fully restored
@@ -223,7 +227,7 @@ class TestParser(SPIGatewareTestCase):
 class TestDispatcher(SPIGatewareTestCase):
     plf_cfg = PlatformConfig(test=True)
     FRAGMENT_UNDER_TEST = Dispatcher
-    FRAGMENT_ARGUMENTS = {"plf_cfg": plf_cfg}
+    FRAGMENT_ARGUMENTS: ClassVar[dict[str, Any]] = {"plf_cfg": plf_cfg}
 
     async def initialize_signals(self, sim):
         self.sim = sim
@@ -273,7 +277,7 @@ class TestDispatcher(SPIGatewareTestCase):
             await self.tick()
             cycles += 1
             if cycles >= timeout:
-                raise TimeoutError("Timeout during _wait_until_signal")
+                raise builtins.TimeoutError("Timeout during _wait_until_signal")
 
     async def wait_complete(self, max_cycles=100) -> None:
         """Block until the dispatcher is fully idle."""
@@ -352,7 +356,7 @@ class TestDispatcher(SPIGatewareTestCase):
         try:
             for _ in range(hdl_cfg.mem_depth):
                 await self.host.spline_move(1000, [1] * hdl_cfg.motors)
-        except TimeoutError:
+        except builtins.TimeoutError:
             pass
         self.assertTrue((await self.host.fpga_state)["mem_full"])
         await self.host.set_parsing(True)
@@ -627,11 +631,11 @@ class TestDispatcher(SPIGatewareTestCase):
         await self.wait_until(~self.dut.parser.fifo.empty)
         # timing is hard to get right involves SPI and laserhead,
         # test is roughly correct
-        for idx, facet in enumerate([3, 0, 1]):
+        for idx, facet_idx in enumerate([3, 0, 1]):
             if idx == 0:
                 await self.advance_cycles(ticks_facet + 5)
             else:
                 await self.advance_cycles(ticks_facet)
             [ticksperiod_rec, facet_rec] = await host.read_facet_ticks_and_id()
-            self.assertEqual(facet_rec, facet)
+            self.assertEqual(facet_rec, facet_idx)
             self.assertAlmostEqual(ticksperiod_rec, ticks_facet, delta=1)

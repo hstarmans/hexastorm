@@ -6,7 +6,8 @@
 
 """SPI and derived interfaces."""
 
-from amaranth import Signal, Module, Cat, Elaboratable
+from amaranth import Cat, Elaboratable, Module, Signal
+
 from ..utils import LunaGatewareTestCase
 
 
@@ -78,7 +79,7 @@ class SPICommandInterface(Elaboratable):
 
         # Bit counter: counts the number of bits received.
         max_bit_count = max(self.word_size, self.command_size)
-        bit_count = Signal(range(0, max_bit_count + 1))
+        bit_count = Signal(range(max_bit_count + 1))
 
         # Shift registers for our command and data.
         current_command = Signal.like(self.command)
@@ -95,10 +96,9 @@ class SPICommandInterface(Elaboratable):
 
             # STALL: entered when we can't accept new bits -- either when
             # CS starts asserted, or when we've received more data than expected.
-            with m.State("STALL"):
-                # Wait for CS to clear.
-                with m.If(~spi.cs):
-                    m.next = "IDLE"
+            # Wait for CS to clear.
+            with m.State("STALL"), m.If(~spi.cs):
+                m.next = "IDLE"
 
             # We ignore all data until chip select is asserted, as that data Isn't For Us (TM).
             # We'll spin and do nothing until the bus-master addresses us.
@@ -115,12 +115,11 @@ class SPICommandInterface(Elaboratable):
                     m.next = "IDLE"
 
                 # Continue shifting in data until we have a full command.
-                with m.If(bit_count < self.command_size):
-                    with m.If(sample_edge):
-                        m.d.sync += [
-                            bit_count.eq(bit_count + 1),
-                            current_command.eq(Cat(spi.sdi, current_command[:-1])),
-                        ]
+                with m.If(bit_count < self.command_size), m.If(sample_edge):
+                    m.d.sync += [
+                        bit_count.eq(bit_count + 1),
+                        current_command.eq(Cat(spi.sdi, current_command[:-1])),
+                    ]
 
                 # ... and then pass that command out to our controller.
                 with m.Else():
@@ -149,12 +148,11 @@ class SPICommandInterface(Elaboratable):
                 m.d.sync += spi.sdo.eq(current_word[-1])
 
                 # Continue shifting data until we have a full word.
-                with m.If(bit_count < self.word_size):
-                    with m.If(sample_edge):
-                        m.d.sync += [
-                            bit_count.eq(bit_count + 1),
-                            current_word.eq(Cat(spi.sdi, current_word[:-1])),
-                        ]
+                with m.If(bit_count < self.word_size), m.If(sample_edge):
+                    m.d.sync += [
+                        bit_count.eq(bit_count + 1),
+                        current_word.eq(Cat(spi.sdi, current_word[:-1])),
+                    ]
 
                 # ... and then output that word on our bus.
                 with m.Else():
@@ -205,7 +203,7 @@ class SPIGatewareTestCase(LunaGatewareTestCase):
 
     async def spi_exchange_byte(self, datum, *, msb_first=True):
         """Sends a byte over the virtual SPI bus."""
-        bits = "{:08b}".format(datum)
+        bits = f"{datum:08b}"
         data_received = ""
 
         if not msb_first:

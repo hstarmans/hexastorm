@@ -2,9 +2,10 @@ import logging
 import struct
 import zlib
 from pathlib import Path
-from typing import Dict, Tuple, Any, Union
+from typing import Any, dict, tuple
 
 import numpy as np
+
 from hexastorm.config import Spi
 
 logger = logging.getLogger(__name__)
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 def write_binary_file(
     pixeldata: np.ndarray,
     params: Any,  # Can be dict or Numba typed dict
-    filepath: Union[str, Path],
+    filepath: str | Path,
     compression_level: int = 9,
 ) -> None:
     """
@@ -133,8 +134,8 @@ def write_binary_file(
 
 
 def read_binary_file(
-    filepath: Union[str, Path], laser_timing_cfg: Dict, bits_in_scanline: int
-) -> Tuple[int, int, float, np.ndarray]:
+    filepath: str | Path, laser_timing_cfg: dict, bits_in_scanline: int
+) -> tuple[int, int, float, np.ndarray]:
     """
     Reads, decompresses, and decodes a binary laser file back into raw pixel data.
 

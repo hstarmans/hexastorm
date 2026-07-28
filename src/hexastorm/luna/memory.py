@@ -9,10 +9,10 @@ This module contains definitions of memory units that work well for USB applicat
 """
 
 from amaranth import Elaboratable, Module, Signal
-from amaranth.lib.memory import Memory
 
 # FIX: DomainRenamer zit nu direct in amaranth.hdl (niet meer in .xfrm)
 from amaranth.hdl import DomainRenamer
+from amaranth.lib.memory import Memory
 
 
 class TransactionalizedFIFO(Elaboratable):
@@ -47,13 +47,13 @@ class TransactionalizedFIFO(Elaboratable):
 
         self.flush = Signal()
 
-        self.space_available = Signal(range(0, depth + 1))
+        self.space_available = Signal(range(depth + 1))
 
     def elaborate(self, platform):
         m = Module()
 
         # Range shortcuts for internal signals.
-        address_range = range(0, self.depth + 1)
+        address_range = range(self.depth + 1)
 
         #
         # Core internal "backing store".

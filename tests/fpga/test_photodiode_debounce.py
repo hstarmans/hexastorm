@@ -1,6 +1,7 @@
-from hexastorm.utils import LunaGatewareTestCase, async_test_case
+from typing import Any, ClassVar
 
 from hexastorm.blocks.photodiode_debounce import PhotodiodeDebounce
+from hexastorm.utils import LunaGatewareTestCase, async_test_case
 
 
 class PhotodiodeDebounceTest(LunaGatewareTestCase):
@@ -11,7 +12,7 @@ class PhotodiodeDebounceTest(LunaGatewareTestCase):
     """
 
     FRAGMENT_UNDER_TEST = PhotodiodeDebounce
-    FRAGMENT_ARGUMENTS = dict(n_low=4, n_high=2)
+    FRAGMENT_ARGUMENTS: ClassVar[dict[str, Any]] = {"n_low": 4, "n_high": 2}
 
     async def initialize_signals(self, sim):
         self.sim = sim

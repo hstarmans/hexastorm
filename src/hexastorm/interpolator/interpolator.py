@@ -1,17 +1,16 @@
 import logging
-from pathlib import Path
 from io import BytesIO
+from pathlib import Path
 from time import time
-from typing import Union
 
+import cv2
 import numpy as np
 from cairosvg import svg2png
-from PIL import Image
-import cv2
+from PIL import EpsImagePlugin, Image
 
 from hexastorm.config import PlatformConfig
-from . import geometry
-from . import io
+
+from . import geometry, io
 
 # Disable PIL Decompression Bomb Warning
 Image.MAX_IMAGE_PIXELS = None
@@ -42,7 +41,9 @@ class Interpolator:
         self._last_output_path = None  # To track the last output pat file for reading
         self.bitorder = "big"
 
-    def set_optical_params(self, correction: bool = None, exposures: int = None):
+    def set_optical_params(
+        self, correction: bool | None = None, exposures: int | None = None
+    ):
         if correction is not None:
             self.correction = correction
         if exposures is not None:
@@ -71,7 +72,10 @@ class Interpolator:
     def pstopil(self, filepath: Path, pixelsize: float = 0.3527777778) -> Image.Image:
         img = Image.open(filepath)
         scale = pixelsize / self.params["samplegridsize"]
-        img.load(scale=scale)
+        if isinstance(img, EpsImagePlugin.EpsImageFile):
+            img.load(scale=max(1, round(scale)))
+        else:
+            img.load()
         return img
 
     def imgtopil(self, filepath: Path, pixelsize: float) -> Image.Image:
@@ -87,13 +91,13 @@ class Interpolator:
         """
         img_array = np.array(img.convert("1"))
         if img_array.max() == 0:
-            raise Exception("Image is empty")
+            raise ValueError("Image is empty")
 
         # Update geometry settings based on actual image size
         x_size, y_size = [i * self.params["samplegridsize"] for i in img_array.shape]
 
         if (x_size > self.params["pltfxsize"]) or (y_size > self.params["pltfysize"]):
-            raise Exception("Object does not fit on platform")
+            raise ValueError("Object does not fit on platform")
 
         logger.debug(f"Sample size is {x_size:.2f} mm by {y_size:.2f} mm")
         self.params["samplexsize"] = x_size
@@ -107,7 +111,7 @@ class Interpolator:
         # Calculate diameter (kernel size must be an integer)
         pixel_radius = self.params["laser_radius_mm"] / self.params["samplegridsize"]
         # Kernel size should be (2 * radius + 1) to ensure a center pixel
-        kernel_size = int(round(pixel_radius * 2))
+        kernel_size = round(pixel_radius * 2)
 
         # Create an elliptical kernel to simulate the circular laser spot
         kernel = cv2.getStructuringElement(
@@ -130,7 +134,7 @@ class Interpolator:
 
     def patternfile(
         self,
-        url: Union[str, Path],
+        url: str | Path,
         pixelsize: float = 0.3527777778,
         test: bool = False,
         positiveresist: bool = False,
@@ -214,7 +218,7 @@ class Interpolator:
         logger.debug(f"Elapsed {time() - ctime:.2f} seconds")
 
         if ptrn.min() < 0 or ptrn.max() > 1:
-            raise Exception("This is not a bit list")
+            raise ValueError("This is not a bit list")
 
         # 4. Handle Polarity and Padding
         # 'mask' defines the valid image area. '~mask' is the padding/overscan area.
@@ -234,7 +238,7 @@ class Interpolator:
         return ptrn
 
     def img_to_bin(
-        self, img_name: Path, bin_name: Path = None, camera: bool = False
+        self, img_name: Path, bin_name: Path | None = None, camera: bool = False
     ) -> float:
         """Convenience method to convert IMG directly to BIN and return job duration in minutes."""
         img_name = Path(img_name)
@@ -293,7 +297,7 @@ class Interpolator:
 
         return total_min
 
-    def writebin(self, pixeldata: np.ndarray, filename: Union[str, Path] = "test.bin"):
+    def writebin(self, pixeldata: np.ndarray, filename: str | Path = "test.bin"):
         """Wrapper for io.write_binary_file"""
         # Resolve path: default to debug folder if not absolute
         out_path = Path(filename)
@@ -303,7 +307,7 @@ class Interpolator:
 
         io.write_binary_file(pixeldata, self.params, out_path)
 
-    def readbin(self, filename: Union[str, Path] = None) -> dict:
+    def readbin(self, filename: str | Path | None = None) -> dict:
         """Wrapper for io.read_binary_file"""
 
         if filename is None:
@@ -331,7 +335,7 @@ class Interpolator:
 
     def plotptrn(
         self,
-        ptrn_data: Union[np.ndarray, dict],
+        ptrn_data: np.ndarray | dict,
         filename: str = "plot",
         color_lanes: bool = True,
     ):

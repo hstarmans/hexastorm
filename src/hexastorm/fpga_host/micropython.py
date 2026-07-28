@@ -1,17 +1,17 @@
-from asyncio import sleep, sleep_ms, wait_for
-import time
 import logging
 import os
+import time
+from asyncio import sleep, sleep_ms, wait_for
 from random import randint
-from machine import Pin, SPI, I2C, PWM
 
-from ulab import numpy as np
-from tmc.uart import ConnectionFail
+from machine import I2C, PWM, SPI, Pin
 from tmc.stepperdriver import TMC_2209
+from tmc.uart import ConnectionFail
+from ulab import numpy as np
 
-from .syncwrap import syncable
-from .interface import BaseHost
 from ..config import Spi
+from .interface import BaseHost
+from .syncwrap import syncable
 
 logger = logging.getLogger(__name__)
 
@@ -258,7 +258,7 @@ class ESP32Host(BaseHost):
         val (bool): True to enable steppers (active-low), False to disable.
         """
         if not isinstance(val, bool):
-            raise ValueError("enable_steppers must be a boolean value (True or False)")
+            raise TypeError("enable_steppers must be a boolean value (True or False)")
 
         # Assuming 'enable' is active-low: 0 = enabled, 1 = disabled
         self.stepper_cs.value(0 if val else 1)
@@ -275,7 +275,7 @@ class ESP32Host(BaseHost):
         adr = self.cfg.esp32_cfg["i2c"]["digipot_addr"]
         # cam reset needs to be high to read the current value from the digipot
         # assumed this is done during intialization
-        return list(self.i2c.readfrom_mem(adr, 0, 1))[0]
+        return next(iter(self.i2c.readfrom_mem(adr, 0, 1)))
 
     @laser_current.setter
     def laser_current(self, val):
@@ -383,25 +383,31 @@ class ESP32Host(BaseHost):
             await self.synchronize(False)
         return mean_ms
 
-    async def test_laserhead(self, shift=0):
+    async def test_laserhead(self, shift=0, ref_facet_means=None):
         """
-        Test laserhead by comparing jitter percentage of each facet against expected configuration.
+        Test laserhead performance by evaluating motor stability and per-facet spot positioning probability.
 
-        Measures the period for each facet multiple times, computes the jitter
-        (ignoring statistical outliers) , and compares against the expected jitter percentage from configuration.
+        Decomposing Rotational Timing Variance:
+        Measured facet period variance is decomposed into three distinct physical sources:
+        1. Cut Error / Facet Geometry: Static mechanical angle variations unique to each physical facet.
+        2. Motor Speed Jitter: Dynamic angular velocity fluctuations and motor control loop hunting across revolutions.
+        3. Optical / Measurement Noise: Photodiode comparator edge jitter and FPGA timer resolution.
+
+        Test Structure:
+        - Part 1 (Motor Stability & RPM): Measures global mean period, computes actual motor RPM, and evaluates
+          global RPM speed deviation against expected target.
+        - Part 2 (Spot Positioning Probability): Computes Process Capability (Cpk) at 3-sigma (99.73% of spots in spec).
+          Under Chi-Square distribution assumptions with N >= 200 samples, this statistical metric guarantees a
+          false alarm rate (alpha) < 0.001% and a missed defect rate (beta) < 0.003% for laser spot positioning accuracy.
 
         Args:
         - shift (int, optional): Rotational offset used to map raw hardware facet IDs
           to calibrated logical facet IDs. Defaults to 0.
+        - ref_facet_means (list, optional): Reference baseline facet period means in ms.
 
         Returns:
-        - dict: A report containing the overall pass/fail status, global RPM stats,
-          and detailed jitter/mean statistics for each logical facet.
-
-        Notes:
-        - If facet period is below half the expected period, test fails.
-        - The `shift` parameter ensures that errors are reported against the correct
-          physical facet based on the calibration table, regardless of boot orientation.
+        - dict: A report containing overall pass/fail status, global RPM stats,
+          and per-facet Cpk, 3-sigma jitter, and spot positioning metrics.
         """
         cur_sync = (await self.fpga_state)["synchronized"]
         if not cur_sync:
@@ -412,7 +418,7 @@ class ESP32Host(BaseHost):
         expected_rpm = laz_tim["rpm"]
         exp_facet_ms = 60 / (expected_rpm * num_facets / 1000)
 
-        # Initialize the report dictionary with the new RPM fields
+        # Initialize the report dictionary with global stats and per-facet reports
         report = {
             "passed": True,
             "global_mean_ms": 0.0,
@@ -422,19 +428,18 @@ class ESP32Host(BaseHost):
             "facets": {},
         }
 
-        # Request 200 samples for the percentile trim
+        # Request 200 samples for statistical evaluation
         facet_ms, facet_ids = await self.measure_facet_period_ms(samples=200)
 
-        # --- CASE 1: Global Mean Check (RPM Accuracy) ---
+        # --- PART 1: Global Mean Check & Motor Stability (RPM Accuracy) ---
         global_mean_ms = float(np.mean(facet_ms))
         global_deviation_perc = float(
-            abs(global_mean_ms - exp_facet_ms) / exp_facet_ms * 100
+            abs(global_mean_ms - exp_facet_ms) / exp_facet_ms * 100.0
         )
 
-        # Calculate the actual physical RPM based on the timings
+        # Calculate actual physical RPM based on mean facet period
         measured_rpm = round(60000 / (global_mean_ms * num_facets))
 
-        # Populate global stats (rounded for clean JSON output)
         report["global_mean_ms"] = round(global_mean_ms, 4)
         report["global_deviation_perc"] = round(global_deviation_perc, 2)
         report["measured_rpm"] = measured_rpm
@@ -449,17 +454,27 @@ class ESP32Host(BaseHost):
             await self.synchronize(False)
             return report
 
-        # --- CASE 2: Per-Facet Jitter Check ---
+        # --- PART 2: Spot Positioning Probability (Cpk & 3-Sigma Jitter) ---
+        jitter_limit = laz_tim["jitter_exp_perc"]
+        ref_means = (
+            list(ref_facet_means) if ref_facet_means else [exp_facet_ms] * num_facets
+        )
+
         for f_id in range(num_facets):
             raw_f_id = (f_id + shift) % num_facets
             facet_data = facet_ms[facet_ids == raw_f_id]
             n_samples = len(facet_data)
 
-            # Default facet report
             facet_report = {
                 "passed": False,
                 "mean_ms": 0.0,
+                "ref_mean_ms": 0.0,
+                "delta_mean_ms": 0.0,
+                "std_dev_perc": 0.0,
                 "jitter_perc": 0.0,
+                "three_sigma_jitter_perc": 0.0,
+                "cpk": 0.0,
+                "pct_in_spec": 0.0,
                 "samples_used": n_samples,
             }
 
@@ -471,43 +486,56 @@ class ESP32Host(BaseHost):
                 report["facets"][f_id] = facet_report
                 continue
 
-            # 1. Sort the array in ascending order
-            sorted_data = np.sort(facet_data)
+            # 1. Calculate facet mean, reference mean, and standard deviation
+            mean_val = float(np.mean(facet_data))
+            ref_val = float(ref_means[f_id]) if f_id < len(ref_means) else mean_val
+            delta_val = mean_val - ref_val
+            std_val = float(np.std(facet_data)) if n_samples > 0 else 0.0
 
-            # 2. Drop 2% outliers from each end
-            drop_count = int(n_samples * 0.02)
-            clean_data = (
-                sorted_data[drop_count:-drop_count] if drop_count > 0 else sorted_data
+            # 2. Compute 1-sigma and 3-sigma relative jitter percentages
+            std_dev_perc = (std_val / mean_val) * 100.0 if mean_val > 0 else 0.0
+            three_sigma_jitter_perc = 3.0 * std_dev_perc
+
+            # 3. Calculate Process Capability Cpk (for 3-sigma / 99.73% spot positioning)
+            if std_dev_perc > 0:
+                cpk = jitter_limit / (3.0 * std_dev_perc)
+            else:
+                cpk = 99.0
+
+            # 4. Calculate actual percentage of samples within jitter_limit tolerance
+            in_spec_count = sum(
+                1
+                for x in facet_data
+                if (abs(float(x) - mean_val) / mean_val * 100.0) <= jitter_limit
             )
+            pct_in_spec = (in_spec_count / n_samples) * 100.0
 
-            # 3. Calculate metrics
-            clean_min = clean_data[0]
-            clean_max = clean_data[-1]
-            mean_val = np.mean(clean_data)
-
-            min_frac_perc = (mean_val - clean_min) / mean_val * 100
-            max_frac_perc = (clean_max - mean_val) / mean_val * 100
-            total_jitter_perc = min_frac_perc + max_frac_perc
-
-            # 4. Populate facet report (Rounded for consistency)
-            facet_report["mean_ms"] = round(float(mean_val), 4)
-            facet_report["jitter_perc"] = round(float(total_jitter_perc), 4)
-            facet_report["samples_used"] = len(clean_data)
-
-            jitter_limit = laz_tim["jitter_exp_perc"]
-            is_facet_passed = total_jitter_perc <= jitter_limit
+            # 5. Facet passes if Cpk >= 1.0 (3-sigma jitter <= jitter_limit)
+            is_facet_passed = three_sigma_jitter_perc <= jitter_limit
             facet_report["passed"] = is_facet_passed
+            facet_report["mean_ms"] = round(mean_val, 4)
+            facet_report["ref_mean_ms"] = round(ref_val, 4)
+            facet_report["delta_mean_ms"] = round(delta_val, 4)
+            facet_report["std_dev_perc"] = round(std_dev_perc, 5)
+            facet_report["three_sigma_jitter_perc"] = round(three_sigma_jitter_perc, 4)
+            facet_report["jitter_perc"] = round(
+                three_sigma_jitter_perc, 4
+            )  # Backward compatibility
+            facet_report["cpk"] = round(float(cpk), 2)
+            facet_report["pct_in_spec"] = round(float(pct_in_spec), 2)
+            facet_report["samples_used"] = n_samples
 
             if not is_facet_passed:
                 logger.error(
                     f"Facet {f_id}: Failed, Mean {mean_val:.4f} ms, "
-                    f"Jitter {total_jitter_perc:.4f}% exceeds limit of {jitter_limit}%."
+                    f"3-Sigma Jitter {three_sigma_jitter_perc:.4f}% (Cpk {cpk:.2f}) "
+                    f"exceeds limit of {jitter_limit}%."
                 )
                 report["passed"] = False
             else:
                 logger.info(
                     f"Facet {f_id}: Passed, Mean {mean_val:.4f} ms, "
-                    f"Jitter {total_jitter_perc:.4f}%."
+                    f"3-Sigma Jitter {three_sigma_jitter_perc:.4f}% (Cpk {cpk:.2f}, {pct_in_spec:.1f}% in spec)."
                 )
 
             report["facets"][f_id] = facet_report

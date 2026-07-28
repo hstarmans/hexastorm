@@ -1,11 +1,11 @@
+import os
 import unittest
 
-from hexastorm.core import Dispatcher, SPIParser
-
-from hexastorm.movement import Polynomial
-from hexastorm.lasers import Laserhead
-from hexastorm.platforms import Firestarter
 from hexastorm.config import PlatformConfig
+from hexastorm.core import Dispatcher, SPIParser
+from hexastorm.lasers import Laserhead
+from hexastorm.movement import Polynomial
+from hexastorm.platforms import Firestarter
 
 
 class TestBuild(unittest.TestCase):
@@ -13,10 +13,14 @@ class TestBuild(unittest.TestCase):
 
     # build directory created in folder python is executed
     def test_all(self):
+        do_program = os.environ.get("HEXASTORM_DO_PROGRAM", "0").lower() in (
+            "1",
+            "true",
+        )
         platform = Firestarter()
         platform.build(
             Dispatcher(PlatformConfig(test=False)),
-            do_program=True,
+            do_program=do_program,
             verbose=True,
         )
 
