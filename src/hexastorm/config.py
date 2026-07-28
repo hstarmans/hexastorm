@@ -11,15 +11,20 @@ import logging
 import sys
 from collections import OrderedDict
 from math import ceil, radians
-from typing import ClassVar
-
 if sys.implementation.name == "micropython":
     from ulab import numpy as np
 
     MICROPYTHON = True
+
+    class _ClassVar:
+        def __getitem__(self, item):
+            return item
+
+    ClassVar = _ClassVar()
 else:
     import json
     from pathlib import Path
+    from typing import ClassVar
 
     import numpy as np
 
