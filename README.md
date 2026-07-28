@@ -30,6 +30,10 @@ Sync the project dependencies from [pyproject.toml](./pyproject.toml).
 ```console
 uv sync
 ```
+Deploy binary on connected board with ESP32S3 and UP5K fpga.
+```console 
+uv run build
+```
 Camera support is outlined in [developer.md](./developer.md).
 
 You can execute tests and run the main modules as follows:  
