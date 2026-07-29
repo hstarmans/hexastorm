@@ -217,7 +217,9 @@ class ESP32Host(BaseHost):
                     return False
             return True
         else:
-            await self.enable_comp(synchronize=False)
+            await self.enable_comp(
+                synchronize=False, laser0=False, laser1=False, polygon=False
+            )
             return True
 
     def reset(self):
@@ -303,7 +305,10 @@ class ESP32Host(BaseHost):
         adr = self.cfg.esp32_cfg["i2c"]["digipot_addr"]
         # cam reset needs to be high to write to the digipot
         # assumed this is done during initialization
-        self.i2c.writeto_mem(adr, 0, bytes([val]))
+        try:
+            self.i2c.writeto_mem(adr, 0, bytes([val]))
+        except OSError as e:
+            raise OSError(f"Digipot not detected for laser driver: {e}")
 
     async def measure_facet_period_ms(self, samples=30, max_trials=10_000):
         """

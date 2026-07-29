@@ -2,7 +2,7 @@ import logging
 import struct
 import zlib
 from pathlib import Path
-from typing import Any, dict, tuple
+from typing import Any
 
 import numpy as np
 

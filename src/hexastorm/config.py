@@ -15,16 +15,9 @@ if sys.implementation.name == "micropython":
     from ulab import numpy as np
 
     MICROPYTHON = True
-
-    class _ClassVar:
-        def __getitem__(self, item):
-            return item
-
-    ClassVar = _ClassVar()
 else:
     import json
     from pathlib import Path
-    from typing import ClassVar
 
     import numpy as np
 
@@ -38,7 +31,7 @@ class Spi:
 
     command_bytes = 1
     word_bytes = 8
-    move_instruction: ClassVar[dict[str, int]] = {"instruction": 1, "ticks": 7}
+    move_instruction: dict[str, int] = {"instruction": 1, "ticks": 7}
 
     class Commands:
         """SPI protocol command. Each command is followed by a word."""

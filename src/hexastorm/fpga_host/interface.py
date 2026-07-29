@@ -1,6 +1,7 @@
 import logging
 import sys
 from asyncio import sleep
+from time import time
 
 from .. import ulabext
 from ..config import PlatformConfig, Spi
@@ -475,7 +476,9 @@ class BaseHost:
         command = [Spi.Commands.flush] + [0] * Spi.word_bytes
         return await self.send_command(command)
 
-    async def wait_fifo_empty(self, poll_interval=0.01, check_sensors=False):
+    async def wait_fifo_empty(
+        self, poll_interval=0.01, check_sensors=False, timeout=5.0
+    ):
         """
         Poll status until the FPGA instruction FIFO is empty.
 
@@ -485,6 +488,7 @@ class BaseHost:
         Args:
             poll_interval (float): Delay in seconds between status polling calls.
             check_sensors (bool): If True, checks limit switches while waiting and aborts if triggered.
+            timeout (float): Max seconds to wait before giving up (default 5.0). Pass None or 0 to wait indefinitely.
 
         Returns:
             list[int] or None: Limit switches hit if check_sensors triggered an abort, otherwise None.
@@ -492,7 +496,11 @@ class BaseHost:
         if self.test:
             return None
 
+        start_time = time()
         while not (await self.fpga_state)["mem_empty"]:
+            if timeout and (time() - start_time) > timeout:
+                logger.warning("wait_fifo_empty timed out waiting for FIFO to empty.")
+                break
             if check_sensors:
                 switches = await self.read_switches()
                 if any(switches):
