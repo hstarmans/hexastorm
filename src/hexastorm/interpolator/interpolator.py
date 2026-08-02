@@ -298,13 +298,23 @@ class Interpolator:
         return total_min
 
     def writebin(self, pixeldata: np.ndarray, filename: str | Path = "test.bin"):
-        """Wrapper for io.write_binary_file"""
-        # Resolve path: default to debug folder if not absolute
+        """Wrapper for io.write_binary_file.
+
+        Encodes exposure count and optical-correction flag into the output filename
+        stem so the firmware can validate the file contract without parsing binary:
+          e.g. ``myjob_e1_nocor.pat`` or ``myjob_e4_cor.pat``
+        """
         out_path = Path(filename)
-        self._last_output_path = out_path
         if not out_path.is_absolute():
             out_path = self.cfg.paths["patterns"] / out_path
 
+        # Encode metadata into the stem
+        n_exp = self.params["exposures"]
+        cor_tag = "cor" if self.params["optical_correction"] else "nocor"
+        new_stem = f"{out_path.stem}_e{n_exp}_{cor_tag}"
+        out_path = out_path.with_name(new_stem + out_path.suffix)
+
+        self._last_output_path = out_path
         io.write_binary_file(pixeldata, self.params, out_path)
 
     def readbin(self, filename: str | Path | None = None) -> dict:
@@ -503,7 +513,7 @@ def main():
     fname = Path("combined_grid_test.svg")
     bin_name = fname.with_suffix(".bin")
     ctime = time()
-    interpolator = Interpolator(correction=False, exposures=4)
+    interpolator = Interpolator(correction=False, exposures=1)
     logger.info(f"Interpolator {time() - ctime:.2f} seconds")
 
     ptrn = interpolator.patternfile(fname)

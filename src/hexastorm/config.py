@@ -319,6 +319,9 @@ class PlatformConfig:
                 params[f"f{i}_scan"] = 0.0
                 params[f"f{i}_orth"] = 0.0
 
+        # Store metadata so writers (e.g. write_binary_file) can encode it in the filename
+        params["exposures"] = int(exposures)
+        params["optical_correction"] = correction_data != {}
         return params
 
     @property
