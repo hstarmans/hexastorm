@@ -536,7 +536,11 @@ class BaseHost:
 
         # Execute the move to the home switches
         hit_array = await self.gotopoint(
-            position=dist.tolist(), speed=speed, absolute=False, check_sensors=True
+            position=dist.tolist(),
+            speed=speed,
+            absolute=False,
+            check_sensors=True,
+            validate_limits=False,
         )
         valid_hits = np.array(axes) * np.array(hit_array)
         multiplier = 1 - valid_hits
@@ -559,6 +563,7 @@ class BaseHost:
                 speed=speed,
                 absolute=False,
                 check_sensors=False,
+                validate_limits=False,
             )
 
     def _calc_coordinated_velocities(self, displacement, speed):
@@ -663,6 +668,7 @@ class BaseHost:
         absolute=True,
         check_sensors=True,
         workspace=False,
+        validate_limits=True,
     ):
         """Coordinated linear motion (G0/G1) across all axes.
 
