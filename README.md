@@ -4,7 +4,7 @@
 
 Unlike traditional galvanometer scanners, Hexastorm uses a high-speed rotating prism or mirror to deflect the laser beam, with position feedback determined via a photodiode. The system is powered by a **Lattice iCE40UP5K FPGA** (utilizing **Amaranth HDL**) and an **ESP32-S3** (utilizing **Micropython**), providing a complete stack of hardware, gateware, and software to enable advanced laser scanning applications.
 
-<img src="https://cdn.hackaday.io/images/490011635348687883.jpg" height="300" alt="Hexastorm System"/>
+<img src="/images/machine.jpeg" height="300" alt="Hexastorm System"/>
 
 ### Project Resources
 * **Website:** [Hexastorm.com](https://www.hexastorm.com)

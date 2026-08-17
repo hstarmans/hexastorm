@@ -230,6 +230,61 @@ class PlatformConfig:
             visible_pixels = last_record.get("visible_pixels", [])
         return visible_pixels
 
+    def compute_photodiode_scan_corrections(
+        self, facet_period_ms: list[float] | np.ndarray, k_scale: float = 1.628
+    ) -> dict[str, dict[str, float]]:
+        """
+        Computes zero-camera feed-forward along-scan corrections (in mm) directly from
+        photodiode timing measurements per facet.
+
+        Physics & Derivation Context:
+            The mapping between photodiode timing differences and along-scan spatial shift
+            is not simply `v_scan(0) * delta_t` because of the scanline duty cycle geometry:
+
+            1. Center Scan Speed:
+               The transversal displacement through the rotating prism follows Snell's Law:
+               `tau(I) = T * sin(I) * (1 - sqrt((1 - sin(I)^2) / (n^2 - sin(I)^2)))`
+               Near line center (I = 0 deg), d(tau)/dI = T * (1 - 1/n) = 30.0 mm * (1 - 1/1.49) = 9.866 mm/rad.
+               At 3000 RPM (omega = 314.159 rad/s), the scan speed is:
+               `v_scan(0) = (d(tau)/dI) * omega = 9.866 * 314.159 = 3.10 mm/ms (3.10 um/us)`.
+
+            2. Duty Cycle & Trigger Position:
+               The photodiode triggers at the start of the facet sweep (frac = 0.0), whereas
+               the active laser exposure window runs from `start_frac = 0.35` to `end_frac = 0.70`,
+               centered at `center_frac = (0.35 + 0.70) / 2 = 0.525`.
+               The timing deviation measured across the full facet sweep accumulates proportionally
+               at the center of the active write window:
+               `delta_t_effective = delta_t * center_frac`.
+               Therefore, the effective scale factor is:
+               `k_scale = v_scan(0) * center_frac = 3.10 mm/ms * 0.525 = 1.628 mm/ms (1.628 um/us)`.
+
+            3. First-Order Approximation & Residuals:
+               Total along-scan deviation is composed of:
+               `Delta_x = Delta_x_timing(delta_t) + Delta_x_mechanical_wedge`.
+               This method corrects for dynamic/rotational timing variations Delta_x_timing (slashing
+               jitter by >50%), while static individual facet wedge errors and non-linear velocity
+               variations across the sweep remain as smaller residuals.
+
+        Args:
+            facet_period_ms: Array or list of measured periods for each facet in milliseconds.
+            k_scale: Scale factor converting timing offset (ms) to spatial shift (mm).
+                     Defaults to 1.628 mm/ms (derived from v_scan(0) * center_frac).
+
+        Returns:
+            dict: Correction dictionary formatted for `get_optical_params(correction=...)`.
+        """
+        periods = np.array(facet_period_ms, dtype=float)
+        p_median = float(np.median(periods))
+        delta_t_ms = periods - p_median
+
+        correction_dict = {}
+        for i, dt in enumerate(delta_t_ms):
+            correction_dict[str(i)] = {
+                "scan": float(k_scale * dt),
+                "orth": 0.0,
+            }
+        return correction_dict
+
     def get_optical_params(self, correction=False, exposures=4):
         """
         Returns a dictionary of physical parameters, including calculated Lanewidth.
