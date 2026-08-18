@@ -23,7 +23,7 @@ class ESP32Host(BaseHost):
 
     def __init__(self):
         super().__init__(test=False)
-        self.steppers_init = False
+        self.steppers = {}
         self.reset()
 
     def init_micropython(self):
@@ -114,29 +114,33 @@ class ESP32Host(BaseHost):
 
         return response
 
-    def init_steppers(self):
-        """Initialize TMC2209 stepper drivers over UART."""
+    def init_steppers(self, reinit=False):
+        """Initialize TMC2209 stepper drivers over UART.
+
+        Preserves already initialized axes unless reinit=True.
+        """
         esp32_cfg = self.cfg.esp32_cfg
-        self.steppers = {}
+        tmc_cfg = esp32_cfg["tmc2209"]
 
-        if not self.steppers_init:
-            tmc_cfg = esp32_cfg["tmc2209"]
-            failed = False
-            for ax_name, mtr_id in tmc_cfg["mtr_ids"].items():
-                try:
-                    tmc = TMC_2209(
-                        pin_en=esp32_cfg["stepper_cs"],
-                        mtr_id=mtr_id,
-                        uart_dct=tmc_cfg["uart"],
-                    )
-                    self.steppers[ax_name] = tmc
+        if not hasattr(self, "steppers") or reinit:
+            self.steppers = {}
 
-                except ConnectionFail:
-                    logger.error(
-                        f"Failed to initialize TMC2209 for {ax_name} (ID {mtr_id})."
-                    )
-                    failed = True
-            self.steppers_init = not failed
+        for ax_name, mtr_id in tmc_cfg["mtr_ids"].items():
+            if ax_name in self.steppers and not reinit:
+                continue
+
+            try:
+                tmc = TMC_2209(
+                    pin_en=esp32_cfg["stepper_cs"],
+                    mtr_id=mtr_id,
+                    uart_dct=tmc_cfg["uart"],
+                )
+                self.steppers[ax_name] = tmc
+                logger.info(f"Initialized TMC2209 for {ax_name} (ID {mtr_id}).")
+            except Exception as e:
+                logger.warning(
+                    f"Failed to initialize TMC2209 for {ax_name} (ID {mtr_id}): {e}"
+                )
 
     def flash_fpga(self, filename="sd/fpga/fpga.bit"):
         """Flash a bitstream file to the FPGA directly using SPI.
