@@ -11,6 +11,7 @@ import logging
 import sys
 from collections import OrderedDict
 from math import ceil, radians
+
 if sys.implementation.name == "micropython":
     from ulab import numpy as np
 
@@ -22,6 +23,20 @@ else:
     import numpy as np
 
     MICROPYTHON = False
+
+try:
+    from camera import FrameSize, GrabMode, PixelFormat
+except ImportError:
+
+    class FrameSize:
+        UXGA = 15
+
+    class PixelFormat:
+        JPEG = 4
+
+    class GrabMode:
+        LATEST = 1
+
 
 logger = logging.getLogger(__name__)
 
@@ -412,8 +427,17 @@ class PlatformConfig:
                 "vsync": 41,
                 "href": 40,
                 "xclk": 39,
+                "xclk_freq": 10000000,
                 "pwdn": -1,
                 "reset": 42,
+                "settings": {
+                    "exposure_ms": 200,
+                    "frame_size": FrameSize.UXGA,
+                    "pixel_format": PixelFormat.JPEG,
+                    "jpeg_quality": 85,
+                    "fb_count": 1,
+                    "grab_mode": GrabMode.LATEST,
+                },
             },
             "i2c": {
                 "scl": 17,
