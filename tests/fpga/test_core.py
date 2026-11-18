@@ -53,12 +53,59 @@ class TestParser(SPIGatewareTestCase):
     @async_test_case
     async def test_scanline_write_to_fifo(self, sim):
         """
-        Verifies that writing a full scanline sends the expected number of words to the FIFO.
+        Verifies that writing an all-on scanline sends header + 1 event word (2 words) to the FIFO.
         """
         laser_timing = self.host.cfg.laser_timing
         await self.host.write_line([1] * laser_timing["scanline_length"])
         await self.wait_until(~self.dut.fifo.empty)
-        await self.assert_fifo_written(self.hdl_cfg.words_scanline)
+        await self.assert_fifo_written(2)
+
+    @async_test_case
+    async def test_scanline_variable_event_words_to_fifo(self, sim):
+        """
+        Verifies variable-length event scanlines:
+        - all-zero scanline -> 1 FIFO word (header only, event_words=0)
+        - alternating [1, 0, 1] scanline -> 3 FIFO words (header + 2 event words for 3 events)
+        """
+        scanline_len = self.host.cfg.laser_timing["scanline_length"]
+
+        await self.host.write_line([0] * scanline_len)
+        await self.assert_fifo_written(1)
+
+        await self.host.flush_buffer()
+        await sim.tick()
+
+        alternating = [1 if i % 2 == 0 else 0 for i in range(scanline_len)]
+        num_events = sum(
+            1
+            for i, b in enumerate(alternating)
+            if b != (alternating[i - 1] if i > 0 else 0)
+        )
+        expected_words = 1 + (num_events + 1) // 2
+        await self.host.write_line(alternating)
+        await self.assert_fifo_written(expected_words)
+
+    @async_test_case
+    async def test_scanline_zero_steps_to_fifo(self, sim):
+        """
+        Verifies that steps_line=0 does not raise ZeroDivisionError, encodes
+        half_period == scanline_length and event_words == 2 for [1, 0, 1],
+        and writes header + 2 event words to the FIFO.
+        """
+        scanline_len = self.host.cfg.laser_timing["scanline_length"]
+        byte_lst = self.host.bit_to_byte_list([1, 0, 1], steps_line=0, direction=1)
+        word0 = bytes(byte_lst[:8])
+        payload_int = int.from_bytes(word0[1:8], "little")
+        event_words = (payload_int >> 1) & 0xFFFF
+        half_period = payload_int >> 17
+
+        self.assertEqual(word0[0], Spi.Instructions.scanline)
+        self.assertEqual(payload_int & 1, 1)
+        self.assertEqual(event_words, 2)
+        self.assertEqual(half_period, scanline_len)
+
+        await self.host.write_line([1, 0, 1], steps_line=0, direction=1)
+        await self.assert_fifo_written(3)
 
     @async_test_case
     async def test_scanline_empty_to_fifo(self, sim):

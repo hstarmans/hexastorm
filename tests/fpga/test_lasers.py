@@ -457,6 +457,7 @@ class Loweredge(BaseTest):
     )
     plf_cfg.laser_timing = laz_tim
     plf_cfg.update_laser_timing()
+    plf_cfg.hdl_cfg.mem_depth = 128
 
     FRAGMENT_UNDER_TEST = DiodeSimulator
     FRAGMENT_ARGUMENTS: ClassVar[dict[str, Any]] = {"plf_cfg": plf_cfg}
@@ -495,6 +496,7 @@ class Upperedge(Loweredge):
     )
     plf_cfg.laser_timing = laz_tim
     plf_cfg.update_laser_timing()
+    plf_cfg.hdl_cfg.mem_depth = 128
 
     FRAGMENT_UNDER_TEST = DiodeSimulator
     FRAGMENT_ARGUMENTS: ClassVar[dict[str, Any]] = {"plf_cfg": plf_cfg}

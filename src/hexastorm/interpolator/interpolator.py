@@ -5,7 +5,6 @@ from time import time
 
 import cv2
 import numpy as np
-from cairosvg import svg2png
 from PIL import EpsImagePlugin, Image
 
 from hexastorm.config import PlatformConfig
@@ -60,14 +59,22 @@ class Interpolator:
 
     def svgtopil(self, svg_filepath: Path) -> Image.Image:
         """
-        Converts SVG vector graphics to a raster PIL Image.
+        Converts SVG vector graphics to a raster PIL Image using resvg-py.
         Includes a -90 degree rotation to align the coordinate system with the laser scan direction.
         """
-        with open(svg_filepath, "rb") as f:
-            svg_data = f.read()
-        dpi = 25.4 / self.params["samplegridsize"]
-        png_data = svg2png(bytestring=svg_data, dpi=dpi)
-        return Image.open(BytesIO(png_data)).rotate(-90, expand=True)
+        import resvg_py
+
+        dpi = float(round(25.4 / self.params["samplegridsize"]))
+        png_data = resvg_py.svg_to_bytes(
+            svg_string=Path(svg_filepath).read_text(encoding="utf-8"),
+            dpi=dpi,
+            background="#ffffff",
+        )
+        img = Image.open(BytesIO(png_data))
+        if img.mode in ("RGBA", "LA"):
+            bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
+            img = Image.alpha_composite(bg, img.convert("RGBA")).convert("RGB")
+        return img.rotate(-90, expand=True)
 
     def pstopil(self, filepath: Path, pixelsize: float = 0.3527777778) -> Image.Image:
         img = Image.open(filepath)
@@ -297,6 +304,12 @@ class Interpolator:
 
         return total_min
 
+    def _tagged_bin_path(self, path: Path) -> Path:
+        """Appends exposure count and optical-correction tag to the output stem."""
+        n_exp = int(self.params["exposures"])
+        cor_tag = "cor" if self.params["optical_correction"] else "nocor"
+        return path.with_name(f"{path.stem}_e{n_exp}_{cor_tag}{path.suffix}")
+
     def writebin(self, pixeldata: np.ndarray, filename: str | Path = "test.bin"):
         """Wrapper for io.write_binary_file.
 
@@ -308,11 +321,7 @@ class Interpolator:
         if not out_path.is_absolute():
             out_path = self.cfg.paths["patterns"] / out_path
 
-        # Encode metadata into the stem
-        n_exp = self.params["exposures"]
-        cor_tag = "cor" if self.params["optical_correction"] else "nocor"
-        new_stem = f"{out_path.stem}_e{n_exp}_{cor_tag}"
-        out_path = out_path.with_name(new_stem + out_path.suffix)
+        out_path = self._tagged_bin_path(out_path)
 
         self._last_output_path = out_path
         io.write_binary_file(pixeldata, self.params, out_path)
@@ -325,10 +334,14 @@ class Interpolator:
         in_path = Path(filename)
         if not in_path.is_absolute():
             in_path = self.cfg.paths["patterns"] / in_path
+        if not in_path.exists():
+            tagged_path = self._tagged_bin_path(in_path)
+            if tagged_path.exists():
+                in_path = tagged_path
 
         # Unpack the tuple internally
         facets, lanes, width, data_bytes = io.read_binary_file(
-            in_path, self.cfg.laser_timing, self.params["bitsinscanline"]
+            in_path, self.cfg.laser_timing, int(self.params["bitsinscanline"])
         )
 
         data_bits = np.unpackbits(data_bytes, bitorder=self.bitorder)

@@ -87,69 +87,44 @@ class BaseHost:
 
     def bit_to_byte_list(self, laser_bits, steps_line=1, direction=0):
         """
-        Convert a bit list into a padded byte list suitable for FPGA scanline commands.
+        Convert a bit list into an event-driven byte list suitable for FPGA scanline commands.
 
         Args:
             laser_bits (List[int]): Bits to write to the substrate (laser on/off).
-            steps_line (int): Number of motor steps for the scanline. Must be > 0.
+            steps_line (float): Number of motor steps for the scanline (>= 0, where 0 means stationary).
             direction (int): 0 for backward, 1 for forward.
 
         Returns:
             List[int]: Byte list ready to be packed into SPI commands.
         """
-        word_len = Spi.word_bytes
-        byteorder = "little"
         scanline_length = self.cfg.laser_timing["scanline_length"]
-        half_period = int((scanline_length - 1) // (steps_line * 2))
-        if half_period < 1:
-            raise ValueError("Steps per line cannot be achieved (period < 1)")
-
-        # 2. Build Header using Bitwise Math
-        # The FPGA expects 56 bits: [55 bits for Ticks] + [1 bit for Direction]
-        # In Little Endian, the Direction is the Least Significant Bit (LSB).
-        # So we shift Ticks left by 1, and OR in the Direction.
-
-        payload_int = (half_period << 1) | (direction & 1)
-
-        # Convert integer to 7 bytes (56 bits), little endian
-        payload_bytes = payload_int.to_bytes(7, byteorder)
-
-        # Create buffer starting with Instruction Byte
-        # We use bytearray for performance (mutable), converting to list at the end only if strictly needed
-        out_buffer = bytearray()
 
         # Handle Empty/Stop Case
         if len(laser_bits) == 0:
-            out_buffer.append(Spi.Instructions.last_scanline)
+            out_buffer = bytearray([Spi.Instructions.last_scanline])
+            out_buffer.extend(b"\x00" * (Spi.word_bytes - 1))
+            return list(out_buffer)
+
+        if len(laser_bits) == scanline_length:
+            bits = laser_bits
+        elif scanline_length % 8 == 0 and len(laser_bits) == scanline_length // 8:
+            bits = [
+                (byte_val >> bit_idx) & 1
+                for byte_val in laser_bits
+                for bit_idx in range(8)
+            ]
         else:
-            out_buffer.append(Spi.Instructions.scanline)
-            out_buffer.extend(payload_bytes)
+            raise ValueError(f"Invalid laser_bits length: {len(laser_bits)}")
 
-        # 3. Header Alignment (Padding)
-        # Calculate how many zeros we need to reach the next word boundary
-        # This replaces the inner helper function to save function call overhead
-        current_len = len(out_buffer)
-        padding = (word_len - (current_len % word_len)) % word_len
-        if padding:
-            out_buffer.extend(b"\x00" * padding)
-
-        # 4. Append Laser Data
-        if len(laser_bits) > 0:
-            # Case A: Input is raw bits (0, 1, 1, 0...) -> Pack them
-            if len(laser_bits) == scanline_length:
-                out_buffer.extend(ulabext.packbits(laser_bits, bitorder=byteorder))
-            # Case B: Input is already bytes -> Just append
-            elif len(laser_bits) == scanline_length // 8:
-                out_buffer.extend(laser_bits)
-            else:
-                raise ValueError(f"Invalid laser_bits length: {len(laser_bits)}")
-
-        # 5. Final Alignment (Padding)-
-        current_len = len(out_buffer)
-        padding = (word_len - (current_len % word_len)) % word_len
-        if padding:
-            out_buffer.extend(b"\x00" * padding)
-
+        laser_ticks = self.cfg.laser_timing["laser_ticks"]
+        events = ulabext.bits_to_events(bits, laser_ticks)
+        out_buffer = ulabext.pack_scanline_events(
+            events=events,
+            steps_line=steps_line,
+            direction=direction,
+            scanline_length=scanline_length,
+            scanline_cmd=Spi.Instructions.scanline,
+        )
         return list(out_buffer)
 
     async def write_line(

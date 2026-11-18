@@ -6,9 +6,38 @@ from typing import Any
 
 import numpy as np
 
+from hexastorm import ulabext
 from hexastorm.config import Spi
 
 logger = logging.getLogger(__name__)
+
+
+def bits_to_events_np(line_bits: np.ndarray, laser_ticks: int) -> list[tuple[int, int]]:
+    """Convert a 1D binary scanline numpy array into (tick, intensity) events."""
+    return ulabext.bits_to_events(np.asarray(line_bits, dtype=np.uint8), laser_ticks)
+
+
+def events_to_bits_np(
+    events: list[tuple[int, int]], scanline_length: int, laser_ticks: int
+) -> np.ndarray:
+    """Reconstruct a 1D uint8 binary scanline array from (tick, intensity) events."""
+    scanline_length = int(scanline_length)
+    bits = np.zeros(scanline_length, dtype=np.uint8)
+    if not events or scanline_length <= 0:
+        return bits
+
+    tick_step = int(laser_ticks)
+    valid = [(int(t), int(v)) for t, v in events if 0 <= int(t) < ulabext.SENTINEL_TICK]
+    for i, (tick, intensity) in enumerate(valid):
+        start_px = max(0, tick // tick_step)
+        if start_px >= scanline_length:
+            break
+        if i + 1 < len(valid):
+            end_px = min(scanline_length, valid[i + 1][0] // tick_step)
+        else:
+            end_px = scanline_length
+        bits[start_px:end_px] = 1 if intensity > 0 else 0
+    return bits
 
 
 def write_binary_file(
@@ -18,111 +47,86 @@ def write_binary_file(
     compression_level: int = 9,
 ) -> None:
     """
-    Encodes and writes pixel data to a compressed binary file optimized for FPGA streaming.
+    Encodes and writes pixel data to a compressed event-driven binary file for FPGA streaming.
 
-    This function performs the final formatting required by the hardware:
-    1.  **Global Reversal**: Reverses the byte order of the entire image to match the laser scanning direction.
-    2.  **Scanline Headers**: Prepends a 9-byte SPI header to every scanline containing
-        direction (Zig/Zag) and timing configuration (Half-Period).
-    3.  **SPI Packetization**: Chunks the data into 9-byte words (1 Write Command Byte + 8 Data Bytes).
-    4.  **Endianness Correction**: Reverses the bit/byte order within chunks to match the FPGA's SPI shift register.
+    For each scanline:
+    1.  Extracts the 1-bit line in hardware sweep order (reversed relative to image order).
+    2.  Run-length encodes transitions into 32-bit `[24-bit tick | 8-bit intensity]` events.
+    3.  Prefixes an 8-byte scanline header containing direction, event word count, and step timing.
+    4.  Packetizes every 8-byte word into a 9-byte SPI write frame and compresses with zlib.
 
     File Format:
         [Header: lanewidth(f32), facets(u32), lanes(u32)]
-        [Zlib Compressed Data Stream]
+        [Zlib Compressed Event-Driven SPI Stream]
 
     Args:
-        pixeldata: The raw 1-bit raster data (numpy array).
-        params: Geometry settings dict (must contain lanewidth, facetsinlane, etc.).
+        pixeldata: The raw 1-bit packed raster data (numpy array, bitorder='big').
+        params: Geometry settings dict (must contain lanewidth, facetsinlane, laser_ticks, etc.).
         filepath: Output destination path.
         compression_level: Zlib compression level (0-9).
     """
     out_path = Path(filepath)
-    # Ensure parent directory exists
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     # 1. Setup Parameters
-    # Handle both Numba typed dict and standard dict
     lanewidth = float(params["lanewidth"])
     facets = int(params["facetsinlane"])
     bits_in_scanline = int(params["bitsinscanline"])
     samplexsize = float(params["samplexsize"])
     stepsperline = float(params["stepsperline"])
+    laser_ticks = int(params["laser_ticks"])
 
     lanes = int(np.ceil(samplexsize / lanewidth))
     bytes_in_line = int(np.ceil(bits_in_scanline / 8))
 
-    # 2. Reshape & Global Reversal (Vectorized)
+    # 2. Reshape into (lanes, facets, bytes_in_line)
     try:
         expected_size = lanes * facets * bytes_in_line
         if pixeldata.size != expected_size:
             logger.debug(f"Resizing data: {pixeldata.size} -> {expected_size}")
-            # Note: resize in-place might affect the array passed by reference,
-            # but usually patternfile creates a new array anyway.
             pixeldata.resize(expected_size, refcheck=False)
 
         grid = pixeldata.reshape(lanes, facets, bytes_in_line)
     except ValueError as e:
         raise ValueError(f"Data shape mismatch: {e}")
 
-    # Reverse the image data bytes (Corresponds to bits[::-1])
-    # This aligns the data buffer with the physical laser sweep direction.
-    grid = grid[:, :, ::-1]
-
-    # 3. Pre-calculate Headers
-    # Calculate the 7-byte configuration header once
-    def make_header(direction):
-        half_period = int((bits_in_scanline - 1) // (stepsperline * 2))
-        # (HalfPeriod << 1) | Direction
-        payload = (half_period << 1) | direction
-        return payload.to_bytes(7, "little")
-
-    # Create full headers: [CMD_SCANLINE (0x03 usually)] + [Config Bytes]
-    # Note: Your original code used Spi.Instructions.scanline.
-    # Ensure this matches the byte value (e.g., b'\x03')
-    scanline_cmd = Spi.Instructions.scanline.to_bytes(1, "big")
-    header_bwd = scanline_cmd + make_header(0)
-    header_fwd = scanline_cmd + make_header(1)
-
-    # Calculate Padding
-    total_len = len(header_fwd) + bytes_in_line
-    pad_len = (8 - (total_len % 8)) % 8
-    padding = b"\x00" * pad_len
+    scanline_cmd = Spi.Instructions.scanline
     spi_write_cmd = Spi.Commands.write.to_bytes(1, "big")
 
-    # 4. Write Loop
+    # 3. Encode & Write Loop
     compressor = zlib.compressobj(level=compression_level)
-
-    # 1MB Buffer
     IO_BUFFER_SIZE = 1024 * 1024
     write_buffer = bytearray()
 
-    logger.info(f"Writing binary file to {out_path}...")
+    logger.info(f"Writing event-driven binary file to {out_path}...")
     with open(out_path, "wb") as f:
         # File Header
-        f.write(compressor.compress(struct.pack("<f", lanewidth)))
-        f.write(compressor.compress(struct.pack("<I", facets)))
-        f.write(compressor.compress(struct.pack("<I", lanes)))
+        f.write(compressor.compress(struct.pack("<fII", lanewidth, facets, lanes)))
 
         for lane_idx in range(lanes):
-            # Select Header
-            is_forward = lane_idx % 2 == 0
-            header = header_fwd if is_forward else header_bwd
-            # Get all facets for this lane
+            direction = 1 if lane_idx % 2 == 0 else 0
             lane_data = grid[lane_idx]
 
             for facet_idx in range(facets):
-                # Assemble payload: [Header] + [Image Data (reversed)] + [Padding]
-                full_payload = header + lane_data[facet_idx].tobytes() + padding
+                # Unpack image-order bits and reverse to hardware scan order
+                line_bits_img = np.unpackbits(lane_data[facet_idx], bitorder="big")[
+                    :bits_in_scanline
+                ]
+                line_bits_hw = line_bits_img[::-1]
+                events = bits_to_events_np(line_bits_hw, laser_ticks)
+                full_payload = ulabext.pack_scanline_events(
+                    events=events,
+                    steps_line=stepsperline,
+                    direction=direction,
+                    scanline_length=bits_in_scanline,
+                    scanline_cmd=scanline_cmd,
+                )
 
-                # SPI Chunking (Replaces byte_to_cmd_list)
-                # Loop over payload in 8-byte chunks
+                # SPI Chunking: 1 Write Command Byte + 8 reversed Payload Bytes
                 for i in range(0, len(full_payload), 8):
                     chunk = full_payload[i : i + 8]
-                    # Reverse chunk for SPI endianness
-                    chunk_reversed = chunk[::-1]
                     write_buffer.extend(spi_write_cmd)
-                    write_buffer.extend(chunk_reversed)
+                    write_buffer.extend(chunk[::-1])
 
                 if len(write_buffer) >= IO_BUFFER_SIZE:
                     f.write(compressor.compress(write_buffer))
@@ -137,16 +141,15 @@ def read_binary_file(
     filepath: str | Path, laser_timing_cfg: dict, bits_in_scanline: int
 ) -> tuple[int, int, float, np.ndarray]:
     """
-    Reads, decompresses, and decodes a binary laser file back into raw pixel data.
+    Reads, decompresses, and decodes an event-driven binary laser file back into raw pixel data.
 
-    This function reverses the "FPGA-ready" formatting applied by write_binary_file.
-    It strips the SPI command bytes, reverses the endianness corrections, and
-    discards the scanline configuration headers to return the pure image bitmap.
+    Reconstructs the 1-bit bitmap per scanline from the SPI-framed `[tick, intensity]`
+    event stream so visualization and verification tools receive the exact original bitmap.
 
     Args:
-        filepath: Path to the .bin file.
-        laser_timing_cfg: Configuration dict to determine SPI word length.
-        bits_in_scanline: Expected number of valid bits per line (for trimming padding).
+        filepath: Path to the .bin / .pat file.
+        laser_timing_cfg: Configuration dict containing `laser_ticks`.
+        bits_in_scanline: Expected number of valid bits per line.
 
     Returns:
         Tuple containing: (facets_in_lane, lanes, lanewidth, flattened_pixel_data)
@@ -156,54 +159,70 @@ def read_binary_file(
         raise FileNotFoundError(f"Binary file not found: {path}")
 
     with open(path, "rb") as f:
-        compressed_data = f.read()
-        data = zlib.decompress(compressed_data)
+        data = zlib.decompress(f.read())
 
     # Parse File Header
     lanewidth, facets_in_lane, lanes = struct.unpack("<fII", data[:12])
 
-    # Geometry for parsing
-    words_in_line = Spi.words_scanline(laser_timing_cfg)
+    laser_ticks = int(laser_timing_cfg["laser_ticks"])
+    bits_in_scanline = int(bits_in_scanline)
     bytes_in_line = int(np.ceil(bits_in_scanline / 8))
     total_lines = lanes * facets_in_lane
 
-    # Load Raw Data
     raw_payload = np.frombuffer(data, dtype=np.uint8, offset=12)
+    lines = np.zeros((total_lines, bytes_in_line), dtype=np.uint8)
 
-    expected_size = total_lines * words_in_line * 9
-    if raw_payload.size != expected_size:
-        trunc_lines = raw_payload.size // (words_in_line * 9)
-        logger.warning(
-            f"File size mismatch. Expected {total_lines} lines, found {trunc_lines}."
-        )
-        total_lines = trunc_lines
-        raw_payload = raw_payload[: total_lines * words_in_line * 9]
+    offset = 0
+    parsed_lines = 0
+    payload_len = raw_payload.size
 
-    # Reshape to (Lines, Words per Line, 9 Bytes per Word)
-    grid = raw_payload.reshape(total_lines, words_in_line, 9)
+    while parsed_lines < total_lines:
+        if offset + 9 > payload_len:
+            logger.warning(
+                f"File size mismatch. Expected {total_lines} lines, found {parsed_lines}."
+            )
+            lines = lines[:parsed_lines]
+            break
 
-    # --- UNDO SPI PIPELINE ---
+        # Word 0: [1B SPI write cmd][8B reversed header]
+        word0 = raw_payload[offset + 1 : offset + 9][::-1].tobytes()
+        offset += 9
 
-    # A. Separate Headers (Word 0) from Data (Words 1..N)
-    # The first word of every line is the Command/Header word. We discard it.
-    data_grid = grid[:, 1:, :]
+        instr = word0[0]
+        if instr == Spi.Instructions.last_scanline:
+            parsed_lines += 1
+            continue
+        if instr != Spi.Instructions.scanline:
+            raise ValueError(
+                f"Unexpected scanline instruction {instr:#x} at line {parsed_lines}"
+            )
 
-    # B. Remove the first byte (Write Command 0x01) from every Data Word
-    # The remaining 8 bytes are actual pixel data.
-    payload_bytes = data_grid[:, :, 1:]
+        payload_int = int.from_bytes(word0[1:8], "little")
+        event_words = (payload_int >> 1) & 0xFFFF
 
-    # C. Reverse the SPI Chunks
-    # The writing process reversed these 8-byte chunks. We reverse them back.
-    payload_bytes = payload_bytes[..., ::-1]
+        if offset + event_words * 9 > payload_len:
+            logger.warning(
+                f"Truncated event stream at line {parsed_lines} "
+                f"(expected {event_words} event words)."
+            )
+            lines = lines[:parsed_lines]
+            break
 
-    # D. Flatten lines
-    lines = payload_bytes.reshape(total_lines, -1)
+        events: list[tuple[int, int]] = []
+        for _ in range(event_words):
+            ev_bytes = raw_payload[offset + 1 : offset + 9][::-1].tobytes()
+            offset += 9
+            ev0, ev1 = struct.unpack("<II", ev_bytes)
+            t0 = (ev0 >> 8) & 0xFFFFFF
+            if t0 < ulabext.SENTINEL_TICK:
+                events.append((t0, ev0 & 0xFF))
+            t1 = (ev1 >> 8) & 0xFFFFFF
+            if t1 < ulabext.SENTINEL_TICK:
+                events.append((t1, ev1 & 0xFF))
 
-    # E. Trim padding (if image width isn't a perfect multiple of SPI words)
-    lines = lines[:, :bytes_in_line]
-
-    # F. Global Reverse
-    # The writing process reversed the entire line. We reverse it back.
-    lines = lines[:, ::-1]
+        line_bits_hw = events_to_bits_np(events, bits_in_scanline, laser_ticks)
+        line_bits_img = line_bits_hw[::-1]
+        lines[parsed_lines] = np.packbits(line_bits_img, bitorder="big")[:bytes_in_line]
+        parsed_lines += 1
 
     return facets_in_lane, lanes, lanewidth, lines.flatten()

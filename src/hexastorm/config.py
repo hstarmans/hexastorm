@@ -77,10 +77,6 @@ class Spi:
         error = 2
         empty = 3
 
-    def words_scanline(laser_timing):
-        """Returns the number of words required for a single scanline instruction."""
-        return ceil((8 + ceil(laser_timing["scanline_length"] / 8)) / Spi.word_bytes)
-
     def words_move(hdl_cfg):
         """Returns the number of words required for a single move instruction."""
         bytes_move = (
@@ -331,6 +327,7 @@ class PlatformConfig:
                 # Number of vertices/facets on the polygon, must be even
                 "facets": float(laz_tim["facets"]),
                 "laser_hz": float(laz_tim["laser_hz"]),
+                "laser_ticks": float(laz_tim["laser_ticks"]),
                 # Polygon rotation frequency (Hz)
                 "rotationfrequency": laz_tim["rpm"] / 60,
                 # Radius of the laser beam [mm]
@@ -482,7 +479,6 @@ class PlatformConfig:
     @property
     def hdl_cfg(self):
         """Required for amaranth synthesis."""
-        laz_tim = self.laser_timing
         if self._hdl_cfg is not None:
             return self._hdl_cfg
 
@@ -495,7 +491,6 @@ class PlatformConfig:
             "motor_divider": pow(2, 8),
             "pol_degree": 2,
             "mem_width": Spi.word_bytes * 8,
-            "words_scanline": Spi.words_scanline(laz_tim),
             "motor_debug": "ticks_in_facet",
         }
         if self.test:
@@ -503,6 +498,7 @@ class PlatformConfig:
                 {
                     "test": True,
                     "lines_chunk": 2,
+                    "fifo_margin_words": 4,
                 }
             )
         else:
@@ -513,15 +509,11 @@ class PlatformConfig:
                     # listed max 120 kbit, practical 114 kbit
                     # you use EBR / sysMEM (Block RAM) 120 kbit
                     "mem_depth": mem_depth,
+                    "lines_chunk": 50,
+                    "fifo_margin_words": 600,
                 }
             )
-            lines_in_mem = int(cfg["mem_depth"] / cfg["words_scanline"])
-            lines_per_sec = laz_tim["rpm"] * laz_tim["facets"] / 60
-            cfg["lines_chunk"] = 50
-            lines_left_in_mem = lines_in_mem - cfg["lines_chunk"]
-            # assert you have 0.5 seconds to react
-            assert lines_left_in_mem / lines_per_sec > 0.48
-        cfg["space_available"] = int(cfg["lines_chunk"] * cfg["words_scanline"])
+            assert mem_depth > cfg["fifo_margin_words"]
         # Choose bit used for stepping
         if cfg["pol_degree"] == 3:
             cfg["bit_shift"] = 40
@@ -569,6 +561,8 @@ class PlatformConfig:
             "homing_dir": {"x": -1, "y": -1, "z": 1},
             "steps_mm": steps,
             "offset_mm": offset_mm,
+            "min_mm": {"x": 0.0, "y": 0.0, "z": 0.0},
+            "max_mm": {"x": 200.0, "y": 200.0, "z": 100.0},
             "orth2lsrline": "x",
         }
 

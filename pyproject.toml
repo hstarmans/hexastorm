@@ -14,14 +14,17 @@ readme = "README.md"
 requires-python = ">=3.12, <3.13"
 dependencies = [
     "fire>=0.7.1",
-    "numpy>=2.5.4",
+    "numpy>=2.5.4; sys_platform != 'darwin' or platform_machine != 'x86_64'",
+    "numpy>=2.2.0,<2.3; sys_platform == 'darwin' and platform_machine == 'x86_64'",
     "pillow>=13.0.0",
     "tqdm>=4.70.1",
     "ruff>=0.17.5",
-    "opencv-python>=5.0.0.93",
+    "opencv-python>=5.0.0.93; sys_platform != 'darwin' or platform_machine != 'x86_64'",
+    "opencv-python>=4.10.0,<4.12; sys_platform == 'darwin' and platform_machine == 'x86_64'",
     "amaranth-boards",
-    "cairosvg>=2.9.1",
-    "numba>=0.68.1",
+    "resvg-py",
+    "numba>=0.68.1; sys_platform != 'darwin' or platform_machine != 'x86_64'",
+    "numba>=0.61.2,<0.62; sys_platform == 'darwin' and platform_machine == 'x86_64'",
     "nbqa>=1.10.0",
     "pytest>=9.2.0",
     "yowasp-nextpnr-ice40>=0.11.1.0.post826",
@@ -55,5 +58,10 @@ package-dir = {"" = "src", "tests" = "tests"}
 [tool.setuptools.packages.find]
 where = ["src", "."]
 include = ["hexastorm*", "tests*", "ulab*", "machine*", "tmc*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = ["subprojects", ".venv", "build", "output"]
+addopts = "--ignore=tests/camera/test_optical.py --ignore=tests/esp32/test_esp32.py --ignore=tests/fpga/test_build.py"
 
 

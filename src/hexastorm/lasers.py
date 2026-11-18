@@ -165,8 +165,11 @@ class Laserhead(Elaboratable):
         fast_timeout_en = Signal()
 
         read_data = self.read_data
-        read_old = Signal.like(read_data)
-        bit_index = Signal(range(hdl_cfg.mem_width))
+        words_left = Signal(16)
+        cur_event = Signal(32)
+        next_event = Signal(32)
+        has_next_event = Signal()
+        line_tick = Signal(24)
 
         with m.FSM(init="RESET") as laserfsm:
             with m.State("RESET"):
@@ -188,10 +191,12 @@ class Laserhead(Elaboratable):
                     linecnt.eq(0),
                     self.synchronized.eq(0),
                     enable_prism.eq(0),
-                    bit_index.eq(0),
                     byte_index.eq(0),
                     lasercnt.eq(0),
                     lasers.eq(0),
+                    words_left.eq(0),
+                    has_next_event.eq(0),
+                    line_tick.eq(0),
                 ]
                 with m.If(self.synchronize & (~self.error)):
                     # Error: photodiode cannot be high without active laser
@@ -296,7 +301,8 @@ class Laserhead(Elaboratable):
                     with m.Case(Spi.Instructions.scanline):
                         m.d.sync += [
                             self.dir.eq(read_data[8]),
-                            stephalfperiod.eq(read_data[9:]),
+                            words_left.eq(read_data[9:25]),
+                            stephalfperiod.eq(read_data[25:]),
                         ]
                         m.next = "WAIT_FOR_DATA_RUN"
                     with m.Case(Spi.Instructions.last_scanline):
@@ -314,23 +320,40 @@ class Laserhead(Elaboratable):
             with m.State("WAIT_FOR_DATA_RUN"):
                 m.d.sync += [
                     tickcounter.eq(tickcounter + 1),
-                    bit_index.eq(0),
                     byte_index.eq(0),
                     lasercnt.eq(0),
+                    line_tick.eq(0),
+                    lasers[0].eq(0),
                 ]
                 start_threshold = int(laz_tim["start_frac"] * laz_tim["facet_ticks"])
                 assert start_threshold > 0
                 with m.If(tickcounter >= start_threshold):
-                    m.d.sync += self.read_en.eq(1)
+                    with m.If(words_left > 0):
+                        m.d.sync += [
+                            cur_event.eq(read_data[0:32]),
+                            next_event.eq(read_data[32:64]),
+                            has_next_event.eq(1),
+                            words_left.eq(words_left - 1),
+                            self.read_en.eq(1),
+                        ]
+                    with m.Else():
+                        m.d.sync += [
+                            cur_event.eq(0xFFFFFFFF),
+                            next_event.eq(0xFFFFFFFF),
+                            has_next_event.eq(0),
+                            self.read_en.eq(0),
+                        ]
                     m.next = "DATA_RUN"
 
             with m.State("DATA_RUN"):
                 m.d.sync += [
                     tickcounter.eq(tickcounter + 1),
                     lasers[1].eq(lasers[0]),
+                    self.read_en.eq(0),
+                    line_tick.eq(line_tick + 1),
                 ]
                 # NOTE:
-                #      lasercnt used to pulse laser at certain freq
+                #      lasercnt used to pulse laser at pixel rate and drive stepper
                 with m.If(lasercnt == 0):
                     # Handle motor stepping
                     with m.If(stepcnt >= stephalfperiod):
@@ -350,43 +373,36 @@ class Laserhead(Elaboratable):
 
                         m.next = "WAIT_END"
 
-                    # Still scanning — advance and output laser bit
+                    # Still scanning — advance pixel/window counter
                     with m.Else():
                         m.d.sync += [
                             lasercnt.eq(laz_tim["laser_ticks"] - 1),
                             byte_index.eq(byte_index + 1),
                         ]
-                        with m.If(bit_index == 0):
-                            m.d.sync += [
-                                lasers[0].eq(read_data[0]),
-                                read_old.eq(read_data >> 1),
-                                self.read_en.eq(0),
-                            ]
-                        with m.Else():
-                            m.d.sync += lasers[0].eq(read_old[0])
                 with m.Else():
                     m.d.sync += lasercnt.eq(lasercnt - 1)
-                    # NOTE: read enable can only be high for 1 cycle
-                    #       as a result this is done right before the "read"
-                    with m.If(lasercnt == 1):
-                        # Advance read bit position
-                        with m.If(bit_index == 0):
-                            m.d.sync += [bit_index.eq(bit_index + 1)]
-                        # Last bit in word — fetch next byte if needed
-                        with m.Elif(bit_index == hdl_cfg.mem_width - 1):
-                            # If fifo is empty it will give errors later
-                            # so it can be ignored here
-                            # Only grab a new line if more than current
-                            # is needed
-                            # -1 as counting in python is different
-                            with m.If(byte_index < (laz_tim["scanline_length"])):
-                                m.d.sync += self.read_en.eq(1)
-                            m.d.sync += bit_index.eq(0)
-                        with m.Else():
+
+                with (
+                    m.If((lasercnt != 0) | (byte_index < laz_tim["scanline_length"])),
+                    m.If(line_tick == cur_event[8:32]),
+                ):
+                    m.d.sync += lasers[0].eq(cur_event[0:8].any())
+                    with m.If(has_next_event):
+                        m.d.sync += [
+                            cur_event.eq(next_event),
+                            has_next_event.eq(0),
+                        ]
+                    with m.Else():
+                        with m.If(words_left > 0):
                             m.d.sync += [
-                                bit_index.eq(bit_index + 1),
-                                read_old.eq(read_old >> 1),
+                                cur_event.eq(read_data[0:32]),
+                                next_event.eq(read_data[32:64]),
+                                has_next_event.eq(1),
+                                words_left.eq(words_left - 1),
+                                self.read_en.eq(1),
                             ]
+                        with m.Else():
+                            m.d.sync += cur_event.eq(0xFFFFFFFF)
             with m.State("WAIT_END"):
                 m.d.sync += [
                     tickcounter.eq(tickcounter + 1),

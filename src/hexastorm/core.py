@@ -76,29 +76,23 @@ class SPIParser(Elaboratable):
         # Internal state
         state = Signal(8)
 
-        words_rec = Signal(
-            range(
-                max(
-                    hdl_cfg.words_move,
-                    hdl_cfg.words_scanline + 1,
-                )
-            )
-        )
+        words_rec = Signal(17)
+        scanline_words = Signal(17)
         instr_rec = Signal(8)
         error_word = Signal()
 
         status = Spi.State
 
-        # Space available: equals the max chunk of lines, i.e. data, you are allowed to send
+        # FIFO margin: assert fifo_full once free words drop at or below this safety margin
         is_fifo_full = Signal()
-        m.d.comb += is_fifo_full.eq(fifo.space_available <= hdl_cfg.space_available)
+        m.d.comb += is_fifo_full.eq(fifo.space_available <= hdl_cfg.fifo_margin_words)
 
         m.d.sync += [
             state[status.parsing].eq(self.parse),
-            state[status.full].eq(fifo.space_available <= hdl_cfg.space_available),
+            state[status.full].eq(fifo.space_available <= hdl_cfg.fifo_margin_words),
             state[status.error].eq(self.error_other | error_word),
             state[status.empty].eq(fifo.empty),
-            self.fifo_full.eq(fifo.space_available <= hdl_cfg.space_available),
+            self.fifo_full.eq(fifo.space_available <= hdl_cfg.fifo_margin_words),
         ]
 
         with m.FSM(name="parser", init="RESET"):
@@ -142,6 +136,7 @@ class SPIParser(Elaboratable):
                     with m.If(valid_instr):
                         m.d.sync += [
                             instr_rec.eq(byte0),
+                            scanline_words.eq(spi_cmd.word_received[9:25] + 1),
                             fifo.write_en.eq(1),
                             fifo.write_data.eq(spi_cmd.word_received),
                             words_rec.eq(words_rec + 1),
@@ -169,10 +164,7 @@ class SPIParser(Elaboratable):
 
                 m.d.comb += ready_to_commit.eq(
                     ((instr_rec == instr.move) & (words_rec == hdl_cfg.words_move))
-                    | (
-                        (instr_rec == instr.scanline)
-                        & (words_rec == hdl_cfg.words_scanline)
-                    )
+                    | ((instr_rec == instr.scanline) & (words_rec == scanline_words))
                     | (instr_rec == instr.write_pin)
                     | (instr_rec == instr.last_scanline)
                     | (instr_rec == instr.set_fan)

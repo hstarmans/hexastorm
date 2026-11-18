@@ -1,11 +1,38 @@
 import logging
 import math
+import sys
 from typing import Any
 
+import numba.cpython.unicode  # noqa: F401
 import numpy as np
 from numba import jit, typed, types
+from numba.core import cgutils, pythonapi
+from numba.core import types as nb_types
+from numba.core.extending import NativeValue
 
 from ..config import displacement_kernel
+
+# Workaround for Python builds using FNV string hashing (e.g. uv macOS x86_64):
+# Numba hashes strings internally with siphash24 while unbox_unicode_str copies
+# the cached CPython FNV hash, causing typed.Dict string-literal lookups to miss.
+if sys.hash_info.algorithm == "fnv":
+
+    def _unbox_unicode_str_fnv(typ, obj, c):
+        _ok, data, length, kind, is_ascii, _ = c.pyapi.string_as_string_size_and_kind(
+            obj
+        )
+        uni_str = cgutils.create_struct_proxy(typ)(c.context, c.builder)
+        uni_str.data = data
+        uni_str.length = length
+        uni_str.kind = kind
+        uni_str.is_ascii = is_ascii
+        uni_str.hash = uni_str.hash.type(-1)
+        uni_str.meminfo = c.pyapi.nrt_meminfo_new_from_pyobject(data, obj)
+        uni_str.parent = obj
+        is_error = cgutils.is_not_null(c.builder, c.pyapi.err_occurred())
+        return NativeValue(uni_str._getvalue(), is_error=is_error)
+
+    pythonapi._unboxers.functions[nb_types.UnicodeType] = _unbox_unicode_str_fnv
 
 # --- JIT Compiled Math Functions ---
 
