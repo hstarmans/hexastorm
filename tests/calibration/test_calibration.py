@@ -3,11 +3,12 @@ Run test:
     uv run pytest tests/test_calibration.py -v
 """
 
-import pytest
+import logging
+from pathlib import Path
+
 import cv2 as cv
 import numpy as np
-from pathlib import Path
-import logging
+import pytest
 
 from hexastorm.calibration.analyzer import calibration
 from hexastorm.config import Camera
@@ -88,7 +89,7 @@ def generate_synthetic_facets(output_dir: Path):
         for pt in pts_tilted:
             cv.circle(
                 img,
-                (int(round(pt[0])), int(round(pt[1]))),
+                (round(pt[0]), round(pt[1])),
                 dot_radius_px,
                 (255, 255, 255),
                 -1,
@@ -96,9 +97,11 @@ def generate_synthetic_facets(output_dir: Path):
 
         cv.imwrite(str(output_dir / f"facet{i}.jpg"), img)
 
+        median_scan = float(np.median([f["scan"] for f in SYNTHETIC_SHIFTS_UM]))
+        median_orth = float(np.median([f["orth"] for f in SYNTHETIC_SHIFTS_UM]))
         ground_truth[str(i)] = {
-            "Scan_shift_um": scan_um,
-            "Orth_shift_um": orth_um,
+            "Scan_shift_um": scan_um - median_scan,
+            "Orth_shift_um": orth_um - median_orth,
             "rotation_angle_deg": TARGET_ANGLE_DEG,
         }
 
@@ -117,7 +120,7 @@ def generated_data(tmp_path):
 def test_calibration_accuracy(generated_data):
     img_dir, ground_truth = generated_data
 
-    results = calibration(image_dir=img_dir, num_facets=4, debug=DEBUG, store_log=False)
+    results = calibration(image_dir=img_dir, debug=DEBUG)
     assert results, "Calibration returned empty results!"
 
     for facet_id, expected_metrics in ground_truth.items():
@@ -167,8 +170,8 @@ def generate_2d_grid_image(output_path: Path, shift_x_um: float, shift_y_um: flo
 
             cv.circle(
                 img,
-                (int(round(x)), int(round(y))),
-                int(round(dot_radius_px)),
+                (round(x), round(y)),
+                round(dot_radius_px),
                 (255, 255, 255),
                 -1,
             )
@@ -190,17 +193,15 @@ def test_2d_verification(tmp_path):
     # 2. Run the unified calibration function in 2D mode
     results = calibration(
         image_dir=img_dir,
-        num_facets=4,
         debug=False,
-        store_log=False,
         compute_rotation=False,  # Tells analyzer to treat this as a 2D grid
     )
 
     assert results, "2D Calibration returned empty results!"
 
-    # 3. Calculate the expected virtual reference (the mean of all input shifts)
-    mean_scan = sum(f["scan"] for f in GRID_SHIFTS_UM) / len(GRID_SHIFTS_UM)
-    mean_orth = sum(f["orth"] for f in GRID_SHIFTS_UM) / len(GRID_SHIFTS_UM)
+    # 3. Calculate the expected virtual reference (the median of all input shifts)
+    median_scan = float(np.median([f["scan"] for f in GRID_SHIFTS_UM]))
+    median_orth = float(np.median([f["orth"] for f in GRID_SHIFTS_UM]))
 
     # 4. Verify each facet against its expected RELATIVE shift
     for i in range(4):
@@ -208,8 +209,8 @@ def test_2d_verification(tmp_path):
         assert facet_key in results, f"Facet {i} missing from output"
 
         # The true deviation is the absolute position minus the group center
-        expected_scan_rel = GRID_SHIFTS_UM[i]["scan"] - mean_scan
-        expected_orth_rel = GRID_SHIFTS_UM[i]["orth"] - mean_orth
+        expected_scan_rel = GRID_SHIFTS_UM[i]["scan"] - median_scan
+        expected_orth_rel = GRID_SHIFTS_UM[i]["orth"] - median_orth
 
         actual_scan = results[facet_key].get("Scan_shift_um")
         actual_orth = results[facet_key].get("Orth_shift_um")

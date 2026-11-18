@@ -1,7 +1,10 @@
 import logging
-import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle, Circle
+import math
 
+import matplotlib.pyplot as plt
+from matplotlib.patches import Circle, Rectangle
+
+from ...config import displacement_kernel
 from .machine import LaserCalibrationGen
 
 logger = logging.getLogger(__name__)
@@ -28,6 +31,7 @@ class CameraCalibrationGen(LaserCalibrationGen):
         # We will manually control the canvas size to include the whitespace at X=0.
         self.tight = None
         self.camera = True
+        self.pattern_height_mm = 2.0
 
         self.line_thickness_mm = line_thickness_mm
         self.calculate_view_bounds(lower_pixel, upper_pixel)
@@ -35,10 +39,20 @@ class CameraCalibrationGen(LaserCalibrationGen):
     def calculate_view_bounds(self, px_low: int, px_high: int):
         start_pixel = self.optical_settings["startpixel"]
         grid_size = self.optical_settings["samplegridsize"]
-        start_point = self.interpolator.geo.fxpos(pixel=start_pixel)
+        if hasattr(self.interpolator, "geo"):
+            start_point = self.interpolator.geo.fxpos(pixel=start_pixel)
 
-        def px_to_mm(px):
-            return (start_point - self.interpolator.geo.fxpos(pixel=px)) * grid_size
+            def px_to_mm(px):
+                return (start_point - self.interpolator.geo.fxpos(pixel=px)) * grid_size
+        else:
+            params = self.interpolator.params
+            sin_tilt = math.sin(float(params["tiltangle"]))
+            bits_len = int(params["bitsinscanline"])
+            start_u = sin_tilt * displacement_kernel(start_pixel, params)
+
+            def px_to_mm(px):
+                line_px = start_pixel + (px % bits_len)
+                return start_u - (sin_tilt * displacement_kernel(line_px, params))
 
         # 3. Calculated bounds
         self.x_min = px_to_mm(px_low)
@@ -157,7 +171,7 @@ class CameraCalibrationGen(LaserCalibrationGen):
         if calculated_dots_x > 10:
             num_dots_x = 10
         elif calculated_dots_x < 1:
-            raise Exception("View width is too small to comfortably fit even 1 dot!")
+            raise ValueError("View width is too small to comfortably fit even 1 dot!")
         else:
             num_dots_x = calculated_dots_x
 
@@ -166,9 +180,7 @@ class CameraCalibrationGen(LaserCalibrationGen):
 
         # Vertical settings remain fixed per requirements
         y_offset = 0.2
-        spacing_y = dot_radius * 4.0
-        if spacing_y < 0.2:
-            spacing_y = 0.2
+        spacing_y = max(dot_radius * 4.0, 0.2)
         pattern_height = spacing_y * num_dots_y + y_offset  # mm
 
         for i in range(num_dots_x):

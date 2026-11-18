@@ -5,11 +5,11 @@ Run test:
 
 import json
 import logging
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
-import pytest
 import cv2 as cv
 import numpy as np
+import pytest
 
 from hexastorm.calibration.stack import LaserStackSimulator
 
@@ -101,24 +101,24 @@ def test_laser_stack_simulator(mock_open, mock_config_class):
 
     assert len(contours) == 15, f"Expected 15 dots, found {len(contours)}"
 
-    # Extract X coordinates of all dots
-    x_coords = []
+    # Extract Y coordinates of all dots (stacker rotates -90 deg and steps along Y)
+    y_coords = []
     for cnt in contours:
         M = cv.moments(cnt)
         if M["m00"] > 0:
-            cx = M["m10"] / M["m00"]
-            x_coords.append(cx)
+            cy = M["m01"] / M["m00"]
+            y_coords.append(cy)
 
-    # Group the X coordinates by column (rounding to nearest pixel)
-    unique_columns = np.unique(np.round(x_coords))
+    # Group the Y coordinates by row (rounding to nearest pixel)
+    unique_rows = np.unique(np.round(y_coords))
 
-    # We expect exactly 3 columns of dots
-    assert len(unique_columns) == 3, f"Expected 3 columns, found {len(unique_columns)}"
+    # We expect exactly 3 rows of dots
+    assert len(unique_rows) == 3, f"Expected 3 rows, found {len(unique_rows)}"
 
-    # Check the spatial distance between column 0 -> 1, and 1 -> 2
+    # Check the spatial distance between row 0 -> 1, and 1 -> 2
     # It should be exactly equal to our FORCED_STEP_PX (50 pixels)
-    dist_1 = unique_columns[1] - unique_columns[0]
-    dist_2 = unique_columns[2] - unique_columns[1]
+    dist_1 = unique_rows[1] - unique_rows[0]
+    dist_2 = unique_rows[2] - unique_rows[1]
 
     assert dist_1 == pytest.approx(FORCED_STEP_PX, abs=1.0), (
         f"Step 1 distance was {dist_1}, expected {FORCED_STEP_PX}"

@@ -1,7 +1,4 @@
-from pathlib import Path
-
 import numpy as np
-import pytest
 
 from hexastorm.interpolator.patterns.cross_scan import CrossScanPatternGen
 
@@ -53,7 +50,9 @@ def test_cross_scan_pattern_large_optical_correction(tmp_path):
     assert result["metadata"]["facetsinlane"] == 8  # 2 exposures * 4 facets
 
     # Verify that plotptrn executes cleanly with large corrections
-    plot_canvas = gen.interpolator.plotptrn(result, filename="test_large_correction_plot")
+    plot_canvas = gen.interpolator.plotptrn(
+        result, filename="test_large_correction_plot"
+    )
     assert plot_canvas is not None
     assert plot_canvas.ndim == 3  # RGB image canvas
     assert np.any(plot_canvas > 0)  # Contains non-black rendered pixels

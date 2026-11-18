@@ -1,3 +1,11 @@
+"""Reference 2D grid-sampling geometry model for the bitmap ``Interpolator``.
+
+Note:
+    ``_jit_calculate_grid`` and ``ScannerModel`` belong to the legacy bitmap reference
+    pipeline (used by ``interpolator.Interpolator`` and ``plotptrn()``). Direct
+    vector-to-timestamp slicing and laserhead coordinate transforms live in ``vector.py``.
+"""
+
 import logging
 import math
 import sys

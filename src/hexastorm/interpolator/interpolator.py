@@ -19,15 +19,15 @@ logger = logging.getLogger(__name__)
 
 class Interpolator:
     """
-    Orchestrates the conversion of digital patterns (SVG/PNG) into binary laser control data.
+    Reference / Raster Pipeline for converting digital patterns (SVG/PNG) into laser control data.
 
-    This class acts as the bridge between the physical model of the scanner and the
-    digital image data. It performs 'Inverse Mapping' interpolation:
-    1.  Calculates the physical (X, Y) coordinates of the laser for every clock tick
-        using the physics model in `geometry.py`.
-    2.  Maps these non-linear, curved scan coordinates onto the rectilinear grid
-        of the input image.
-    3.  Samples the image at these points to determine if the laser should be ON or OFF.
+    Note:
+        This class implements the frozen bitmap-based inverse-mapping pipeline
+        (rasterizing SVGs via `resvg-py` onto a 2D pixel grid and sampling via
+        `geometry._jit_calculate_grid`). It is maintained as the **golden reference
+        implementation** for verifying the direct vector-to-timestamp pipeline
+        (`vector.VectorInterpolator`) and as a fallback for pure raster images.
+        New vector/KiCad features and laserhead coordinate transforms belong in `vector.py`.
     """
 
     def __init__(self, correction: bool = False, exposures: int = 1):

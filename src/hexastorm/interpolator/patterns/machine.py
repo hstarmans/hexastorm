@@ -11,7 +11,7 @@ from matplotlib.patches import Rectangle
 
 from ...config import PlatformConfig
 from ..interpolator import Interpolator
-
+from ..vector import VectorInterpolator
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,7 @@ class LaserCalibrationGen:
         pix_per_mm: int = 200,
         correction: bool = False,
         exposures: int = 1,
+        use_vector: bool = False,
     ):
         """
         Initialize the generator.
@@ -39,10 +40,19 @@ class LaserCalibrationGen:
         Args:
             pix_per_mm (int): Resolution of the internal rasterization for calculation
                               (does not affect vector output precision). Defaults to 200.
+            correction (bool): Apply calibration corrections if True.
+            exposures (int): Number of exposures per scanline.
+            use_vector (bool): If True, slice SVGs directly with ``VectorInterpolator``;
+                               otherwise use the reference bitmap ``Interpolator``.
         """
         config = PlatformConfig(test=False)
 
-        self.interpolator = Interpolator(correction=correction, exposures=exposures)
+        if use_vector:
+            self.interpolator = VectorInterpolator(
+                correction=correction, exposures=exposures
+            )
+        else:
+            self.interpolator = Interpolator(correction=correction, exposures=exposures)
         # Determine output directory
         self.script_directory = config.paths["svgs"]
         self.camera = False
@@ -66,7 +76,9 @@ class LaserCalibrationGen:
             f"Laser Spot Compensation: {self.laser_spot_mm * 1000:.1f} microns ({self.laser_spot_mm} mm)"
         )
 
-    def set_correction(self, correction: bool = None, exposures: int = None):
+    def set_correction(
+        self, correction: bool | None = None, exposures: int | None = None
+    ):
         """Enables or disables correction mode."""
         self.interpolator.set_optical_params(correction=correction, exposures=exposures)
 
@@ -310,7 +322,7 @@ class LaserCalibrationGen:
         """
         ax.set_xlabel(x_label)
         ax.set_ylabel(y_label)
-        for key, spine in ax.spines.items():
+        for spine in ax.spines.values():
             spine.set_visible(False)
 
     def generate_combined_test(self):
@@ -422,7 +434,7 @@ class LaserCalibrationGen:
         ax.set_xlim(0, box_size)
         ax.set_ylim(0, box_size)
 
-        for key, spine in ax.spines.items():
+        for spine in ax.spines.values():
             spine.set_visible(False)
 
         ax.grid(False)
@@ -433,7 +445,7 @@ class LaserCalibrationGen:
         self.resize_to_mm_scale(fig, ax)
 
         # 2. Calculate where the Top-Left of the paper is in your Data Coordinates
-        tl_x, tl_y = self.get_top_left_in_data_coords(fig, ax)
+        tl_x, _tl_y = self.get_top_left_in_data_coords(fig, ax)
 
         # Vernier Aligntment Mark for Stage
         self.add_vernier_alignment(

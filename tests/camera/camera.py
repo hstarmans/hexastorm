@@ -2,11 +2,11 @@ import os
 
 # Qt fonts cannot be found on the pi, use system fonts
 os.environ["QT_QPA_FONTDIR"] = "/usr/share/fonts"
-import cv2 as cv
-import subprocess
 import logging
+import subprocess
 import time
 
+import cv2 as cv
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +66,7 @@ class Cam:
         # 1. Disable Auto Exposure
         subprocess.run(
             ["v4l2-ctl", "-d", "/dev/v4l-subdev0", "-c", "exposure_auto=1"],
+            check=False,
             capture_output=True,
         )
 
@@ -82,6 +83,7 @@ class Cam:
                     "-c",
                     f"vertical_blanking={vblank_value}",
                 ],
+                check=False,
                 capture_output=True,
             )
             logger.debug(

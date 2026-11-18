@@ -1,6 +1,5 @@
 import logging
 from pathlib import Path
-from typing import Any
 
 import fire
 import numpy as np
@@ -33,9 +32,7 @@ class CrossScanPatternGen:
         self, correction: bool | dict | None = None, exposures: int | None = None
     ):
         """Enables or updates optical correction parameters."""
-        self.interpolator.set_optical_params(
-            correction=correction, exposures=exposures
-        )
+        self.interpolator.set_optical_params(correction=correction, exposures=exposures)
 
     def generate_pattern(
         self,

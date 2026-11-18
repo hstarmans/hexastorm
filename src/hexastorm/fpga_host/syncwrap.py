@@ -30,15 +30,16 @@ def _loop_is_running():
                 return True
         except (RuntimeError, AttributeError) as err:
             logger.debug("Error checking current_task: %s", err)
-    # CPython: get_running_loop()
+    # CPython (3.7+): get_running_loop()
     get_running_loop = getattr(asyncio, "get_running_loop", None)
     if callable(get_running_loop):
         try:
             get_running_loop()
-            return True
         except (RuntimeError, AttributeError) as err:
             logger.debug("Error checking get_running_loop: %s", err)
-    # CPython older: get_event_loop().is_running()
+            return False
+        return True
+    # Older CPython/MicroPython fallback: get_event_loop().is_running()
     get_event_loop = getattr(asyncio, "get_event_loop", None)
     if callable(get_event_loop):
         try:
@@ -78,7 +79,7 @@ def _run_sync(coro):
         return loop.run_until_complete(coro)
 
     except RuntimeError as e:
-        logger.exception("Error in _run_sync: %s", e)
+        logger.exception("Error in _run_sync")
         # If get_event_loop() raises a RuntimeError (e.g., "no current event loop"),
         # or if run_until_complete fails in a nested context, re-raise it.
         # Ensure coroutine closure to prevent 'never awaited' warning.

@@ -8,6 +8,7 @@ import math
 import os
 import unittest
 from functools import wraps
+from typing import ClassVar
 
 from amaranth.sim import Simulator
 
@@ -46,7 +47,7 @@ class LunaGatewareTestCase(unittest.TestCase):
     domain = "sync"
 
     FRAGMENT_UNDER_TEST = None
-    FRAGMENT_ARGUMENTS = {}
+    FRAGMENT_ARGUMENTS: ClassVar[dict] = {}
 
     FAST_CLOCK_FREQUENCY = None
     SYNC_CLOCK_FREQUENCY = 120e6
@@ -79,7 +80,7 @@ class LunaGatewareTestCase(unittest.TestCase):
         return ()
 
     def simulate(self, *, vcd_suffix=None):
-        if os.getenv("GENERATE_VCDS", default=False):
+        if os.getenv("GENERATE_VCDS"):
             vcd_name = self.get_vcd_name()
             if vcd_suffix:
                 vcd_name = f"{vcd_name}_{vcd_suffix}"

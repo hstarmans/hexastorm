@@ -1,25 +1,26 @@
-import time
-from pathlib import Path
 import logging
 import sys
+import time
+from pathlib import Path
 
-import fire
 import cv2 as cv
-from tqdm import tqdm
+import fire
 import numpy as np
+from tqdm import tqdm
 
-from . import camera
-from hexastorm.log_setup import configure_logging
-from hexastorm.interpolator.patterns import camera as cam_patterns
 from hexastorm.calibration import (
+    LaserStackSimulator,
+    append_history_record,
     calibration,
     get_dots,
-    append_history_record,
     update_statistical_history,
-    LaserStackSimulator,
 )
-from hexastorm.esp32_controller import ESP32Controller, ESP32RemoteError
 from hexastorm.config import PlatformConfig
+from hexastorm.esp32_controller import ESP32Controller, ESP32RemoteError
+from hexastorm.interpolator.patterns import camera as cam_patterns
+from hexastorm.log_setup import configure_logging
+
+from . import camera
 
 logger = logging.getLogger(__name__)
 
@@ -65,11 +66,11 @@ class StaticTests:
         """
 
         def enable_laser():
-            global host
+            global host  # noqa: PLW0602
             host.enable_comp(laser1=True)
 
         def disable_laser():
-            global host
+            global host  # noqa: PLW0602
             host.enable_comp(laser1=False)
 
         self.esp.exec_func(enable_laser)
@@ -86,7 +87,7 @@ class StaticTests:
         """
 
         def start_preview():
-            global host
+            global host  # noqa: PLW0602
             host.enable_comp(laser0=True, polygon=True)
 
         self.esp.exec_func(start_preview)
@@ -101,7 +102,7 @@ class StaticTests:
         self.take_picture(save=False)
 
         def stop_preview():
-            global host
+            global host  # noqa: PLW0602
             host.enable_comp(laser1=False, polygon=False)
 
         self.esp.exec_func(stop_preview)
@@ -113,7 +114,7 @@ class StaticTests:
         """
 
         def start_spot():
-            global host
+            global host  # noqa: PLW0602
             host.enable_comp(laser1=True, polygon=False)
 
         self.esp.exec_func(start_spot)
@@ -127,7 +128,7 @@ class StaticTests:
         self.take_picture()
 
         def stop_spot():
-            global host
+            global host  # noqa: PLW0602
             host.enable_comp(laser1=False, polygon=False)
 
         self.esp.exec_func(stop_spot)
@@ -184,8 +185,9 @@ class DynamicTests(StaticTests):
         super().__init__()
 
         def get_facet_zero_mapping():
-            global host, spoll, sys
+            global host, spoll, sys  # noqa: PLW0602
             import sys
+
             import uselect
 
             host.synchronize(True)
@@ -225,7 +227,7 @@ class DynamicTests(StaticTests):
 
         def remote_pattern(line, fct):
             # Imports required inside the function for ESP32 execution
-            global host, spoll, sys
+            global host, spoll, sys  # noqa: PLW0602
 
             chunk = host.cfg.hdl_cfg.lines_chunk
             true_facet = host.remap(fct)
@@ -255,10 +257,9 @@ class DynamicTests(StaticTests):
         start_time = time.time()
         ready = False
         while (time.time() - start_time) < 2.0:  # 3s timeout
-            if self.esp.serial.in_waiting:
-                if self.esp.serial.read(1) == b"R":
-                    ready = True
-                    break
+            if self.esp.serial.in_waiting and self.esp.serial.read(1) == b"R":
+                ready = True
+                break
             time.sleep(0.01)
 
         result_img = None
@@ -268,7 +269,7 @@ class DynamicTests(StaticTests):
             # Pass the save flag down to take_picture
             result_img = self.take_picture(count=1, name=name, save=save_image)
         else:
-            raise Exception("Timeout: ESP32 did not respond with 'R'")
+            raise RuntimeError("Timeout: ESP32 did not respond with 'R'")
 
         self.esp.serial.write(b"Q")
 
@@ -314,7 +315,6 @@ class DynamicTests(StaticTests):
                     line=line,
                     fct=facet,
                     preview=False,
-                    takepicture=True,
                     save_image=False,
                     name=None,
                 )
@@ -701,7 +701,7 @@ class DynamicTests(StaticTests):
         num_facets = self.cfg.laser_timing["facets"]
 
         def get_remote_means():
-            global host
+            global host  # noqa: PLW0602
 
             shift = host.remap(0)
             # remap means to stored facet

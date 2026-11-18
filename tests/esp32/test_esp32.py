@@ -1,6 +1,6 @@
 import logging
-import unittest
 import time
+import unittest
 
 from hexastorm.esp32_controller import ESP32Controller
 
@@ -18,7 +18,7 @@ class Tests(unittest.TestCase):
         logger.info("Running Invalid Command Test...")
         
         def remote_fail():
-            import host  # noqa: F401 (silence linter warning if host isn't local)
+            import host
             host.superfunctie()
 
         with self.assertRaises(RuntimeError) as cm:
@@ -45,7 +45,9 @@ class Tests(unittest.TestCase):
         logger.info("Running Blink Test...")
         
         def remote_blink(dur):
-            import machine, time
+            import time
+
+            import machine
             led = machine.Pin(8, machine.Pin.OUT)
             led.off()
             time.sleep(dur) 
@@ -95,7 +97,10 @@ class Tests(unittest.TestCase):
         logger.info("Running Soft Interrupt (uselect) Test...")
         
         def remote_poll_loop():
-            import sys, uselect, time
+            import sys
+            import time
+
+            import uselect
             
             # 1. Register Standard Input (Serial) for polling
             spoll = uselect.poll()

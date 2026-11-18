@@ -11,6 +11,7 @@ import logging
 import sys
 from collections import OrderedDict
 from math import ceil, radians
+from typing import ClassVar
 
 if sys.implementation.name == "micropython":
     from ulab import numpy as np
@@ -46,7 +47,7 @@ class Spi:
 
     command_bytes = 1
     word_bytes = 8
-    move_instruction: dict[str, int] = {"instruction": 1, "ticks": 7}
+    move_instruction: ClassVar[dict[str, int]] = {"instruction": 1, "ticks": 7}
 
     class Commands:
         """SPI protocol command. Each command is followed by a word."""

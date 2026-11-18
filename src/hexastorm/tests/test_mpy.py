@@ -130,10 +130,10 @@ class LaserheadTest(Base):
         laz_tim = host.cfg.laser_timing
         mt_cfg = host.cfg.motor_cfg
         numb_lines = round(
-            dist * mt_cfg["steps_mm"][mt_cfg["orth2lsrline"]] * steps_line
+            dist * mt_cfg["steps_mm"][mt_cfg["orth2lsrline"]] / steps_line
         )
         host.enable_comp(synchronize=True)
-        start_pos = (host.position).copy()
+        start_pos = np.array(host.mpos)
         host.enable_steppers = True
         logger.info(f"Wait for synchronization, {time_out} seconds.")
         sleep(time_out)
@@ -147,7 +147,7 @@ class LaserheadTest(Base):
             indx = indx.index(mt_cfg["orth2lsrline"])
             # assume y axis is 1
             start_pos[indx] += dist if direction else -dist
-            assert_array_almost_equal((host.position), start_pos, decimal=1)
+            assert_array_almost_equal(np.array(host.mpos), start_pos, decimal=1)
         host.write_line([])
         logger.info(f"Wait for stopline to execute, {time_out} seconds")
         sleep(time_out)
@@ -218,22 +218,21 @@ class MoveTest(Base):
 
     def test_multiple_move(self, decimals=1):
         """Jog ±10 mm twice and verify final position is unchanged."""
-        motors = self.host.cfg.hdl_cfg.motors
         delta = np.array([10, 10, 0])
-        start_pos = (self.host.position).copy()
+        start_pos = np.array(self.host.mpos)
         for direction in [-1, 1]:
             self.assertFalse((self.host.fpga_state)["error"])
             self.host.enable_steppers = True
-            start_move_pos = (self.host.position).copy()
+            start_move_pos = np.array(self.host.mpos)
             disp = delta * direction
-            self.host.gotopoint(position=disp, speed=[1] * motors, absolute=False)
+            self.host.gotopoint(position=disp, speed=1.0, absolute=False)
             sleep(3)
             assert_array_almost_equal(
-                self.host.position,
+                np.array(self.host.mpos),
                 start_move_pos + disp,
                 decimal=decimals,
             )
-        assert_array_almost_equal(self.host.position, start_pos, decimal=decimals)
+        assert_array_almost_equal(np.array(self.host.mpos), start_pos, decimal=decimals)
         self.host.enable_steppers = False
 
 

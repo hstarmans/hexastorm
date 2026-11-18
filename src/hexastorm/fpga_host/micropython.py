@@ -6,7 +6,6 @@ from random import randint
 
 from machine import I2C, PWM, SPI, Pin
 from tmc.stepperdriver import TMC_2209
-from tmc.uart import ConnectionFail
 from ulab import numpy as np
 
 from ..config import Spi
@@ -137,7 +136,7 @@ class ESP32Host(BaseHost):
                 )
                 self.steppers[ax_name] = tmc
                 logger.info(f"Initialized TMC2209 for {ax_name} (ID {mtr_id}).")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning(
                     f"Failed to initialize TMC2209 for {ax_name} (ID {mtr_id}): {e}"
                 )

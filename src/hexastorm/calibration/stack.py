@@ -1,11 +1,11 @@
-import logging
 import json
+import logging
 from pathlib import Path
 
 import cv2 as cv
 import numpy as np
 
-from ..config import PlatformConfig, Camera
+from ..config import Camera, PlatformConfig
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ class LaserStackSimulator:
             last_record = history[-1]
             facets = last_record["facets"]
 
-        angles = [facets[facet]["rotation_angle"] for facet in facets.keys()]
+        angles = [facets[facet]["rotation_angle"] for facet in facets]
 
         self.expected_total_steps = expected_total_steps
         self.rotate = rotate

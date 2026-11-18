@@ -1,9 +1,9 @@
 import itertools
 
 from amaranth import Record
-from amaranth.build import Pins, PinsN, Resource, ResourceError, Subsignal, Attrs
+from amaranth.build import Attrs, Pins, PinsN, Resource, ResourceError, Subsignal
 
-__all__ = ["StepperResource", "LaserscannerResource", "BLDCResource"]
+__all__ = ["LaserscannerResource", "StepperResource"]
 
 
 def get_all_resources(platform, name, **kwargs):
@@ -61,61 +61,6 @@ def StepperResource(*args, step_pin, dir_pin, limit_pin, number=None, conn=None)
     ]
 
     return Resource.family(*args, number, default_name="stepper", ios=ios)
-
-
-class BLDCRecord(Record):
-    """Record representation of a BLDC motor resource."""
-
-    def __init__(self):
-        layout = [
-            ("uL", 1),
-            ("uH", 1),
-            ("vL", 1),
-            ("vH", 1),
-            ("wL", 1),
-            ("wH", 1),
-            ("sensor0", 1),
-            ("sensor1", 1),
-            ("sensor2", 1),
-        ]
-        super().__init__(layout)
-
-
-def BLDCResource(
-    *args,
-    uL,
-    uH,
-    vL,
-    vH,
-    wL,
-    wH,
-    sensor0,
-    sensor1,
-    sensor2,
-    number=None,
-    conn=None,
-):
-    """
-    BLDC motor resource.
-
-    I/O signals:
-        uL/uH, vL/vH, wL/wH -- 3-phase low/high drive signals
-        sensor* -- Hall sensor inputs
-    """
-    ios = [
-        Subsignal("uL", Pins(uL, dir="o", conn=conn, assert_width=1)),
-        Subsignal("uH", Pins(uH, dir="o", conn=conn, assert_width=1)),
-        Subsignal("vL", Pins(vL, dir="o", conn=conn, assert_width=1)),
-        Subsignal("vH", Pins(vH, dir="o", conn=conn, assert_width=1)),
-        Subsignal("wL", Pins(wL, dir="o", conn=conn, assert_width=1)),
-        Subsignal("wH", Pins(wH, dir="o", conn=conn, assert_width=1)),
-        Subsignal("sensor0", Pins(sensor0, dir="i", conn=conn, assert_width=1)),
-        Subsignal("sensor1", Pins(sensor1, dir="i", conn=conn, assert_width=1)),
-        Subsignal("sensor2", Pins(sensor2, dir="i", conn=conn, assert_width=1)),
-    ]
-    ios.append(Attrs(IO_STANDARD="SB_LVCMOS"))
-
-    return Resource.family(*args, number, default_name="bldc", ios=ios)
 
 
 class LaserscannerRecord(Record):

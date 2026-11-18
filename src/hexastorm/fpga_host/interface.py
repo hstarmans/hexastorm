@@ -651,7 +651,7 @@ class BaseHost:
         position     --
             • If *absolute* is True,  absolute position (mm) for every axis.
             • If *absolute* is False, relative displacement (mm) for every axis.
-        speed        -- list with speed in mm/s, if None default speeds used 10 mm/s
+        speed        -- scalar feedrate in mm/s (float), if None default speed 10.0 mm/s is used
         absolute     -- Position interpreted as absolute (True) or
                         a displacement (False).
         check_sensors -- If True, aborts motion if switch threshold is passed (home switch hit).

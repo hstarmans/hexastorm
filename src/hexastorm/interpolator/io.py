@@ -2,7 +2,7 @@ import logging
 import struct
 import zlib
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 import numpy as np
 
@@ -40,6 +40,73 @@ def events_to_bits_np(
     return bits
 
 
+class EventStreamWriter:
+    """Streams variable-length (tick, intensity) scanline events into a zlib-compressed SPI .pat/.bin file."""
+
+    IO_BUFFER_SIZE = 1024 * 1024
+
+    def __init__(
+        self,
+        filepath: str | Path,
+        lanewidth: float,
+        facets_in_lane: int,
+        lanes: int,
+        steps_per_line: float,
+        bits_in_scanline: int,
+        compression_level: int = 9,
+    ):
+        self.out_path = Path(filepath)
+        self.lanewidth = float(lanewidth)
+        self.facets_in_lane = int(facets_in_lane)
+        self.lanes = int(lanes)
+        self.steps_per_line = float(steps_per_line)
+        self.bits_in_scanline = int(bits_in_scanline)
+        self.compression_level = int(compression_level)
+
+        self._scanline_cmd = Spi.Instructions.scanline
+        self._spi_write_cmd = Spi.Commands.write.to_bytes(1, "big")
+        self._compressor = zlib.compressobj(level=self.compression_level)
+        self._write_buffer = bytearray()
+        self._fh = None
+
+    def __enter__(self) -> Self:
+        self.out_path.parent.mkdir(parents=True, exist_ok=True)
+        self._fh = open(self.out_path, "wb")
+        header = struct.pack("<fII", self.lanewidth, self.facets_in_lane, self.lanes)
+        self._fh.write(self._compressor.compress(header))
+        return self
+
+    def write_scanline(self, events: list[tuple[int, int]], direction: int) -> None:
+        """Pack one scanline's events into SPI write frames and buffer compressed output."""
+        full_payload = ulabext.pack_scanline_events(
+            events=events,
+            steps_line=self.steps_per_line,
+            direction=direction,
+            scanline_length=self.bits_in_scanline,
+            scanline_cmd=self._scanline_cmd,
+        )
+        for i in range(0, len(full_payload), 8):
+            chunk = full_payload[i : i + 8]
+            self._write_buffer.extend(self._spi_write_cmd)
+            self._write_buffer.extend(chunk[::-1])
+
+        if len(self._write_buffer) >= self.IO_BUFFER_SIZE:
+            self._fh.write(self._compressor.compress(self._write_buffer))
+            self._write_buffer = bytearray()
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        try:
+            if self._fh is not None and exc_type is None:
+                if self._write_buffer:
+                    self._fh.write(self._compressor.compress(self._write_buffer))
+                    self._write_buffer = bytearray()
+                self._fh.write(self._compressor.flush())
+        finally:
+            if self._fh is not None:
+                self._fh.close()
+                self._fh = None
+
+
 def write_binary_file(
     pixeldata: np.ndarray,
     params: Any,  # Can be dict or Numba typed dict
@@ -66,7 +133,6 @@ def write_binary_file(
         compression_level: Zlib compression level (0-9).
     """
     out_path = Path(filepath)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
 
     # 1. Setup Parameters
     lanewidth = float(params["lanewidth"])
@@ -90,19 +156,17 @@ def write_binary_file(
     except ValueError as e:
         raise ValueError(f"Data shape mismatch: {e}")
 
-    scanline_cmd = Spi.Instructions.scanline
-    spi_write_cmd = Spi.Commands.write.to_bytes(1, "big")
-
     # 3. Encode & Write Loop
-    compressor = zlib.compressobj(level=compression_level)
-    IO_BUFFER_SIZE = 1024 * 1024
-    write_buffer = bytearray()
-
     logger.info(f"Writing event-driven binary file to {out_path}...")
-    with open(out_path, "wb") as f:
-        # File Header
-        f.write(compressor.compress(struct.pack("<fII", lanewidth, facets, lanes)))
-
+    with EventStreamWriter(
+        filepath=out_path,
+        lanewidth=lanewidth,
+        facets_in_lane=facets,
+        lanes=lanes,
+        steps_per_line=stepsperline,
+        bits_in_scanline=bits_in_scanline,
+        compression_level=compression_level,
+    ) as writer:
         for lane_idx in range(lanes):
             direction = 1 if lane_idx % 2 == 0 else 0
             lane_data = grid[lane_idx]
@@ -114,27 +178,7 @@ def write_binary_file(
                 ]
                 line_bits_hw = line_bits_img[::-1]
                 events = bits_to_events_np(line_bits_hw, laser_ticks)
-                full_payload = ulabext.pack_scanline_events(
-                    events=events,
-                    steps_line=stepsperline,
-                    direction=direction,
-                    scanline_length=bits_in_scanline,
-                    scanline_cmd=scanline_cmd,
-                )
-
-                # SPI Chunking: 1 Write Command Byte + 8 reversed Payload Bytes
-                for i in range(0, len(full_payload), 8):
-                    chunk = full_payload[i : i + 8]
-                    write_buffer.extend(spi_write_cmd)
-                    write_buffer.extend(chunk[::-1])
-
-                if len(write_buffer) >= IO_BUFFER_SIZE:
-                    f.write(compressor.compress(write_buffer))
-                    write_buffer = bytearray()
-
-        if write_buffer:
-            f.write(compressor.compress(write_buffer))
-        f.write(compressor.flush())
+                writer.write_scanline(events, direction)
 
 
 def read_binary_file(

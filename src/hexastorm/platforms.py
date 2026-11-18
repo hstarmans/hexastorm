@@ -11,12 +11,7 @@ from amaranth_boards.resources import LEDResources
 from amaranth_boards.test.blinky import Blinky
 
 from .config import PlatformConfig
-from .resources import (
-    # BLDCRecord,
-    # BLDCResource,
-    LaserscannerResource,
-    StepperResource,
-)
+from .resources import LaserscannerResource, StepperResource
 
 logger = logging.getLogger(__name__)
 
@@ -63,19 +58,6 @@ class Firestarter(LatticeICE40Platform):
             Subsignal("photodiode", Pins("21", dir="i")),
             Attrs(IO_STANDARD="SB_LVCMOS"),
         ),
-        # # BLDC driver
-        # BLDCResource(
-        #     number=0,
-        #     uL="2",
-        #     uH="4",
-        #     vL="3",
-        #     vH="6",
-        #     wL="9",
-        #     wH="10",
-        #     sensor0="45",
-        #     sensor1="47",
-        #     sensor2="48",
-        # ),
         # x-stepper
         StepperResource(
             number=0,
