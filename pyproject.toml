@@ -14,27 +14,42 @@ readme = "README.md"
 requires-python = ">=3.12, <3.13"
 dependencies = [
     "fire>=0.7.1",
-    "numpy>=2.5.4; sys_platform != 'darwin' or platform_machine != 'x86_64'",
-    "numpy>=2.2.0,<2.3; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+    "numpy>=2.5.5",
     "pillow>=13.0.0",
-    "tqdm>=4.70.1",
-    "ruff>=0.17.5",
-    "opencv-python>=5.0.0.93; sys_platform != 'darwin' or platform_machine != 'x86_64'",
-    "opencv-python>=4.10.0,<4.12; sys_platform == 'darwin' and platform_machine == 'x86_64'",
     "amaranth-boards",
     "resvg-py",
-    "nbqa>=1.10.0",
-    "pytest>=9.2.0",
     "yowasp-nextpnr-ice40>=0.11.1.0.post826",
     "yowasp-yosys>=0.71.0.0.post1285",
-    "ipykernel>=7.4.0",
     "matplotlib>=3.11.2",
     "pyserial>=3.5",
+]
+
+[project.optional-dependencies]
+camera = [
+    "opencv-python>=5.1.0.95; sys_platform != 'darwin' or platform_machine != 'x86_64'",
+    "opencv-python>=4.11.0,<4.12; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+    "tqdm>=4.70.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "ruff>=0.17.5",
 ]
 
 
 [tool.ruff]
 line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "PLE", "PLW"]
+ignore = ["E501", "B905"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/calibration/*.py" = ["E402"]
+"tests/camera/test_optical.py" = ["PLW0602", "PLW0603"]
+"tests/esp32/test_esp32.py" = ["PLW0602", "PLW0603"]
+"src/hexastorm/fpga_host/micropython.py" = ["B904"]
 
 [tool.ruff.format]
 quote-style = "double"

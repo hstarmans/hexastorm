@@ -1,8 +1,8 @@
 import logging
 from typing import Any
 
-import cv2
 import numpy as np
+from PIL import Image
 
 from hexastorm.config import PlatformConfig
 
@@ -14,25 +14,49 @@ logger = logging.getLogger(__name__)
 VALID_VIEWS = ("laserhead", "substrate", "machine")
 
 
+def _ellipse_kernel(kernel_size: int) -> np.ndarray:
+    """Return a boolean elliptical structuring element of shape ``(k, k)``."""
+    if kernel_size <= 1:
+        return np.ones((1, 1), dtype=bool)
+    cy = cx = kernel_size // 2
+    ry = rx = kernel_size // 2
+    yy, xx = np.ogrid[:kernel_size, :kernel_size]
+    return ((yy - cy) / ry) ** 2 + ((xx - cx) / rx) ** 2 <= 1.0
+
+
 def laser_compensation(
     layerarr: np.ndarray, params: Any, erode: bool = False
 ) -> np.ndarray:
-    """Apply elliptical laser-spot morphology (erosion or dilation) using OpenCV."""
+    """Apply elliptical laser-spot morphology (erosion or dilation) using pure NumPy."""
     pixel_radius = params["laser_radius_mm"] / params["samplegridsize"]
     kernel_size = round(pixel_radius * 2)
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
 
     logger.debug(
-        f"Fast OpenCV bias: {params['laser_radius_mm'] * 1000:.1f}um "
+        f"Laser spot bias: {params['laser_radius_mm'] * 1000:.1f}um "
         f"({pixel_radius:.2f} px radius, {kernel_size}px kernel)"
     )
 
-    if erode:
-        result = cv2.erode(layerarr, kernel, iterations=1)
-    else:
-        result = cv2.dilate(layerarr, kernel, iterations=1)
+    arr = np.asarray(layerarr, dtype=np.uint8)
+    if kernel_size <= 1:
+        return arr.copy()
 
-    return result.astype(np.uint8)
+    mask = _ellipse_kernel(kernel_size)
+    cy = cx = kernel_size // 2
+    height, width = arr.shape
+    pad_top, pad_bot = cy, kernel_size - 1 - cy
+    pad_left, pad_right = cx, kernel_size - 1 - cx
+    fill = 255 if erode else 0
+    padded = np.pad(
+        arr,
+        ((pad_top, pad_bot), (pad_left, pad_right)),
+        mode="constant",
+        constant_values=fill,
+    )
+    out = np.full_like(arr, fill)
+    op = np.minimum if erode else np.maximum
+    for dy, dx in np.argwhere(mask):
+        op(out, padded[dy : dy + height, dx : dx + width], out=out)
+    return out
 
 
 def _map_to_display_coords(
@@ -174,6 +198,6 @@ def plot_pattern(
     debug_folder = cfg.paths["debug"]
     debug_folder.mkdir(parents=True, exist_ok=True)
     save_path = debug_folder / f"{filename}.png"
-    cv2.imwrite(str(save_path), rgb_canvas)
+    Image.fromarray(rgb_canvas, mode="RGB").save(save_path)
     logger.info(f"Plot saved to {save_path}")
     return rgb_canvas

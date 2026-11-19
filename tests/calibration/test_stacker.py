@@ -7,9 +7,10 @@ import json
 import logging
 from unittest.mock import MagicMock, patch
 
-import cv2 as cv
 import numpy as np
 import pytest
+
+cv = pytest.importorskip("cv2")
 
 from hexastorm.calibration.stack import LaserStackSimulator
 

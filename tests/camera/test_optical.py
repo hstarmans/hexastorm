@@ -23,6 +23,7 @@ from hexastorm.log_setup import configure_logging
 from . import camera
 
 logger = logging.getLogger(__name__)
+TOLERANCE_UM = 30.0
 
 
 class StaticTests:
@@ -66,11 +67,11 @@ class StaticTests:
         """
 
         def enable_laser():
-            global host  # noqa: PLW0602
+            global host
             host.enable_comp(laser1=True)
 
         def disable_laser():
-            global host  # noqa: PLW0602
+            global host
             host.enable_comp(laser1=False)
 
         self.esp.exec_func(enable_laser)
@@ -87,7 +88,7 @@ class StaticTests:
         """
 
         def start_preview():
-            global host  # noqa: PLW0602
+            global host
             host.enable_comp(laser0=True, polygon=True)
 
         self.esp.exec_func(start_preview)
@@ -102,7 +103,7 @@ class StaticTests:
         self.take_picture(save=False)
 
         def stop_preview():
-            global host  # noqa: PLW0602
+            global host
             host.enable_comp(laser1=False, polygon=False)
 
         self.esp.exec_func(stop_preview)
@@ -114,7 +115,7 @@ class StaticTests:
         """
 
         def start_spot():
-            global host  # noqa: PLW0602
+            global host
             host.enable_comp(laser1=True, polygon=False)
 
         self.esp.exec_func(start_spot)
@@ -128,7 +129,7 @@ class StaticTests:
         self.take_picture()
 
         def stop_spot():
-            global host  # noqa: PLW0602
+            global host
             host.enable_comp(laser1=False, polygon=False)
 
         self.esp.exec_func(stop_spot)
@@ -151,10 +152,7 @@ class StaticTests:
                 continue
 
             # if image is already gray
-            if len(img.shape) == 2:
-                grey = img
-            else:
-                grey = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+            grey = img if len(img.shape) == 2 else cv.cvtColor(img, cv.COLOR_BGR2GRAY)
 
             last_img = grey
 
@@ -185,7 +183,7 @@ class DynamicTests(StaticTests):
         super().__init__()
 
         def get_facet_zero_mapping():
-            global host, spoll, sys  # noqa: PLW0602
+            global host, spoll, sys
             import sys
 
             import uselect
@@ -227,7 +225,7 @@ class DynamicTests(StaticTests):
 
         def remote_pattern(line, fct):
             # Imports required inside the function for ESP32 execution
-            global host, spoll, sys  # noqa: PLW0602
+            global host, spoll, sys
 
             chunk = host.cfg.hdl_cfg.lines_chunk
             true_facet = host.remap(fct)
@@ -340,10 +338,7 @@ class DynamicTests(StaticTests):
         visible_indices = [idx * step for idx, vis in enumerate(visibility_map) if vis]
 
         # Calculate percentage
-        if scan_len > 0:
-            percent = (len(visible_indices) * step / scan_len) * 100
-        else:
-            percent = 0
+        percent = (len(visible_indices) * step / scan_len) * 100 if scan_len > 0 else 0
 
         logger.info(
             f"Visible Pixels: {len(visible_indices) * step}/{scan_len} ({percent:.1f}%)"
@@ -500,7 +495,6 @@ class DynamicTests(StaticTests):
         )
 
         # 1. Assert the system meets the final engineering tolerance
-        TOLERANCE_UM = 30.0
         assert max_err_after <= TOLERANCE_UM, (
             f"Tolerance Failure: Worst facet 2D error ({max_err_after:.2f} um) exceeds {TOLERANCE_UM} um limit."
         )
@@ -636,7 +630,6 @@ class DynamicTests(StaticTests):
         logger.info("=" * 45)
 
         # 1. Assert the system meets the final engineering tolerance
-        TOLERANCE_UM = 30.0
         assert max_err_after <= TOLERANCE_UM, (
             f"Tolerance Failure: Worst facet 1D error ({max_err_after:.2f} um) "
             f"exceeds {TOLERANCE_UM} um limit."
@@ -701,7 +694,7 @@ class DynamicTests(StaticTests):
         num_facets = self.cfg.laser_timing["facets"]
 
         def get_remote_means():
-            global host  # noqa: PLW0602
+            global host
 
             shift = host.remap(0)
             # remap means to stored facet

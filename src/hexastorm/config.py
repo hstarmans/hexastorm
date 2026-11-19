@@ -78,6 +78,7 @@ class Spi:
         error = 2
         empty = 3
 
+    @staticmethod
     def words_move(hdl_cfg):
         """Returns the number of words required for a single move instruction."""
         bytes_move = (
@@ -86,6 +87,61 @@ class Spi:
         )
         bytes_move += bytes_move % Spi.word_bytes
         return ceil(bytes_move / Spi.word_bytes)
+
+
+class Camera:
+    """Central hardware and optical specs for supported cameras (OV2640, OV2311)."""
+
+    OV2640: ClassVar[dict] = {
+        "name": "OV2640",
+        "width": 1600,
+        "height": 1200,
+        "pixel_size_um": 2.2,
+        "svga_pixel_size_um": 4.4,
+        "i2c_addr": 0x30,
+        "pins": {
+            "d0": 12,
+            "d1": 14,
+            "d2": 21,
+            "d3": 13,
+            "d4": 11,
+            "d5": 10,
+            "d6": 9,
+            "d7": 8,
+            "pclk": 38,
+            "vsync": 41,
+            "href": 40,
+            "xclk": 39,
+            "xclk_freq": 10_000_000,
+            "pwdn": -1,
+            "reset": 42,
+        },
+        "settings": {
+            "exposure_ms": 200,
+            "frame_size": FrameSize.UXGA,
+            "pixel_format": PixelFormat.JPEG,
+            "jpeg_quality": 85,
+            "fb_count": 1,
+            "grab_mode": GrabMode.LATEST,
+        },
+    }
+
+    OV2311: ClassVar[dict] = {
+        "name": "OV2311",
+        "width": 1600,
+        "height": 1300,
+        "pixel_size_um": 3.0,
+        "line_time_ms": 0.0189,
+    }
+
+    DEFAULT_PIXEL_SIZE_UM = OV2311["pixel_size_um"]
+
+    @classmethod
+    def esp32_camera_cfg(cls) -> dict:
+        """Return a fresh flat camera config dict for ``PlatformConfig.esp32_cfg``."""
+        cfg = dict(cls.OV2640["pins"])
+        cfg["settings"] = dict(cls.OV2640["settings"])
+        return cfg
 
 
 # Pure-NumPy optical displacement kernel
@@ -112,15 +168,15 @@ def displacement_kernel(pixel, params):
     # For a regular polygon, the scan angle range is limited by the facet geometry.
     # interiorangle = 180-360/self.n
     # max_angle = 180-90-0.5*interiorangle
-    I_max = 180 / params["facets"]
+    i_max = 180 / params["facets"]
 
     # Calculate how many pixels fit on one facet face based on laser frequency and RPM.
     pixelsfacet = round(
         params["laser_hz"] / (params["rotationfrequency"] * params["facets"])
     )
     # Convert the current pixel number to an Angle of Incidence (I) in radians.
-    # The scan moves from -I_max to +I_max across the facet.
-    angle = np.radians(-2 * I_max * (pixel / pixelsfacet) + I_max)
+    # The scan moves from -i_max to +i_max across the facet.
+    angle = np.radians(-2 * i_max * (pixel / pixelsfacet) + i_max)
 
     # Pre-calculate trigonometric terms for the Snell's Law / Displacement derivation
     sin_angle = np.sin(angle)
@@ -222,7 +278,7 @@ class PlatformConfig:
             return {}
 
         history_path = self.paths["calibration"] / "calibration_history.json"
-        with open(history_path, "r") as f:
+        with open(history_path) as f:
             history = json.load(f)
 
         latest = history[-1]
@@ -236,7 +292,7 @@ class PlatformConfig:
             return {}
 
         history_file = self.paths["calibration"] / "scan_visibility.json"
-        with open(history_file, "r") as f:
+        with open(history_file) as f:
             history = json.load(f)
             last_record = history[-1]
             visible_pixels = last_record.get("visible_pixels", [])
@@ -393,6 +449,14 @@ class PlatformConfig:
         return params
 
     @property
+    def camera_cfg(self):
+        """Hardware and optical specifications for supported camera sensors."""
+        return {
+            "ov2640": Camera.OV2640,
+            "ov2311": Camera.OV2311,
+        }
+
+    @property
     def esp32_cfg(self):
         """Connections to esp32S3."""
         return {
@@ -412,37 +476,13 @@ class PlatformConfig:
                     },
                 },
             },
-            "camera": {
-                "d0": 12,
-                "d1": 14,
-                "d2": 21,
-                "d3": 13,
-                "d4": 11,
-                "d5": 10,
-                "d6": 9,
-                "d7": 8,
-                "pclk": 38,
-                "vsync": 41,
-                "href": 40,
-                "xclk": 39,
-                "xclk_freq": 10000000,
-                "pwdn": -1,
-                "reset": 42,
-                "settings": {
-                    "exposure_ms": 200,
-                    "frame_size": FrameSize.UXGA,
-                    "pixel_format": PixelFormat.JPEG,
-                    "jpeg_quality": 85,
-                    "fb_count": 1,
-                    "grab_mode": GrabMode.LATEST,
-                },
-            },
+            "camera": Camera.esp32_camera_cfg(),
             "i2c": {
                 "scl": 17,
                 "sda": 18,
                 "freq": int(1e5),
                 "digipot_addr": 0x28,
-                "cam_addr": 0x30,
+                "cam_addr": Camera.OV2640["i2c_addr"],
             },
             "spi": {
                 "sck": 6,
@@ -645,19 +685,3 @@ class PlatformConfig:
                 "photodiode_rearm_ticks": pd_rearm_ticks,
             }
         )
-
-
-def getmovedct(platform):
-    dct = Spi.move_instruction
-    for i in range(platform.motors):
-        for j in range(platform.poldegree):
-            dct.update({f"C{i}{j}": 8})
-
-
-class Camera:
-    """
-    OV2311 is a 2-Megapixel (1600 x 1300)
-    pixelsize is 3.0 μm x 3.0 μm
-    """
-
-    DEFAULT_PIXEL_SIZE_UM = 3.0

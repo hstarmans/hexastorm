@@ -130,7 +130,7 @@ class ESP32Controller:
                 except (ValueError, SyntaxError) as e:
                     raise RuntimeError(
                         f"Found markers, but data was corrupt.\nData: {data_str!r}\nError: {e}"
-                    )
+                    ) from e
             else:
                 # If markers aren't found, the function might have crashed
                 # or logs drowned out the output.

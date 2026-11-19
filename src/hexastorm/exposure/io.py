@@ -171,7 +171,7 @@ def write_binary_file(
 
         grid = pixeldata.reshape(lanes, facets, bytes_in_line)
     except ValueError as e:
-        raise ValueError(f"Data shape mismatch: {e}")
+        raise ValueError(f"Data shape mismatch: {e}") from e
 
     # 3. Encode & Write Loop
     logger.info(f"Writing event-driven binary file to {out_path}...")

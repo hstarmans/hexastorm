@@ -36,7 +36,7 @@ def append_history_record(filename, payload_dict, max_records=10000):
     history = []
     if history_file.exists():
         try:
-            with open(history_file, "r") as f:
+            with open(history_file) as f:
                 content = f.read()
                 if content:
                     history = json.loads(content)
@@ -527,8 +527,8 @@ def calibration(
     # 1. Process each image to find dots
     for i, path in enumerate(image_paths):
         logger.debug(f"Processing Facet {i}...")
-        path = path.resolve()
-        img = cv.imread(str(path))
+        resolved_path = path.resolve()
+        img = cv.imread(str(resolved_path))
 
         dots_facet, stat = get_dots(
             img,

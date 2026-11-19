@@ -233,19 +233,19 @@ def _parse_transform(transform_str: str | None) -> np.ndarray:
         return mat
     for fn, raw_args in _TRANSFORM_RE.findall(transform_str):
         args = [float(x) for x in _NUM_RE.findall(raw_args)]
-        fn = fn.lower()
+        fn_name = fn.lower()
         step = np.eye(3, dtype=np.float64)
-        if fn == "translate" and len(args) >= 1:
+        if fn_name == "translate" and len(args) >= 1:
             tx = args[0]
             ty = args[1] if len(args) >= 2 else 0.0
             step[0, 2] = tx
             step[1, 2] = ty
-        elif fn == "scale" and len(args) >= 1:
+        elif fn_name == "scale" and len(args) >= 1:
             sx = args[0]
             sy = args[1] if len(args) >= 2 else sx
             step[0, 0] = sx
             step[1, 1] = sy
-        elif fn == "rotate" and len(args) >= 1:
+        elif fn_name == "rotate" and len(args) >= 1:
             rad = math.radians(args[0])
             c, s = math.cos(rad), math.sin(rad)
             if len(args) >= 3:
@@ -256,11 +256,11 @@ def _parse_transform(transform_str: str | None) -> np.ndarray:
                 step = t1 @ r @ t2
             else:
                 step = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]], dtype=np.float64)
-        elif fn == "skewx" and len(args) >= 1:
+        elif fn_name == "skewx" and len(args) >= 1:
             step[0, 1] = math.tan(math.radians(args[0]))
-        elif fn == "skewy" and len(args) >= 1:
+        elif fn_name == "skewy" and len(args) >= 1:
             step[1, 0] = math.tan(math.radians(args[0]))
-        elif fn == "matrix" and len(args) >= 6:
+        elif fn_name == "matrix" and len(args) >= 6:
             a, b, c, d, e, f = args[:6]
             step = np.array([[a, c, e], [b, d, f], [0, 0, 1]], dtype=np.float64)
         mat = mat @ step

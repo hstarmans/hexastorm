@@ -39,7 +39,7 @@ class LaserStackSimulator:
         self.cfg = PlatformConfig(test=False)
 
         history_file = self.cfg.paths["calibration"] / "calibration_history.json"
-        with open(history_file, "r") as f:
+        with open(history_file) as f:
             history = json.load(f)
             last_record = history[-1]
             facets = last_record["facets"]

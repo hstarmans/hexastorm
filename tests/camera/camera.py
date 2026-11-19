@@ -8,14 +8,21 @@ import time
 
 import cv2 as cv
 
+from hexastorm.config import Camera
+
 logger = logging.getLogger(__name__)
 
 
 class Cam:
-    LINE_TIME_MS = 0.0189
+    LINE_TIME_MS = Camera.OV2311["line_time_ms"]
     MAX_EXPECTED_MS = 100.0
 
-    def __init__(self, device_index=0, width=1600, height=1300):
+    def __init__(
+        self,
+        device_index=0,
+        width=Camera.OV2311["width"],
+        height=Camera.OV2311["height"],
+    ):
 
         self.device_index = device_index
         self.width = width
@@ -143,7 +150,7 @@ class Cam:
                     break
         finally:
             cv.destroyWindow(window_name)
-            for i in range(10):
+            for _ in range(10):
                 cv.waitKey(1)
 
     def close(self):

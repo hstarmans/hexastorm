@@ -6,9 +6,10 @@ Run test:
 import logging
 from pathlib import Path
 
-import cv2 as cv
 import numpy as np
 import pytest
+
+cv = pytest.importorskip("cv2")
 
 from hexastorm.calibration.analyzer import calibration
 from hexastorm.config import Camera

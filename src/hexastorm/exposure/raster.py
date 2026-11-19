@@ -135,7 +135,7 @@ class RasterExposure:
 
     def laser_compensation(self, layerarr: np.ndarray, erode: bool) -> np.ndarray:
         """
-        Fast laser spot compensation using OpenCV.
+        Elliptical laser spot morphology compensation.
         """
         return plotter.laser_compensation(layerarr, self.params, erode=erode)
 
