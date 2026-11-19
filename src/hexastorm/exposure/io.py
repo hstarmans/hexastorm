@@ -40,6 +40,14 @@ def events_to_bits_np(
     return bits
 
 
+def tagged_bin_path(path: str | Path, params: Any) -> Path:
+    """Append exposure count and optical-correction tag to output filename stem."""
+    out = Path(path)
+    n_exp = int(params["exposures"])
+    cor_tag = "cor" if params["optical_correction"] else "nocor"
+    return out.with_name(f"{out.stem}_e{n_exp}_{cor_tag}{out.suffix}")
+
+
 class EventStreamWriter:
     """Streams variable-length (tick, intensity) scanline events into a zlib-compressed SPI .pat/.bin file."""
 
@@ -93,6 +101,14 @@ class EventStreamWriter:
         if len(self._write_buffer) >= self.IO_BUFFER_SIZE:
             self._fh.write(self._compressor.compress(self._write_buffer))
             self._write_buffer = bytearray()
+
+    def write_raw_spi(self, raw_spi: bytes | bytearray | memoryview) -> None:
+        """Compress and append pre-framed 9-byte SPI write packets directly."""
+        if self._write_buffer:
+            self._fh.write(self._compressor.compress(self._write_buffer))
+            self._write_buffer = bytearray()
+        if raw_spi:
+            self._fh.write(self._compressor.compress(raw_spi))
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         try:

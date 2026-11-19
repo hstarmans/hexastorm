@@ -3,13 +3,12 @@ from io import BytesIO
 from pathlib import Path
 from time import time
 
-import cv2
 import numpy as np
 from PIL import EpsImagePlugin, Image
 
 from hexastorm.config import PlatformConfig
 
-from . import geometry, io
+from . import geometry, io, plotter
 
 # Disable PIL Decompression Bomb Warning
 Image.MAX_IMAGE_PIXELS = None
@@ -17,16 +16,16 @@ Image.MAX_IMAGE_PIXELS = None
 logger = logging.getLogger(__name__)
 
 
-class Interpolator:
+class RasterExposure:
     """
-    Reference / Raster Pipeline for converting digital patterns (SVG/PNG) into laser control data.
+    Reference / Raster Pipeline for converting digital patterns (SVG/PNG/JPG/PS) into laser control data.
 
     Note:
         This class implements the frozen bitmap-based inverse-mapping pipeline
-        (rasterizing SVGs via `resvg-py` onto a 2D pixel grid and sampling via
-        `geometry._jit_calculate_grid`). It is maintained as the **golden reference
-        implementation** for verifying the direct vector-to-timestamp pipeline
-        (`vector.VectorInterpolator`) and as a fallback for pure raster images.
+        (rasterizing SVGs via `resvg-py` or loading bitmaps via PIL onto a 2D pixel
+        grid and sampling via `geometry._jit_calculate_grid`). It is maintained as the
+        **golden reference implementation** for verifying the direct vector-to-timestamp
+        pipeline (`vector.VectorExposure`) and as the fallback for raster images.
         New vector/KiCad features and laserhead coordinate transforms belong in `vector.py`.
     """
 
@@ -115,29 +114,7 @@ class Interpolator:
         """
         Fast laser spot compensation using OpenCV.
         """
-        # Calculate diameter (kernel size must be an integer)
-        pixel_radius = self.params["laser_radius_mm"] / self.params["samplegridsize"]
-        # Kernel size should be (2 * radius + 1) to ensure a center pixel
-        kernel_size = round(pixel_radius * 2)
-
-        # Create an elliptical kernel to simulate the circular laser spot
-        kernel = cv2.getStructuringElement(
-            cv2.MORPH_ELLIPSE, (kernel_size, kernel_size)
-        )
-
-        logger.debug(
-            f"Fast OpenCV bias: {self.params['laser_radius_mm'] * 1000:.1f}um "
-            f"({pixel_radius:.2f} px radius, {kernel_size}px kernel)"
-        )
-
-        if erode:
-            # cv2.erode expects uint8.
-            # It handles binary 0/1 fine, but 0/255 is more standard for CV2.
-            result = cv2.erode(layerarr, kernel, iterations=1)
-        else:
-            result = cv2.dilate(layerarr, kernel, iterations=1)
-
-        return result.astype(np.uint8)
+        return plotter.laser_compensation(layerarr, self.params, erode=erode)
 
     def patternfile(
         self,
@@ -162,16 +139,24 @@ class Interpolator:
         """
         ctime = time()
         file_path = Path(url)
-        if not file_path.is_absolute():
-            file_path = self.cfg.paths["svgs"] / file_path
+        if not file_path.is_absolute() and not file_path.exists():
+            svg_candidate = self.cfg.paths["svgs"] / file_path
+            img_candidate = self.cfg.paths["images"] / file_path
+            if svg_candidate.exists():
+                file_path = svg_candidate
+            elif img_candidate.exists():
+                file_path = img_candidate
+            else:
+                file_path = svg_candidate
 
         # 1. Load Image
-        if file_path.suffix == ".svg":
+        suffix = file_path.suffix.lower()
+        if suffix == ".svg":
             pil = self.svgtopil(file_path)
             if test:
                 self.debug_folder.mkdir(parents=True, exist_ok=True)
                 pil.save(self.debug_folder / "read_debug.png")
-        elif file_path.suffix == ".ps":
+        elif suffix == ".ps":
             pil = self.pstopil(file_path)
         else:
             pil = self.imgtopil(file_path, pixelsize)
@@ -245,7 +230,11 @@ class Interpolator:
         return ptrn
 
     def img_to_bin(
-        self, img_name: Path, bin_name: Path | None = None, camera: bool = False
+        self,
+        img_name: str | Path,
+        bin_name: str | Path | None = None,
+        camera: bool = False,
+        **kwargs,
     ) -> float:
         """Convenience method to convert IMG directly to BIN and return job duration in minutes."""
         img_name = Path(img_name)
@@ -254,7 +243,7 @@ class Interpolator:
             bin_name = img_name.with_suffix(".pat")
 
         # Generate the packed bits
-        ptrn = self.patternfile(img_name)
+        ptrn = self.patternfile(img_name, **kwargs)
 
         # Write to disk
         self.writebin(ptrn, bin_name)
@@ -306,9 +295,7 @@ class Interpolator:
 
     def _tagged_bin_path(self, path: Path) -> Path:
         """Appends exposure count and optical-correction tag to the output stem."""
-        n_exp = int(self.params["exposures"])
-        cor_tag = "cor" if self.params["optical_correction"] else "nocor"
-        return path.with_name(f"{path.stem}_e{n_exp}_{cor_tag}{path.suffix}")
+        return io.tagged_bin_path(path, self.params)
 
     def writebin(self, pixeldata: np.ndarray, filename: str | Path = "test.bin"):
         """Wrapper for io.write_binary_file.
@@ -361,191 +348,13 @@ class Interpolator:
         ptrn_data: np.ndarray | dict,
         filename: str = "plot",
         color_lanes: bool = True,
-    ):
-        """
-        Visualizes the generated pattern data.
-
-        Args:
-            ptrn_data: The binary pattern data.
-            step: Plotting step size (higher is faster but lower resolution).
-            filename: Output filename.
-            color_lanes: If True, alternates lane colors (Light Blue/White).
-        """
-        ptrn_bits = ptrn_data.get("data")
-        metadata = ptrn_data.get("metadata")
-
-        # 1. Setup Local Parameters (Start fresh, don't touch self.params)
-        # We get the default hardware config (speeds, frequencies, etc.)
-        raw_params = self.cfg.get_optical_params(
-            correction=self.correction, exposures=self.exposures
+    ) -> np.ndarray:
+        """Visualizes the generated pattern data via :mod:`hexastorm.exposure.plotter`."""
+        return plotter.plot_pattern(
+            ptrn_data,
+            cfg=self.cfg,
+            correction=self.correction,
+            exposures=self.exposures,
+            filename=filename,
+            color_lanes=color_lanes,
         )
-        local_params = geometry.ScannerModel.to_numba_dict(raw_params)
-
-        # A. Calculate the 'lanewidth' for this specific hardware config
-        # We calculate this fresh to ensure it matches the JIT's logic
-        start_x = geometry._jit_fxpos(0.0, local_params, 0, 0.0)
-        end_x = geometry._jit_fxpos(
-            local_params["bitsinscanline"] - 1, local_params, 0, 0.0
-        )
-        calc_lanewidth = (start_x - end_x) * local_params["samplegridsize"]
-
-        # B. Reverse-Engineer 'samplexsize'
-        # x_size = lanes * width
-        local_params["samplexsize"] = float(metadata["lanes"] * calc_lanewidth)
-
-        # C. Reverse-Engineer 'sampleysize'
-        # The formula used to create facets was:
-        # facets = ceil( rot_freq * facets * (y_size / speed) )
-        # So we invert it: y_size = (facets * speed) / (rot_freq * facets)
-        term = local_params["rotationfrequency"] * local_params["facets"]
-        local_params["sampleysize"] = float(
-            metadata["facetsinlane"] * local_params["stagespeed"] / term
-        )
-
-        # Explicitly set these too, just in case
-        local_params["lanes"] = float(metadata["lanes"])
-        local_params["facetsinlane"] = float(metadata["facetsinlane"])
-
-        # 2. Extract Data
-        if isinstance(ptrn_data, np.ndarray):
-            raw_bytes = ptrn_data
-        elif "data" in ptrn_data:
-            raw_bytes = ptrn_data["data"]
-            if hasattr(raw_bytes, "values"):
-                raw_bytes = raw_bytes.values[0]
-        else:
-            raise ValueError("Could not find data in input structure")
-
-        # 3. Get Coordinates (Re-calculate identical grid)
-        ids = geometry._jit_calculate_grid(local_params)
-
-        # 4. Handle Downsampling
-        factor = int(self.params["downsamplefactor"])
-        if factor > 1:
-            ids = np.repeat(ids, factor, axis=1)
-
-        # 5. Slicing
-        min_len = min(ids.shape[1], len(ptrn_bits))
-        x_full = ids[0, :min_len]
-        y_full = ids[1, :min_len]
-        bits_full = ptrn_bits[:min_len]
-
-        # 6. Prepare Plot Data
-        step = (
-            1  # Adjust this for faster plotting (e.g., 10 means plot every 10th point)
-        )
-        x_plot = x_full[::step]
-        y_plot = y_full[::step]
-        bits_plot = bits_full[::step]
-
-        x_min, x_max = x_plot.min(), x_plot.max()
-        y_min, y_max = y_plot.min(), y_plot.max()
-
-        x_plot -= x_min
-        y_plot -= y_min
-
-        width = x_max - x_min + 1
-        height = y_max - y_min + 1
-
-        logger.debug(f"Plotting Image: {width}x{height} pixels")
-
-        # 7. Rendering
-        # Initialize 1-channel canvas for "Lane IDs"
-        canvas = np.zeros((width, height), dtype=np.uint8)
-
-        # Define IDs for the grayscale map
-        VAL_EVEN = 100
-        VAL_ODD = 200
-        VAL_ALL = 255
-
-        if color_lanes:
-            num_lanes = int(local_params.get("lanes", 1))
-            samples_per_lane = len(x_plot) // num_lanes
-
-            # Loop only to assign IDs (Very fast compared to dilation)
-            for i in range(num_lanes):
-                start = i * samples_per_lane
-                end = start + samples_per_lane if i < num_lanes - 1 else len(x_plot)
-
-                # Check if this slice has any active bits
-                # (Optimization: boolean indexing is faster than creating sub-arrays)
-                lbits = bits_plot[start:end]
-                active_indices = np.where(lbits == 1)[0]
-
-                if active_indices.size > 0:
-                    # Map local indices back to global indices
-                    global_indices = start + active_indices
-
-                    # Determine value (Even=100, Odd=200)
-                    val = VAL_EVEN if (i % 2 == 0) else VAL_ODD
-
-                    # Assign to canvas
-                    canvas[x_plot[global_indices], y_plot[global_indices]] = val
-        else:
-            # Standard Monochrome (assign 255 to all active pixels)
-            active_mask = bits_plot == 1
-            canvas[x_plot[active_mask], y_plot[active_mask]] = VAL_ALL
-
-        # 8. Apply Laser Compensation ONCE
-        # This expands the '100' regions and '200' regions simultaneously
-        canvas_dilated = self.laser_compensation(canvas, erode=False)
-
-        # 9. Create Final RGB Image
-        # Initialize Black Canvas
-        rgb_canvas = np.zeros((width, height, 3), dtype=np.uint8)
-
-        if color_lanes:
-            # Colors (BGR)
-            COL_EVEN = (255, 200, 100)  # Light Blue
-            COL_ODD = (255, 255, 255)  # White
-
-            # Map the dilated IDs to Colors
-            # Note: Overlaps will favor VAL_ODD (200) because 200 > 100 and dilation uses Max
-            rgb_canvas[canvas_dilated == VAL_EVEN] = COL_EVEN
-            rgb_canvas[canvas_dilated == VAL_ODD] = COL_ODD
-        else:
-            # Map all active pixels to White
-            rgb_canvas[canvas_dilated > 0] = (255, 255, 255)
-
-        # 10. Rotate and Save
-        rotated_canvas = cv2.rotate(rgb_canvas, cv2.ROTATE_90_COUNTERCLOCKWISE)
-
-        self.debug_folder.mkdir(parents=True, exist_ok=True)
-        save_path = self.debug_folder / f"{filename}.png"
-        cv2.imwrite(str(save_path), rotated_canvas)
-        logger.info(f"Plot saved to {save_path}")
-        return rotated_canvas
-
-
-def main():
-    from ..log_setup import configure_logging
-
-    configure_logging(logging.DEBUG)
-    # PCB / photopaper stepsperline dual channel,
-    # current 130, 4x per line
-    fname = Path("combined_grid_test.svg")
-    bin_name = fname.with_suffix(".bin")
-    ctime = time()
-    interpolator = Interpolator(correction=False, exposures=1)
-    logger.info(f"Interpolator {time() - ctime:.2f} seconds")
-
-    ptrn = interpolator.patternfile(fname)
-    logger.info(f"Pattern {time() - ctime:.2f} seconds")
-    interpolator.writebin(ptrn, bin_name)
-    pattern_data = interpolator.readbin(bin_name)
-    metadata = pattern_data.get("metadata")
-
-    assert np.allclose(interpolator.params["lanewidth"], metadata["lanewidth"], 1e-3)
-    assert np.allclose(
-        interpolator.params["facetsinlane"], metadata["facetsinlane"], 1e-3
-    )
-    assert len(pattern_data["data"]) == round(
-        metadata["facetsinlane"]
-        * metadata["lanes"]
-        * np.ceil(interpolator.params["bitsinscanline"])
-    )
-    interpolator.plotptrn(pattern_data)
-
-
-if __name__ == "__main__":
-    main()

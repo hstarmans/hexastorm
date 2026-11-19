@@ -15,8 +15,8 @@ Coordinate Frames:
        computed directly from intersection coordinates ``u_hit`` via the 1D inverse
        Snellius prism curve (:class:`PrismCurve`).
 
-The legacy bitmap pipeline (:mod:`hexastorm.interpolator.interpolator` and
-:mod:`hexastorm.interpolator.geometry`) serves as the frozen reference implementation for
+The legacy bitmap pipeline (:mod:`hexastorm.exposure.raster` and
+:mod:`hexastorm.exposure.geometry`) serves as the frozen reference implementation for
 verification and pure raster image fallback.
 """
 
@@ -32,8 +32,16 @@ from typing import Any
 
 import numpy as np
 
-from ..config import PlatformConfig, displacement_kernel
-from . import io
+from ..config import PlatformConfig, Spi, displacement_kernel
+from . import io, plotter
+
+try:
+    from . import _vector_core
+
+    _HAS_C_CORE = _vector_core is not None
+except ImportError:
+    _vector_core = None
+    _HAS_C_CORE = False
 
 logger = logging.getLogger(__name__)
 
@@ -1102,13 +1110,13 @@ def _invert_intervals(
     return out
 
 
-class VectorInterpolator:
-    """Direct Vector-to-Timestamp slicer replacing bitmap rasterization for vector/PCB designs.
+class VectorExposure:
+    """Direct Vector-to-Timestamp exposure pipeline replacing bitmap rasterization for vector/PCB designs.
 
     Intersects closed polygon contours directly with each tilted laser scanline
     ``(u(t), v(t))`` and converts intersection coordinates into 24-bit clock ticks via
     :class:`PrismCurve`. Output files use the exact same compressed event-driven SPI
-    format as :mod:`hexastorm.interpolator.io`.
+    format as :mod:`hexastorm.exposure.io`.
     """
 
     def __init__(
@@ -1149,6 +1157,7 @@ class VectorInterpolator:
         height_mm: float,
         filepath: str | Path,
         compression_level: int = 9,
+        use_c: bool = True,
     ) -> Path:
         """Slice polygon shapes into an event-driven ``.pat`` / ``.bin`` binary file."""
         if width_mm <= 0 or height_mm <= 0:
@@ -1238,109 +1247,263 @@ class VectorInterpolator:
             bits_in_scanline=bits_in_scanline,
             compression_level=compression_level,
         ) as writer:
-            for lane_idx in range(lanes):
-                direction = 1 if lane_idx % 2 == 0 else 0
-                is_forward = lane_idx % 2 == 0
-                dir_sign = 1.0 if is_forward else -1.0
-                lane_u_offset = lane_idx * lanewidth
+            if use_c and _HAS_C_CORE:
+                if shape_edges:
+                    u0_arr = np.ascontiguousarray(
+                        np.concatenate([ed["u0"] for ed in shape_edges]),
+                        dtype=np.float64,
+                    )
+                    v0_arr = np.ascontiguousarray(
+                        np.concatenate([ed["v0"] for ed in shape_edges]),
+                        dtype=np.float64,
+                    )
+                    u1_arr = np.ascontiguousarray(
+                        np.concatenate([ed["u1"] for ed in shape_edges]),
+                        dtype=np.float64,
+                    )
+                    v1_arr = np.ascontiguousarray(
+                        np.concatenate([ed["v1"] for ed in shape_edges]),
+                        dtype=np.float64,
+                    )
+                    du_arr = np.ascontiguousarray(
+                        np.concatenate([ed["du"] for ed in shape_edges]),
+                        dtype=np.float64,
+                    )
+                    edge_counts = np.array(
+                        [ed["u0"].size for ed in shape_edges], dtype=np.int32
+                    )
+                    edge_starts = np.zeros(len(shape_edges), dtype=np.int32)
+                    if len(shape_edges) > 1:
+                        np.cumsum(edge_counts[:-1], out=edge_starts[1:])
+                    poly_umin = np.array(
+                        [ed["poly_umin"] for ed in shape_edges], dtype=np.float64
+                    )
+                    poly_umax = np.array(
+                        [ed["poly_umax"] for ed in shape_edges], dtype=np.float64
+                    )
+                    poly_vmin = np.array(
+                        [ed["poly_vmin"] for ed in shape_edges], dtype=np.float64
+                    )
+                    poly_vmax = np.array(
+                        [ed["poly_vmax"] for ed in shape_edges], dtype=np.float64
+                    )
+                    fill_rules = np.array(
+                        [
+                            1 if ed["fill_rule"] == "nonzero" else 0
+                            for ed in shape_edges
+                        ],
+                        dtype=np.uint8,
+                    )
+                else:
+                    u0_arr = v0_arr = u1_arr = v1_arr = du_arr = np.zeros(
+                        0, dtype=np.float64
+                    )
+                    edge_starts = edge_counts = np.zeros(0, dtype=np.int32)
+                    poly_umin = poly_umax = poly_vmin = poly_vmax = np.zeros(
+                        0, dtype=np.float64
+                    )
+                    fill_rules = np.zeros(0, dtype=np.uint8)
 
-                for f_lane_idx in range(facets_inlane):
-                    facet_idx = f_lane_idx % facets
-                    dx_facet = float(params[f"f{facet_idx}_scan"])
-                    dy_facet = float(params[f"f{facet_idx}_orth"])
+                dx_facet_arr = np.array(
+                    [float(params[f"f{fi}_scan"]) for fi in range(facets)],
+                    dtype=np.float64,
+                )
+                dy_facet_arr = np.array(
+                    [float(params[f"f{fi}_orth"]) for fi in range(facets)],
+                    dtype=np.float64,
+                )
+                u_samples = np.ascontiguousarray(
+                    curve._u_base_samples, dtype=np.float64
+                )
+                tick_samples = np.ascontiguousarray(
+                    curve._tick_samples, dtype=np.float64
+                )
+                scanline_cmd = int(Spi.Instructions.scanline)
+                spi_write_cmd = int(Spi.Commands.write)
 
-                    ystart_mm = (
-                        f_lane_idx * y_shift_per_facet
-                        if is_forward
-                        else (facets_inlane - f_lane_idx) * y_shift_per_facet
+                for lane_idx in range(lanes):
+                    raw_spi, lane_active = _vector_core.slice_lane_spi(
+                        u0_arr,
+                        v0_arr,
+                        u1_arr,
+                        v1_arr,
+                        du_arr,
+                        edge_starts,
+                        edge_counts,
+                        poly_umin,
+                        poly_umax,
+                        poly_vmin,
+                        poly_vmax,
+                        fill_rules,
+                        u_samples,
+                        tick_samples,
+                        dx_facet_arr,
+                        dy_facet_arr,
+                        1 if curve.invert_hw_scan_dir else 0,
+                        int(curve.total_ticks),
+                        int(lane_idx),
+                        int(facets_inlane),
+                        int(bits_in_scanline),
+                        float(stepsperline),
+                        float(u_size_mm),
+                        float(v_size_mm),
+                        float(lanewidth),
+                        float(curve.raw_u_last),
+                        float(curve.xstart_val),
+                        float(slope_den),
+                        float(y_shift_per_facet),
+                        float(v_prism_start),
+                        float(v_prism_end),
+                        float(v_stage_start),
+                        float(v_stage_end),
+                        bool(positiveresist),
+                        int(self.default_intensity),
+                        scanline_cmd,
+                        spi_write_cmd,
+                    )
+                    active_lines += lane_active
+                    writer.write_raw_spi(raw_spi)
+            else:
+                dx_facets = [float(params[f"f{fi}_scan"]) for fi in range(facets)]
+                dy_facets = [float(params[f"f{fi}_orth"]) for fi in range(facets)]
+                min_dx = min(dx_facets)
+                max_dx = max(dx_facets)
+
+                for lane_idx in range(lanes):
+                    direction = 1 if lane_idx % 2 == 0 else 0
+                    is_forward = lane_idx % 2 == 0
+                    dir_sign = 1.0 if is_forward else -1.0
+                    lane_u_offset = lane_idx * lanewidth
+                    min_u_s = (
+                        curve.raw_u_last + curve.xstart_val + min_dx + lane_u_offset
+                    )
+                    max_u_s = (
+                        curve.raw_u_last + curve.xstart_val + max_dx + lane_u_offset
+                    )
+                    lane_u_min = max(0.0, min(min_u_s, min_u_s + slope_den)) - 1e-6
+                    lane_u_max = (
+                        min(u_size_mm, max(max_u_s, max_u_s + slope_den)) + 1e-6
+                    )
+                    lane_shapes = (
+                        [
+                            ed
+                            for ed in shape_edges
+                            if ed["poly_umax"] >= lane_u_min
+                            and ed["poly_umin"] <= lane_u_max
+                        ]
+                        if lane_u_max > lane_u_min
+                        else []
                     )
 
-                    # Scanline sweep start/end in laserhead coordinates
-                    # Note: geometry.py sets u(p) = raw_u(p) + xstart_val + dx_facet + l_idx*lanewidth
-                    u_shift = (
-                        (curve.raw_u_last + curve.xstart_val) + dx_facet + lane_u_offset
-                    )
-                    u_start = u_shift  # corresponds to u_base = 0 (p = N-1)
-                    u_end = (
-                        u_shift + slope_den
-                    )  # corresponds to u_base = lanewidth (p = 0)
+                    for f_lane_idx in range(facets_inlane):
+                        facet_idx = f_lane_idx % facets
+                        dx_facet = dx_facets[facet_idx]
+                        dy_facet = dy_facets[facet_idx]
 
-                    # Window clip bounds matching geometry/interpolator sample [0, u_size]
-                    win_u_min = max(0.0, u_start)
-                    win_u_max = min(u_size_mm, u_end)
+                        ystart_mm = (
+                            f_lane_idx * y_shift_per_facet
+                            if is_forward
+                            else (facets_inlane - f_lane_idx) * y_shift_per_facet
+                        )
 
-                    v_start = (
-                        v_prism_start + dy_facet + dir_sign * v_stage_start + ystart_mm
-                    )
-                    v_end = v_prism_end + dy_facet + dir_sign * v_stage_end + ystart_mm
-                    slope = (
-                        (v_end - v_start) / slope_den if abs(slope_den) > 1e-12 else 0.0
-                    )
+                        # Scanline sweep start/end in laserhead coordinates
+                        # Note: geometry.py sets u(p) = raw_u(p) + xstart_val + dx_facet + l_idx*lanewidth
+                        u_shift = (
+                            (curve.raw_u_last + curve.xstart_val)
+                            + dx_facet
+                            + lane_u_offset
+                        )
+                        u_start = u_shift  # corresponds to u_base = 0 (p = N-1)
+                        u_end = (
+                            u_shift + slope_den
+                        )  # corresponds to u_base = lanewidth (p = 0)
 
-                    # 1. Intersect all active shapes along scanline (u, v)
-                    all_intervals: list[tuple[float, float]] = []
-                    in_v_bounds = (
-                        max(v_start, v_end) >= 0.0 and min(v_start, v_end) < v_size_mm
-                    )
-                    if win_u_max > win_u_min and (in_v_bounds or positiveresist):
-                        for ed in shape_edges:
-                            v_u0 = v_start + slope * (ed["poly_umin"] - u_start)
-                            v_u1 = v_start + slope * (ed["poly_umax"] - u_start)
-                            if (
-                                ed["poly_vmax"] < min(v_u0, v_u1) - 1e-9
-                                or ed["poly_vmin"] > max(v_u0, v_u1) + 1e-9
-                            ):
+                        # Window clip bounds matching geometry/interpolator sample [0, u_size]
+                        win_u_min = max(0.0, u_start)
+                        win_u_max = min(u_size_mm, u_end)
+
+                        v_start = (
+                            v_prism_start
+                            + dy_facet
+                            + dir_sign * v_stage_start
+                            + ystart_mm
+                        )
+                        v_end = (
+                            v_prism_end + dy_facet + dir_sign * v_stage_end + ystart_mm
+                        )
+                        slope = (
+                            (v_end - v_start) / slope_den
+                            if abs(slope_den) > 1e-12
+                            else 0.0
+                        )
+
+                        # 1. Intersect all active shapes along scanline (u, v)
+                        all_intervals: list[tuple[float, float]] = []
+                        in_v_bounds = (
+                            max(v_start, v_end) >= 0.0
+                            and min(v_start, v_end) < v_size_mm
+                        )
+                        if (
+                            win_u_max > win_u_min
+                            and (in_v_bounds or positiveresist)
+                            and lane_shapes
+                        ):
+                            for ed in lane_shapes:
+                                v_u0 = v_start + slope * (ed["poly_umin"] - u_start)
+                                v_u1 = v_start + slope * (ed["poly_umax"] - u_start)
+                                if (
+                                    ed["poly_vmax"] < min(v_u0, v_u1) - 1e-9
+                                    or ed["poly_vmin"] > max(v_u0, v_u1) + 1e-9
+                                ):
+                                    continue
+                                ivs = _intersect_shape_with_scanline(
+                                    ed, u_start, v_start, slope
+                                )
+                                if ivs:
+                                    all_intervals.extend(ivs)
+
+                        merged = _merge_intervals(all_intervals)
+                        if positiveresist:
+                            merged = _invert_intervals(merged, 0.0, u_size_mm)
+
+                        # 2. Clip to active laser scanline window and convert u -> ticks
+                        tick_intervals: list[tuple[int, int]] = []
+                        for a, b in merged:
+                            ca = max(a, win_u_min)
+                            cb = min(b, win_u_max)
+                            if cb <= ca:
                                 continue
-                            ivs = _intersect_shape_with_scanline(
-                                ed, u_start, v_start, slope
-                            )
-                            if ivs:
-                                all_intervals.extend(ivs)
+                            t_a = curve.u_to_tick(ca - u_shift)
+                            t_b = curve.u_to_tick(cb - u_shift)
+                            t_on, t_off = (t_a, t_b) if t_a <= t_b else (t_b, t_a)
+                            if t_off > t_on:
+                                tick_intervals.append((t_on, t_off))
 
-                    merged = _merge_intervals(all_intervals)
-                    if positiveresist:
-                        merged = _invert_intervals(merged, 0.0, u_size_mm)
+                        # Merge adjacent tick intervals (e.g. if sub-tick gap rounds to 0)
+                        events: list[tuple[int, int]] = []
+                        if tick_intervals:
+                            tick_intervals.sort()
+                            cur_on, cur_off = tick_intervals[0]
+                            for t_on, t_off in tick_intervals[1:]:
+                                if t_on <= cur_off:
+                                    cur_off = max(cur_off, t_off)
+                                else:
+                                    events.append((cur_on, self.default_intensity))
+                                    events.append((cur_off, 0))
+                                    cur_on, cur_off = t_on, t_off
+                            events.append((cur_on, self.default_intensity))
+                            events.append((cur_off, 0))
 
-                    # 2. Clip to active laser scanline window and convert u -> ticks
-                    tick_intervals: list[tuple[int, int]] = []
-                    for a, b in merged:
-                        ca = max(a, win_u_min)
-                        cb = min(b, win_u_max)
-                        if cb <= ca:
-                            continue
-                        t_a = curve.u_to_tick(ca - u_shift)
-                        t_b = curve.u_to_tick(cb - u_shift)
-                        t_on, t_off = (t_a, t_b) if t_a <= t_b else (t_b, t_a)
-                        if t_off > t_on:
-                            tick_intervals.append((t_on, t_off))
-
-                    # Merge adjacent tick intervals (e.g. if sub-tick gap rounds to 0)
-                    events: list[tuple[int, int]] = []
-                    if tick_intervals:
-                        tick_intervals.sort()
-                        cur_on, cur_off = tick_intervals[0]
-                        for t_on, t_off in tick_intervals[1:]:
-                            if t_on <= cur_off:
-                                cur_off = max(cur_off, t_off)
-                            else:
-                                events.append((cur_on, self.default_intensity))
-                                events.append((cur_off, 0))
-                                cur_on, cur_off = t_on, t_off
-                        events.append((cur_on, self.default_intensity))
-                        events.append((cur_off, 0))
-
-                    if events:
-                        active_lines += 1
-                    writer.write_scanline(events, direction)
+                        if events:
+                            active_lines += 1
+                        writer.write_scanline(events, direction)
 
         self._last_active_lines = active_lines
         return out_path
 
     def _tagged_bin_path(self, path: Path) -> Path:
-        """Append exposure count and optical-correction tag matching Interpolator."""
-        n_exp = int(self.params["exposures"])
-        cor_tag = "cor" if self.params["optical_correction"] else "nocor"
-        return path.with_name(f"{path.stem}_e{n_exp}_{cor_tag}{path.suffix}")
+        """Append exposure count and optical-correction tag matching RasterExposure."""
+        return io.tagged_bin_path(path, self.params)
 
     def svg_to_bin(
         self,
@@ -1350,7 +1513,7 @@ class VectorInterpolator:
         spot_compensation_mm: float = 0.0,
         compression_level: int = 9,
     ) -> Path:
-        """Parse an SVG vector file and directly slice it to a ``.pat`` / ``.bin`` file."""
+        """Parse an SVG vector file and directly compile it to a ``.pat`` / ``.bin`` file."""
         in_path = Path(svg_path)
         if not in_path.is_absolute() and not in_path.exists():
             in_path = self.cfg.paths["svgs"] / in_path
@@ -1382,6 +1545,8 @@ class VectorInterpolator:
         img_name: str | Path,
         bin_name: str | Path | None = None,
         camera: bool = False,
+        curve_tolerance_mm: float = 0.002,
+        spot_compensation_mm: float = 0.0,
     ) -> float:
         """Convert SVG directly to tagged ``.pat``/``.bin`` and return job duration in minutes."""
         img_path = Path(img_name)
@@ -1392,7 +1557,12 @@ class VectorInterpolator:
             out_target = self.cfg.paths["patterns"] / out_target
         tagged_out = self._tagged_bin_path(out_target)
 
-        self.svg_to_bin(img_path, bin_path=tagged_out)
+        self.svg_to_bin(
+            img_path,
+            bin_path=tagged_out,
+            curve_tolerance_mm=curve_tolerance_mm,
+            spot_compensation_mm=spot_compensation_mm,
+        )
 
         if camera:
             total_min = self._last_active_lines / 180.0
@@ -1409,7 +1579,7 @@ class VectorInterpolator:
         return total_min
 
     def readbin(self, filename: str | Path | None = None) -> dict:
-        """Read back an event-driven ``.bin`` / ``.pat`` file via :mod:`hexastorm.interpolator.io`."""
+        """Read back an event-driven ``.bin`` / ``.pat`` file via :mod:`hexastorm.exposure.io`."""
         if filename is None:
             if self._last_output_path is None:
                 raise ValueError("No output path specified or recorded yet")
@@ -1440,12 +1610,14 @@ class VectorInterpolator:
         filename: str = "plot",
         color_lanes: bool = True,
     ) -> np.ndarray:
-        """Visualize the generated event-driven pattern using the reference plotter."""
-        from .interpolator import Interpolator
-
+        """Visualize the generated event-driven pattern via :mod:`hexastorm.exposure.plotter`."""
         if ptrn_data is None:
             ptrn_data = self.readbin()
-        ref_plotter = Interpolator(correction=self.correction, exposures=self.exposures)
-        return ref_plotter.plotptrn(
-            ptrn_data, filename=filename, color_lanes=color_lanes
+        return plotter.plot_pattern(
+            ptrn_data,
+            cfg=self.cfg,
+            correction=self.correction,
+            exposures=self.exposures,
+            filename=filename,
+            color_lanes=color_lanes,
         )

@@ -1,10 +1,9 @@
 import logging
-import math
 
+import fire
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle, Rectangle
 
-from ...config import displacement_kernel
 from .machine import LaserCalibrationGen
 
 logger = logging.getLogger(__name__)
@@ -37,26 +36,8 @@ class CameraCalibrationGen(LaserCalibrationGen):
         self.calculate_view_bounds(lower_pixel, upper_pixel)
 
     def calculate_view_bounds(self, px_low: int, px_high: int):
-        start_pixel = self.optical_settings["startpixel"]
-        grid_size = self.optical_settings["samplegridsize"]
-        if hasattr(self.interpolator, "geo"):
-            start_point = self.interpolator.geo.fxpos(pixel=start_pixel)
-
-            def px_to_mm(px):
-                return (start_point - self.interpolator.geo.fxpos(pixel=px)) * grid_size
-        else:
-            params = self.interpolator.params
-            sin_tilt = math.sin(float(params["tiltangle"]))
-            bits_len = int(params["bitsinscanline"])
-            start_u = sin_tilt * displacement_kernel(start_pixel, params)
-
-            def px_to_mm(px):
-                line_px = start_pixel + (px % bits_len)
-                return start_u - (sin_tilt * displacement_kernel(line_px, params))
-
-        # 3. Calculated bounds
-        self.x_min = px_to_mm(px_low)
-        self.x_max = px_to_mm(px_high)
+        self.x_min = self.engine.px_to_mm(px_low)
+        self.x_max = self.engine.px_to_mm(px_high)
         self.view_width = self.x_max - self.x_min
 
     def _setup_exact_canvas(self, fig, ax, width_mm, height_mm):
@@ -213,8 +194,8 @@ class CameraCalibrationGen(LaserCalibrationGen):
         Useful for debugging the interpolator output to verify exactly where
         the active laser pixels are falling within the target camera bounds.
         """
-        scanline_length = self.interpolator.cfg.laser_timing["scanline_length"]
-        pattern_bits = self.interpolator.readbin()["data"]
+        scanline_length = self.engine.cfg.laser_timing["scanline_length"]
+        pattern_bits = self.engine.readbin()["data"]
         ptrn = pattern_bits.reshape(-1, scanline_length)
         # --- CLI ASCII Profile ---
 
@@ -244,16 +225,32 @@ class CameraCalibrationGen(LaserCalibrationGen):
             logger.info(f"{i:04d} to {end:04d} | {bucket_sum:<6.0f} | {bar}")
 
 
-def main():
+def _cli(
+    lower_pixel: int = 200,
+    upper_pixel: int = 500,
+    line_thickness_mm: float = 0.15,
+    mode: str = "auto",
+    correction: bool = False,
+    exposures: int = 1,
+):
     from ...log_setup import configure_logging
 
     configure_logging(logging.DEBUG)
 
     cam_pat = CameraCalibrationGen(
-        lower_pixel=200, upper_pixel=500, line_thickness_mm=0.15
+        lower_pixel=lower_pixel,
+        upper_pixel=upper_pixel,
+        line_thickness_mm=line_thickness_mm,
+        mode=mode,
+        correction=correction,
+        exposures=exposures,
     )
     cam_pat.generate_vertical_jitter_test()
     cam_pat.generate_dot_grid_test()
+
+
+def main():
+    fire.Fire(_cli)
 
 
 if __name__ == "__main__":

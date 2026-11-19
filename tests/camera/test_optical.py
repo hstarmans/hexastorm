@@ -17,7 +17,7 @@ from hexastorm.calibration import (
 )
 from hexastorm.config import PlatformConfig
 from hexastorm.esp32_controller import ESP32Controller, ESP32RemoteError
-from hexastorm.interpolator.patterns import camera as cam_patterns
+from hexastorm.exposure.patterns import camera as cam_patterns
 from hexastorm.log_setup import configure_logging
 
 from . import camera
@@ -422,7 +422,7 @@ class DynamicTests(StaticTests):
                 )
                 cam_pat.set_correction(correction=correction)
                 cam_pat.generate_dot_grid_test(num_dots_y)
-                pattern_data = cam_pat.interpolator.readbin()
+                pattern_data = cam_pat.engine.readbin()
                 pattern_bits = pattern_data["data"]
                 ptrn = pattern_bits.reshape(
                     -1, self.cfg.laser_timing["scanline_length"]
@@ -544,7 +544,7 @@ class DynamicTests(StaticTests):
         def dispatch(correction, iters):
             cam_pat.set_correction(correction=correction)
             cam_pat.generate_vertical_jitter_test()
-            pattern_bits = cam_pat.interpolator.readbin()["data"]
+            pattern_bits = cam_pat.engine.readbin()["data"]
             ptrn = pattern_bits.reshape(-1, self.cfg.laser_timing["scanline_length"])
             facets = self.cfg.laser_timing["facets"]
 

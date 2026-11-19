@@ -1,6 +1,7 @@
 import logging
 import os
 
+import fire
 import matplotlib
 
 # Use Agg for file generation without a window popping up
@@ -10,8 +11,7 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 
 from ...config import PlatformConfig
-from ..interpolator import Interpolator
-from ..vector import VectorInterpolator
+from .. import ExposureEngine, LaserheadMount
 
 logger = logging.getLogger(__name__)
 
@@ -30,9 +30,10 @@ class LaserCalibrationGen:
     def __init__(
         self,
         pix_per_mm: int = 200,
-        correction: bool = False,
+        correction: bool | dict = False,
         exposures: int = 1,
-        use_vector: bool = False,
+        mode: str = "auto",
+        mount: LaserheadMount | None = None,
     ):
         """
         Initialize the generator.
@@ -40,19 +41,19 @@ class LaserCalibrationGen:
         Args:
             pix_per_mm (int): Resolution of the internal rasterization for calculation
                               (does not affect vector output precision). Defaults to 200.
-            correction (bool): Apply calibration corrections if True.
+            correction (bool | dict): Apply calibration corrections if True or dict.
             exposures (int): Number of exposures per scanline.
-            use_vector (bool): If True, slice SVGs directly with ``VectorInterpolator``;
-                               otherwise use the reference bitmap ``Interpolator``.
+            mode (str): Exposure backend selection (``"auto"``, ``"vector"``, or ``"raster"``).
+            mount (LaserheadMount | None): Optional laserhead coordinate mount transform.
         """
         config = PlatformConfig(test=False)
 
-        if use_vector:
-            self.interpolator = VectorInterpolator(
-                correction=correction, exposures=exposures
-            )
-        else:
-            self.interpolator = Interpolator(correction=correction, exposures=exposures)
+        self.engine = ExposureEngine(
+            correction=correction,
+            exposures=exposures,
+            mode=mode,
+            mount=mount,
+        )
         # Determine output directory
         self.script_directory = config.paths["svgs"]
         self.camera = False
@@ -77,10 +78,10 @@ class LaserCalibrationGen:
         )
 
     def set_correction(
-        self, correction: bool | None = None, exposures: int | None = None
+        self, correction: bool | dict | None = None, exposures: int | None = None
     ):
         """Enables or disables correction mode."""
-        self.interpolator.set_optical_params(correction=correction, exposures=exposures)
+        self.engine.set_optical_params(correction=correction, exposures=exposures)
 
     def setup_style(self):
         """Sets up the matplotlib style for technical drawings."""
@@ -309,7 +310,7 @@ class LaserCalibrationGen:
         fig.savefig(output_path, dpi=fig.dpi, pad_inches=0, bbox_inches=self.tight)
         plt.close(fig)
         logger.info(f"Saved {filename}")
-        self.interpolator.img_to_bin(filename, camera=self.camera)
+        self.engine.generate(filename, camera=self.camera)
 
     def _clean_axes(self, ax, x_label: str, y_label: str):
         """
@@ -461,17 +462,23 @@ class LaserCalibrationGen:
         self.save_final(fig, "combined_grid_test.svg")
 
 
-def main():
+def _cli(mode: str = "auto", correction: bool = False, exposures: int = 1):
     from ...log_setup import configure_logging
 
     configure_logging(logging.DEBUG)
-    generator = LaserCalibrationGen()
+    generator = LaserCalibrationGen(
+        correction=correction, exposures=exposures, mode=mode
+    )
 
     # Generate all patterns
     generator.generate_combined_test()
-    pattern_data = generator.interpolator.readbin()
-    generator.interpolator.plotptrn(pattern_data, filename="combined_test")
+    pattern_data = generator.engine.readbin()
+    generator.engine.plot(pattern_data, filename="combined_test")
     logger.debug("All patterns generated successfully.")
+
+
+def main():
+    fire.Fire(_cli)
 
 
 if __name__ == "__main__":

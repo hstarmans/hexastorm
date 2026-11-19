@@ -17,7 +17,8 @@ To generate patterns, ensure your environment is synced with the required depend
 # Ensure dependencies are present
 uv sync --system --group camera --group desktop
 
-# Run the pattern generator
-uv run python -m hexastorm.interpolator.patterns.machine
-
+# Run the pattern generator (auto selects vector for SVGs; override with --mode=raster)
+uv run python -m hexastorm.exposure.patterns.machine
+uv run pat_machine --mode=vector
+uv run pat_cam --mode=auto
 ```

@@ -41,14 +41,14 @@ You can execute tests and run the main modules as follows:
 ```console
 uv run pytest -vv tests/fpga/test_core.py
 ```
-**Pattern generation and interpolator**
+**Pattern generation and exposure engine**
 ```console
-uv run python -m hexastorm.interpolator.patterns.machine
-uv run python -m hexastorm.interpolator.interpolator
+uv run python -m hexastorm.exposure.patterns.machine
+uv run python -m hexastorm.exposure.engine
 ```
 Alternative
 ```console
 uv run pat_machine
-uv run interpol
+uv run exposure
 ```
 

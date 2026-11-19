@@ -5,16 +5,16 @@ import numpy as np
 import pytest
 
 from hexastorm import ulabext
-from hexastorm.interpolator import io
-from hexastorm.interpolator.interpolator import Interpolator
+from hexastorm.exposure import io
+from hexastorm.exposure.raster import RasterExposure
 
 
 @pytest.fixture
-def interpolator():
-    return Interpolator()
+def raster_exposure():
+    return RasterExposure()
 
 
-def test_regression_jittertest(interpolator, tmp_path):
+def test_regression_jittertest(raster_exposure, tmp_path):
     """
     Ensures that the entire pipeline (SVG -> Math -> Binary)
     produces the EXACT same bytes as the 'approved' version.
@@ -29,35 +29,32 @@ def test_regression_jittertest(interpolator, tmp_path):
     fname = "combined_grid_test"
     project_root = Path(__file__).resolve().parent.parent.parent
     svg_path = (
-        project_root
-        / "src"
-        / "hexastorm"
-        / "interpolator"
-        / "patterns"
-        / f"{fname}.svg"
+        project_root / "src" / "hexastorm" / "exposure" / "patterns" / f"{fname}.svg"
     )
     if not svg_path.exists():
-        alt_svg_path = interpolator.cfg.paths["svgs"] / f"{fname}.svg"
+        alt_svg_path = raster_exposure.cfg.paths["svgs"] / f"{fname}.svg"
         if not alt_svg_path.exists():
-            from hexastorm.interpolator.patterns.machine import LaserCalibrationGen
+            from hexastorm.exposure.patterns.machine import LaserCalibrationGen
 
-            LaserCalibrationGen(correction=False, exposures=1).generate_combined_test()
+            LaserCalibrationGen(
+                correction=False, exposures=1, mode="raster"
+            ).generate_combined_test()
         svg_path = alt_svg_path
 
     # 1. Run Pipeline
-    ptrn = interpolator.patternfile(svg_path)
+    ptrn = raster_exposure.patternfile(svg_path)
 
     # 2. Write to a temporary file
     out_file = tmp_path / f"{fname}.bin"
-    interpolator.writebin(ptrn, out_file)
-    actual_out = interpolator._last_output_path
+    raster_exposure.writebin(ptrn, out_file)
+    actual_out = raster_exposure._last_output_path
 
     # 3. Verify Output & Roundtrip
     assert actual_out.exists()
     assert actual_out.stat().st_size > 0
-    roundtrip = interpolator.readbin(actual_out)
+    roundtrip = raster_exposure.readbin(actual_out)
     assert np.array_equal(
-        roundtrip["data"], np.unpackbits(ptrn, bitorder=interpolator.bitorder)
+        roundtrip["data"], np.unpackbits(ptrn, bitorder=raster_exposure.bitorder)
     )
 
     # Check Content Hash
@@ -75,19 +72,19 @@ def test_regression_jittertest(interpolator, tmp_path):
     assert file_hash == expected_hash
 
 
-def test_roundtrip_integrity(interpolator, tmp_path):
+def test_roundtrip_integrity(raster_exposure, tmp_path):
     """
     Checks if Write -> Read produces the same parameters.
     This validates the readbin/writebin symmetry and the new IO module.
     """
     # 1. Mock Geometry
     # We can write directly to the numba typed dict
-    interpolator.params["samplexsize"] = 50.0  # mm
-    interpolator.params["sampleysize"] = 50.0  # mm
-    interpolator.params["facetsinlane"] = 100  # Aantal facetten per baan
+    raster_exposure.params["samplexsize"] = 50.0  # mm
+    raster_exposure.params["sampleysize"] = 50.0  # mm
+    raster_exposure.params["facetsinlane"] = 100  # Aantal facetten per baan
 
     # Calculate expected sizes
-    params = interpolator.params
+    params = raster_exposure.params
     lanes = int(np.ceil(params["samplexsize"] / params["lanewidth"]))
     facets = int(params["facetsinlane"])
     bytes_line = int(np.ceil(params["bitsinscanline"] / 8))
@@ -99,11 +96,11 @@ def test_roundtrip_integrity(interpolator, tmp_path):
     # 3. Write
     # The new writebin supports full paths, no need for .name hacks
     out_file = tmp_path / "test_roundtrip.bin"
-    interpolator.writebin(dummy_data, out_file)
+    raster_exposure.writebin(dummy_data, out_file)
 
     # 4. Read back
     # The new readbin supports full paths too
-    result = interpolator.readbin(out_file)
+    result = raster_exposure.readbin(out_file)
     r_meta = result["metadata"]
     r_bits = result["data"]
 
@@ -112,18 +109,18 @@ def test_roundtrip_integrity(interpolator, tmp_path):
     assert r_meta["lanes"] == lanes
     assert np.allclose(r_meta["lanewidth"], params["lanewidth"])
 
-    r_bytes = np.packbits(r_bits, bitorder=interpolator.bitorder)
+    r_bytes = np.packbits(r_bits, bitorder=raster_exposure.bitorder)
     assert len(r_bytes) == len(dummy_data)
     assert np.array_equal(r_bytes, dummy_data)
 
 
-def test_rle_events_roundtrip_and_compression(interpolator, tmp_path):
+def test_rle_events_roundtrip_and_compression(raster_exposure, tmp_path):
     """
     Verifies lossless RLE event roundtrip (bits -> events -> bits) and
     confirming sparse PCB-like scanlines compress far below raw bitstream size.
     """
-    laser_ticks = int(interpolator.params["laser_ticks"])
-    scanline_length = int(interpolator.params["bitsinscanline"])
+    laser_ticks = int(raster_exposure.params["laser_ticks"])
+    scanline_length = int(raster_exposure.params["bitsinscanline"])
 
     rng = np.random.default_rng(123)
     dense_line = rng.integers(0, 2, size=scanline_length, dtype=np.uint8)
@@ -141,19 +138,19 @@ def test_rle_events_roundtrip_and_compression(interpolator, tmp_path):
         assert np.array_equal(reconstructed_ulab, line)
 
     # Verify sparse pattern file roundtrip & size reduction vs uncompressed raw bits
-    interpolator.params["samplexsize"] = 20.0
-    interpolator.params["sampleysize"] = 20.0
-    interpolator.params["facetsinlane"] = 40
-    params = interpolator.params
+    raster_exposure.params["samplexsize"] = 20.0
+    raster_exposure.params["sampleysize"] = 20.0
+    raster_exposure.params["facetsinlane"] = 40
+    params = raster_exposure.params
     lanes = int(np.ceil(params["samplexsize"] / params["lanewidth"]))
     facets = int(params["facetsinlane"])
 
     pattern_bits = np.zeros((lanes * facets, scanline_length), dtype=np.uint8)
     pattern_bits[:, 100:120] = 1
-    packed = np.packbits(pattern_bits.flatten(), bitorder=interpolator.bitorder)
+    packed = np.packbits(pattern_bits.flatten(), bitorder=raster_exposure.bitorder)
 
     out_file = tmp_path / "sparse_pcb.bin"
-    interpolator.writebin(packed, out_file)
-    result = interpolator.readbin(out_file)
+    raster_exposure.writebin(packed, out_file)
+    result = raster_exposure.readbin(out_file)
     assert np.array_equal(result["data"], pattern_bits.flatten())
-    assert interpolator._last_output_path.stat().st_size < packed.nbytes
+    assert raster_exposure._last_output_path.stat().st_size < packed.nbytes

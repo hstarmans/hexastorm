@@ -2,11 +2,14 @@ import struct
 import zlib
 
 import numpy as np
+import pytest
+from PIL import Image, ImageDraw
 
-from hexastorm.interpolator.interpolator import Interpolator
-from hexastorm.interpolator.vector import (
+from hexastorm.exposure import (
+    ExposureEngine,
     LaserheadMount,
-    VectorInterpolator,
+    RasterExposure,
+    VectorExposure,
     VectorShape,
 )
 
@@ -42,7 +45,7 @@ def _extract_raw_events(bin_path):
 
 def test_prism_curve_inverse_roundtrip():
     """Verify PrismCurve forward/inverse mapping roundtrips within <= 1 FPGA clock tick."""
-    interp = VectorInterpolator(correction=False, exposures=1)
+    interp = VectorExposure(correction=False, exposures=1)
     curve = interp.curve
 
     u_grid = np.linspace(curve.u_base_min, curve.u_base_max, 500)
@@ -66,7 +69,7 @@ def test_prism_curve_inverse_roundtrip():
 
 
 def test_vector_vs_reference_interpolator_agreement(tmp_path):
-    """Compare VectorInterpolator output against golden reference Interpolator on PCB SVG geometry."""
+    """Compare VectorExposure output against golden reference RasterExposure on PCB SVG geometry."""
     svg_content = """<?xml version="1.0" encoding="utf-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="8.0mm" height="8.0mm" viewBox="0 0 8.0 8.0">
   <rect x="0" y="0" width="8.0" height="8.0" fill="#ffffff"/>
@@ -85,13 +88,13 @@ def test_vector_vs_reference_interpolator_agreement(tmp_path):
     svg_file = tmp_path / "pcb_test.svg"
     svg_file.write_text(svg_content, encoding="utf-8")
 
-    ref_interp = Interpolator(correction=False, exposures=1)
+    ref_interp = RasterExposure(correction=False, exposures=1)
     ref_ptrn = ref_interp.patternfile(svg_file)
     ref_bin = tmp_path / "ref_pcb.bin"
     ref_interp.writebin(ref_ptrn, ref_bin)
     ref_res = ref_interp.readbin(ref_interp._last_output_path)
 
-    vec_interp = VectorInterpolator(correction=False, exposures=1)
+    vec_interp = VectorExposure(correction=False, exposures=1)
     vec_bin = tmp_path / "vec_pcb.bin"
     vec_interp.svg_to_bin(svg_file, vec_bin)
     vec_res = vec_interp.readbin(vec_bin)
@@ -113,7 +116,7 @@ def test_vector_vs_reference_interpolator_agreement(tmp_path):
 
 def test_vector_subpixel_tick_precision(tmp_path):
     """Verify a 2 um edge shift (< ~4.1 um pixel pitch) yields a sub-pixel clock-tick shift."""
-    vec_interp = VectorInterpolator(correction=False, exposures=1)
+    vec_interp = VectorExposure(correction=False, exposures=1)
     bits_scanline = int(vec_interp.params["bitsinscanline"])
     laser_ticks = int(vec_interp.params["laser_ticks"])
     assert laser_ticks > 1
@@ -163,8 +166,8 @@ def test_vector_optical_correction_and_exposures(tmp_path):
         fill_rule="evenodd",
     )
 
-    vec_uncor = VectorInterpolator(correction=False, exposures=1)
-    vec_cor = VectorInterpolator(correction=correction, exposures=2)
+    vec_uncor = VectorExposure(correction=False, exposures=1)
+    vec_cor = VectorExposure(correction=correction, exposures=2)
 
     out_uncor = tmp_path / "uncor.bin"
     out_cor = tmp_path / "cor.bin"
@@ -211,10 +214,10 @@ def test_laserhead_mount_orientations():
 
 
 def test_vector_plotptrn_and_camera_patterns(tmp_path):
-    """Verify VectorInterpolator.plotptrn() and CameraCalibrationGen(..., use_vector=True)."""
-    from hexastorm.interpolator.patterns.camera import CameraCalibrationGen
+    """Verify VectorExposure.plotptrn() and CameraCalibrationGen(..., mode='auto')."""
+    from hexastorm.exposure.patterns.camera import CameraCalibrationGen
 
-    vec_interp = VectorInterpolator(correction=False, exposures=1)
+    vec_interp = VectorExposure(correction=False, exposures=1)
     poly = np.array([[0.5, 0.2], [2.0, 0.2], [2.0, 1.5], [0.5, 1.5]], dtype=np.float64)
     out_bin = tmp_path / "vector_plot_test.bin"
     vec_interp.slice_polygons([poly], width_mm=2.5, height_mm=1.8, filepath=out_bin)
@@ -229,23 +232,150 @@ def test_vector_plotptrn_and_camera_patterns(tmp_path):
         lower_pixel=200,
         upper_pixel=500,
         line_thickness_mm=0.15,
-        use_vector=True,
+        mode="auto",
     )
     cam_pat.generate_vertical_jitter_test()
-    res_jitter = cam_pat.interpolator.readbin()
+    assert cam_pat.engine._last_mode == "vector"
+    res_jitter = cam_pat.engine.readbin()
     assert len(res_jitter["data"]) > 0
     assert np.any(res_jitter["data"] == 1)
 
     cam_pat.generate_dot_grid_test(num_dots_y=1)
-    res_grid = cam_pat.interpolator.readbin()
+    res_grid = cam_pat.engine.readbin()
     assert len(res_grid["data"]) > 0
     assert np.any(res_grid["data"] == 1)
 
     cam_pat.generate_blank_test()
-    res_blank = cam_pat.interpolator.readbin()
+    res_blank = cam_pat.engine.readbin()
     assert len(res_blank["data"]) > 0
     assert np.any(res_blank["data"] == 1)
 
-    cam_plot = cam_pat.interpolator.plotptrn(res_grid, filename="test_cam_vector_grid")
+    cam_plot = cam_pat.engine.plot(res_grid, filename="test_cam_vector_grid")
     assert cam_plot.ndim == 3
     assert np.any(cam_plot > 0)
+
+
+def test_exposure_engine_dispatch_svg_and_raster(tmp_path):
+    """Verify ExposureEngine dispatches SVGs to vector, images to raster, and validates modes."""
+    svg_file = tmp_path / "sample.svg"
+    svg_file.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="5.0mm" height="5.0mm" viewBox="0 0 5.0 5.0">
+  <rect x="0" y="0" width="5.0" height="5.0" fill="#ffffff"/>
+  <rect x="1.0" y="1.0" width="2.0" height="2.5" fill="#000000"/>
+</svg>
+""",
+        encoding="utf-8",
+    )
+
+    png_file = tmp_path / "sample.png"
+    img = Image.new("RGB", (120, 120), "white")
+    ImageDraw.Draw(img).rectangle([20, 20, 90, 90], fill="black")
+    img.save(png_file)
+
+    engine = ExposureEngine(mode="auto")
+
+    svg_out = tmp_path / "out_svg.pat"
+    engine.generate(svg_file, output_path=svg_out)
+    assert engine._last_mode == "vector"
+    svg_res = engine.readbin()
+    assert np.any(svg_res["data"] == 1)
+    assert np.any(engine.plot(svg_res, filename="test_dispatch_svg") > 0)
+
+    png_out = tmp_path / "out_png.pat"
+    engine.generate(png_file, output_path=png_out, pixelsize=0.05)
+    assert engine._last_mode == "raster"
+    png_res = engine.readbin()
+    assert np.any(png_res["data"] == 1)
+    assert np.any(engine.plot(png_res, filename="test_dispatch_png") > 0)
+
+    svg_raster_out = tmp_path / "out_svg_raster.pat"
+    engine.generate(svg_file, output_path=svg_raster_out, mode="raster")
+    assert engine._last_mode == "raster"
+    assert np.any(engine.readbin()["data"] == 1)
+
+    with pytest.raises(ValueError, match="requires an .svg input"):
+        engine.generate(png_file, mode="vector")
+
+
+def test_machine_pattern_vector_vs_raster():
+    """Verify LaserCalibrationGen supports mode='auto' (vector) and mode='raster' on combined grid."""
+    from hexastorm.exposure.patterns.machine import LaserCalibrationGen
+
+    gen_vec = LaserCalibrationGen(mode="auto")
+    gen_vec.generate_combined_test()
+    assert gen_vec.engine._last_mode == "vector"
+    res_vec = gen_vec.engine.readbin()
+
+    gen_ras = LaserCalibrationGen(mode="raster")
+    gen_ras.generate_combined_test()
+    assert gen_ras.engine._last_mode == "raster"
+    res_ras = gen_ras.engine.readbin()
+
+    assert res_vec["metadata"]["lanes"] == res_ras["metadata"]["lanes"]
+    assert res_vec["metadata"]["facetsinlane"] == res_ras["metadata"]["facetsinlane"]
+    assert np.isclose(
+        res_vec["metadata"]["lanewidth"], res_ras["metadata"]["lanewidth"], atol=1e-4
+    )
+    assert np.any(res_vec["data"] == 1)
+    assert res_vec["data"].shape == res_ras["data"].shape
+    agreement = float(np.mean(res_vec["data"] == res_ras["data"]))
+    assert agreement > 0.97, (
+        f"Machine combined grid vector/raster agreement {agreement:.4f} too low"
+    )
+
+
+def test_vector_c_core_matches_python_fallback(tmp_path):
+    """Verify the compiled C99 core matches the pure-Python fallback bit-for-bit."""
+    from hexastorm.exposure import vector as vector_mod
+    from hexastorm.exposure.vector import parse_svg_polygons
+
+    assert vector_mod._HAS_C_CORE is True
+
+    svg_content = """<?xml version="1.0" encoding="utf-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="9.0mm" height="7.5mm" viewBox="0 0 9.0 7.5">
+  <rect x="0" y="0" width="9.0" height="7.5" fill="#ffffff"/>
+  <rect x="0.6" y="0.8" width="0.5" height="5.8" fill="#000000"/>
+  <rect x="0.3" y="3.2" width="7.2" height="0.55" fill="#000000"/>
+  <line x1="1.2" y1="6.0" x2="7.5" y2="4.6" stroke="#000000" stroke-width="0.35" stroke-linecap="round"/>
+  <circle cx="6.2" cy="1.8" r="1.0" fill="#000000"/>
+  <path d="M 3.0 1.0 L 4.4 1.0 L 4.4 2.4 L 3.0 2.4 Z M 3.4 1.4 L 4.0 1.4 L 4.0 2.0 L 3.4 2.0 Z"
+        fill="#000000" fill-rule="evenodd"/>
+  <polygon points="1.8,4.8 2.6,4.2 3.1,5.2 2.2,5.6" fill="#000000" fill-rule="nonzero"/>
+</svg>
+"""
+    svg_file = tmp_path / "parity.svg"
+    svg_file.write_text(svg_content, encoding="utf-8")
+    shapes, w_mm, h_mm = parse_svg_polygons(svg_file)
+
+    correction = {
+        "0": {"scan": 0.0, "orth": 0.0},
+        "1": {"scan": 0.045, "orth": -0.060},
+        "2": {"scan": -0.030, "orth": 0.080},
+        "3": {"scan": 0.015, "orth": -0.020},
+    }
+
+    cases = [
+        ("uncor", False, 1, False, LaserheadMount()),
+        ("cor_e2", correction, 2, False, LaserheadMount()),
+        ("pos_resist", False, 1, True, LaserheadMount(rotation_deg=90.0)),
+        ("non_inv", False, 1, False, LaserheadMount(invert_hw_scan_dir=False)),
+    ]
+
+    for tag, cor, exps, pos_res, mount in cases:
+        vec_c = VectorExposure(correction=cor, exposures=exps, mount=mount)
+        vec_py = VectorExposure(correction=cor, exposures=exps, mount=mount)
+        if pos_res:
+            vec_c.params["positiveresist"] = 1.0
+            vec_py.params["positiveresist"] = 1.0
+
+        out_c = tmp_path / f"{tag}_c.pat"
+        out_py = tmp_path / f"{tag}_py.pat"
+
+        vec_c.slice_polygons(shapes, w_mm, h_mm, filepath=out_c, use_c=True)
+        vec_py.slice_polygons(shapes, w_mm, h_mm, filepath=out_py, use_c=False)
+
+        assert vec_c._last_active_lines == vec_py._last_active_lines
+        assert zlib.decompress(out_c.read_bytes()) == zlib.decompress(
+            out_py.read_bytes()
+        ), f"Mismatch in {tag} decompressed SPI stream"

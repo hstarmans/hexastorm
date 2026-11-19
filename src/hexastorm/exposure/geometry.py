@@ -1,9 +1,9 @@
-"""Reference 2D grid-sampling geometry model for the bitmap ``Interpolator``.
+"""Reference 2D grid-sampling geometry model for the bitmap ``RasterExposure``.
 
 Note:
     ``_jit_calculate_grid`` and ``ScannerModel`` belong to the legacy bitmap reference
-    pipeline (used by ``interpolator.Interpolator`` and ``plotptrn()``). Direct
-    vector-to-timestamp slicing and laserhead coordinate transforms live in ``vector.py``.
+    pipeline (used by ``exposure.raster.RasterExposure`` and ``exposure.plotter.plot_pattern``). Direct
+    vector-to-timestamp compilation and laserhead coordinate transforms live in ``vector.py``.
 """
 
 import logging

@@ -5,7 +5,7 @@ import fire
 import numpy as np
 
 from ...config import PlatformConfig
-from ..interpolator import Interpolator
+from .. import ExposureEngine
 
 logger = logging.getLogger(__name__)
 
@@ -26,13 +26,13 @@ class CrossScanPatternGen:
         self.cfg = PlatformConfig(test=False)
         self.exposures = exposures
         self.correction = correction
-        self.interpolator = Interpolator(correction=correction, exposures=exposures)
+        self.engine = ExposureEngine(correction=correction, exposures=exposures)
 
     def set_correction(
         self, correction: bool | dict | None = None, exposures: int | None = None
     ):
         """Enables or updates optical correction parameters."""
-        self.interpolator.set_optical_params(correction=correction, exposures=exposures)
+        self.engine.set_optical_params(correction=correction, exposures=exposures)
 
     def generate_pattern(
         self,
@@ -54,9 +54,9 @@ class CrossScanPatternGen:
         Returns:
             dict: The pattern data dictionary returned by readbin().
         """
-        bitsinscanline = int(self.interpolator.params["bitsinscanline"])
+        bitsinscanline = int(self.engine.params["bitsinscanline"])
         num_facets = int(self.cfg.laser_timing["facets"])
-        exposures = self.interpolator.exposures
+        exposures = self.engine.exposures
         lanes = 4
 
         active_start = margin_bits
@@ -95,34 +95,34 @@ class CrossScanPatternGen:
                     fk_line = (lane_idx * exposures + exp_idx) * num_facets + lane_idx
                     ptrn[fk_line, active_start:active_end] = dashed_pattern
 
-        # Update interpolator params for proper geometry calculation & file header formatting
-        self.interpolator.params["lanes"] = float(lanes)
-        self.interpolator.params["samplexsize"] = float(
-            lanes * self.interpolator.params["lanewidth"]
+        # Update engine params for proper geometry calculation & file header formatting
+        self.engine.params["lanes"] = float(lanes)
+        self.engine.params["samplexsize"] = float(
+            lanes * self.engine.params["lanewidth"]
         )
-        self.interpolator.params["facetsinlane"] = float(exposures * num_facets)
+        self.engine.params["facetsinlane"] = float(exposures * num_facets)
 
         # Flatten and pack bits
-        factor = int(self.interpolator.params["downsamplefactor"])
+        factor = int(self.engine.params["downsamplefactor"])
         ptrn_flat = np.repeat(ptrn.flatten(), factor)
-        ptrn_packed = np.packbits(ptrn_flat, bitorder=self.interpolator.bitorder)
+        ptrn_packed = np.packbits(ptrn_flat, bitorder=self.engine.bitorder)
 
         # Write binary pattern file
         logger.info(
             f"Generating cross-scan pattern: lanes={lanes}, exposures={exposures}, "
             f"dash_len={dash_len_bits}, gap_len={gap_len_bits}"
         )
-        self.interpolator.writebin(ptrn_packed, filename)
+        self.engine.writebin(ptrn_packed, filename)
 
         # Read back and plot pattern
-        pattern_data = self.interpolator.readbin()
+        pattern_data = self.engine.readbin()
         plot_name = Path(filename).stem
-        self.interpolator.plotptrn(pattern_data, filename=plot_name)
+        self.engine.plot(pattern_data, filename=plot_name)
 
         return pattern_data
 
 
-def main(
+def _cli(
     exposures: int = 1,
     dash_len_bits: int = 100,
     gap_len_bits: int = 100,
@@ -135,15 +135,18 @@ def main(
 
     configure_logging(logging.INFO)
     gen = CrossScanPatternGen(exposures=exposures, correction=correction)
-    result = gen.generate_pattern(
+    gen.generate_pattern(
         dash_len_bits=dash_len_bits,
         gap_len_bits=gap_len_bits,
         margin_bits=margin_bits,
         filename=filename,
     )
     logger.info("Cross-scan pattern generation complete.")
-    return result
+
+
+def main():
+    fire.Fire(_cli)
 
 
 if __name__ == "__main__":
-    fire.Fire(main)
+    main()
