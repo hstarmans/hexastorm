@@ -88,7 +88,7 @@ class Spi:
         return ceil(bytes_move / Spi.word_bytes)
 
 
-# seperate function for numba jit
+# Pure-NumPy optical displacement kernel
 def displacement_kernel(pixel, params):
     """
     Calculates the transversal displacement of the laser beam caused by the rotating prism.
@@ -104,7 +104,7 @@ def displacement_kernel(pixel, params):
 
     Args:
         pixel: The current pixel index in the scan line (proxy for time/angle).
-        params: Numba typed dictionary containing system geometry (facets, n, inradius, etc).
+        params: Dictionary containing system geometry (facets, n, inradius, etc).
 
     Returns:
         float: The physical displacement in millimeters relative to the optical axis.

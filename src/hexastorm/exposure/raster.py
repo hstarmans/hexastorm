@@ -9,6 +9,12 @@ from PIL import EpsImagePlugin, Image
 from hexastorm.config import PlatformConfig
 
 from . import geometry, io, plotter
+from .coordinates import (
+    CoordinateTransform,
+    LaserheadMount,
+    MachineFrame,
+    SubstratePlacement,
+)
 
 # Disable PIL Decompression Bomb Warning
 Image.MAX_IMAGE_PIXELS = None
@@ -29,10 +35,23 @@ class RasterExposure:
         New vector/KiCad features and laserhead coordinate transforms belong in `vector.py`.
     """
 
-    def __init__(self, correction: bool = False, exposures: int = 1):
+    def __init__(
+        self,
+        correction: bool | dict = False,
+        exposures: int = 1,
+        mount: LaserheadMount | None = None,
+        placement: SubstratePlacement | None = None,
+        machine: MachineFrame | None = None,
+    ):
         self.cfg = PlatformConfig(test=False)
         self.correction = correction
         self.exposures = exposures
+        self.mount = mount if mount is not None else LaserheadMount()
+        self.placement = placement if placement is not None else SubstratePlacement()
+        self.machine = (
+            machine if machine is not None else MachineFrame.from_config(self.cfg)
+        )
+        self._last_coord: CoordinateTransform | None = None
         self.set_optical_params(correction=correction, exposures=exposures)
         self.debug_folder = self.cfg.paths["base"] / "debug"
         self.debug_folder.mkdir(parents=True, exist_ok=True)
@@ -40,27 +59,20 @@ class RasterExposure:
         self.bitorder = "big"
 
     def set_optical_params(
-        self, correction: bool | None = None, exposures: int | None = None
+        self, correction: bool | dict | None = None, exposures: int | None = None
     ):
         if correction is not None:
             self.correction = correction
         if exposures is not None:
             self.exposures = exposures
-        # Initialize math parameters via config (pure python side)
         raw_params = self.cfg.get_optical_params(
             correction=self.correction, exposures=self.exposures
         )
-        # Initialize the Scanner model (JIT-compiled geometry calculations)
         self.geo = geometry.ScannerModel(raw_params)
-
-        # Link self.params to the JIT class params so we can read them easily
         self.params = self.geo.params
 
     def svgtopil(self, svg_filepath: Path) -> Image.Image:
-        """
-        Converts SVG vector graphics to a raster PIL Image using resvg-py.
-        Includes a -90 degree rotation to align the coordinate system with the laser scan direction.
-        """
+        """Convert SVG vector graphics to an unrotated RGB PIL Image using resvg-py."""
         import resvg_py
 
         dpi = float(round(25.4 / self.params["samplegridsize"]))
@@ -73,7 +85,7 @@ class RasterExposure:
         if img.mode in ("RGBA", "LA"):
             bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
             img = Image.alpha_composite(bg, img.convert("RGBA")).convert("RGB")
-        return img.rotate(-90, expand=True)
+        return img
 
     def pstopil(self, filepath: Path, pixelsize: float = 0.3527777778) -> Image.Image:
         img = Image.open(filepath)
@@ -91,23 +103,34 @@ class RasterExposure:
         return img
 
     def piltoarray(self, img: Image.Image) -> np.ndarray:
-        """
-        Converts PIL Image to a numpy array and crops it to the region of interest.
-        Also updates the system parameters (samplexsize/sampleysize) to match the actual image dimensions.
-        """
-        img_array = np.array(img.convert("1"))
+        """Convert PIL Image (unrotated Substrate frame) to boolean/binary numpy array."""
+        img_array = np.array(img.convert("1", dither=Image.Dither.NONE))
         if img_array.max() == 0:
             raise ValueError("Image is empty")
 
-        # Update geometry settings based on actual image size
-        x_size, y_size = [i * self.params["samplegridsize"] for i in img_array.shape]
+        grid_size = float(self.params["samplegridsize"])
+        h_px, w_px = img_array.shape
+        width_mm = w_px * grid_size
+        height_mm = h_px * grid_size
 
-        if (x_size > self.params["pltfxsize"]) or (y_size > self.params["pltfysize"]):
-            raise ValueError("Object does not fit on platform")
+        coord = CoordinateTransform(
+            width_mm=width_mm,
+            height_mm=height_mm,
+            machine=self.machine,
+            placement=self.placement,
+            mount=self.mount,
+        )
+        coord.validate_fits_machine(
+            max_x_mm=min(self.machine.x_size_mm, float(self.params["pltfxsize"])),
+            max_y_mm=min(self.machine.y_size_mm, float(self.params["pltfysize"])),
+        )
+        self._last_coord = coord
 
-        logger.debug(f"Sample size is {x_size:.2f} mm by {y_size:.2f} mm")
-        self.params["samplexsize"] = x_size
-        self.params["sampleysize"] = y_size
+        logger.debug(
+            f"Sample size is {coord.u_size_mm:.2f} mm by {coord.v_size_mm:.2f} mm"
+        )
+        self.params["samplexsize"] = coord.u_size_mm
+        self.params["sampleysize"] = coord.v_size_mm
         return img_array
 
     def laser_compensation(self, layerarr: np.ndarray, erode: bool) -> np.ndarray:
@@ -176,35 +199,60 @@ class RasterExposure:
         logger.debug("Retrieved image")
         logger.debug(f"Elapsed {time() - ctime:.2f} seconds")
 
-        # 2. Calculate Coordinates
-        # ids is (2, N) array: [y_coords, x_coords] stack.
-        # These are the physical integer coordinates on the sample grid.
-        ids = self.geo.calculate_coordinates()
+        # 2 & 3. Map Laserhead Coordinates -> Substrate Bitmap via CoordinateTransform
+        coord = self._last_coord
+        h_px, w_px = layerarr.shape
+        grid_size = float(self.params["samplegridsize"])
 
-        logger.debug("Created coordinates for interpolation")
-        logger.debug(f"Elapsed {time() - ctime:.2f} seconds")
+        if coord is None or coord.is_identity_lh_to_sub:
+            ids = self.geo.calculate_coordinates()
+            logger.debug("Created coordinates for interpolation")
+            logger.debug(f"Elapsed {time() - ctime:.2f} seconds")
 
-        # Note: Coordinate convention swap.
-        # The 'geometry' module returns stacked arrays, but the interpretation here
-        # assumes ids[0] is the Y-index (Row) and ids[1] is the X-index (Column).
-        y_coords = ids[0]
-        x_coords = ids[1]
+            u_px = ids[0]
+            v_px = ids[1]
+            mask = (u_px >= 0) & (u_px < w_px) & (v_px >= 0) & (v_px < h_px)
+            ptrn = np.zeros(u_px.shape, dtype=np.uint8)
+            # Substrate y=0 is bottom row (h_px - 1), y=height_mm is top row (0)
+            ptrn[mask] = layerarr[(h_px - 1) - v_px[mask], u_px[mask]]
+        else:
+            ptrn_3d: np.ndarray | None = None
+            mask_3d: np.ndarray | None = None
+            for lane_idx, u_mm, v_mm in self.geo.iter_lane_coords_mm():
+                if ptrn_3d is None:
+                    n_lanes = int(self.params["lanes"])
+                    n_facets = int(self.params["facetsinlane"])
+                    n_pts = u_mm.shape[1]
+                    ptrn_3d = np.zeros((n_lanes, n_facets, n_pts), dtype=np.uint8)
+                    mask_3d = np.zeros((n_lanes, n_facets, n_pts), dtype=bool)
+                    logger.debug(f"The lanewidth is {self.params['lanewidth']:.2f} mm")
+                    logger.debug(f"The facets in lane are {n_facets}")
 
-        # 3. Map Image to Coordinates (Sampling)
-        # Create a boolean mask for coordinates that fall inside the image bounds.
-        # The scanner area is typically larger than the image (overscan).
-        mask = (
-            (x_coords >= 0)
-            & (x_coords < layerarr.shape[1])
-            & (y_coords >= 0)
-            & (y_coords < layerarr.shape[0])
-        )
+                x_sub_mm, y_sub_mm = coord.laserhead_to_substrate_xy(u_mm, v_mm)
+                in_bounds = (
+                    (x_sub_mm >= 0.0)
+                    & (x_sub_mm <= coord.width_mm)
+                    & (y_sub_mm >= 0.0)
+                    & (y_sub_mm <= coord.height_mm)
+                )
+                col = np.clip(
+                    np.floor(x_sub_mm[in_bounds] / grid_size).astype(np.int32),
+                    0,
+                    w_px - 1,
+                )
+                row = np.clip(
+                    np.floor(
+                        (coord.height_mm - y_sub_mm[in_bounds]) / grid_size
+                    ).astype(np.int32),
+                    0,
+                    h_px - 1,
+                )
+                ptrn_3d[lane_idx][in_bounds] = layerarr[row, col]
+                mask_3d[lane_idx] = in_bounds
 
-        ptrn = np.zeros(x_coords.shape, dtype=np.uint8)
-
-        # Advanced Indexing: Sample the image at the calculated coordinates.
-        # layerarr[row, col] corresponds to layerarr[y, x].
-        ptrn[mask] = layerarr[y_coords[mask], x_coords[mask]]
+            assert ptrn_3d is not None and mask_3d is not None
+            ptrn = ptrn_3d.ravel()
+            mask = mask_3d.ravel()
 
         logger.debug("Completed interpolation")
         logger.debug(f"Elapsed {time() - ctime:.2f} seconds")
@@ -311,7 +359,12 @@ class RasterExposure:
         out_path = self._tagged_bin_path(out_path)
 
         self._last_output_path = out_path
-        io.write_binary_file(pixeldata, self.params, out_path)
+        io.write_binary_file(
+            pixeldata,
+            self.params,
+            out_path,
+            invert_hw_scan_dir=self.mount.invert_hw_scan_dir,
+        )
 
     def readbin(self, filename: str | Path | None = None) -> dict:
         """Wrapper for io.read_binary_file"""
@@ -348,6 +401,7 @@ class RasterExposure:
         ptrn_data: np.ndarray | dict,
         filename: str = "plot",
         color_lanes: bool = True,
+        view: str = "substrate",
     ) -> np.ndarray:
         """Visualizes the generated pattern data via :mod:`hexastorm.exposure.plotter`."""
         return plotter.plot_pattern(
@@ -357,4 +411,7 @@ class RasterExposure:
             exposures=self.exposures,
             filename=filename,
             color_lanes=color_lanes,
+            view=view,
+            machine=self.machine,
+            coord=self._last_coord,
         )

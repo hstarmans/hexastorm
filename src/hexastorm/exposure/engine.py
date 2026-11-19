@@ -8,8 +8,14 @@ import numpy as np
 from hexastorm.config import PlatformConfig, displacement_kernel
 
 from . import io, plotter
+from .coordinates import (
+    CoordinateTransform,
+    LaserheadMount,
+    MachineFrame,
+    SubstratePlacement,
+)
 from .raster import RasterExposure
-from .vector import LaserheadMount, VectorExposure
+from .vector import VectorExposure
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +37,8 @@ class ExposureEngine:
         mode: str = "auto",
         mount: LaserheadMount | None = None,
         intensity: int = 255,
+        placement: SubstratePlacement | None = None,
+        machine: MachineFrame | None = None,
     ):
         if mode not in VALID_MODES:
             raise ValueError(
@@ -40,12 +48,17 @@ class ExposureEngine:
         self.cfg = PlatformConfig(test=False)
         self.mode = mode
         self.mount = mount
+        self.placement = placement
+        self.machine = (
+            machine if machine is not None else MachineFrame.from_config(self.cfg)
+        )
         self.default_intensity = max(1, min(255, int(intensity)))
         self.bitorder = "big"
         self._vector: VectorExposure | None = None
         self._raster: RasterExposure | None = None
         self._last_output_path: Path | None = None
         self._last_mode: str | None = None
+        self._last_coord: CoordinateTransform | None = None
         self.set_optical_params(correction=correction, exposures=exposures)
 
     @property
@@ -57,6 +70,8 @@ class ExposureEngine:
                 exposures=self.exposures,
                 mount=self.mount,
                 intensity=self.default_intensity,
+                placement=self.placement,
+                machine=self.machine,
             )
         return self._vector
 
@@ -67,6 +82,9 @@ class ExposureEngine:
             self._raster = RasterExposure(
                 correction=self.correction,
                 exposures=self.exposures,
+                mount=self.mount,
+                placement=self.placement,
+                machine=self.machine,
             )
         return self._raster
 
@@ -131,6 +149,7 @@ class ExposureEngine:
             input_path, bin_name=output_path, camera=camera, **kwargs
         )
         self._last_output_path = backend._last_output_path
+        self._last_coord = getattr(backend, "_last_coord", None)
         for key in ("lanes", "facetsinlane", "samplexsize", "sampleysize"):
             if key in backend.params:
                 self.params[key] = backend.params[key]
@@ -193,6 +212,7 @@ class ExposureEngine:
         ptrn_data: dict | None = None,
         filename: str = "plot",
         color_lanes: bool = True,
+        view: str = "substrate",
     ) -> np.ndarray:
         """Render an event-driven pattern dictionary (or last written file) to a debug PNG."""
         if ptrn_data is None:
@@ -204,6 +224,9 @@ class ExposureEngine:
             exposures=self.exposures,
             filename=filename,
             color_lanes=color_lanes,
+            view=view,
+            machine=self.machine,
+            coord=self._last_coord,
         )
 
     plotptrn = plot
@@ -216,12 +239,18 @@ def _cli(
     correction: bool = False,
     exposures: int = 1,
     plot: bool = True,
+    align: str = "laserhead",
 ):
     """CLI entry point to compile an SVG or raster image into an exposure file."""
     from ..log_setup import configure_logging
 
     configure_logging(logging.DEBUG)
-    engine = ExposureEngine(correction=correction, exposures=exposures, mode=mode)
+    engine = ExposureEngine(
+        correction=correction,
+        exposures=exposures,
+        mode=mode,
+        placement=SubstratePlacement(align=align),
+    )
     duration = engine.generate(input_file, output_path=output_file)
     logger.info(
         f"Exposure complete (mode={engine._last_mode}, duration={duration:.2f} min): "

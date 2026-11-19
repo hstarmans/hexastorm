@@ -5,18 +5,20 @@ event-driven ``[tick, intensity]`` FPGA scanline files (``.pat`` / ``.bin``) wit
 intermediate bitmap rasterization.
 
 Coordinate Frames:
-    1. Design frame ``(x_design, y_design)`` [mm]: bottom-left origin ``(0, 0)``,
+    1. Substrate frame ``(x_sub, y_sub)`` [mm]: bottom-left origin ``(0, 0)``,
        right = ``+x``, up = ``+y``.
-    2. Laserhead frame ``(u_scan, v_step)`` [mm]: mapped explicitly from Design via
-       :class:`LaserheadMount` (mount rotation and axis mirroring). ``u_scan`` is the
-       fast prism-scan axis (divided into lanes of width ``lanewidth``), and
-       ``v_step`` is the slow stage-stepping axis (``orth2lsrline``).
-    3. FPGA Clock Ticks ``t``: per scanline ``[0, scanline_length * laser_ticks]``,
+    2. Machine frame ``(x_mach, y_mach)`` [mm]: physical stage coordinates, mapped
+       from Substrate via :class:`SubstratePlacement`.
+    3. Laserhead frame ``(u_scan, v_step)`` [mm]: optical scanhead coordinates,
+       mapped from Machine via :class:`MachineFrame` and :class:`LaserheadMount`.
+       ``u_scan`` is the fast prism-scan axis (divided into lanes of width
+       ``lanewidth``), and ``v_step`` is the slow stage-stepping axis.
+    4. FPGA Clock Ticks ``t``: per scanline ``[0, scanline_length * laser_ticks]``,
        computed directly from intersection coordinates ``u_hit`` via the 1D inverse
        Snellius prism curve (:class:`PrismCurve`).
 
-The legacy bitmap pipeline (:mod:`hexastorm.exposure.raster` and
-:mod:`hexastorm.exposure.geometry`) serves as the frozen reference implementation for
+The pure-NumPy bitmap pipeline (:mod:`hexastorm.exposure.raster` and
+:mod:`hexastorm.exposure.geometry`) serves as the reference implementation for
 verification and pure raster image fallback.
 """
 
@@ -34,6 +36,12 @@ import numpy as np
 
 from ..config import PlatformConfig, Spi, displacement_kernel
 from . import io, plotter
+from .coordinates import (
+    CoordinateTransform,
+    LaserheadMount,
+    MachineFrame,
+    SubstratePlacement,
+)
 
 try:
     from . import _vector_core
@@ -63,63 +71,6 @@ _UNIT_TO_MM = {
     "cm": 10.0,
     "in": 25.4,
 }
-
-
-@dataclass
-class LaserheadMount:
-    """Explicit coordinate transform between Design ``(x, y)`` and Scanner ``(u, v)``.
-
-    Args:
-        rotation_deg: Counter-clockwise rotation applied to the design to align it
-            with the scanner axes ``(u_scan, v_step)``. ``0.0`` keeps ``u = x, v = y``
-            (matching the legacy bitmap :class:`Interpolator`). ``90.0`` corresponds
-            to mounting the laserhead rotated by 90 degrees on the stage.
-        mirror_u: Mirror along the prism scan axis ``u_scan``.
-        mirror_v: Mirror along the stage step axis ``v_step``.
-        invert_hw_scan_dir: If ``True`` (Hexastorm standard hardware sweep), clock
-            tick ``0`` starts at the ``u_min`` side of each lane (legacy pixel
-            ``bitsinscanline - 1``) and sweeps toward ``u_max`` (pixel ``0``).
-    """
-
-    rotation_deg: float = 0.0
-    mirror_u: bool = False
-    mirror_v: bool = False
-    invert_hw_scan_dir: bool = True
-
-    def transform_bounds(
-        self, width_mm: float, height_mm: float
-    ) -> tuple[float, float, float, float]:
-        """Return ``(u_min, v_min, u_size, v_size)`` after rotating the design box."""
-        theta = math.radians(self.rotation_deg)
-        c, s = math.cos(theta), math.sin(theta)
-        corners = (
-            (0.0, 0.0),
-            (width_mm, 0.0),
-            (width_mm, height_mm),
-            (0.0, height_mm),
-        )
-        us = [x * c - y * s for x, y in corners]
-        vs = [x * s + y * c for x, y in corners]
-        u_min, u_max = min(us), max(us)
-        v_min, v_max = min(vs), max(vs)
-        return u_min, v_min, (u_max - u_min), (v_max - v_min)
-
-    def transform_points(
-        self, pts: np.ndarray, width_mm: float, height_mm: float
-    ) -> tuple[np.ndarray, float, float]:
-        """Transform ``(K, 2)`` design coordinates [mm] into scanner ``(u, v)`` [mm]."""
-        u_min, v_min, u_size, v_size = self.transform_bounds(width_mm, height_mm)
-        theta = math.radians(self.rotation_deg)
-        c, s = math.cos(theta), math.sin(theta)
-
-        pts_arr = np.asarray(pts, dtype=np.float64)
-        u = pts_arr[:, 0] * c - pts_arr[:, 1] * s - u_min
-        v = pts_arr[:, 0] * s + pts_arr[:, 1] * c - v_min
-        if self.mirror_u:
-            u = u_size - u
-        if self.mirror_v:
-            v = v_size - v
-        return np.column_stack((u, v)), u_size, v_size
 
 
 @dataclass
@@ -1125,15 +1076,22 @@ class VectorExposure:
         exposures: int = 1,
         mount: LaserheadMount | None = None,
         intensity: int = 255,
+        placement: SubstratePlacement | None = None,
+        machine: MachineFrame | None = None,
     ):
         self.cfg = PlatformConfig(test=False)
         self.correction = correction
         self.exposures = exposures
         self.mount = mount if mount is not None else LaserheadMount()
+        self.placement = placement if placement is not None else SubstratePlacement()
+        self.machine = (
+            machine if machine is not None else MachineFrame.from_config(self.cfg)
+        )
         self.default_intensity = max(1, min(255, int(intensity)))
         self.bitorder = "big"
         self._last_output_path: Path | None = None
         self._last_active_lines: int = 0
+        self._last_coord: CoordinateTransform | None = None
         self.set_optical_params(correction=correction, exposures=exposures)
 
     def set_optical_params(
@@ -1163,21 +1121,29 @@ class VectorExposure:
         if width_mm <= 0 or height_mm <= 0:
             raise ValueError("Sample width_mm and height_mm must be positive")
 
-        # Normalize raw numpy contours to VectorShape and transform to laserhead frame
+        coord = CoordinateTransform(
+            width_mm=width_mm,
+            height_mm=height_mm,
+            machine=self.machine,
+            placement=self.placement,
+            mount=self.mount,
+        )
+        coord.validate_fits_machine(
+            max_x_mm=min(self.machine.x_size_mm, float(self.params["pltfxsize"])),
+            max_y_mm=min(self.machine.y_size_mm, float(self.params["pltfysize"])),
+        )
+        self._last_coord = coord
+        u_size_mm, v_size_mm = coord.u_size_mm, coord.v_size_mm
+
+        # Normalize raw numpy contours to VectorShape and transform Substrate -> Laserhead
         transformed_shapes: list[VectorShape] = []
-        u_size_mm, v_size_mm = width_mm, height_mm
         for item in polygons:
             shape = (
                 item
                 if isinstance(item, VectorShape)
                 else VectorShape(contours=[np.asarray(item, dtype=np.float64)])
             )
-            t_contours = []
-            for cnt in shape.contours:
-                t_pts, u_size_mm, v_size_mm = self.mount.transform_points(
-                    cnt, width_mm, height_mm
-                )
-                t_contours.append(t_pts)
+            t_contours = [coord.substrate_to_laserhead(cnt) for cnt in shape.contours]
             transformed_shapes.append(
                 VectorShape(
                     contours=t_contours,
@@ -1185,15 +1151,6 @@ class VectorExposure:
                     intensity=shape.intensity,
                 )
             )
-        if not transformed_shapes:
-            _, _, u_size_mm, v_size_mm = self.mount.transform_bounds(
-                width_mm, height_mm
-            )
-
-        if u_size_mm > float(self.params["pltfxsize"]) or v_size_mm > float(
-            self.params["pltfysize"]
-        ):
-            raise ValueError("Object does not fit on platform")
 
         params = self.params
         params["samplexsize"] = float(u_size_mm)
@@ -1609,6 +1566,7 @@ class VectorExposure:
         ptrn_data: np.ndarray | dict | None = None,
         filename: str = "plot",
         color_lanes: bool = True,
+        view: str = "substrate",
     ) -> np.ndarray:
         """Visualize the generated event-driven pattern via :mod:`hexastorm.exposure.plotter`."""
         if ptrn_data is None:
@@ -1620,4 +1578,7 @@ class VectorExposure:
             exposures=self.exposures,
             filename=filename,
             color_lanes=color_lanes,
+            view=view,
+            machine=self.machine,
+            coord=self._last_coord,
         )

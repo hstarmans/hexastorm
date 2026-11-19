@@ -1,275 +1,258 @@
-"""Reference 2D grid-sampling geometry model for the bitmap ``RasterExposure``.
+"""Reference 2D grid-sampling geometry model for ``RasterExposure`` and ``plotter``.
 
-Note:
-    ``_jit_calculate_grid`` and ``ScannerModel`` belong to the legacy bitmap reference
-    pipeline (used by ``exposure.raster.RasterExposure`` and ``exposure.plotter.plot_pattern``). Direct
-    vector-to-timestamp compilation and laserhead coordinate transforms live in ``vector.py``.
+Generates pure-NumPy lookup coordinates in native Laserhead coordinates:
+``u_scan`` (fast prism sweep + multi-lane stitching) and ``v_step`` (slow stage axis).
 """
 
 import logging
 import math
-import sys
+from collections.abc import Iterator
 from typing import Any
 
-import numba.cpython.unicode  # noqa: F401
 import numpy as np
-from numba import jit, typed, types
-from numba.core import cgutils, pythonapi
-from numba.core import types as nb_types
-from numba.core.extending import NativeValue
 
 from ..config import displacement_kernel
 
-# Workaround for Python builds using FNV string hashing (e.g. uv macOS x86_64):
-# Numba hashes strings internally with siphash24 while unbox_unicode_str copies
-# the cached CPython FNV hash, causing typed.Dict string-literal lookups to miss.
-if sys.hash_info.algorithm == "fnv":
-
-    def _unbox_unicode_str_fnv(typ, obj, c):
-        _ok, data, length, kind, is_ascii, _ = c.pyapi.string_as_string_size_and_kind(
-            obj
-        )
-        uni_str = cgutils.create_struct_proxy(typ)(c.context, c.builder)
-        uni_str.data = data
-        uni_str.length = length
-        uni_str.kind = kind
-        uni_str.is_ascii = is_ascii
-        uni_str.hash = uni_str.hash.type(-1)
-        uni_str.meminfo = c.pyapi.nrt_meminfo_new_from_pyobject(data, obj)
-        uni_str.parent = obj
-        is_error = cgutils.is_not_null(c.builder, c.pyapi.err_occurred())
-        return NativeValue(uni_str._getvalue(), is_error=is_error)
-
-    pythonapi._unboxers.functions[nb_types.UnicodeType] = _unbox_unicode_str_fnv
-
-# --- JIT Compiled Math Functions ---
-
-# We compile the kernel independently because it is a pure mathematical function
-# that doesn't depend on the class state, just the params passed to it.
-displacement = jit(nopython=True, cache=True)(displacement_kernel)
-
 logger = logging.getLogger(__name__)
 
+# Pure-NumPy optical displacement kernel alias
+displacement = displacement_kernel
 
-@jit(nopython=True, cache=True)
-def _jit_fxpos(
-    pixel: float, params: dict[str, float], facet_idx: int = 0, xstart: float = 0
-) -> float:
-    """
-    Returns the laser diode X-position (Transversal / Scan Direction) in pixels.
 
-    The X-axis typically represents the direction the laser scans across the sample.
-    If tiltangle (alpha) is 90 degrees (Hexastorm standard), sin(90)=1, so
-    X receives 100% of the prism displacement. AMSystems/LDIsystems/KleoLDI use
-    different angles.
+def fxpos(
+    pixel: float | np.ndarray,
+    params: dict[str, Any],
+    facet_idx: int = 0,
+    xstart: float = 0.0,
+) -> float | np.ndarray:
+    """Return laserhead ``u_scan`` position in sample-grid pixels.
 
     Args:
-        pixel: The pixel index.
-        params: System parameters.
-        facet_idx: Index of the current facet.
-        xstart: Offset in mm.
+        pixel: Pixel index or array along the scanline.
+        params: Optical/geometry parameter dictionary.
+        facet_idx: Physical prism facet index ``0 .. facets - 1``.
+        xstart: Offset along ``u_scan`` in mm.
     """
-    # Get the correction for the current facet
-    dx = params["f" + str(facet_idx) + "_scan"]
-    line_pixel = params["startpixel"] + pixel % params["bitsinscanline"]
-
-    # Project displacement onto X axis based on polygon tilt
+    dx = float(params[f"f{facet_idx}_scan"])
+    line_pixel = float(params["startpixel"]) + (pixel % float(params["bitsinscanline"]))
     xpos = (
-        (np.sin(params["tiltangle"]) * displacement(line_pixel, params)) + xstart + dx
+        (np.sin(float(params["tiltangle"])) * displacement_kernel(line_pixel, params))
+        + float(xstart)
+        + dx
     )
-
-    # Convert mm to grid pixels
-    return xpos / params["samplegridsize"]
+    return xpos / float(params["samplegridsize"])
 
 
-@jit(nopython=True, cache=True)
-def _jit_fypos(
-    pixel: float,
-    params: dict[str, float],
-    facet_idx: int,
-    direction: bool,
-    ystart: float = 0,
-) -> float:
-    """
-    Returns the laser diode Y-position (Longitudinal / Stage Direction) in pixels.
-
-    The Y-axis is the "slow" axis parallel to the stage movement.
-    The position is a sum of two components:
-    1. Projection of Prism Displacement: If tiltangle != 90, some scan motion bleeds into Y.
-    2. Stage Movement: The continuous motion of the substrate (v = stagespeed).
+def fypos(
+    pixel: float | np.ndarray,
+    params: dict[str, Any],
+    facet_idx: int = 0,
+    direction: bool = True,
+    ystart: float = 0.0,
+) -> float | np.ndarray:
+    """Return laserhead ``v_step`` position in sample-grid pixels.
 
     Args:
-        pixel: The pixel index.
-        params: System parameters.
-        direction: Boolean indicating scan direction (Zig-Zag scanning).
-        facet_idx: Index of the current facet.
-        ystart: Y-offset in mm.
+        pixel: Pixel index or array along the scanline.
+        params: Optical/geometry parameter dictionary.
+        facet_idx: Physical prism facet index ``0 .. facets - 1``.
+        direction: True for forward lane motion, False for backward lane motion.
+        ystart: Offset along ``v_step`` in mm.
     """
-    dy = params["f" + str(facet_idx) + "_orth"]
-
-    line_pixel = params["startpixel"] + pixel % params["bitsinscanline"]
-
-    # 1. Optical Component: Projection of displacement onto Y (usually 0 if tilt=90)
-    base_y = (-np.cos(params["tiltangle"]) * displacement(line_pixel, params)) + dy
-
-    # 2. Mechanical Component: Stage movement over time
-    # time = pixel / LASER_HZ
-    # distance = time * stagespeed
-    stage_component = (line_pixel / params["laser_hz"]) * params["stagespeed"]
-
+    dy = float(params[f"f{facet_idx}_orth"])
+    line_pixel = float(params["startpixel"]) + (pixel % float(params["bitsinscanline"]))
+    base_y = (
+        -np.cos(float(params["tiltangle"])) * displacement_kernel(line_pixel, params)
+    ) + dy
+    stage_component = (line_pixel / float(params["laser_hz"])) * float(
+        params["stagespeed"]
+    )
+    offset = float(ystart)
     if direction:
-        ypos = base_y + stage_component + ystart
+        ypos = base_y + stage_component + offset
     else:
-        ypos = base_y - stage_component + ystart
+        ypos = base_y - stage_component + offset
+    return ypos / float(params["samplegridsize"])
 
-    return ypos / params["samplegridsize"]
+
+scan_u_px = fxpos
+stage_v_px = fypos
 
 
-@jit(nopython=True, cache=True)
-def _jit_calculate_grid(params: Any) -> tuple[np.ndarray, dict[str, float]]:
-    """
-    Generates the lookup coordinate grid using pre-allocation to avoid
-    Numba concatenation errors.
-    """
-    if not params["sampleysize"] or not params["samplexsize"]:
+def _plan_grid_geometry(
+    params: dict[str, Any],
+    lanes: int | None = None,
+    facets_inlane: int | None = None,
+) -> dict[str, Any]:
+    """Plan grid dimensions and precompute per-facet base sweeps."""
+    if (lanes is None or facets_inlane is None) and (
+        not params["sampleysize"] or not params["samplexsize"]
+    ):
         raise ValueError("Sampleysize or samplexsize are set to zero.")
 
-    # Validation
-    if (
-        _jit_fxpos(0, params, 0, 0.0) < 0
-        or _jit_fxpos(params["bitsinscanline"] - 1, params, 0, 0.0) > 0
-    ):
+    points_per_sweep = int(params["bitsinscanline"])
+    num_physical_facets = int(params["facets"])
+    grid_size = float(params["samplegridsize"])
+    start_x = float(fxpos(0.0, params, 0, 0.0))
+    end_x = float(fxpos(float(points_per_sweep - 1), params, 0, 0.0))
+
+    if start_x < 0 or end_x > 0:
         raise ValueError("Line seems ill positioned: fxpos(0) < 0 or end > 0")
 
-    # 1. Geometry Planning
-    start_x = _jit_fxpos(0.0, params, 0, 0.0)
-    end_x = _jit_fxpos(params["bitsinscanline"] - 1, params, 0, 0.0)
-    lanewidth = (start_x - end_x) * params["samplegridsize"]
-
-    # Calculate required lanes
-    lanes = math.ceil(params["samplexsize"] / lanewidth)
-
-    # Calculate required facets
-    facets_inlane = math.ceil(
-        params["rotationfrequency"]
-        * params["facets"]
-        * (params["sampleysize"] / params["stagespeed"])
+    lanewidth = float((start_x - end_x) * grid_size)
+    planned_lanes = (
+        math.ceil(float(params["samplexsize"]) / lanewidth)
+        if lanes is None
+        else int(lanes)
+    )
+    planned_facets = (
+        math.ceil(
+            float(params["rotationfrequency"])
+            * num_physical_facets
+            * (float(params["sampleysize"]) / float(params["stagespeed"]))
+        )
+        if facets_inlane is None
+        else int(facets_inlane)
     )
 
-    # --- PRE-CALCULATE SIZE & ALLOCATE MEMORY ---
-    # This replaces the dynamic list appending
-    points_per_sweep = int(params["bitsinscanline"])
-    total_points = int(lanes * facets_inlane * points_per_sweep)
+    xstart_val = float(abs(end_x * grid_size))
+    x_width_pixels = float(start_x - end_x)
+    stagespeed = float(params["stagespeed"])
+    rot_freq = float(params["rotationfrequency"])
+    y_shift_per_facet = stagespeed / (num_physical_facets * rot_freq * grid_size)
 
-    # Pre-allocate the final arrays with the exact size needed
-    x_final = np.empty(total_points, dtype=np.int32)
-    y_final = np.empty(total_points, dtype=np.int32)
+    # Precompute the F physical facet base sweeps (F, P) in pure NumPy
+    pixel_indices = np.arange(points_per_sweep, dtype=np.float64)
+    startpixel = float(params["startpixel"])
+    line_pixel = startpixel + (pixel_indices % points_per_sweep)
+    disp = displacement_kernel(line_pixel, params)
 
-    # 2. Base Facet Generation
-    pixel_indices = np.arange(points_per_sweep)
+    tilt = float(params["tiltangle"])
+    sin_tilt = math.sin(tilt)
+    cos_tilt = math.cos(tilt)
+    stage_comp = (line_pixel / float(params["laser_hz"])) * stagespeed
 
-    xstart_val = abs(
-        _jit_fxpos(points_per_sweep - 1, params) * params["samplegridsize"]
+    dx_arr = np.array(
+        [float(params[f"f{fi}_scan"]) for fi in range(num_physical_facets)],
+        dtype=np.float64,
+    )[:, None]
+    dy_arr = np.array(
+        [float(params[f"f{fi}_orth"]) for fi in range(num_physical_facets)],
+        dtype=np.float64,
+    )[:, None]
+
+    u_base_mm = (sin_tilt * disp)[None, :] + xstart_val + dx_arr
+    base_v_mm = (-cos_tilt * disp)[None, :] + dy_arr
+    v_base_fwd_mm = base_v_mm + stage_comp[None, :]
+    v_base_bwd_mm = base_v_mm - stage_comp[None, :]
+
+    f_lane_indices = np.arange(planned_facets, dtype=np.int64)
+    facet_map = f_lane_indices % num_physical_facets
+
+    u_lane_base_mm = u_base_mm[facet_map]
+    v_fwd_mm = (
+        v_base_fwd_mm[facet_map]
+        + (f_lane_indices * y_shift_per_facet * grid_size)[:, None]
     )
-
-    y_shift_per_facet = (params["stagespeed"]) / (
-        params["facets"] * params["rotationfrequency"] * params["samplegridsize"]
+    v_bwd_mm = (
+        v_base_bwd_mm[facet_map]
+        + ((planned_facets - f_lane_indices) * y_shift_per_facet * grid_size)[:, None]
     )
-
-    x_width_pixels = _jit_fxpos(0, params, 0) - _jit_fxpos(
-        points_per_sweep - 1, params, 0
-    )
-
-    # 3. Coordinate Generation
-    num_physical_facets = int(params["facets"])
-
-    # Track where we are inserting data into the final arrays
-    current_idx = 0
-
-    for l_idx in range(lanes):
-        is_forward = l_idx % 2 == 0
-        lane_x_offset = l_idx * x_width_pixels
-
-        for f_lane_idx in range(facets_inlane):
-            facet_idx = f_lane_idx % num_physical_facets
-
-            if is_forward:
-                ystart_mm = f_lane_idx * y_shift_per_facet * params["samplegridsize"]
-            else:
-                ystart_mm = (
-                    (facets_inlane - f_lane_idx)
-                    * y_shift_per_facet
-                    * params["samplegridsize"]
-                )
-
-            # Calculate sweep
-            x_sweep = _jit_fxpos(pixel_indices, params, facet_idx, xstart_val)
-            y_sweep = _jit_fypos(
-                pixel_indices, params, facet_idx, is_forward, ystart_mm
-            )
-
-            # --- DIRECT INSERTION ---
-            # Instead of append, we slice directly into the final array
-            end_idx = current_idx + points_per_sweep
-
-            x_final[current_idx:end_idx] = (x_sweep + lane_x_offset).astype(np.int32)
-            y_final[current_idx:end_idx] = y_sweep.astype(np.int32)
-
-            # Move the pointer forward
-            current_idx = end_idx
-
-    # 4. Final Assembly
-    ids = np.vstack((x_final, y_final)).astype(np.int32)
 
     params["lanewidth"] = lanewidth
-    params["lanes"] = float(lanes)
-    params["facetsinlane"] = float(facets_inlane)
+    params["lanes"] = float(planned_lanes)
+    params["facetsinlane"] = float(planned_facets)
+
+    return {
+        "lanes": planned_lanes,
+        "facets_inlane": planned_facets,
+        "points_per_sweep": points_per_sweep,
+        "grid_size": grid_size,
+        "x_width_pixels": x_width_pixels,
+        "u_lane_base_mm": u_lane_base_mm,
+        "v_fwd_mm": v_fwd_mm,
+        "v_bwd_mm": v_bwd_mm,
+    }
+
+
+def calculate_grid(
+    params: dict[str, Any],
+    lanes: int | None = None,
+    facets_inlane: int | None = None,
+) -> np.ndarray:
+    """Generate the ``(2, N)`` int32 laserhead pixel lookup grid ``[u_px, v_px]``."""
+    plan = _plan_grid_geometry(params, lanes=lanes, facets_inlane=facets_inlane)
+    n_lanes = plan["lanes"]
+    n_facets = plan["facets_inlane"]
+    n_pts = plan["points_per_sweep"]
+    grid_size = plan["grid_size"]
+    x_width_pixels = plan["x_width_pixels"]
+
+    u_lane_base_px = plan["u_lane_base_mm"] / grid_size
+    v_fwd_px = (plan["v_fwd_mm"] / grid_size).astype(np.int32)
+    v_bwd_px = (plan["v_bwd_mm"] / grid_size).astype(np.int32)
+
+    total_per_lane = n_facets * n_pts
+    ids = np.empty((2, n_lanes * total_per_lane), dtype=np.int32)
+    u_out = ids[0].reshape(n_lanes, n_facets, n_pts)
+    v_out = ids[1].reshape(n_lanes, n_facets, n_pts)
+
+    for lane_idx in range(n_lanes):
+        u_out[lane_idx] = (u_lane_base_px + lane_idx * x_width_pixels).astype(np.int32)
+        v_out[lane_idx] = v_fwd_px if (lane_idx % 2 == 0) else v_bwd_px
 
     return ids
 
 
+def iter_lane_coords_mm(
+    params: dict[str, Any],
+    lanes: int | None = None,
+    facets_inlane: int | None = None,
+) -> Iterator[tuple[int, np.ndarray, np.ndarray]]:
+    """Yield ``(lane_idx, u_mm, v_mm)`` per lane in physical Laserhead millimeters."""
+    plan = _plan_grid_geometry(params, lanes=lanes, facets_inlane=facets_inlane)
+    lane_step_mm = plan["x_width_pixels"] * plan["grid_size"]
+    u_lane_base_mm = plan["u_lane_base_mm"]
+    v_fwd_mm = plan["v_fwd_mm"]
+    v_bwd_mm = plan["v_bwd_mm"]
+
+    for lane_idx in range(plan["lanes"]):
+        u_mm = u_lane_base_mm + (lane_idx * lane_step_mm)
+        v_mm = v_fwd_mm if (lane_idx % 2 == 0) else v_bwd_mm
+        yield lane_idx, u_mm, v_mm
+
+
 class ScannerModel:
-    """
-    Standard Python wrapper around JIT-compiled kernels.
-    Holds the state (params) and delegates calculation to Numba functions.
-    """
+    """Pure-NumPy optical scanner geometry wrapper holding system parameters."""
 
-    def __init__(self, params):
-        self.params = self.to_numba_dict(params)
+    def __init__(self, params: dict[str, Any]):
+        self.params = dict(params)
 
-    @staticmethod
-    def to_numba_dict(std_dict: dict[str, Any]) -> Any:
-        """
-        Converts a standard Python dictionary to a Numba-compatible typed dictionary.
-        This enables JIT compilation for functions using this data.
-        """
-        dct = typed.Dict.empty(key_type=types.string, value_type=types.float64)
-        for k, v in std_dict.items():
-            dct[k] = float(v)
-        return dct
-
-    def fxpos(self, pixel: float, facet_idx: int = 0, xstart: float = 0) -> float:
-        return _jit_fxpos(pixel, self.params, facet_idx, xstart)
+    def fxpos(self, pixel: float, facet_idx: int = 0, xstart: float = 0.0) -> float:
+        return float(fxpos(pixel, self.params, facet_idx, xstart))
 
     def fypos(
-        self, pixel: float, facet_idx: int, direction: bool, ystart: float = 0
+        self, pixel: float, facet_idx: int, direction: bool, ystart: float = 0.0
     ) -> float:
-        return _jit_fypos(pixel, self.params, facet_idx, direction, ystart)
+        return float(fypos(pixel, self.params, facet_idx, direction, ystart))
 
-    def calculate_coordinates(self) -> np.ndarray:
-        """
-        Generates the lookup coordinate grid for the entire exposure area.
-
-        This function maps every "tick" of the laser clock to a physical X,Y location
-        on the substrate, accounting for:
-        1. Prism rotation (Fast Axis / X)
-        2. Stage movement (Slow Axis / Y)
-        3. Multi-lane stitching (if sample > single scan width)
-
-        Returns:
-            ids: (2, N) Array of [Y_pixel, X_pixel] coordinates.
-        """
-        ids = _jit_calculate_grid(self.params)
+    def calculate_coordinates(
+        self,
+        lanes: int | None = None,
+        facets_inlane: int | None = None,
+    ) -> np.ndarray:
+        """Generate the ``(2, N)`` int32 lookup grid ``[u_px, v_px]`` in Laserhead space."""
+        ids = calculate_grid(self.params, lanes=lanes, facets_inlane=facets_inlane)
         logger.debug(f"The lanewidth is {self.params['lanewidth']:.2f} mm")
         logger.debug(f"The facets in lane are {int(self.params['facetsinlane'])}")
         return ids
+
+    def iter_lane_coords_mm(
+        self,
+        lanes: int | None = None,
+        facets_inlane: int | None = None,
+    ) -> Iterator[tuple[int, np.ndarray, np.ndarray]]:
+        """Yield ``(lane_idx, u_mm, v_mm)`` per lane in physical Laserhead millimeters."""
+        return iter_lane_coords_mm(
+            self.params, lanes=lanes, facets_inlane=facets_inlane
+        )

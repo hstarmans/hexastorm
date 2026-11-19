@@ -125,9 +125,10 @@ class EventStreamWriter:
 
 def write_binary_file(
     pixeldata: np.ndarray,
-    params: Any,  # Can be dict or Numba typed dict
+    params: dict[str, Any],
     filepath: str | Path,
     compression_level: int = 9,
+    invert_hw_scan_dir: bool = True,
 ) -> None:
     """
     Encodes and writes pixel data to a compressed event-driven binary file for FPGA streaming.
@@ -188,11 +189,13 @@ def write_binary_file(
             lane_data = grid[lane_idx]
 
             for facet_idx in range(facets):
-                # Unpack image-order bits and reverse to hardware scan order
+                # Unpack image-order bits and optionally reverse to hardware scan order
                 line_bits_img = np.unpackbits(lane_data[facet_idx], bitorder="big")[
                     :bits_in_scanline
                 ]
-                line_bits_hw = line_bits_img[::-1]
+                line_bits_hw = (
+                    line_bits_img[::-1] if invert_hw_scan_dir else line_bits_img
+                )
                 events = bits_to_events_np(line_bits_hw, laser_ticks)
                 writer.write_scanline(events, direction)
 

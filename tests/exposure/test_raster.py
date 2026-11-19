@@ -23,8 +23,9 @@ def test_regression_jittertest(raster_exposure, tmp_path):
     this test will fail. Validate the new output manually,
     then update the hash here.
     """
-    # The hash of the "golden master" file (event-driven format + resvg-py SVG rasterizer).
-    expected_hash = "6546d9ed5107c5efdee0cb11d086c84c"
+    # Golden-master hash for unified unrotated Substrate rasterization + non-dithered 1-bit conversion
+    # (removed legacy -90 deg SVG rotation and directional Floyd-Steinberg dithering).
+    expected_hash = "1c65e883b72bd3310e19ac09e530a02b"
 
     fname = "combined_grid_test"
     project_root = Path(__file__).resolve().parent.parent.parent
@@ -78,7 +79,7 @@ def test_roundtrip_integrity(raster_exposure, tmp_path):
     This validates the readbin/writebin symmetry and the new IO module.
     """
     # 1. Mock Geometry
-    # We can write directly to the numba typed dict
+    # We can write directly to the params dict
     raster_exposure.params["samplexsize"] = 50.0  # mm
     raster_exposure.params["sampleysize"] = 50.0  # mm
     raster_exposure.params["facetsinlane"] = 100  # Aantal facetten per baan

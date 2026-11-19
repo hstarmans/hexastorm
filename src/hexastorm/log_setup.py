@@ -57,6 +57,5 @@ def configure_logging(level=logging.INFO):
 
     # Suppress chatty third-party libraries
     logging.getLogger("matplotlib").setLevel(logging.WARNING)
-    logging.getLogger("numba").setLevel(logging.WARNING)
     logging.getLogger("PIL").setLevel(logging.WARNING)
     logging.getLogger("tests.camera.camera").setLevel(logging.INFO)
