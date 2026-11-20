@@ -89,10 +89,10 @@ class SPIParser(Elaboratable):
 
         m.d.sync += [
             state[status.parsing].eq(self.parse),
-            state[status.full].eq(fifo.space_available <= hdl_cfg.fifo_margin_words),
+            state[status.full].eq(is_fifo_full),
             state[status.error].eq(self.error_other | error_word),
             state[status.empty].eq(fifo.empty),
-            self.fifo_full.eq(fifo.space_available <= hdl_cfg.fifo_margin_words),
+            self.fifo_full.eq(is_fifo_full),
         ]
 
         with m.FSM(name="parser", init="RESET"):
@@ -118,6 +118,10 @@ class SPIParser(Elaboratable):
                         m.next = "WAIT_COMMAND"
                     with m.Case(cmd.flush):
                         m.d.comb += fifo.flush.eq(1)
+                        m.d.sync += [
+                            words_rec.eq(0),
+                            error_word.eq(0),
+                        ]
                         m.next = "WAIT_COMMAND"
                     with m.Case(cmd.write):
                         m.d.sync += spi_cmd.word_to_send.eq(state_word)
@@ -129,31 +133,34 @@ class SPIParser(Elaboratable):
                         m.d.sync += spi_cmd.word_to_send.eq(self.debug_word)
                         m.next = "WAIT_COMMAND"
 
-            with m.State("WAIT_WORD"), m.If(spi_cmd.word_complete):
-                byte0 = spi_cmd.word_received[:8]
-                with m.If(words_rec == 0):
-                    valid_instr = (byte0 > 0) & (byte0 <= 6)
-                    with m.If(valid_instr):
+            with m.State("WAIT_WORD"):
+                with m.If(spi_cmd.word_complete):
+                    byte0 = spi_cmd.word_received[:8]
+                    with m.If(words_rec == 0):
+                        valid_instr = (byte0 > 0) & (byte0 <= 6)
+                        with m.If(valid_instr):
+                            m.d.sync += [
+                                instr_rec.eq(byte0),
+                                scanline_words.eq(spi_cmd.word_received[9:25] + 1),
+                                fifo.write_en.eq(1),
+                                fifo.write_data.eq(spi_cmd.word_received),
+                                words_rec.eq(words_rec + 1),
+                            ]
+                            m.next = "WRITE"
+                        with m.Else():
+                            # Invalid instruction → mark error and discard
+                            m.d.sync += error_word.eq(1)
+                            m.next = "WAIT_COMMAND"
+                    with m.Else():
+                        # Additional words for multi-word instructions
                         m.d.sync += [
-                            instr_rec.eq(byte0),
-                            scanline_words.eq(spi_cmd.word_received[9:25] + 1),
                             fifo.write_en.eq(1),
                             fifo.write_data.eq(spi_cmd.word_received),
                             words_rec.eq(words_rec + 1),
                         ]
                         m.next = "WRITE"
-                    with m.Else():
-                        # Invalid instruction → mark error and discard
-                        m.d.sync += error_word.eq(1)
-                        m.next = "WAIT_COMMAND"
-                with m.Else():
-                    # Additional words for multi-word instructions
-                    m.d.sync += [
-                        fifo.write_en.eq(1),
-                        fifo.write_data.eq(spi_cmd.word_received),
-                        words_rec.eq(words_rec + 1),
-                    ]
-                    m.next = "WRITE"
+                with m.Elif(spi_cmd.idle):
+                    m.next = "WAIT_COMMAND"
 
             with m.State("WRITE"):
                 m.d.sync += fifo.write_en.eq(0)

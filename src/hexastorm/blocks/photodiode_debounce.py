@@ -1,4 +1,5 @@
 from amaranth import Elaboratable, Module, Signal
+from amaranth.lib.cdc import FFSynchronizer
 from amaranth.lib.io import Buffer
 
 
@@ -17,10 +18,10 @@ class PhotodiodeDebounce(Elaboratable):
         self.n_low = int(n_low)
         self.n_high = int(n_high)
         # Inputs
-        self.raw = Signal()  # asynchronous / noisy (active-high == no light)
+        self.raw = Signal(init=1)  # asynchronous / noisy (active-high == no light)
 
         # Outputs
-        self.sync_level = Signal()  # 2FF-synchronized level of raw
+        self.sync_level = Signal(init=1)  # 2FF-synchronized level of raw
         self.valid_pulse = Signal()  # one-cycle pulse when low stays for n_low
         self.in_refractory = Signal()  # high until we see n_high highs
         self.low_streak = Signal(range(self.n_low + 1))
@@ -29,23 +30,14 @@ class PhotodiodeDebounce(Elaboratable):
     def elaborate(self, platform):
         m = Module()
 
-        meta = Signal()
         if platform is not None:
             # Ensure the photodiode pin is set as input
             pd = platform.request("photodiode", dir="-")
             m.submodules += [
                 phd_buf := Buffer("i", pd.photodiode),
+                FFSynchronizer(phd_buf.i, self.sync_level, init=1),
             ]
             m.d.comb += self.raw.eq(phd_buf.i)
-            # 2FF synchronizer
-            # probability that metastability (photodiode hit at edge window)
-            # input stuck in a inbetween
-            # state lasts across two full
-            # clock periods is astronomically low.
-            m.d.sync += [
-                meta.eq(self.raw),
-                self.sync_level.eq(meta),
-            ]
         else:
             # 2FF synchronizer disabled for testing
             m.d.comb += self.sync_level.eq(self.raw)

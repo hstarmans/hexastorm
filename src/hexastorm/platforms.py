@@ -1,14 +1,13 @@
 import logging
 import os
-import platform as pltf
 import shlex
+import shutil
 import subprocess
 from typing import ClassVar
 
 from amaranth.build import Attrs, Clock, Pins, PinsN, Resource, Subsignal
 from amaranth.vendor import LatticeICE40Platform
 from amaranth_boards.resources import LEDResources
-from amaranth_boards.test.blinky import Blinky
 
 from .config import PlatformConfig
 from .resources import LaserscannerResource, StepperResource
@@ -32,17 +31,17 @@ class Firestarter(LatticeICE40Platform):
             "clk",
             0,
             Pins("32", dir="i"),
-            Clock(ice40_cfg["clks"][ice40_cfg["hfosc_div"]] * 1e6),
+            Clock(ice40_cfg["clks"]["esp32s3"] * 1e6),
             Attrs(IO_STANDARD="SB_LVCMOS"),
         ),
         Resource(
             "fpga_spi",
             0,
-            Subsignal("sck", Pins("15")),
-            Subsignal("sdi", Pins("17")),
-            Subsignal("sdo", Pins("14")),
-            Subsignal("cs", PinsN("16")),
-            Subsignal("fifo_full", Pins("25")),
+            Subsignal("sck", Pins("15", dir="i")),
+            Subsignal("sdi", Pins("17", dir="i")),
+            Subsignal("sdo", Pins("14", dir="o")),
+            Subsignal("cs", PinsN("16", dir="i")),
+            Subsignal("fifo_full", Pins("25", dir="o")),
             Attrs(IO_STANDARD="SB_LVCMOS"),
         ),
         # Laserscanner resource
@@ -89,75 +88,91 @@ class Firestarter(LatticeICE40Platform):
     ]
     connectors: ClassVar[list] = []
 
-    def __init__(self, remote_host=None, device=None):
-        LatticeICE40Platform.__init__(self)
+    def __init__(self, remote_host=None, device=None, **kwargs):
+        super().__init__(**kwargs)
         self.esp32_cfg = PlatformConfig(test=False).esp32_cfg
         if device is not None:
             self.esp32_cfg["device"] = device
         self.remote_host = remote_host or os.environ.get("HEXASTORM_REMOTE_HOST")
 
-    def build(self, *args, **kwargs):
-        search_command = "where" if pltf.system() == "Windows" else "which"
-        base = f"{search_command} yowasp-"
-        os.environ["YOSYS"] = subprocess.getoutput(base + "yosys")
-        os.environ["NEXTPNR_ICE40"] = subprocess.getoutput(base + "nextpnr-ice40")
-        os.environ["ICEPACK"] = subprocess.getoutput(base + "icepack")
-        super().build(*args, **kwargs)
+    def _configure_yowasp_tools(self):
+        for env_var, tool_name in (
+            ("YOSYS", "yowasp-yosys"),
+            ("NEXTPNR_ICE40", "yowasp-nextpnr-ice40"),
+            ("ICEPACK", "yowasp-icepack"),
+        ):
+            if env_var not in os.environ:
+                tool_path = shutil.which(tool_name)
+                if tool_path:
+                    os.environ[env_var] = tool_path
 
-    def toolchain_program(self, products, name, **kwargs):
-        device = self.esp32_cfg["device"]
+    def build(self, *args, **kwargs):
+        self._configure_yowasp_tools()
+        return super().build(*args, **kwargs)
+
+    def toolchain_program(
+        self, products, name, *, device=None, remote_host=None, **kwargs
+    ):
+        target_device = device or self.esp32_cfg["device"]
+        target_remote = remote_host if remote_host is not None else self.remote_host
+        flash_cmd = (
+            "from hexastorm.fpga_host.micropython import ESP32HostSync; "
+            "ESP32HostSync().flash_fpga('sd/fpga/fpga.bit')"
+        )
         with products.extract(f"{name}.bin") as bitstream_filename:
-            if self.remote_host:
+            if target_remote:
                 logger.info(
-                    f"Flashing remotely to {self.remote_host} device {device}..."
+                    f"Flashing remotely to {target_remote} device {target_device}..."
                 )
                 subprocess.check_call(
-                    ["scp", bitstream_filename, f"{self.remote_host}:/tmp/fpga.bit"]
+                    ["scp", bitstream_filename, f"{target_remote}:/tmp/fpga.bit"]
                 )
-                path_env = 'export PATH="$HOME/.local/bin:$HOME/.local/share/uv/tools/mpremote/bin:$PATH"; '
-                mpremote_cp = (
-                    path_env
-                    + f"mpremote resume connect {shlex.quote(device)} fs cp /tmp/fpga.bit :sd/fpga/fpga.bit"
+                path_env = (
+                    'export PATH="$HOME/.local/bin:'
+                    '$HOME/.local/share/uv/tools/mpremote/bin:$PATH"; '
                 )
-                subprocess.check_call(["ssh", self.remote_host, mpremote_cp])
-                for cmd in [
-                    "from hexastorm.fpga_host.micropython import ESP32HostSync",
-                    "hst = ESP32HostSync()",
-                    'hst.flash_fpga("sd/fpga/fpga.bit")',
-                ]:
-                    mpremote_exec = (
-                        path_env
-                        + f"mpremote resume connect {shlex.quote(device)} exec {shlex.quote(cmd)}"
+                q_device = shlex.quote(target_device)
+                q_flash = shlex.quote(flash_cmd)
+                remote_cmd = (
+                    f"{path_env}"
+                    f"mpremote resume connect {q_device} "
+                    f"fs cp /tmp/fpga.bit :sd/fpga/fpga.bit + exec {q_flash}"
+                )
+                try:
+                    subprocess.check_call(["ssh", target_remote, remote_cmd])
+                finally:
+                    subprocess.run(
+                        ["ssh", target_remote, "rm -f /tmp/fpga.bit"], check=False
                     )
-                    subprocess.check_call(["ssh", self.remote_host, mpremote_exec])
-                subprocess.run(
-                    ["ssh", self.remote_host, "rm -f /tmp/fpga.bit"], check=False
-                )
             else:
-                logger.info(f"Flashing locally to device {device}...")
+                logger.info(f"Flashing locally to device {target_device}...")
                 subprocess.check_call(
                     [
                         "mpremote",
                         "resume",
                         "connect",
-                        device,
+                        target_device,
                         "fs",
                         "cp",
                         bitstream_filename,
                         ":sd/fpga/fpga.bit",
                     ]
                 )
-                for cmd in [
-                    "from hexastorm.fpga_host.micropython import ESP32HostSync",
-                    "hst = ESP32HostSync()",
-                    'hst.flash_fpga("sd/fpga/fpga.bit")',
-                ]:
-                    subprocess.check_call(
-                        ["mpremote", "resume", "connect", device, "exec", cmd]
-                    )
+                subprocess.check_call(
+                    [
+                        "mpremote",
+                        "resume",
+                        "connect",
+                        target_device,
+                        "exec",
+                        flash_cmd,
+                    ]
+                )
 
 
 if __name__ == "__main__":
+    from amaranth_boards.test.blinky import Blinky
+
     Firestarter().build(
         Blinky(),
         do_program=True,

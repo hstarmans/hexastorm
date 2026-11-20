@@ -5,6 +5,7 @@ from typing import Any, ClassVar
 from hexastorm.config import PlatformConfig, Spi
 from hexastorm.fpga_host.mock import MockHost
 from hexastorm.lasers import DiodeSimulator, Laserhead
+from hexastorm.ulabext import pack_scanline_events
 from hexastorm.utils import LunaGatewareTestCase, async_test_case
 
 
@@ -216,6 +217,31 @@ class LaserheadTest(BaseTest):
 
         # Expect error due to lack of photodiode input
         self.assertEqual(sim.get(dut.error), 1)
+
+    @async_test_case
+    async def test_disable_synchronize_aborts_spinup_and_wait_stable(self, sim):
+        """Verify clearing synchronize stops Laserhead during SPINUP and WAIT_STABLE."""
+        dut = self.dut
+
+        sim.set(dut.synchronize, 1)
+        await sim.tick()
+        await self.wait_until_state("SPINUP")
+        sim.set(dut.synchronize, 0)
+        await self.wait_until_state("STOP")
+        await sim.tick()
+        self.assertEqual(sim.get(dut.error), 0)
+        self.assertEqual(sim.get(dut.process_lines), 0)
+        self.assertEqual(sim.get(dut.lh_rec.en), 0)
+
+        sim.set(dut.synchronize, 1)
+        await sim.tick()
+        await self.wait_until_state("WAIT_STABLE")
+        sim.set(dut.synchronize, 0)
+        await self.wait_until_state("STOP")
+        await sim.tick()
+        self.assertEqual(sim.get(dut.error), 0)
+        self.assertEqual(sim.get(dut.process_lines), 0)
+        self.assertEqual(sim.get(dut.lh_rec.en), 0)
 
 
 class SinglelineTest(BaseTest):
@@ -441,6 +467,45 @@ class MultilineTest(BaseTest):
         """Test multiple scanlines written to and read from the ring buffer."""
         await self.scanline_ring_buffer(numb_lines=3)
 
+    @async_test_case
+    async def test_invalid_instruction_stops_prism_and_clears_process_lines(self, sim):
+        """Verify an illegal FIFO opcode stops the prism and clears process_lines."""
+        dut = self.dut
+        sim.set(dut.fifo.write_data, 0xAA)
+        await self.pulse(dut.fifo.write_en)
+        await self.pulse(dut.fifo.write_commit)
+
+        await self.pulse(dut.expose_start)
+        sim.set(dut.synchronize, 1)
+
+        await self.wait_until_state("READ_INSTRUCTION")
+        await self.wait_until_state("STOP")
+        await sim.tick()
+        self.assertEqual(sim.get(dut.error), 1)
+        self.assertEqual(sim.get(dut.process_lines), 0)
+        self.assertEqual(sim.get(dut.lh_rec.en), 0)
+
+    @async_test_case
+    async def test_both_laser_channels_stay_in_sync(self, sim):
+        """Verify lasers[0] and lasers[1] switch identically with no 1-cycle skew."""
+        dut = self.dut
+        await self.write_line([1, 0, 1])
+        await self.write_line([])
+
+        sim.set(dut.synchronize, 1)
+        await sim.tick()
+        await self.pulse(dut.expose_start)
+
+        await self.wait_until_state("DATA_RUN")
+        await sim.tick()
+        total_ticks = self.laz_tim["scanline_length"] * self.laz_tim["laser_ticks"]
+        for _ in range(total_ticks):
+            self.assertEqual(
+                sim.get(dut.lh_rec.lasers[0]),
+                sim.get(dut.lh_rec.lasers[1]),
+            )
+            await sim.tick()
+
 
 class Loweredge(BaseTest):
     """Test Laserhead scanline exposure when scanline length equals memory word width."""
@@ -479,6 +544,47 @@ class Loweredge(BaseTest):
     async def test_scanlineringbuffer(self, sim):
         """Write several scanlines and verify they are processed correctly."""
         await self.scanline_ring_buffer(numb_lines=3)
+
+    @async_test_case
+    async def test_unread_event_words_drained_at_end_of_scanline(self, sim):
+        """Verify unread trailing event words are drained so the next line parses cleanly."""
+        dut = self.dut
+        scanline_len = self.laz_tim["scanline_length"]
+        laser_ticks = self.laz_tim["laser_ticks"]
+        raw_bytes = pack_scanline_events(
+            events=[
+                (0, 255),
+                (scanline_len * laser_ticks + 10, 0),
+                (scanline_len * laser_ticks + 20, 255),
+                (scanline_len * laser_ticks + 30, 0),
+                (scanline_len * laser_ticks + 40, 255),
+            ],
+            steps_line=1,
+            direction=0,
+            scanline_length=scanline_len,
+            scanline_cmd=Spi.Instructions.scanline,
+        )
+        for i in range(0, len(raw_bytes), Spi.word_bytes):
+            word = unpack("Q", raw_bytes[i : i + Spi.word_bytes])[0]
+            sim.set(dut.fifo.write_data, word)
+            await self.pulse(dut.fifo.write_en)
+        await self.pulse(dut.fifo.write_commit)
+
+        normal_line = [1 if i % 4 == 0 else 0 for i in range(scanline_len)]
+        await self.write_line(normal_line)
+        await self.write_line([])
+
+        await self.pulse(dut.expose_start)
+        sim.set(dut.synchronize, 1)
+
+        await self.wait_until_state("DATA_RUN")
+        await self.wait_until_state("DRAIN_WORDS")
+        await self.wait_until_state("WAIT_END")
+        await self.check_line(normal_line)
+        await self.check_line([])
+        self.assertEqual(sim.get(dut.error), 0)
+        self.assertEqual(sim.get(dut.expose_finished), 1)
+        self.assertEqual(sim.get(dut.empty), 1)
 
 
 class Upperedge(Loweredge):

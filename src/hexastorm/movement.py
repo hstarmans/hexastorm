@@ -1,5 +1,6 @@
 from amaranth import Elaboratable, Module, Mux, Signal, signed
 from amaranth.hdl import Array
+from amaranth.lib.cdc import FFSynchronizer
 from amaranth.lib.io import Buffer
 
 from .resources import StepperRecord, get_all_resources
@@ -86,7 +87,10 @@ class Polynomial(Elaboratable):
         ice40_cfg = plf_cfg.ice40_cfg
 
         # Timing counters
-        divider = int(ice40_cfg["clks"][ice40_cfg["hfosc_div"]])
+        divider = round(
+            ice40_cfg["clks"][ice40_cfg["hfosc_div"]] * 1e6 / hdl_cfg.motor_freq
+        )
+        assert divider >= 1
         cntr = Signal(range(divider))
         ticks = Signal(hdl_cfg.move_ticks.bit_length())
 
@@ -108,11 +112,11 @@ class Polynomial(Elaboratable):
                     step_buf := Buffer("o", stepper.step),
                     dir_buf := Buffer("o", stepper.dir),
                     lim_buf := Buffer("i", stepper.limit),
+                    FFSynchronizer(lim_buf.i, steppers[i].limit),
                 ]
                 m.d.comb += [
                     step_buf.o.eq(steppers[i].step),
                     dir_buf.o.eq(steppers[i].dir),
-                    steppers[i].limit.eq(lim_buf.i),
                 ]
 
         # Generate step pulse based on toggling specific bit
@@ -123,7 +127,7 @@ class Polynomial(Elaboratable):
             idx = motor * hdl_cfg.pol_degree
             step_motor = cntrs[idx][hdl_cfg.bit_shift]
 
-            with m.If(motor == laser_idx):
+            if motor == laser_idx:
                 # 1. Pipeline registers for edge detection
                 step_motor_d = Signal()
                 step_laser_d = Signal()
@@ -154,23 +158,23 @@ class Polynomial(Elaboratable):
                     m.d.sync += steppers[motor].step.eq(1)
                 with m.Elif(evt_fall):
                     m.d.sync += steppers[motor].step.eq(0)
-            with m.Else():
+            else:
                 m.d.sync += steppers[motor].step.eq(step_motor)
 
         # Direction signal: Purely based on the sign bit of velocity! (0 LUTs)
         for motor in range(hdl_cfg.motors):
             idx = motor * hdl_cfg.pol_degree
-            with m.If((motor == laser_idx) & self.override_laser):
-                # Override active for laser motor – use external dir
-                m.d.sync += steppers[motor].dir.eq(self.dir_laser)
-            with m.Else():
-                if hdl_cfg.pol_degree >= 2:
-                    # Velocity is stored in cntrs[idx + 1]
-                    # -1 gets the sign bit. ~ inverts it so positive = 1, negative = 0
-                    m.d.sync += steppers[motor].dir.eq(~cntrs[idx + 1][-1])
-                else:
-                    # Constant velocity is in coeff[idx]
-                    m.d.sync += steppers[motor].dir.eq(~self.coeff[idx][-1])
+            dir_poly = (
+                ~cntrs[idx + 1][-1] if hdl_cfg.pol_degree >= 2 else ~self.coeff[idx][-1]
+            )
+            if motor == laser_idx:
+                with m.If(self.override_laser):
+                    # Override active for laser motor – use external dir
+                    m.d.sync += steppers[motor].dir.eq(self.dir_laser)
+                with m.Else():
+                    m.d.sync += steppers[motor].dir.eq(dir_poly)
+            else:
+                m.d.sync += steppers[motor].dir.eq(dir_poly)
 
         # State machine for execution
         with m.FSM(init="RESET", name="polynomial_fsm"):

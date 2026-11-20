@@ -9,7 +9,8 @@ from hexastorm.config import PlatformConfig, Spi
 from hexastorm.core import Dispatcher, SPIParser
 from hexastorm.fpga_host.mock import MockHost
 from hexastorm.luna.spi import SPIGatewareTestCase
-from hexastorm.utils import async_test_case
+from hexastorm.pwm import HardwarePWM
+from hexastorm.utils import LunaGatewareTestCase, async_test_case
 
 
 class TestParser(SPIGatewareTestCase):
@@ -269,6 +270,67 @@ class TestParser(SPIGatewareTestCase):
             sim.get(self.dut.fifo.space_available),
             self.hdl_cfg.mem_depth,  # Space should be fully restored
         )
+
+    @async_test_case
+    async def test_flush_clears_error_flag(self, sim):
+        """
+        Verifies that flushing clears a parser error_word latched from an invalid opcode.
+        """
+        command = [Spi.Commands.write] + [0] * Spi.word_bytes
+        await self.host.send_command(command)
+        self.assertTrue((await self.host.fpga_state)["error"])
+
+        await self.host.flush_buffer()
+        await sim.tick()
+        self.assertFalse((await self.host.fpga_state)["error"])
+
+    @async_test_case
+    async def test_flush_resets_partial_multiword_instruction(self, sim):
+        """
+        Verifies that flushing mid-instruction resets words_rec so a subsequent
+        single-word instruction is parsed as a fresh header rather than a continuation.
+        """
+        write_byte = Spi.Commands.write.to_bytes(1, "big")
+        move_byte = Spi.Instructions.move.to_bytes(1, "big")
+        partial_move = write_byte + (1000).to_bytes(7, "big") + move_byte
+        await self.host.send_command(partial_move)
+        self.assertTrue(sim.get(self.dut.fifo.empty))
+
+        await self.host.flush_buffer()
+        await sim.tick()
+
+        await self.host.set_fan_speed(128)
+        await self.assert_fifo_written(1)
+        self.assertEqual(
+            sim.get(self.dut.fifo.read_data),
+            (128 << 8) | Spi.Instructions.set_fan,
+        )
+        self.assertFalse((await self.host.fpga_state)["error"])
+
+    @async_test_case
+    async def test_aborted_cs_during_write_recovers_parser(self, sim):
+        """
+        Verifies that dropping CS mid-word during cmd.write returns SPIParser
+        from WAIT_WORD back to WAIT_COMMAND so subsequent commands work normally.
+        """
+        sim.set(self.dut.spi.cs, 1)
+        await sim.tick()
+        await self.spi_exchange_byte(Spi.Commands.write)
+        await self.spi_exchange_byte(0x00)
+        await self.spi_exchange_byte(0x00)
+        sim.set(self.dut.spi.cs, 0)
+        await self.advance_cycles(2)
+
+        await self.host.flush_buffer()
+        await sim.tick()
+
+        await self.host.set_fan_speed(77)
+        await self.assert_fifo_written(1)
+        self.assertEqual(
+            sim.get(self.dut.fifo.read_data),
+            (77 << 8) | Spi.Instructions.set_fan,
+        )
+        self.assertFalse((await self.host.fpga_state)["error"])
 
 
 class TestDispatcher(SPIGatewareTestCase):
@@ -632,12 +694,13 @@ class TestDispatcher(SPIGatewareTestCase):
         self.simulated_positions = [0] * self.motors
         self.prev_steps = [sim.get(s.step) for s in self.dut.pol.steppers]
 
+        self.assertFalse((await self.host.fpga_state)["synchronized"])
+
         # Queue lines
         for _ in range(num_lines):
             await host.write_line([1] * laz_tim["scanline_length"], steps_line, 0)
         await host.write_line([])
 
-        self.assertFalse((await self.host.fpga_state)["synchronized"])
         self.assertTrue((await self.host.fpga_state)["synchronized"])
 
         # We must use wait_complete here to ensure steps are actively tracked while waiting for FIFO to empty
@@ -678,11 +741,40 @@ class TestDispatcher(SPIGatewareTestCase):
         await self.wait_until(~self.dut.parser.fifo.empty)
         # timing is hard to get right involves SPI and laserhead,
         # test is roughly correct
-        for idx, facet_idx in enumerate([3, 0, 1]):
+        facets = self.plf_cfg.laser_timing["facets"]
+        # One read_facet_ticks_and_id() SPI transfer takes 1154 cycles;
+        # +66 cycles = 1220 = 61 * facet_ticks -> exactly +1 facet (mod 4) per read.
+        expected_facet = None
+        for idx in range(facets):
             if idx == 0:
                 await self.advance_cycles(ticks_facet + 5)
             else:
-                await self.advance_cycles(ticks_facet)
+                await self.advance_cycles(66)
             [ticksperiod_rec, facet_rec] = await host.read_facet_ticks_and_id()
-            self.assertEqual(facet_rec, facet_idx)
+            if expected_facet is None:
+                self.assertIn(facet_rec, range(facets))
+                expected_facet = facet_rec
+            else:
+                self.assertEqual(facet_rec, expected_facet)
+            expected_facet = (expected_facet + 1) % facets
             self.assertAlmostEqual(ticksperiod_rec, ticks_facet, delta=1)
+
+
+class TestHardwarePWM(LunaGatewareTestCase):
+    FRAGMENT_UNDER_TEST = HardwarePWM
+    FRAGMENT_ARGUMENTS: ClassVar[dict[str, Any]] = {
+        "resolution": 8,
+        "clock_div_bits": 0,
+    }
+
+    @async_test_case
+    async def test_duty_cycles_including_100_percent(self, sim):
+        """Verify 0%, 50%, and true 100% (255/255) registered PWM output."""
+        for duty, expected_high in ((0, 0), (128, 128), (255, 256)):
+            sim.set(self.dut.duty, duty)
+            await sim.tick()  # registered output latency
+            high_cycles = 0
+            for _ in range(256):
+                await sim.tick()
+                high_cycles += sim.get(self.dut.pwm_out)
+            self.assertEqual(high_cycles, expected_high)

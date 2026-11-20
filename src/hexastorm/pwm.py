@@ -33,7 +33,8 @@ class HardwarePWM(Elaboratable):
             # No divider: tick on every clock cycle (perfect for the spindle)
             m.d.sync += counter.eq(counter + 1)
 
-        # Output logic stays the same
-        m.d.comb += self.pwm_out.eq(counter < self.duty)
+        # Output logic (registered to avoid glitches; max duty reaches 100%)
+        max_duty = (1 << self.resolution) - 1
+        m.d.sync += self.pwm_out.eq((counter < self.duty) | (self.duty == max_duty))
 
         return m

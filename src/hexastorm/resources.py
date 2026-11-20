@@ -1,6 +1,6 @@
 import itertools
 
-from amaranth import Record
+from amaranth import Signal
 from amaranth.build import Attrs, Pins, PinsN, Resource, ResourceError, Subsignal
 
 __all__ = ["LaserscannerResource", "StepperResource"]
@@ -32,16 +32,13 @@ def get_all_resources(platform, name, **kwargs):
     return resources
 
 
-class StepperRecord(Record):
-    """Record representing a stepper motor interface for simulation or test."""
+class StepperRecord:
+    """Signal bundle representing a stepper motor interface for simulation or test."""
 
     def __init__(self):
-        layout = [
-            ("step", 1),
-            ("dir", 1),
-            ("limit", 1),
-        ]
-        super().__init__(layout)
+        self.step = Signal(name="step")
+        self.dir = Signal(name="dir")
+        self.limit = Signal(name="limit")
 
 
 def StepperResource(*args, step_pin, dir_pin, limit_pin, number=None, conn=None):
@@ -54,25 +51,22 @@ def StepperResource(*args, step_pin, dir_pin, limit_pin, number=None, conn=None)
         limit_pin    -- Limit switch (input)
     """
     ios = [
-        Subsignal("step", Pins(step_pin, conn=conn, assert_width=1)),
-        Subsignal("dir", Pins(dir_pin, conn=conn, assert_width=1)),
-        Subsignal("limit", Pins(limit_pin, conn=conn, assert_width=1)),
+        Subsignal("step", Pins(step_pin, dir="o", conn=conn, assert_width=1)),
+        Subsignal("dir", Pins(dir_pin, dir="o", conn=conn, assert_width=1)),
+        Subsignal("limit", Pins(limit_pin, dir="i", conn=conn, assert_width=1)),
         Attrs(IO_STANDARD="SB_LVCMOS"),
     ]
 
     return Resource.family(*args, number, default_name="stepper", ios=ios)
 
 
-class LaserscannerRecord(Record):
-    """Record to test stepper motor"""
+class LaserscannerRecord:
+    """Signal bundle representing a laser scanner interface."""
 
     def __init__(self):
-        layout = [
-            ("lasers", 2),
-            ("pwm", 1),
-            ("en", 1),
-        ]
-        super().__init__(layout)
+        self.lasers = Signal(2, name="lasers")
+        self.pwm = Signal(name="pwm")
+        self.en = Signal(name="en")
 
 
 def LaserscannerResource(
@@ -88,7 +82,6 @@ def LaserscannerResource(
 
     I/O signals:
         lasers           -- 2-bit output to laser driver (MSB first), e.g. "12 11"
-        photodiode       -- Input signal from scanner sensor
         pwm              -- Output PWM control
         enable           -- Output enable pin (active low)
     """
