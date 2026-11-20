@@ -219,9 +219,9 @@ int hx_slice_lane_spi(
 
     uint64_t half_period;
     if (scene->steps_per_line <= 0.0) {
-        half_period = (scene->bits_in_scanline > 1) ? (uint64_t)scene->bits_in_scanline : 1ULL;
+        half_period = 0ULL;
     } else {
-        double hp = floor((double)(scene->bits_in_scanline - 1) / (scene->steps_per_line * 2.0));
+        double hp = floor(((double)scene->total_ticks / (scene->steps_per_line * 2.0)) + 1e-9) - 1.0;
         if (hp < 1.0) {
             return HX_ERR_STEP_PERIOD;
         }

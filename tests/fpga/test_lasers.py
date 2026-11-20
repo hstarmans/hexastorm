@@ -5,7 +5,12 @@ from typing import Any, ClassVar
 from hexastorm.config import PlatformConfig, Spi
 from hexastorm.fpga_host.mock import MockHost
 from hexastorm.lasers import DiodeSimulator, Laserhead
-from hexastorm.ulabext import pack_scanline_events
+from hexastorm.ulabext import (
+    bits_to_events,
+    calc_step_half_period,
+    events_to_bits,
+    pack_scanline_events,
+)
 from hexastorm.utils import LunaGatewareTestCase, async_test_case
 
 
@@ -96,19 +101,22 @@ class BaseTest(LunaGatewareTestCase):
         self.assertFalse(sim.get(dut.error))
 
         if bit_lst:
-            expected_period = steps_per_line * (laz_tim["scanline_length"] - 1) // 2
+            scanline_ticks = laz_tim["scanline_ticks"]
+            expected_period = calc_step_half_period(steps_per_line, scanline_ticks)
             self.assertEqual(sim.get(dut.stephalfperiod), expected_period)
+
+            expected_events = bits_to_events(bit_lst, scanline_ticks)
+            expected_tick_bits = events_to_bits(
+                expected_events, scanline_ticks, scanline_ticks
+            )
 
             await self.wait_until_state("DATA_RUN")
             await sim.tick()
 
-            for idx, bit in enumerate(bit_lst):
-                self.assertEqual(sim.get(dut.lasercnt), laz_tim["laser_ticks"] - 1)
-                self.assertEqual(sim.get(dut.scanbit), idx + 1)
-
-                for _ in range(laz_tim["laser_ticks"]):
-                    self.assertEqual(sim.get(dut.lh_rec.lasers[0]), bit)
-                    await sim.tick()
+            for tick, expected_bit in enumerate(expected_tick_bits):
+                self.assertEqual(sim.get(dut.line_tick), tick + 1)
+                self.assertEqual(sim.get(dut.lh_rec.lasers[0]), expected_bit)
+                await sim.tick()
         else:
             self.assertTrue(sim.get(dut.expose_finished))
 
@@ -131,15 +139,8 @@ class BaseTest(LunaGatewareTestCase):
         await self.pulse(sim, dut.read_commit_2)
         return data_out
 
-    async def write_line(self, bit_list, steps_per_line=1, direction=0):
-        """Writes a scanline into FIFO manually (no dispatcher/parser).
-
-        If you write to the FIFO, the space available reduces. The write /
-        read commit signals moves the block pointer.
-        If you keep reading you move to the next block, if you discard
-        you move back within the last block you read.
-        """
-        byte_lst = self.host.bit_to_byte_list(bit_list, steps_per_line, direction)
+    async def _commit_scanline_bytes(self, byte_lst):
+        """Commit packed scanline bytes directly into the FPGA test FIFO."""
         dut = self.dut
         sim = self.sim
 
@@ -154,12 +155,23 @@ class BaseTest(LunaGatewareTestCase):
 
         await self.pulse(dut.fifo.write_commit)
 
+    async def write_events(self, events, steps_per_line=1, direction=0):
+        """Write raw ``(tick, intensity)`` events (or ``None`` for stop) into FIFO."""
+        byte_lst = self.host.events_to_byte_list(events, steps_per_line, direction)
+        await self._commit_scanline_bytes(byte_lst)
+
+    async def write_line(self, bit_list, steps_per_line=1, direction=0):
+        """Writes a scanline into FIFO manually (no dispatcher/parser)."""
+        byte_lst = self.host.bit_to_byte_list(bit_list, steps_per_line, direction)
+        await self._commit_scanline_bytes(byte_lst)
+
     async def scanline_ring_buffer(self, numb_lines=3):
         """Write several scanlines to FIFO and validate playback."""
         sim = self.sim
         dut = self.dut
+        n_bits = self.laz_tim["scanline_ticks"] // 3
         lines = [
-            [randint(0, 1) for _ in range(self.laz_tim["scanline_length"])]
+            [randint(0, 1) for _ in range(n_bits)]
             for _ in range(numb_lines)
         ]
         lines.append([])  # end with empty line
@@ -256,12 +268,12 @@ class SinglelineTest(BaseTest):
     async def test_single_line_exposure_sequence(self, sim):
         """Test synchronization, scanline buffering, and exposure completion."""
         dut = self.dut
-        scanline_length = self.laz_tim["scanline_length"]
+        scanline_ticks = self.laz_tim["scanline_ticks"]
 
         # Write full-on scanline and synchronize
-        one_line = [1] * scanline_length
-        zero_line = [0] * scanline_length
-        random_line = [randint(0, 1) for _ in range(scanline_length)]
+        one_line = [1] * scanline_ticks
+        zero_line = [0] * scanline_ticks
+        random_line = [randint(0, 1) for _ in range(scanline_ticks)]
         lines = [one_line, zero_line, random_line]
         for line in lines:
             await self.write_line(line)
@@ -274,16 +286,13 @@ class SinglelineTest(BaseTest):
         # In single line mode reads are not committed
         # if the FIFO is empty so the last line is always repeated!
         for check in range(10):
-            if check > len(random_line) - 1:
-                idx = len(random_line) - 1
-            else:
-                idx = check
+            idx = min(check, len(lines) - 1)
             await self.check_line(lines[idx])
 
         self.assertTrue(sim.get(dut.synchronized))
 
         # Write a random line and an empty line
-        random_line = [randint(0, 1) for _ in range(scanline_length)]
+        random_line = [randint(0, 1) for _ in range(scanline_ticks)]
         empty_line = []
 
         self.assertFalse(sim.get(dut.expose_finished))
@@ -311,7 +320,7 @@ class SinglelinesinglefacetTest(SinglelineTest):
     async def test_single_line_single_facet(self, sim):
         """Verify line exposure across multiple stable states in single-facet mode."""
         dut = self.dut
-        scanline = [1] * self.laz_tim["scanline_length"]
+        scanline = [1] * self.laz_tim["scanline_ticks"]
 
         sim.set(dut.singlefacet, 1)
         await sim.tick()
@@ -340,7 +349,7 @@ class SinglelinesinglefacetTest(SinglelineTest):
         """Verify scanhead performs expected movement in single-facet mode."""
         dut = self.dut
         steps_per_line = 1
-        scanline = [1] * self.laz_tim["scanline_length"]
+        scanline = [1] * self.laz_tim["scanline_ticks"]
 
         sim.set(dut.singlefacet, 1)
         await sim.tick()
@@ -372,7 +381,7 @@ class MultilineTest(BaseTest):
         dut = self.dut
         sim = self.sim
 
-        lines = [[1] * self.laz_tim["scanline_length"]] * numb_lines
+        lines = [[1] * self.laz_tim["scanline_ticks"]] * numb_lines
         if append_stop:
             lines.append([])
 
@@ -498,7 +507,7 @@ class MultilineTest(BaseTest):
 
         await self.wait_until_state("DATA_RUN")
         await sim.tick()
-        total_ticks = self.laz_tim["scanline_length"] * self.laz_tim["laser_ticks"]
+        total_ticks = self.laz_tim["scanline_ticks"]
         for _ in range(total_ticks):
             self.assertEqual(
                 sim.get(dut.lh_rec.lasers[0]),
@@ -506,9 +515,57 @@ class MultilineTest(BaseTest):
             )
             await sim.tick()
 
+    @async_test_case
+    async def test_single_tick_event_switching(self, sim):
+        """Verify Laserhead switches at single FPGA clock-tick resolution without divider quantization."""
+        dut = self.dut
+        events = [(0, 255), (3, 0), (5, 255), (6, 0)]
+        await self.write_events(events, steps_per_line=1, direction=0)
+        await self.write_events(None)
+
+        sim.set(dut.synchronize, 1)
+        await sim.tick()
+        await self.pulse(dut.expose_start)
+
+        await self.wait_until_state("DATA_RUN")
+        await sim.tick()
+
+        expected_bits = events_to_bits(
+            events,
+            self.laz_tim["scanline_ticks"],
+            self.laz_tim["scanline_ticks"],
+        )
+        for tick, expected in enumerate(expected_bits):
+            self.assertEqual(sim.get(dut.line_tick), tick + 1)
+            self.assertEqual(sim.get(dut.lh_rec.lasers[0]), expected)
+            self.assertEqual(sim.get(dut.lh_rec.lasers[1]), expected)
+            await sim.tick()
+
+        await self.wait_until_state("WAIT_END")
+        self.assertEqual(sim.get(dut.error), 0)
+
+    @async_test_case
+    async def test_zero_steps_stationary_scanline(self, sim):
+        """Verify steps_per_line=0 encodes stephalfperiod=0 and performs zero motor steps."""
+        dut = self.dut
+        scanline = [1] * self.laz_tim["scanline_ticks"]
+        for _ in range(3):
+            await self.write_line(scanline, steps_per_line=0, direction=1)
+        await self.write_line([])
+
+        sim.set(dut.synchronize, 1)
+        await sim.tick()
+        await self.pulse(dut.expose_start)
+
+        steps = await self.count_steps()
+        self.assertEqual(steps, 0)
+        self.assertEqual(sim.get(dut.stephalfperiod), 0)
+        self.assertEqual(sim.get(dut.error), 0)
+        self.assertTrue(sim.get(dut.expose_finished))
+
 
 class Loweredge(BaseTest):
-    """Test Laserhead scanline exposure when scanline length equals memory word width."""
+    """Test Laserhead scanline exposure when scanline ticks equal 3x memory word width."""
 
     plf_cfg = PlatformConfig(test=True)
     laz_tim = plf_cfg.laser_timing
@@ -516,8 +573,7 @@ class Loweredge(BaseTest):
     laz_tim.update(
         {
             "facet_ticks": 500,
-            "laser_ticks": 3,
-            "scanline_length": plf_cfg.hdl_cfg.mem_width,
+            "scanline_ticks": plf_cfg.hdl_cfg.mem_width * 3,
         }
     )
     plf_cfg.laser_timing = laz_tim
@@ -549,19 +605,18 @@ class Loweredge(BaseTest):
     async def test_unread_event_words_drained_at_end_of_scanline(self, sim):
         """Verify unread trailing event words are drained so the next line parses cleanly."""
         dut = self.dut
-        scanline_len = self.laz_tim["scanline_length"]
-        laser_ticks = self.laz_tim["laser_ticks"]
+        scanline_ticks = self.laz_tim["scanline_ticks"]
         raw_bytes = pack_scanline_events(
             events=[
                 (0, 255),
-                (scanline_len * laser_ticks + 10, 0),
-                (scanline_len * laser_ticks + 20, 255),
-                (scanline_len * laser_ticks + 30, 0),
-                (scanline_len * laser_ticks + 40, 255),
+                (scanline_ticks + 10, 0),
+                (scanline_ticks + 20, 255),
+                (scanline_ticks + 30, 0),
+                (scanline_ticks + 40, 255),
             ],
             steps_line=1,
             direction=0,
-            scanline_length=scanline_len,
+            scanline_ticks=scanline_ticks,
             scanline_cmd=Spi.Instructions.scanline,
         )
         for i in range(0, len(raw_bytes), Spi.word_bytes):
@@ -570,7 +625,7 @@ class Loweredge(BaseTest):
             await self.pulse(dut.fifo.write_en)
         await self.pulse(dut.fifo.write_commit)
 
-        normal_line = [1 if i % 4 == 0 else 0 for i in range(scanline_len)]
+        normal_line = [1 if i % 4 == 0 else 0 for i in range(scanline_ticks)]
         await self.write_line(normal_line)
         await self.write_line([])
 
@@ -588,7 +643,7 @@ class Loweredge(BaseTest):
 
 
 class Upperedge(Loweredge):
-    """Test scanline exposure with length one bit longer than the memory word width."""
+    """Test scanline exposure with ticks equal to 3x (memory word width + 1)."""
 
     plf_cfg = PlatformConfig(test=True)
     laz_tim = plf_cfg.laser_timing
@@ -596,8 +651,7 @@ class Upperedge(Loweredge):
     laz_tim.update(
         {
             "facet_ticks": 500,
-            "laser_ticks": 3,
-            "scanline_length": plf_cfg.hdl_cfg.mem_width + 1,
+            "scanline_ticks": (plf_cfg.hdl_cfg.mem_width + 1) * 3,
         }
     )
     plf_cfg.laser_timing = laz_tim

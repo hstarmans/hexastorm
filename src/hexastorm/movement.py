@@ -1,5 +1,4 @@
-from amaranth import Elaboratable, Module, Mux, Signal, signed
-from amaranth.hdl import Array
+from amaranth import Array, Elaboratable, Module, Mux, Signal, signed
 from amaranth.lib.cdc import FFSynchronizer
 from amaranth.lib.io import Buffer
 

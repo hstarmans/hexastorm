@@ -12,30 +12,32 @@ from hexastorm.config import Spi
 logger = logging.getLogger(__name__)
 
 
-def bits_to_events_np(line_bits: np.ndarray, laser_ticks: int) -> list[tuple[int, int]]:
+def bits_to_events_np(
+    line_bits: np.ndarray, scanline_ticks: int
+) -> list[tuple[int, int]]:
     """Convert a 1D binary scanline numpy array into (tick, intensity) events."""
-    return ulabext.bits_to_events(np.asarray(line_bits, dtype=np.uint8), laser_ticks)
+    return ulabext.bits_to_events(np.asarray(line_bits, dtype=np.uint8), scanline_ticks)
 
 
 def events_to_bits_np(
-    events: list[tuple[int, int]], scanline_length: int, laser_ticks: int
+    events: list[tuple[int, int]], num_bits: int, scanline_ticks: int
 ) -> np.ndarray:
-    """Reconstruct a 1D uint8 binary scanline array from (tick, intensity) events."""
-    scanline_length = int(scanline_length)
-    bits = np.zeros(scanline_length, dtype=np.uint8)
-    if not events or scanline_length <= 0:
+    """Reconstruct a 1D uint8 binary array of length ``num_bits`` from tick events."""
+    n = int(num_bits)
+    total_ticks = int(scanline_ticks)
+    bits = np.zeros(n, dtype=np.uint8)
+    if not events or n <= 0 or total_ticks <= 0:
         return bits
 
-    tick_step = int(laser_ticks)
     valid = [(int(t), int(v)) for t, v in events if 0 <= int(t) < ulabext.SENTINEL_TICK]
     for i, (tick, intensity) in enumerate(valid):
-        start_px = max(0, tick // tick_step)
-        if start_px >= scanline_length:
+        start_px = max(0, (tick * n) // total_ticks)
+        if start_px >= n:
             break
         if i + 1 < len(valid):
-            end_px = min(scanline_length, valid[i + 1][0] // tick_step)
+            end_px = min(n, (valid[i + 1][0] * n) // total_ticks)
         else:
-            end_px = scanline_length
+            end_px = n
         bits[start_px:end_px] = 1 if intensity > 0 else 0
     return bits
 
@@ -60,7 +62,7 @@ class EventStreamWriter:
         facets_in_lane: int,
         lanes: int,
         steps_per_line: float,
-        bits_in_scanline: int,
+        scanline_ticks: int,
         compression_level: int = 9,
     ):
         self.out_path = Path(filepath)
@@ -68,7 +70,7 @@ class EventStreamWriter:
         self.facets_in_lane = int(facets_in_lane)
         self.lanes = int(lanes)
         self.steps_per_line = float(steps_per_line)
-        self.bits_in_scanline = int(bits_in_scanline)
+        self.scanline_ticks = int(scanline_ticks)
         self.compression_level = int(compression_level)
 
         self._scanline_cmd = Spi.Instructions.scanline
@@ -90,7 +92,7 @@ class EventStreamWriter:
             events=events,
             steps_line=self.steps_per_line,
             direction=direction,
-            scanline_length=self.bits_in_scanline,
+            scanline_ticks=self.scanline_ticks,
             scanline_cmd=self._scanline_cmd,
         )
         for i in range(0, len(full_payload), 8):
@@ -145,7 +147,7 @@ def write_binary_file(
 
     Args:
         pixeldata: The raw 1-bit packed raster data (numpy array, bitorder='big').
-        params: Geometry settings dict (must contain lanewidth, facetsinlane, laser_ticks, etc.).
+        params: Geometry settings dict (must contain lanewidth, facetsinlane, scanline_ticks, etc.).
         filepath: Output destination path.
         compression_level: Zlib compression level (0-9).
     """
@@ -157,7 +159,7 @@ def write_binary_file(
     bits_in_scanline = int(params["bitsinscanline"])
     samplexsize = float(params["samplexsize"])
     stepsperline = float(params["stepsperline"])
-    laser_ticks = int(params["laser_ticks"])
+    scanline_ticks = int(params["scanline_ticks"])
 
     lanes = int(np.ceil(samplexsize / lanewidth))
     bytes_in_line = int(np.ceil(bits_in_scanline / 8))
@@ -181,7 +183,7 @@ def write_binary_file(
         facets_in_lane=facets,
         lanes=lanes,
         steps_per_line=stepsperline,
-        bits_in_scanline=bits_in_scanline,
+        scanline_ticks=scanline_ticks,
         compression_level=compression_level,
     ) as writer:
         for lane_idx in range(lanes):
@@ -196,27 +198,14 @@ def write_binary_file(
                 line_bits_hw = (
                     line_bits_img[::-1] if invert_hw_scan_dir else line_bits_img
                 )
-                events = bits_to_events_np(line_bits_hw, laser_ticks)
+                events = bits_to_events_np(line_bits_hw, scanline_ticks)
                 writer.write_scanline(events, direction)
 
 
-def read_binary_file(
-    filepath: str | Path, laser_timing_cfg: dict, bits_in_scanline: int
-) -> tuple[int, int, float, np.ndarray]:
-    """
-    Reads, decompresses, and decodes an event-driven binary laser file back into raw pixel data.
-
-    Reconstructs the 1-bit bitmap per scanline from the SPI-framed `[tick, intensity]`
-    event stream so visualization and verification tools receive the exact original bitmap.
-
-    Args:
-        filepath: Path to the .bin / .pat file.
-        laser_timing_cfg: Configuration dict containing `laser_ticks`.
-        bits_in_scanline: Expected number of valid bits per line.
-
-    Returns:
-        Tuple containing: (facets_in_lane, lanes, lanewidth, flattened_pixel_data)
-    """
+def read_binary_events(
+    filepath: str | Path,
+) -> tuple[int, int, float, list[tuple[int, list[tuple[int, int]]]]]:
+    """Read raw per-scanline ``(direction, [(tick, intensity), ...])`` events without rasterizing."""
     path = Path(filepath)
     if not path.exists():
         raise FileNotFoundError(f"Binary file not found: {path}")
@@ -224,17 +213,11 @@ def read_binary_file(
     with open(path, "rb") as f:
         data = zlib.decompress(f.read())
 
-    # Parse File Header
     lanewidth, facets_in_lane, lanes = struct.unpack("<fII", data[:12])
-
-    laser_ticks = int(laser_timing_cfg["laser_ticks"])
-    bits_in_scanline = int(bits_in_scanline)
-    bytes_in_line = int(np.ceil(bits_in_scanline / 8))
     total_lines = lanes * facets_in_lane
-
     raw_payload = np.frombuffer(data, dtype=np.uint8, offset=12)
-    lines = np.zeros((total_lines, bytes_in_line), dtype=np.uint8)
 
+    lines_events: list[tuple[int, list[tuple[int, int]]]] = []
     offset = 0
     parsed_lines = 0
     payload_len = raw_payload.size
@@ -244,15 +227,14 @@ def read_binary_file(
             logger.warning(
                 f"File size mismatch. Expected {total_lines} lines, found {parsed_lines}."
             )
-            lines = lines[:parsed_lines]
             break
 
-        # Word 0: [1B SPI write cmd][8B reversed header]
         word0 = raw_payload[offset + 1 : offset + 9][::-1].tobytes()
         offset += 9
 
         instr = word0[0]
         if instr == Spi.Instructions.last_scanline:
+            lines_events.append((0, []))
             parsed_lines += 1
             continue
         if instr != Spi.Instructions.scanline:
@@ -261,6 +243,7 @@ def read_binary_file(
             )
 
         payload_int = int.from_bytes(word0[1:8], "little")
+        direction = payload_int & 1
         event_words = (payload_int >> 1) & 0xFFFF
 
         if offset + event_words * 9 > payload_len:
@@ -268,7 +251,6 @@ def read_binary_file(
                 f"Truncated event stream at line {parsed_lines} "
                 f"(expected {event_words} event words)."
             )
-            lines = lines[:parsed_lines]
             break
 
         events: list[tuple[int, int]] = []
@@ -283,9 +265,26 @@ def read_binary_file(
             if t1 < ulabext.SENTINEL_TICK:
                 events.append((t1, ev1 & 0xFF))
 
-        line_bits_hw = events_to_bits_np(events, bits_in_scanline, laser_ticks)
-        line_bits_img = line_bits_hw[::-1]
-        lines[parsed_lines] = np.packbits(line_bits_img, bitorder="big")[:bytes_in_line]
+        lines_events.append((direction, events))
         parsed_lines += 1
+
+    return facets_in_lane, lanes, lanewidth, lines_events
+
+
+def read_binary_file(
+    filepath: str | Path, laser_timing_cfg: dict, bits_in_scanline: int
+) -> tuple[int, int, float, np.ndarray]:
+    """Reads, decompresses, and rasterizes an event-driven ``.bin``/``.pat`` file to 1-bit bytes."""
+    facets_in_lane, lanes, lanewidth, lines_events = read_binary_events(filepath)
+
+    scanline_ticks = int(laser_timing_cfg["scanline_ticks"])
+    bits_in_scanline = int(bits_in_scanline)
+    bytes_in_line = int(np.ceil(bits_in_scanline / 8))
+    lines = np.zeros((len(lines_events), bytes_in_line), dtype=np.uint8)
+
+    for idx, (_direction, events) in enumerate(lines_events):
+        line_bits_hw = events_to_bits_np(events, bits_in_scanline, scanline_ticks)
+        line_bits_img = line_bits_hw[::-1]
+        lines[idx] = np.packbits(line_bits_img, bitorder="big")[:bytes_in_line]
 
     return facets_in_lane, lanes, lanewidth, lines.flatten()

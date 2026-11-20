@@ -11,12 +11,24 @@ from typing import Any
 
 import numpy as np
 
-from ..config import displacement_kernel
+from ..config import displacement_at_frac, displacement_kernel
 
 logger = logging.getLogger(__name__)
 
 # Pure-NumPy optical displacement kernel alias
 displacement = displacement_kernel
+
+
+def _pixel_to_frac(
+    pixel: float | np.ndarray, params: dict[str, Any]
+) -> float | np.ndarray:
+    """Map software raster index ``pixel`` in ``[0, bitsinscanline)`` onto ``[start_frac, end_frac]``."""
+    n = float(params["bitsinscanline"])
+    p = pixel % n
+    start_f = float(params["start_frac"])
+    end_f = float(params["end_frac"])
+    denom = max(1.0, n - 1.0)
+    return start_f + (p / denom) * (end_f - start_f)
 
 
 def fxpos(
@@ -34,9 +46,9 @@ def fxpos(
         xstart: Offset along ``u_scan`` in mm.
     """
     dx = float(params[f"f{facet_idx}_scan"])
-    line_pixel = float(params["startpixel"]) + (pixel % float(params["bitsinscanline"]))
+    frac = _pixel_to_frac(pixel, params)
     xpos = (
-        (np.sin(float(params["tiltangle"])) * displacement_kernel(line_pixel, params))
+        (np.sin(float(params["tiltangle"])) * displacement_at_frac(frac, params))
         + float(xstart)
         + dx
     )
@@ -60,13 +72,12 @@ def fypos(
         ystart: Offset along ``v_step`` in mm.
     """
     dy = float(params[f"f{facet_idx}_orth"])
-    line_pixel = float(params["startpixel"]) + (pixel % float(params["bitsinscanline"]))
+    frac = _pixel_to_frac(pixel, params)
     base_y = (
-        -np.cos(float(params["tiltangle"])) * displacement_kernel(line_pixel, params)
+        -np.cos(float(params["tiltangle"])) * displacement_at_frac(frac, params)
     ) + dy
-    stage_component = (line_pixel / float(params["laser_hz"])) * float(
-        params["stagespeed"]
-    )
+    facet_freq = float(params["rotationfrequency"]) * float(params["facets"])
+    stage_component = (frac / facet_freq) * float(params["stagespeed"])
     offset = float(ystart)
     if direction:
         ypos = base_y + stage_component + offset
@@ -123,14 +134,13 @@ def _plan_grid_geometry(
 
     # Precompute the F physical facet base sweeps (F, P) in pure NumPy
     pixel_indices = np.arange(points_per_sweep, dtype=np.float64)
-    startpixel = float(params["startpixel"])
-    line_pixel = startpixel + (pixel_indices % points_per_sweep)
-    disp = displacement_kernel(line_pixel, params)
+    fracs = _pixel_to_frac(pixel_indices, params)
+    disp = displacement_at_frac(fracs, params)
 
     tilt = float(params["tiltangle"])
     sin_tilt = math.sin(tilt)
     cos_tilt = math.cos(tilt)
-    stage_comp = (line_pixel / float(params["laser_hz"])) * stagespeed
+    stage_comp = (fracs / (rot_freq * num_physical_facets)) * stagespeed
 
     dx_arr = np.array(
         [float(params[f"f{fi}_scan"]) for fi in range(num_physical_facets)],

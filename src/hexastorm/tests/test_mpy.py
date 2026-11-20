@@ -127,7 +127,6 @@ class LaserheadTest(Base):
             timeout:    wait
         """
         host = self.host
-        laz_tim = host.cfg.laser_timing
         mt_cfg = host.cfg.motor_cfg
         numb_lines = round(
             dist * mt_cfg["steps_mm"][mt_cfg["orth2lsrline"]] / steps_line
@@ -137,10 +136,9 @@ class LaserheadTest(Base):
         host.enable_steppers = True
         logger.info(f"Wait for synchronization, {time_out} seconds.")
         sleep(time_out)
-        line = [0] * laz_tim["scanline_length"]
         for direction in [0, 1]:
             for _ in range(numb_lines):
-                host.write_line(line, steps_line, direction)
+                host.write_events([], steps_line, direction)
             logger.info(f"Wait for move to complete, {time_out} seconds.")
             sleep(time_out)
             indx = list(mt_cfg["steps_mm"].keys())
@@ -148,7 +146,7 @@ class LaserheadTest(Base):
             # assume y axis is 1
             start_pos[indx] += dist if direction else -dist
             assert_array_almost_equal(np.array(host.mpos), start_pos, decimal=1)
-        host.write_line([])
+        host.write_events(None)
         logger.info(f"Wait for stopline to execute, {time_out} seconds")
         sleep(time_out)
         self.assertFalse((host.fpga_state)["error"])
@@ -161,22 +159,22 @@ class LaserheadTest(Base):
         """Send *numb_lines* scanlines and compare measured line rate."""
         host = self.host
         laz_tim = host.cfg.laser_timing
-        line = [1] * laz_tim["scanline_length"]
+        events = [(0, 255)]
         host.enable_comp(singlefacet=singlefacet)
         # Pre-load buffer a bit
         for _ in range(8):
-            host.write_line(line)
+            host.write_events(events)
         logger.info(f"Processing {numb_lines} lines")
         sleep(3)
         start_ms = ticks_ms()
         if repeat:
-            host.write_line(line, repetitions=numb_lines)
+            host.write_events(events, repetitions=numb_lines)
         else:
             for _ in range(numb_lines):
-                host.write_line(line)
+                host.write_events(events)
         elapsed_s = (ticks_ms() - start_ms) / 1000
         measured_hz = numb_lines / elapsed_s
-        host.write_line([])
+        host.write_events(None)
         # 3000 RPM
         #    100 khz --> pass
         #    400 Khz --> pass, fail for repeat is False

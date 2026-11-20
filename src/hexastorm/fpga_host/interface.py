@@ -85,80 +85,47 @@ class BaseHost:
 
         return cmd_list
 
-    def bit_to_byte_list(self, laser_bits, steps_line=1, direction=0):
-        """
-        Convert a bit list into an event-driven byte list suitable for FPGA scanline commands.
-
-        Args:
-            laser_bits (List[int]): Bits to write to the substrate (laser on/off).
-            steps_line (float): Number of motor steps for the scanline (>= 0, where 0 means stationary).
-            direction (int): 0 for backward, 1 for forward.
-
-        Returns:
-            List[int]: Byte list ready to be packed into SPI commands.
-        """
-        scanline_length = self.cfg.laser_timing["scanline_length"]
-
-        # Handle Empty/Stop Case
-        if len(laser_bits) == 0:
+    def events_to_byte_list(self, events, steps_line=1, direction=0):
+        """Convert (tick, intensity) events (or ``None`` for stop) to scanline bytes."""
+        if events is None:
             out_buffer = bytearray([Spi.Instructions.last_scanline])
             out_buffer.extend(b"\x00" * (Spi.word_bytes - 1))
             return list(out_buffer)
 
-        if len(laser_bits) == scanline_length:
-            bits = laser_bits
-        elif scanline_length % 8 == 0 and len(laser_bits) == scanline_length // 8:
-            bits = [
-                (byte_val >> bit_idx) & 1
-                for byte_val in laser_bits
-                for bit_idx in range(8)
-            ]
-        else:
-            raise ValueError(f"Invalid laser_bits length: {len(laser_bits)}")
-
-        laser_ticks = self.cfg.laser_timing["laser_ticks"]
-        events = ulabext.bits_to_events(bits, laser_ticks)
         out_buffer = ulabext.pack_scanline_events(
             events=events,
             steps_line=steps_line,
             direction=direction,
-            scanline_length=scanline_length,
+            scanline_ticks=self.cfg.laser_timing["scanline_ticks"],
             scanline_cmd=Spi.Instructions.scanline,
         )
         return list(out_buffer)
 
-    async def write_line(
-        self, bit_lst, steps_line=1, direction=0, repetitions=1, facet=None
+    def bit_to_byte_list(self, laser_bits, steps_line=1, direction=0):
+        """Convert a bit list (empty = stop) into event-driven scanline bytes."""
+        if len(laser_bits) == 0:
+            return self.events_to_byte_list(None, steps_line, direction)
+
+        scanline_ticks = self.cfg.laser_timing["scanline_ticks"]
+        if len(laser_bits) > scanline_ticks:
+            raise ValueError(f"Invalid laser_bits length: {len(laser_bits)}")
+
+        events = ulabext.bits_to_events(laser_bits, scanline_ticks)
+        return self.events_to_byte_list(events, steps_line, direction)
+
+    async def _send_scanline_cmds(
+        self, active_byte_lst, steps_line=1, direction=0, repetitions=1, facet=None
     ):
-        """
-        Projects a scanline to the substrate using the laser system.
-
-        Args:
-            bitlst (List[int]): Laser on/off bits. Empty list sends stop command.
-            stepsperline (int): Number of steps to move during scanline.
-                                To disable motion, turn off the motor separately.
-            direction (int): 0 = backward, 1 = forward.
-            repetitions (int): Number of times to repeat the scanline projection.
-            facet (int): Which facet to target (0 to facets-1).
-
-        Behavior:
-            Converts the bit list into a sequence of commands and
-            sends them to the FPGA controller. Commands are repeated
-            for the specified number of repetitions.
-        """
-        active_byte_lst = self.bit_to_byte_list(bit_lst, steps_line, direction)
+        """Stream a packed scanline (optionally isolated to one facet) to the FPGA FIFO."""
         active_cmd_bytes = b"".join(self.byte_to_cmd_list(active_byte_lst))
         packet_size = self.cfg.hdl_cfg.lines_chunk
         if facet is None:
             cmd_bytes = active_cmd_bytes
         else:
-            # Create silent command for other facets
             facets = self.cfg.laser_timing["facets"]
-            silent_bits = [0] * len(bit_lst)
-            silent_byte_lst = self.bit_to_byte_list(silent_bits, steps_line, direction)
+            silent_byte_lst = self.events_to_byte_list([], steps_line, direction)
             silent_cmd_bytes = b"".join(self.byte_to_cmd_list(silent_byte_lst))
 
-            # Build full cycle with one active facet
             facet_cycle = [silent_cmd_bytes] * facets
             if 0 <= facet < facets:
                 facet_cycle[facet] = active_cmd_bytes
@@ -171,6 +138,24 @@ class BaseHost:
             last_index = min(i + packet_size, repetitions)
             repeat = last_index - i
             await self.send_command(cmd_bytes * repeat, timeout=True)
+
+    async def write_events(
+        self, events, steps_line=1, direction=0, repetitions=1, facet=None
+    ):
+        """Project a scanline directly from ``(tick, intensity)`` events (``None`` = stop)."""
+        active_byte_lst = self.events_to_byte_list(events, steps_line, direction)
+        await self._send_scanline_cmds(
+            active_byte_lst, steps_line, direction, repetitions, facet
+        )
+
+    async def write_line(
+        self, bit_lst, steps_line=1, direction=0, repetitions=1, facet=None
+    ):
+        """Project a scanline from a 1D binary list (empty list sends stop command)."""
+        active_byte_lst = self.bit_to_byte_list(bit_lst, steps_line, direction)
+        await self._send_scanline_cmds(
+            active_byte_lst, steps_line, direction, repetitions, facet
+        )
 
     async def _send_pin_state(self):
         """Helper to send the current internal pin state to the FPGA."""

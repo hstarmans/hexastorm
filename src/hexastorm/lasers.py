@@ -146,16 +146,16 @@ class Laserhead(Elaboratable):
                 self.expose_finished.eq(0),
             ]
 
-        # step generator, i.e. slowest speed is 1/(2^4-1)
-        stephalfperiod = Signal(laz_tim["scanline_length"].bit_length() + 4)
+        scanline_ticks = laz_tim["scanline_ticks"]
+
+        # Step generator in raw FPGA clock ticks; +4 bits covers down to 1/16 step per scanline
+        stephalfperiod = Signal(scanline_ticks.bit_length() + 4)
         stepcnt = Signal.like(stephalfperiod)
 
         # Laser FSM
         assert laz_tim["facets"] < 2**8, "too many facets"
         facetcnt = Signal(8)  # 1 byte, is sent back
         linecnt = Signal.like(facetcnt)
-        lasercnt = Signal(range(laz_tim["laser_ticks"]))
-        pixel_index = Signal(range(laz_tim["scanline_length"] + 1))
 
         # Auto-size the tickcounter
         tickcounter_max = max(laz_tim["spinup_ticks"], laz_tim["stable_ticks"])
@@ -189,10 +189,9 @@ class Laserhead(Elaboratable):
                     tickcounter.eq(0),
                     facetcnt.eq(0),
                     linecnt.eq(0),
+                    stepcnt.eq(0),
                     self.synchronized.eq(0),
                     enable_prism.eq(0),
-                    pixel_index.eq(0),
-                    lasercnt.eq(0),
                     lasers.eq(0),
                     words_left.eq(0),
                     has_next_event.eq(0),
@@ -339,8 +338,6 @@ class Laserhead(Elaboratable):
             with m.State("WAIT_FOR_DATA_RUN"):
                 m.d.sync += [
                     tickcounter.eq(tickcounter + 1),
-                    pixel_index.eq(0),
-                    lasercnt.eq(0),
                     line_tick.eq(0),
                     lasers.eq(0),
                 ]
@@ -370,64 +367,52 @@ class Laserhead(Elaboratable):
                     self.read_en.eq(0),
                     line_tick.eq(line_tick + 1),
                 ]
-                # NOTE:
-                #      lasercnt used to pulse laser at pixel rate and drive stepper
-                with m.If(lasercnt == 0):
-                    # Handle motor stepping
-                    with m.If(stepcnt >= stephalfperiod):
-                        m.d.sync += [self.step.eq(~self.step), stepcnt.eq(0)]
-                    with m.Else():
-                        m.d.sync += stepcnt.eq(stepcnt + 1)
 
-                    # End of scanline reached
-                    with m.If(pixel_index >= laz_tim["scanline_length"]):
-                        m.d.sync += lasers.eq(0)
+                with m.If(line_tick >= scanline_ticks):
+                    m.d.sync += lasers.eq(0)
 
-                        with m.If(words_left > 0):
-                            m.d.sync += [
-                                words_left.eq(words_left - 1),
-                                self.read_en.eq(1),
-                            ]
-                            m.next = "DRAIN_WORDS"
-                        with m.Else():
-                            # Commit or discard based on configuration and FIFO status
-                            with m.If(hdl_cfg.single_line & self.empty):
-                                m.d.sync += self.read_discard.eq(1)
-                            with m.Else():
-                                m.d.sync += self.read_commit.eq(1)
-
-                            m.next = "WAIT_END"
-
-                    # Still scanning — advance pixel/window counter
-                    with m.Else():
+                    with m.If(words_left > 0):
                         m.d.sync += [
-                            lasercnt.eq(laz_tim["laser_ticks"] - 1),
-                            pixel_index.eq(pixel_index + 1),
+                            words_left.eq(words_left - 1),
+                            self.read_en.eq(1),
                         ]
+                        m.next = "DRAIN_WORDS"
+                    with m.Else():
+                        # Commit or discard based on configuration and FIFO status
+                        with m.If(hdl_cfg.single_line & self.empty):
+                            m.d.sync += self.read_discard.eq(1)
+                        with m.Else():
+                            m.d.sync += self.read_commit.eq(1)
+
+                        m.next = "WAIT_END"
+
                 with m.Else():
-                    m.d.sync += lasercnt.eq(lasercnt - 1)
+                    # Step orthogonal axis directly at FPGA clock resolution (0 = stationary)
+                    with m.If(stephalfperiod != 0):
+                        with m.If(stepcnt >= stephalfperiod):
+                            m.d.sync += [self.step.eq(~self.step), stepcnt.eq(0)]
+                        with m.Else():
+                            m.d.sync += stepcnt.eq(stepcnt + 1)
 
-                with (
-                    m.If((lasercnt != 0) | (pixel_index < laz_tim["scanline_length"])),
-                    m.If(line_tick == cur_event[8:32]),
-                ):
-                    m.d.sync += lasers.eq(Mux(cur_event[0:8].any(), 0b11, 0b00))
-                    with m.If(has_next_event):
-                        m.d.sync += [
-                            cur_event.eq(next_event),
-                            has_next_event.eq(0),
-                        ]
-                    with m.Else():
-                        with m.If(words_left > 0):
+                    # Event-driven laser switching at full FPGA clock resolution
+                    with m.If(line_tick == cur_event[8:32]):
+                        m.d.sync += lasers.eq(Mux(cur_event[0:8].any(), 0b11, 0b00))
+                        with m.If(has_next_event):
                             m.d.sync += [
-                                cur_event.eq(read_data[0:32]),
-                                next_event.eq(read_data[32:64]),
-                                has_next_event.eq(1),
-                                words_left.eq(words_left - 1),
-                                self.read_en.eq(1),
+                                cur_event.eq(next_event),
+                                has_next_event.eq(0),
                             ]
                         with m.Else():
-                            m.d.sync += cur_event.eq(0xFFFFFFFF)
+                            with m.If(words_left > 0):
+                                m.d.sync += [
+                                    cur_event.eq(read_data[0:32]),
+                                    next_event.eq(read_data[32:64]),
+                                    has_next_event.eq(1),
+                                    words_left.eq(words_left - 1),
+                                    self.read_en.eq(1),
+                                ]
+                            with m.Else():
+                                m.d.sync += cur_event.eq(0xFFFFFFFF)
 
             with m.State("DRAIN_WORDS"):
                 m.d.sync += [
@@ -499,8 +484,7 @@ class Laserhead(Elaboratable):
         if self.plf_cfg.test:
             self.stephalfperiod = stephalfperiod
             self.tickcounter = tickcounter
-            self.scanbit = pixel_index
-            self.lasercnt = lasercnt
+            self.line_tick = line_tick
             self.facetcnt = facetcnt
             self.linecnt = linecnt
             self.laserfsm = laserfsm

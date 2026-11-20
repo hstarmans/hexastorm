@@ -194,9 +194,9 @@ class CameraCalibrationGen(LaserCalibrationGen):
         Useful for debugging the interpolator output to verify exactly where
         the active laser pixels are falling within the target camera bounds.
         """
-        scanline_length = self.engine.cfg.laser_timing["scanline_length"]
+        bits_in_scanline = int(self.engine.params["bitsinscanline"])
         pattern_bits = self.engine.readbin()["data"]
-        ptrn = pattern_bits.reshape(-1, scanline_length)
+        ptrn = pattern_bits.reshape(-1, bits_in_scanline)
         # --- CLI ASCII Profile ---
 
         scanline = ptrn[0, :]

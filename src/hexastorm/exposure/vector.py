@@ -13,7 +13,7 @@ Coordinate Frames:
        mapped from Machine via :class:`MachineFrame` and :class:`LaserheadMount`.
        ``u_scan`` is the fast prism-scan axis (divided into lanes of width
        ``lanewidth``), and ``v_step`` is the slow stage-stepping axis.
-    4. FPGA Clock Ticks ``t``: per scanline ``[0, scanline_length * laser_ticks]``,
+    4. FPGA Clock Ticks ``t``: per scanline ``[0, scanline_ticks]``,
        computed directly from intersection coordinates ``u_hit`` via the 1D inverse
        Snellius prism curve (:class:`PrismCurve`).
 
@@ -34,7 +34,7 @@ from typing import Any
 
 import numpy as np
 
-from ..config import PlatformConfig, Spi, displacement_kernel
+from ..config import PlatformConfig, Spi, displacement_at_frac
 from . import io, plotter
 from .coordinates import (
     CoordinateTransform,
@@ -96,54 +96,44 @@ class VectorShape:
 class PrismCurve:
     """1D forward and inverse mapping between lane-local ``u`` [mm] and FPGA clock ticks.
 
-    At continuous hardware tick ``t`` in ``[0, bitsinscanline * laser_ticks]``:
+    At continuous hardware tick ``t`` in ``[0, scanline_ticks]``:
     - When ``invert_hw_scan_dir=True`` (Hexastorm standard), tick ``0`` aligns with
-      the outer edge ``p = N - 0.5`` of hardware pixel ``0`` (legacy pixel ``N - 1``)
-      and tick ``N * laser_ticks`` aligns with ``p = -0.5`` of hardware pixel ``N - 1``.
-    - Pixel center ``p`` (``0 <= p <= N - 1``) corresponds to hardware tick
-      ``((N - 1 - p) + 0.5) * laser_ticks``.
+      ``end_frac`` (``u_base = 0``) and tick ``scanline_ticks`` aligns with ``start_frac``
+      (``u_base = lanewidth``).
+    - When ``invert_hw_scan_dir=False``, ticks run from ``start_frac`` to ``end_frac``.
     """
 
+    N_LUT = 1025
+
     def __init__(self, params: dict[str, Any], invert_hw_scan_dir: bool = True):
-        self.bits_in_scanline = int(params["bitsinscanline"])
-        self.laser_ticks = int(params["laser_ticks"])
-        self.total_ticks = self.bits_in_scanline * self.laser_ticks
-        self.start_pixel = float(params["startpixel"])
+        self.total_ticks = int(params["scanline_ticks"])
+        self.start_frac = float(params["start_frac"])
+        self.end_frac = float(params["end_frac"])
         self.tiltangle = float(params["tiltangle"])
         self.sin_tilt = math.sin(self.tiltangle)
         self.cos_tilt = math.cos(self.tiltangle)
         self.invert_hw_scan_dir = invert_hw_scan_dir
         self.f0_scan = float(params.get("f0_scan", 0.0))
 
-        # Sample pixel centers p = [N-1, N-2, ..., 0] extended by +-0.5 px at ends
-        # so tick=0..total_ticks covers the full physical aperture seamlessly.
-        n = self.bits_in_scanline
-        self._p_samples = np.concatenate(
-            ([n - 0.5], np.arange(n - 1, -1, -1, dtype=np.float64), [-0.5])
+        # Sample facet fraction linearly from end_frac (tick 0) to start_frac (total_ticks)
+        frac_samples = np.linspace(
+            self.end_frac, self.start_frac, self.N_LUT, dtype=np.float64
         )
-        disp_samples = np.array(
-            [
-                displacement_kernel(self.start_pixel + float(p), params)
-                for p in self._p_samples
-            ],
-            dtype=np.float64,
-        )
+        disp_samples = displacement_at_frac(frac_samples, params)
         raw_u = self.sin_tilt * disp_samples
-        disp_first_center = displacement_kernel(self.start_pixel, params)
-        disp_last_center = displacement_kernel(self.start_pixel + (n - 1), params)
-        self.raw_u_first = self.sin_tilt * disp_first_center
-        self.raw_u_last = self.sin_tilt * disp_last_center
-        self.disp_first = disp_first_center
-        self.disp_last = disp_last_center
+        self.disp_last = float(disp_samples[0])  # at end_frac
+        self.disp_first = float(disp_samples[-1])  # at start_frac
+        self.raw_u_last = float(raw_u[0])
+        self.raw_u_first = float(raw_u[-1])
 
         self.xstart_val = abs(self.raw_u_last + self.f0_scan)
         self.lanewidth = abs(self.raw_u_first - self.raw_u_last)
 
-        # u_base(p) = raw_u(p) + xstart_val - f0_scan -> 0.0 at p=N-1, lanewidth at p=0
+        # u_base(end_frac) = 0.0 at tick 0 -> u_base(start_frac) = lanewidth at tick total_ticks
         self._u_base_samples = raw_u - self.raw_u_last
-        # Corresponding hardware ticks if invert_hw_scan_dir is True:
-        # p = N - 0.5 -> tick = 0, p = N - 1 -> tick = 0.5*laser_ticks, ..., p = -0.5 -> total_ticks
-        self._tick_samples = ((n - 0.5) - self._p_samples) * float(self.laser_ticks)
+        self._tick_samples = np.linspace(
+            0.0, float(self.total_ticks), self.N_LUT, dtype=np.float64
+        )
 
         # Ensure u is strictly ascending for np.interp
         if self._u_base_samples[0] > self._u_base_samples[-1]:
@@ -1159,12 +1149,9 @@ class VectorExposure:
         curve = self.curve
         lanewidth = curve.lanewidth
         facets = int(params["facets"])
-        laser_hz = float(params["laser_hz"])
         stagespeed = float(params["stagespeed"])
         rot_freq = float(params["rotationfrequency"])
         stepsperline = float(params["stepsperline"])
-        bits_in_scanline = curve.bits_in_scanline
-        startpixel = curve.start_pixel
         positiveresist = bool(params["positiveresist"])
 
         lanes = math.ceil(u_size_mm / lanewidth)
@@ -1181,13 +1168,12 @@ class VectorExposure:
                 shape_edges.append(ed)
 
         # Constants for scanline v_start / v_end trajectory
-        y_shift_per_facet = stagespeed / (facets * rot_freq)
-        p_start = float(bits_in_scanline - 1)
-        p_end = 0.0
+        facet_period_s = 1.0 / (rot_freq * facets)
+        y_shift_per_facet = stagespeed * facet_period_s
         v_prism_start = -curve.cos_tilt * curve.disp_last
         v_prism_end = -curve.cos_tilt * curve.disp_first
-        v_stage_start = ((startpixel + p_start) / laser_hz) * stagespeed
-        v_stage_end = ((startpixel + p_end) / laser_hz) * stagespeed
+        v_stage_start = (curve.end_frac * facet_period_s) * stagespeed
+        v_stage_end = (curve.start_frac * facet_period_s) * stagespeed
         slope_den = curve.raw_u_first - curve.raw_u_last
 
         out_path = Path(filepath)
@@ -1201,7 +1187,7 @@ class VectorExposure:
             facets_in_lane=facets_inlane,
             lanes=lanes,
             steps_per_line=stepsperline,
-            bits_in_scanline=bits_in_scanline,
+            scanline_ticks=curve.total_ticks,
             compression_level=compression_level,
         ) as writer:
             if use_c and _HAS_C_CORE:
@@ -1300,7 +1286,6 @@ class VectorExposure:
                         int(curve.total_ticks),
                         int(lane_idx),
                         int(facets_inlane),
-                        int(bits_in_scanline),
                         float(stepsperline),
                         float(u_size_mm),
                         float(v_size_mm),
@@ -1535,8 +1520,7 @@ class VectorExposure:
         logger.info(f"Estimated Job Duration: {total_min:.2f} minutes using {device}")
         return total_min
 
-    def readbin(self, filename: str | Path | None = None) -> dict:
-        """Read back an event-driven ``.bin`` / ``.pat`` file via :mod:`hexastorm.exposure.io`."""
+    def _resolve_bin_path(self, filename: str | Path | None = None) -> Path:
         if filename is None:
             if self._last_output_path is None:
                 raise ValueError("No output path specified or recorded yet")
@@ -1548,6 +1532,24 @@ class VectorExposure:
             tagged_path = self._tagged_bin_path(in_path)
             if tagged_path.exists():
                 in_path = tagged_path
+        return in_path
+
+    def readbin_events(self, filename: str | Path | None = None) -> dict:
+        """Read raw FPGA tick events ``[(direction, [(tick, intensity), ...]), ...]`` from a file."""
+        in_path = self._resolve_bin_path(filename)
+        facets, lanes, width, lines_events = io.read_binary_events(in_path)
+        return {
+            "events": lines_events,
+            "metadata": {
+                "lanes": lanes,
+                "lanewidth": width,
+                "facetsinlane": facets,
+            },
+        }
+
+    def readbin(self, filename: str | Path | None = None) -> dict:
+        """Read back an event-driven ``.bin`` / ``.pat`` file via :mod:`hexastorm.exposure.io`."""
+        in_path = self._resolve_bin_path(filename)
         facets, lanes, width, data_bytes = io.read_binary_file(
             in_path, self.cfg.laser_timing, int(self.params["bitsinscanline"])
         )

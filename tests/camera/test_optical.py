@@ -197,53 +197,15 @@ class DynamicTests(StaticTests):
 
         self.esp.exec_func(get_facet_zero_mapping)
 
-    def picture_line(self, line, fct=0, preview=True, name=None, save_image=True):
-        """
-        Projects a 1D binary pattern with a specific polygon facet and captures the result.
-
-        This method manages a synchronous hardware handshake over serial. It offloads
-        a continuous projection loop to the ESP32, waits for the ESP32 to signal ('R')
-        that the polygon scanner is stable and exposing the correct facet, and only
-        then triggers the camera capture.
-
-        Args:
-            line (list[int]): 1D binary array representing the laser firing pattern (1s and 0s).
-            fct (int): The logical index of the polygon facet to target (e.g., 0-3).
-            preview (bool): If True, pauses to display a live camera feed before capture.
-            name (str, optional): The filename for the captured image (e.g., 'facet_0.jpg').
-            save_image (bool): If True, writes the image to disk. If False, keeps it in memory.
-
-        Returns:
-            numpy.ndarray | None: The captured grayscale image, or None if the capture failed.
-
-        Raises:
-            Exception: If the ESP32 fails to respond with the 'R' ready signal within the timeout.
-        """
-        # Default filename
+    def _capture_projection(
+        self, remote_pattern, remote_kwargs, fct=0, preview=True, name=None, save_image=True
+    ):
+        """Run a synchronous ESP32 projection loop and capture a camera frame."""
         if name is None:
             name = f"dynamic_facet_{fct}.jpg"
 
-        def remote_pattern(line, fct):
-            # Imports required inside the function for ESP32 execution
-            global host, spoll, sys
-
-            chunk = host.cfg.hdl_cfg.lines_chunk
-            true_facet = host.remap(fct)
-
-            while True:
-                host.write_line(line, repetitions=chunk, facet=true_facet)
-
-                # Check for incoming commands (non-blocking)
-                if spoll.poll(0):
-                    cmd = sys.stdin.read(1)
-                    if cmd == "P":  # PICTURE REQUEST
-                        # Signal PC we are ready/stable
-                        sys.stdout.write("R")
-                    elif cmd == "Q":  # QUIT REQUEST
-                        return
-
         # Start the remote loop (wait=False is crucial here)
-        self.esp.exec_func(remote_pattern, wait=False, line=line, fct=fct)
+        self.esp.exec_func(remote_pattern, wait=False, **remote_kwargs)
 
         self.cam.set_exposure_ms(300)
 
@@ -254,7 +216,7 @@ class DynamicTests(StaticTests):
         # 2. Wait for 'R' response (with timeout)
         start_time = time.time()
         ready = False
-        while (time.time() - start_time) < 2.0:  # 3s timeout
+        while (time.time() - start_time) < 2.0:
             if self.esp.serial.in_waiting and self.esp.serial.read(1) == b"R":
                 ready = True
                 break
@@ -264,37 +226,91 @@ class DynamicTests(StaticTests):
         if ready:
             if preview:
                 self.cam.live_view(0.6)
-            # Pass the save flag down to take_picture
             result_img = self.take_picture(count=1, name=name, save=save_image)
         else:
             raise RuntimeError("Timeout: ESP32 did not respond with 'R'")
 
         self.esp.serial.write(b"Q")
 
-        # We must confirm the ESP32 has fully exited the previous function
-        # and returned to the REPL before we return control to the loop.
+        # Confirm the ESP32 has exited the remote loop back to the REPL prompt.
         start_drain = time.time()
         buffer = b""
         while (time.time() - start_drain) < 2.0:
             if self.esp.serial.in_waiting:
                 chunk = self.esp.serial.read(self.esp.serial.in_waiting)
                 buffer += chunk
-                if b">>>" in buffer:  # Look for the MicroPython prompt
+                if b">>>" in buffer:
                     break
             time.sleep(0.01)
 
         return result_img
 
+    def picture_line(self, line, fct=0, preview=True, name=None, save_image=True):
+        """Project a 1D binary pattern with a specific polygon facet and capture a frame."""
+
+        def remote_pattern(line, fct):
+            global host, spoll, sys
+
+            chunk = host.cfg.hdl_cfg.lines_chunk
+            true_facet = host.remap(fct)
+
+            while True:
+                host.write_line(line, repetitions=chunk, facet=true_facet)
+
+                if spoll.poll(0):
+                    cmd = sys.stdin.read(1)
+                    if cmd == "P":
+                        sys.stdout.write("R")
+                    elif cmd == "Q":
+                        return
+
+        return self._capture_projection(
+            remote_pattern,
+            {"line": line, "fct": fct},
+            fct=fct,
+            preview=preview,
+            name=name,
+            save_image=save_image,
+        )
+
+    def picture_events(self, events, fct=0, preview=True, name=None, save_image=True):
+        """Project raw ``[(tick, intensity), ...]`` events for a facet at full FPGA clock precision."""
+
+        def remote_events(events, fct):
+            global host, spoll, sys
+
+            chunk = host.cfg.hdl_cfg.lines_chunk
+            true_facet = host.remap(fct)
+
+            while True:
+                host.write_events(events, steps_line=0, repetitions=chunk, facet=true_facet)
+
+                if spoll.poll(0):
+                    cmd = sys.stdin.read(1)
+                    if cmd == "P":
+                        sys.stdout.write("R")
+                    elif cmd == "Q":
+                        return
+
+        return self._capture_projection(
+            remote_events,
+            {"events": events, "fct": fct},
+            fct=fct,
+            preview=preview,
+            name=name,
+            save_image=save_image,
+        )
+
     def scan_visibility(self, facet=0, step=10):
         """
-        Loops over all pixels in the scanline length.
+        Loops over software scanline grid indices.
         Projects a single pixel, takes a picture (no save), and checks visibility.
 
         Args:
             facet (int): The facet index to scan.
             step (int): The stride/interval between pixels (default=10).
         """
-        scan_len = self.cfg.laser_timing["scanline_length"]
+        scan_len = int(self.cfg.get_optical_params()["bitsinscanline"])
         visibility_map = []
         pixels_to_scan = list(range(0, scan_len, step))
 
@@ -417,21 +433,17 @@ class DynamicTests(StaticTests):
                 )
                 cam_pat.set_correction(correction=correction)
                 cam_pat.generate_dot_grid_test(num_dots_y)
-                pattern_data = cam_pat.engine.readbin()
-                pattern_bits = pattern_data["data"]
-                ptrn = pattern_bits.reshape(
-                    -1, self.cfg.laser_timing["scanline_length"]
-                )
-                lines = len(ptrn)
+                lines_events = cam_pat.engine.readbin_events()["events"]
+                lines = len(lines_events)
                 stacker = LaserStackSimulator(
                     exposures=tot_facets, expected_total_steps=lines
                 )
                 for row in range(facet, lines, tot_facets):
-                    line = ptrn[row].tolist()[::-1]  # Reverse the line
-                    if max(line) == 0:  # skip empty liines
+                    _direction, events = lines_events[row]
+                    if not events:  # skip empty lines
                         continue
-                    img = self.picture_line(
-                        line=line,
+                    img = self.picture_events(
+                        events=events,
                         fct=facet,
                         save_image=debug_frames,
                         name=False,
@@ -538,8 +550,7 @@ class DynamicTests(StaticTests):
         def dispatch(correction, iters):
             cam_pat.set_correction(correction=correction)
             cam_pat.generate_vertical_jitter_test()
-            pattern_bits = cam_pat.engine.readbin()["data"]
-            ptrn = pattern_bits.reshape(-1, self.cfg.laser_timing["scanline_length"])
+            lines_events = cam_pat.engine.readbin_events()["events"]
             facets = self.cfg.laser_timing["facets"]
 
             state_name = "Corrected" if correction else "Uncorrected"
@@ -548,9 +559,11 @@ class DynamicTests(StaticTests):
             for it in tqdm(range(iters), desc=f"Capturing {state_name}", unit="iter"):
                 for facet in range(facets):
                     offset = 16  # orthogonal error can move lines of image
-                    line = ptrn[facet + offset].tolist()[::-1]
+                    _direction, events = lines_events[facet + offset]
                     fname = f"scan_error_{state_name.lower()}_f{facet}_iter{it}.jpg"
-                    self.picture_line(line=line, fct=facet, name=fname, preview=False)
+                    self.picture_events(
+                        events=events, fct=facet, name=fname, preview=False
+                    )
 
             # 2. Analyze Images
             results_matrix = []
@@ -668,7 +681,7 @@ class DynamicTests(StaticTests):
 
         fname = name if name else f"facet{facet}.jpg"
         pat = [1] * 1 + [0] * 39
-        bits = self.cfg.laser_timing["scanline_length"]
+        bits = int(self.cfg.get_optical_params()["bitsinscanline"])
         # extend pattern to cover full line
         line = pat * (bits // len(pat)) + pat[: bits % len(pat)]
 

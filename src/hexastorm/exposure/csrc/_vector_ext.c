@@ -70,7 +70,6 @@ static PyObject *py_slice_lane_spi(PyObject *self, PyObject *args, PyObject *kwa
         "total_ticks",
         "lane_idx",
         "facets_inlane",
-        "bits_in_scanline",
         "steps_per_line",
         "u_size_mm",
         "v_size_mm",
@@ -100,7 +99,6 @@ static PyObject *py_slice_lane_spi(PyObject *self, PyObject *args, PyObject *kwa
     int total_ticks = 0;
     int lane_idx = 0;
     int facets_inlane = 0;
-    int bits_in_scanline = 0;
     double steps_per_line = 0.0;
     double u_size_mm = 0.0;
     double v_size_mm = 0.0;
@@ -121,7 +119,7 @@ static PyObject *py_slice_lane_spi(PyObject *self, PyObject *args, PyObject *kwa
     if (!PyArg_ParseTupleAndKeywords(
             args,
             kwargs,
-            "OOOOOOOOOOOOOOOOiiiiiddddddddddddpBBB",
+            "OOOOOOOOOOOOOOOOiiiiddddddddddddpBBB",
             kwlist,
             &u0_obj,
             &v0_obj,
@@ -143,7 +141,6 @@ static PyObject *py_slice_lane_spi(PyObject *self, PyObject *args, PyObject *kwa
             &total_ticks,
             &lane_idx,
             &facets_inlane,
-            &bits_in_scanline,
             &steps_per_line,
             &u_size_mm,
             &v_size_mm,
@@ -247,7 +244,6 @@ static PyObject *py_slice_lane_spi(PyObject *self, PyObject *args, PyObject *kwa
     scene.v_stage_start = v_stage_start;
     scene.v_stage_end = v_stage_end;
     scene.steps_per_line = steps_per_line;
-    scene.bits_in_scanline = bits_in_scanline;
     scene.positiveresist = positiveresist;
     scene.default_intensity = default_intensity;
     scene.scanline_cmd = scanline_cmd;

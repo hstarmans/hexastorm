@@ -145,54 +145,28 @@ class Camera:
 
 
 # Pure-NumPy optical displacement kernel
-def displacement_kernel(pixel, params):
-    """
-    Calculates the transversal displacement of the laser beam caused by the rotating prism.
-
-    Physics Context:
-        The prism acts as a rotating "Transparent Parallel Plate" .
-        As the angle of incidence (I) changes with rotation, the beam is shifted laterally.
-
-        The formula implemented corresponds to the transversal displacement (tau)
-        described on https://reprap.org/wiki/Open_hardware_fast_high_resolution_LASER:
-        tau = T * sin(I) * (1 - sqrt((1 - sin(I)^2) / (n^2 - sin(I)^2)))
-        Where T = 2 * inradius (thickness of the prism).
-
-    Args:
-        pixel: The current pixel index in the scan line (proxy for time/angle).
-        params: Dictionary containing system geometry (facets, n, inradius, etc).
-
-    Returns:
-        float: The physical displacement in millimeters relative to the optical axis.
-    """
-    # For a regular polygon, the scan angle range is limited by the facet geometry.
-    # interiorangle = 180-360/self.n
-    # max_angle = 180-90-0.5*interiorangle
+def displacement_at_frac(frac, params):
+    """Calculate transversal beam displacement [mm] at facet rotation fraction ``frac``."""
     i_max = 180 / params["facets"]
+    angle = np.radians(-2 * i_max * frac + i_max)
 
-    # Calculate how many pixels fit on one facet face based on laser frequency and RPM.
-    pixelsfacet = round(
-        params["laser_hz"] / (params["rotationfrequency"] * params["facets"])
-    )
-    # Convert the current pixel number to an Angle of Incidence (I) in radians.
-    # The scan moves from -i_max to +i_max across the facet.
-    angle = np.radians(-2 * i_max * (pixel / pixelsfacet) + i_max)
-
-    # Pre-calculate trigonometric terms for the Snell's Law / Displacement derivation
     sin_angle = np.sin(angle)
     sin_angle_sq = sin_angle**2
     n_sq = params["n"] ** 2
-
-    # T (Thickness) = 2 * inradius
     thickness = params["inradius"] * 2
 
-    # Calculate transversal displacement (tau)
-    disp = (
+    return (
         thickness
         * sin_angle
         * (1 - ((1 - sin_angle_sq) / (n_sq - sin_angle_sq)) ** 0.5)
     )
-    return disp
+
+
+def displacement_kernel(pixel, params):
+    """Legacy pixel-domain wrapper around :func:`displacement_at_frac`."""
+    span = float(params["end_frac"]) - float(params["start_frac"])
+    frac = float(pixel) * span / float(params["bitsinscanline"])
+    return displacement_at_frac(frac, params)
 
 
 class PlatformConfig:
@@ -200,42 +174,38 @@ class PlatformConfig:
     Holds platform configuration.
     """
 
+    DEFAULT_RASTER_SAMPLES = 1000
+
     def __init__(self, test=False):
         """
         Initialization follows one of two routes:
 
             - **Test Mode** (`test=True`):
-            - You define low-level timing values directly (`ticks_in_facet`, `laser_ticks`, `bits_in_scanline`)
+            - You define low-level timing values directly (`facet_ticks`, `scanline_ticks`)
             - Useful for simulation or FPGA-level tuning
 
             - **Production Mode** (`test=False`):
-            - You define real-world timing values (`LASER_HZ`, `SPINUP_TIME`, etc.)
+            - You define real-world timing values (`rpm`, `start_frac`, `end_frac`, `pd_debounce_us`, etc.)
             - The system computes derived timing parameters
 
-            After initial input, shared constants are injected, and the `params()` method is called to:
-            - Normalize both modes into a consistent parameter space
-            - Compute all secondary parameters (e.g., `JITTERTICKS`, `POLYPERIOD`)
-            - Perform sanity checks (e.g., ensure scanline fits within available ticks)
-
-            The final result is stored in `self.laser_var`, a flat dictionary of all configuration values.
+            The final result is stored in `self.laser_timing`, a flat dictionary of all configuration values.
         """
         self.test = test
         self._hdl_cfg = None
         if test:
             self.laser_timing = {
                 "rpm": 1000,
-                "scanline_length": 3,
                 "facet_ticks": 20,
-                "laser_ticks": 4,
+                "scanline_ticks": 12,
             }
         else:
             self.laser_timing = {
                 "rpm": 3000,
                 "spinup_time": 1.5,
                 "stable_time": 1.125,
-                "laser_hz": 400e3,
                 "start_frac": 0.35,
                 "end_frac": 0.7,
+                "pd_debounce_us": 20.0,
             }
         self.update_laser_timing()
         self.motor_cfg = self._init_motor_cfg()
@@ -373,6 +343,12 @@ class PlatformConfig:
         # need steps per line to calculate stage speed
         params = {"stepsperline": 1 / exposures}  # 0.25 is four exposures per line
 
+        raster_samples = (
+            self.DEFAULT_RASTER_SAMPLES
+            if laz_tim["scanline_ticks"] >= self.DEFAULT_RASTER_SAMPLES
+            else int(laz_tim["scanline_ticks"])
+        )
+
         params.update(
             {
                 # angle [radians]
@@ -383,8 +359,11 @@ class PlatformConfig:
                 "n": 1.49,
                 # Number of vertices/facets on the polygon, must be even
                 "facets": float(laz_tim["facets"]),
-                "laser_hz": float(laz_tim["laser_hz"]),
-                "laser_ticks": float(laz_tim["laser_ticks"]),
+                "crystal_hz": float(laz_tim["crystal_hz"]),
+                "facet_ticks": int(laz_tim["facet_ticks"]),
+                "scanline_ticks": int(laz_tim["scanline_ticks"]),
+                "start_frac": float(laz_tim["start_frac"]),
+                "end_frac": float(laz_tim["end_frac"]),
                 # Polygon rotation frequency (Hz)
                 "rotationfrequency": laz_tim["rpm"] / 60,
                 # Radius of the laser beam [mm]
@@ -407,30 +386,17 @@ class PlatformConfig:
                     * (laz_tim["rpm"] / 60)
                     * laz_tim["facets"]
                 ),
-                # Start Pixel calculation based on scanline duty cycle
-                "startpixel": (
-                    (
-                        laz_tim["scanline_length"]
-                        / (laz_tim["end_frac"] - laz_tim["start_frac"])
-                    )
-                    * laz_tim["start_frac"]
-                ),
-                # number of pixels in a line
-                "bitsinscanline": int(laz_tim["scanline_length"]),
+                # Host-only software raster grid resolution for RasterExposure / plotter
+                "bitsinscanline": raster_samples,
                 "downsamplefactor": 1.0,
                 # resist
                 "positiveresist": 0.0,
             }
         )
 
-        # Store in settings (converted to grid pixels if that was your convention,
-        # but storing as mm is usually safer for config, assuming downstream converts it)
-        # Based on your previous code, lanewidth was in MM.
-
-        start_pixel = params["startpixel"]
         params["lanewidth"] = abs(
-            displacement_kernel(start_pixel + params["bitsinscanline"] - 1, params)
-            - displacement_kernel(start_pixel, params)
+            displacement_at_frac(laz_tim["end_frac"], params)
+            - displacement_at_frac(laz_tim["start_frac"], params)
         )
 
         num_facets = int(laz_tim["facets"])
@@ -616,20 +582,18 @@ class PlatformConfig:
         poly_hz = rpm / 60
 
         if self.test:
-            facet_ticks = self.laser_timing["facet_ticks"]
-            laser_ticks = self.laser_timing["laser_ticks"]
-            scanline_length = self.laser_timing["scanline_length"]
+            facet_ticks = int(self.laser_timing["facet_ticks"])
+            scanline_ticks = int(self.laser_timing["scanline_ticks"])
 
             crystal_hz = round(facet_ticks * facets * poly_hz)
-            laser_hz = crystal_hz / laser_ticks
             spinup_time = 10 / crystal_hz
             stable_time = 5 * facet_ticks / crystal_hz
             start_frac = 2 / facet_ticks
-            end_frac = (laser_ticks * scanline_length) / facet_ticks + start_frac
+            end_frac = scanline_ticks / facet_ticks + start_frac
             assert facet_ticks == round(crystal_hz / (poly_hz * facets))
             pd_trigger_ticks = 1
             pd_rearm_ticks = 2
-            jitter_sync_ticks = round(0.5 * laser_ticks)
+            jitter_sync_ticks = 2
         else:
             spinup_time = self.laser_timing["spinup_time"]
             stable_time = self.laser_timing["stable_time"]
@@ -638,10 +602,10 @@ class PlatformConfig:
 
             crystal_hz = self.ice40_cfg["clks"][self.ice40_cfg["hfosc_div"]] * 1e6
             facet_ticks = round(crystal_hz / (poly_hz * facets))
-            laser_hz = self.laser_timing["laser_hz"]
-            laser_ticks = int(crystal_hz / laser_hz)
-            pd_trigger_ticks = laser_ticks * 8
-            pd_rearm_ticks = laser_ticks * 8
+            scanline_ticks = round(facet_ticks * (end_frac - start_frac))
+            pd_debounce_us = self.laser_timing.get("pd_debounce_us", 20.0)
+            pd_trigger_ticks = max(1, round(pd_debounce_us * 1e-6 * crystal_hz))
+            pd_rearm_ticks = pd_trigger_ticks
             # jitter allowed for synchronization 1% is larger than
             # jitter allowed for exposure 0.2%
             jitter_sync_ticks = round(0.01 * facet_ticks)
@@ -650,36 +614,27 @@ class PlatformConfig:
         spinup_ticks = round(spinup_time * crystal_hz)
         stable_ticks = round(stable_time * crystal_hz)
 
-        scanline_length = round(facet_ticks * (end_frac - start_frac) / laser_ticks)
         motor_period = int(crystal_hz / (poly_hz * 6 * 2))
 
         # Sanity checks
-        assert laser_ticks > 2
-        if end_frac > round(1 - (jitter_sync_ticks + 1) / facet_ticks):
+        if scanline_ticks <= 0:
+            raise ValueError("scanline_ticks invalid")
+        if end_frac >= 1 - (jitter_sync_ticks + 1) / facet_ticks:
             raise ValueError("Invalid settings, end_frac too high")
 
-        if self.test:
-            assert scanline_length == self.laser_timing["scanline_length"]
-        elif scanline_length % 8 != 0:
-            scanline_length += 8 - scanline_length % 8
-
-        if scanline_length <= 0:
-            raise ValueError("Bits in scanline invalid")
         # Update dictionary
         self.laser_timing.update(
             {
                 "facets": facets,
                 "crystal_hz": crystal_hz,
-                "laser_hz": laser_hz,
                 "start_frac": start_frac,
                 "end_frac": end_frac,
                 "facet_ticks": facet_ticks,
-                "laser_ticks": laser_ticks,
+                "scanline_ticks": scanline_ticks,
                 "spinup_ticks": spinup_ticks,
                 "stable_ticks": stable_ticks,
                 "jitter_sync_ticks": jitter_sync_ticks,
                 "jitter_exp_perc": jitter_exp_perc,
-                "scanline_length": scanline_length,
                 "motor_period": motor_period,
                 "photodiode_trigger_ticks": pd_trigger_ticks,
                 "photodiode_rearm_ticks": pd_rearm_ticks,

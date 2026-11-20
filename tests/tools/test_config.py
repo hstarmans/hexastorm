@@ -70,3 +70,16 @@ def test_spi_words_move_staticmethod():
     assert via_class == via_instance
     assert isinstance(via_class, int)
     assert via_class > 0
+
+
+def test_tick_native_laser_timing():
+    """Production laser_timing exposes direct FPGA ticks without legacy pixel divider keys."""
+    cfg = PlatformConfig(test=False)
+    laz_tim = cfg.laser_timing
+    assert laz_tim["crystal_hz"] == 24_000_000
+    assert laz_tim["facet_ticks"] == 120_000
+    assert laz_tim["scanline_ticks"] == 42_000
+    assert laz_tim["photodiode_trigger_ticks"] == 480
+    assert laz_tim["photodiode_rearm_ticks"] == 480
+    for legacy_key in ("laser_hz", "laser_ticks", "scanline_length"):
+        assert legacy_key not in laz_tim

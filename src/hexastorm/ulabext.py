@@ -84,25 +84,39 @@ def assert_array_almost_equal(x, y, decimal=6, err_msg="", verbose=True):
 SENTINEL_TICK = 0xFFFFFF
 
 
-def bits_to_events(laser_bits, laser_ticks: int) -> list[tuple[int, int]]:
-    """Convert a 1D binary scanline sequence into (tick, intensity) transition events.
+def calc_step_half_period(steps_line: float, scanline_ticks: int) -> int:
+    """Compute orthogonal-stage step half-period in FPGA clock ticks (0 = stationary)."""
+    if steps_line <= 0:
+        return 0
+    half_period = math.floor((scanline_ticks / (steps_line * 2.0)) + 1e-9) - 1
+    if half_period < 1:
+        raise ValueError("Steps per line cannot be achieved (period < 1)")
+    return int(half_period)
+
+
+def bits_to_events(laser_bits, scanline_ticks: int) -> list[tuple[int, int]]:
+    """Convert a 1D binary sequence into (tick, intensity) transitions over ``[0, scanline_ticks)``.
 
     Assumes the laser starts OFF (0) at tick 0 of the active scanline window.
-    Emits an event only when the state changes: (tick_offset, 255) for ON and
-    (tick_offset, 0) for OFF.
     """
-    tick_step = int(laser_ticks)
+    total_ticks = int(scanline_ticks)
+    n = len(laser_bits)
+    if n == 0:
+        return []
+    if n > total_ticks:
+        raise ValueError(
+            f"laser_bits length ({n}) exceeds scanline_ticks ({total_ticks})"
+        )
+
     if not IS_MICROPYTHON and isinstance(laser_bits, np.ndarray):
         arr = np.asarray(laser_bits, dtype=np.uint8) != 0
-        if arr.size == 0:
-            return []
         prev = np.empty_like(arr)
         prev[0] = False
         prev[1:] = arr[:-1]
         change_idx = np.flatnonzero(arr != prev)
         if change_idx.size == 0:
             return []
-        ticks = change_idx.astype(np.int64) * tick_step
+        ticks = ((change_idx.astype(np.int64) * total_ticks) + n - 1) // n
         intensities = np.where(arr[change_idx], 255, 0)
         return list(zip(ticks.tolist(), intensities.tolist()))
 
@@ -111,30 +125,31 @@ def bits_to_events(laser_bits, laser_ticks: int) -> list[tuple[int, int]]:
     for idx, bit in enumerate(laser_bits):
         b = bool(bit)
         if b != state:
-            events.append((idx * tick_step, 255 if b else 0))
+            tick = ((idx * total_ticks) + n - 1) // n
+            events.append((tick, 255 if b else 0))
             state = b
     return events
 
 
 def events_to_bits(
-    events: list[tuple[int, int]], scanline_length: int, laser_ticks: int
+    events: list[tuple[int, int]], num_bits: int, scanline_ticks: int
 ) -> list[int]:
-    """Reconstruct a binary 0/1 list of length `scanline_length` from events."""
-    scanline_length = int(scanline_length)
-    bits = [0] * scanline_length
-    if not events or scanline_length <= 0:
+    """Reconstruct a binary 0/1 list of length ``num_bits`` from FPGA tick events."""
+    n = int(num_bits)
+    total_ticks = int(scanline_ticks)
+    bits = [0] * n
+    if not events or n <= 0 or total_ticks <= 0:
         return bits
 
-    tick_step = int(laser_ticks)
     valid_events = [(int(t), int(v)) for t, v in events if 0 <= int(t) < SENTINEL_TICK]
     for i, (tick, intensity) in enumerate(valid_events):
-        start_px = max(tick // tick_step, 0)
-        if start_px >= scanline_length:
+        start_px = max(0, (tick * n) // total_ticks)
+        if start_px >= n:
             break
         if i + 1 < len(valid_events):
-            end_px = min(scanline_length, valid_events[i + 1][0] // tick_step)
+            end_px = min(n, (valid_events[i + 1][0] * n) // total_ticks)
         else:
-            end_px = scanline_length
+            end_px = n
         bit_val = 1 if intensity > 0 else 0
         for px in range(start_px, end_px):
             bits[px] = bit_val
@@ -145,7 +160,7 @@ def pack_scanline_events(
     events: list[tuple[int, int]],
     steps_line: float,
     direction: int,
-    scanline_length: int,
+    scanline_ticks: int,
     scanline_cmd: int = 3,
 ) -> bytearray:
     """Pack a scanline header and its (tick, intensity) events into 8-byte aligned bytes.
@@ -154,18 +169,13 @@ def pack_scanline_events(
         bits  0..7 : scanline_cmd (Spi.Instructions.scanline = 0x03)
         bit   8    : direction (0 or 1)
         bits  9..24: event_words (16-bit count of 64-bit event words following header)
-        bits 25..63: step half_period (39-bit integer)
+        bits 25..63: step half_period in FPGA ticks (39-bit integer; 0 = stationary)
 
     Word 1..event_words (8 bytes each, two 32-bit events per 64-bit word):
         ev0 (bits  0..31): [24-bit tick << 8 | 8-bit intensity]
         ev1 (bits 32..63): [24-bit tick << 8 | 8-bit intensity] or 0xFFFFFF00 sentinel
     """
-    if steps_line <= 0:
-        half_period = max(1, int(scanline_length))
-    else:
-        half_period = int((scanline_length - 1) // (steps_line * 2))
-    if half_period < 1:
-        raise ValueError("Steps per line cannot be achieved (period < 1)")
+    half_period = calc_step_half_period(steps_line, scanline_ticks)
 
     num_events = len(events)
     event_words = (num_events + 1) // 2

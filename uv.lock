@@ -21,14 +21,6 @@ wheels = [
 ]
 
 [[package]]
-name = "amaranth-boards"
-version = "0.0.21"
-source = { git = "https://github.com/amaranth-lang/amaranth-boards.git?rev=main#f270d210e36b0787d62db77176c7b0e8032178d3" }
-dependencies = [
-    { name = "amaranth" },
-]
-
-[[package]]
 name = "click"
 version = "8.5.1"
 source = { registry = "https://pypi.org/simple" }
@@ -112,7 +104,7 @@ name = "hexastorm"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "amaranth-boards" },
+    { name = "amaranth" },
     { name = "fire" },
     { name = "matplotlib" },
     { name = "numpy" },
@@ -138,7 +130,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "amaranth-boards", git = "https://github.com/amaranth-lang/amaranth-boards.git?rev=main" },
+    { name = "amaranth", specifier = ">=0.5.10,<0.6" },
     { name = "fire", specifier = ">=0.7.1" },
     { name = "matplotlib", specifier = ">=3.11.2" },
     { name = "numpy", specifier = ">=2.5.5" },

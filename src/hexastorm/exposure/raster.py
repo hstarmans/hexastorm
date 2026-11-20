@@ -314,10 +314,10 @@ class RasterExposure:
         if camera:
             # Unpack the bytes back to bits to easily check line by line
             data_bits = np.unpackbits(ptrn_packed, bitorder=self.bitorder)
-            scanline_length = self.cfg.laser_timing["scanline_length"]
+            bits_in_scanline = int(self.params["bitsinscanline"])
 
             # Reshape into a 2D array: (total_lines, bits_per_line)
-            lines2d = data_bits.reshape(-1, scanline_length)
+            lines2d = data_bits.reshape(-1, bits_in_scanline)
 
             # Count rows where the sum of bits is greater than 0
             active_lines = np.count_nonzero(lines2d.sum(axis=1) > 0)

@@ -5,7 +5,7 @@ from pathlib import Path
 import fire
 import numpy as np
 
-from hexastorm.config import PlatformConfig, displacement_kernel
+from hexastorm.config import PlatformConfig, displacement_at_frac
 
 from . import io, plotter
 from .coordinates import (
@@ -108,13 +108,15 @@ class ExposureEngine:
             )
 
     def px_to_mm(self, px: int) -> float:
-        """Map a scanline pixel index to physical scan-axis distance in mm."""
-        start_pixel = float(self.params["startpixel"])
-        sin_tilt = math.sin(float(self.params["tiltangle"]))
+        """Map a software scanline pixel index to physical scan-axis distance in mm."""
+        start_frac = float(self.params["start_frac"])
+        end_frac = float(self.params["end_frac"])
         bits_len = int(self.params["bitsinscanline"])
-        start_u = sin_tilt * displacement_kernel(start_pixel, self.params)
-        line_px = start_pixel + (px % bits_len)
-        return float(start_u - (sin_tilt * displacement_kernel(line_px, self.params)))
+        denom = max(1.0, float(bits_len - 1))
+        frac = start_frac + ((px % bits_len) / denom) * (end_frac - start_frac)
+        sin_tilt = math.sin(float(self.params["tiltangle"]))
+        start_u = sin_tilt * displacement_at_frac(start_frac, self.params)
+        return float(start_u - (sin_tilt * displacement_at_frac(frac, self.params)))
 
     def resolve_mode(self, input_path: str | Path, mode: str | None = None) -> str:
         """Determine which backend ('vector' or 'raster') should process *input_path*."""
@@ -180,8 +182,7 @@ class ExposureEngine:
         io.write_binary_file(pixeldata, self.params, out_path)
         return out_path
 
-    def readbin(self, filename: str | Path | None = None) -> dict:
-        """Read back an event-driven ``.bin``/``.pat`` file into unpacked bits and metadata."""
+    def _resolve_bin_path(self, filename: str | Path | None = None) -> Path:
         if filename is None:
             if self._last_output_path is None:
                 raise ValueError("No output path specified or recorded yet")
@@ -193,6 +194,24 @@ class ExposureEngine:
             tagged_path = io.tagged_bin_path(in_path, self.params)
             if tagged_path.exists():
                 in_path = tagged_path
+        return in_path
+
+    def readbin_events(self, filename: str | Path | None = None) -> dict:
+        """Read raw FPGA tick events from an event-driven ``.bin``/``.pat`` file."""
+        in_path = self._resolve_bin_path(filename)
+        facets, lanes, width, lines_events = io.read_binary_events(in_path)
+        return {
+            "events": lines_events,
+            "metadata": {
+                "lanes": lanes,
+                "lanewidth": width,
+                "facetsinlane": facets,
+            },
+        }
+
+    def readbin(self, filename: str | Path | None = None) -> dict:
+        """Read back an event-driven ``.bin``/``.pat`` file into unpacked bits and metadata."""
+        in_path = self._resolve_bin_path(filename)
 
         facets, lanes, width, data_bytes = io.read_binary_file(
             in_path, self.cfg.laser_timing, int(self.params["bitsinscanline"])

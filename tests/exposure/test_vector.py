@@ -56,10 +56,9 @@ def test_prism_curve_inverse_roundtrip():
     assert int(ticks[0]) == 0
     assert int(ticks[-1]) == curve.total_ticks
 
-    # Lane nominal bounds [0, lanewidth] sit at first/last pixel centers (half a pixel inward)
-    half_px_ticks = curve.laser_ticks // 2
-    assert curve.u_to_tick(0.0) == half_px_ticks
-    assert curve.u_to_tick(curve.lanewidth) == curve.total_ticks - half_px_ticks
+    # Lane bounds [0, lanewidth] map directly onto full FPGA clock span [0, total_ticks]
+    assert curve.u_to_tick(0.0) == 0
+    assert curve.u_to_tick(curve.lanewidth) == curve.total_ticks
 
     # Verify roundtrip tick -> u -> tick matches within <= 1 FPGA clock tick
     sample_ticks = np.linspace(0, curve.total_ticks, 200)
@@ -115,11 +114,12 @@ def test_vector_vs_reference_interpolator_agreement(tmp_path):
 
 
 def test_vector_subpixel_tick_precision(tmp_path):
-    """Verify a 2 um edge shift (< ~4.1 um pixel pitch) yields a sub-pixel clock-tick shift."""
+    """Verify a 2 um edge shift (< ~2.86 um software grid pitch) yields a sub-grid clock-tick shift."""
     vec_interp = VectorExposure(correction=False, exposures=1)
+    scanline_ticks = int(vec_interp.params["scanline_ticks"])
     bits_scanline = int(vec_interp.params["bitsinscanline"])
-    laser_ticks = int(vec_interp.params["laser_ticks"])
-    assert laser_ticks > 1
+    raster_tick_step = scanline_ticks // bits_scanline
+    assert raster_tick_step > 1
 
     def slice_single_rect(x0_mm: float, name: str):
         poly = np.array(
@@ -137,7 +137,7 @@ def test_vector_subpixel_tick_precision(tmp_path):
         active = [evs for _d, evs in lines if evs]
         return active
 
-    # Shift right edge/left edge by +0.002 mm (2 um), smaller than one ~4.1 um laser pixel
+    # Shift left edge by +0.002 mm (2 um), smaller than one ~2.86 um software raster step
     lines_a = slice_single_rect(1.000, "rect_a.bin")
     lines_b = slice_single_rect(1.002, "rect_b.bin")
     assert len(lines_a) == len(lines_b) and len(lines_a) > 10
@@ -146,9 +146,9 @@ def test_vector_subpixel_tick_precision(tmp_path):
     tick_on_b = lines_b[len(lines_b) // 2][0][0]
     tick_diff = tick_on_b - tick_on_a
 
-    # Both lie within ~1 pixel pitch (~60 ticks), yet distinctly resolve the 2 um shift (~25-35 ticks)
-    assert 0 < tick_diff < laser_ticks
-    assert 0 <= tick_on_a < tick_on_b < bits_scanline * laser_ticks
+    # Both lie within 1 software raster step (~42 ticks), yet cleanly resolve the 2 um shift
+    assert 0 < tick_diff < raster_tick_step
+    assert 0 <= tick_on_a < tick_on_b < scanline_ticks
 
 
 def test_vector_optical_correction_and_exposures(tmp_path):

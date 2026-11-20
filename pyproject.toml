@@ -16,7 +16,7 @@ dependencies = [
     "fire>=0.7.1",
     "numpy>=2.5.5",
     "pillow>=13.0.0",
-    "amaranth-boards",
+    "amaranth>=0.5.10,<0.6",
     "resvg-py",
     "yowasp-nextpnr-ice40>=0.11.1.0.post826",
     "yowasp-yosys>=0.71.0.0.post1285",
@@ -53,9 +53,6 @@ ignore = ["E501", "B905"]
 
 [tool.ruff.format]
 quote-style = "double"
-
-[tool.uv.sources]
-amaranth-boards = { git = "https://github.com/amaranth-lang/amaranth-boards.git", rev = "main" }
 
 [project.scripts]
 cam = "tests.camera.test_optical:main"

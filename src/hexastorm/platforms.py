@@ -7,7 +7,6 @@ from typing import ClassVar
 
 from amaranth.build import Attrs, Clock, Pins, PinsN, Resource, Subsignal
 from amaranth.vendor import LatticeICE40Platform
-from amaranth_boards.resources import LEDResources
 
 from .config import PlatformConfig
 from .resources import LaserscannerResource, StepperResource
@@ -24,9 +23,10 @@ class Firestarter(LatticeICE40Platform):
     default_clk = ice40_cfg["default_clk"]  # or "clk" for the esp32s3 external clock
     hfosc_div = ice40_cfg["hfosc_div"]
     resources: ClassVar[list] = [
-        *LEDResources(  # blue, green, red
-            pins="39 40 41", invert=True, attrs=Attrs(IO_STANDARD="SB_LVCMOS")
-        ),
+        *[
+            Resource("led", i, PinsN(pin, dir="o"), Attrs(IO_STANDARD="SB_LVCMOS"))
+            for i, pin in enumerate(("39", "40", "41"))
+        ],  # blue, green, red
         Resource(
             "clk",
             0,
@@ -171,10 +171,21 @@ class Firestarter(LatticeICE40Platform):
 
 
 if __name__ == "__main__":
-    from amaranth_boards.test.blinky import Blinky
+    from amaranth import Elaboratable, Module, Signal
+    from amaranth.lib.io import Buffer
+
+    class _Blinky(Elaboratable):
+        def elaborate(self, platform):
+            m = Module()
+            led_buf = Buffer("o", platform.request("led", 0, dir="-"))
+            m.submodules.led_buf = led_buf
+            counter = Signal(24)
+            m.d.sync += counter.eq(counter + 1)
+            m.d.comb += led_buf.o.eq(counter[-1])
+            return m
 
     Firestarter().build(
-        Blinky(),
+        _Blinky(),
         do_program=True,
         verbose=True,
     )

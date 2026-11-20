@@ -60,7 +60,6 @@ typedef struct {
     double v_stage_start;
     double v_stage_end;
     double steps_per_line;
-    int32_t bits_in_scanline;
     int32_t positiveresist;
     uint8_t default_intensity;
     uint8_t scanline_cmd;

@@ -24,8 +24,8 @@ def test_regression_jittertest(raster_exposure, tmp_path):
     then update the hash here.
     """
     # Golden-master hash for unified unrotated Substrate rasterization + non-dithered 1-bit conversion
-    # (removed legacy -90 deg SVG rotation and directional Floyd-Steinberg dithering).
-    expected_hash = "1c65e883b72bd3310e19ac09e530a02b"
+    # using tick-native 24 MHz step_half_period and 1000-sample software raster grid over exact start/end_frac.
+    expected_hash = "66903575e9cb4c902f3553dfecfc88ca"
 
     fname = "combined_grid_test"
     project_root = Path(__file__).resolve().parent.parent.parent
@@ -120,7 +120,7 @@ def test_rle_events_roundtrip_and_compression(raster_exposure, tmp_path):
     Verifies lossless RLE event roundtrip (bits -> events -> bits) and
     confirming sparse PCB-like scanlines compress far below raw bitstream size.
     """
-    laser_ticks = int(raster_exposure.params["laser_ticks"])
+    scanline_ticks = int(raster_exposure.params["scanline_ticks"])
     scanline_length = int(raster_exposure.params["bitsinscanline"])
 
     rng = np.random.default_rng(123)
@@ -130,10 +130,10 @@ def test_rle_events_roundtrip_and_compression(raster_exposure, tmp_path):
     sparse_line[600:640] = 1
 
     for line in (np.zeros(scanline_length, dtype=np.uint8), sparse_line, dense_line):
-        events = io.bits_to_events_np(line, laser_ticks)
-        reconstructed_np = io.events_to_bits_np(events, scanline_length, laser_ticks)
+        events = io.bits_to_events_np(line, scanline_ticks)
+        reconstructed_np = io.events_to_bits_np(events, scanline_length, scanline_ticks)
         reconstructed_ulab = np.array(
-            ulabext.events_to_bits(events, scanline_length, laser_ticks), dtype=np.uint8
+            ulabext.events_to_bits(events, scanline_length, scanline_ticks), dtype=np.uint8
         )
         assert np.array_equal(reconstructed_np, line)
         assert np.array_equal(reconstructed_ulab, line)

@@ -8,10 +8,7 @@
 This module contains definitions of memory units that work well for USB applications.
 """
 
-from amaranth import Elaboratable, Module, Signal
-
-# FIX: DomainRenamer zit nu direct in amaranth.hdl (niet meer in .xfrm)
-from amaranth.hdl import DomainRenamer
+from amaranth import DomainRenamer, Elaboratable, Module, Signal
 from amaranth.lib.memory import Memory
 
 
