@@ -10,7 +10,7 @@ as well as platform-level configuration settings used for FPGA synthesis and fir
 import logging
 import sys
 from collections import OrderedDict
-from math import ceil, radians
+from math import ceil, pi, radians
 from typing import ClassVar
 
 if sys.implementation.name == "micropython":
@@ -148,7 +148,7 @@ class Camera:
 def displacement_at_frac(frac, params):
     """Calculate transversal beam displacement [mm] at facet rotation fraction ``frac``."""
     i_max = 180 / params["facets"]
-    angle = np.radians(-2 * i_max * frac + i_max)
+    angle = (-2 * i_max * frac + i_max) * (pi / 180.0)
 
     sin_angle = np.sin(angle)
     sin_angle_sq = sin_angle**2
