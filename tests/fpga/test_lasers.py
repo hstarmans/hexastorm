@@ -268,12 +268,12 @@ class SinglelineTest(BaseTest):
     async def test_single_line_exposure_sequence(self, sim):
         """Test synchronization, scanline buffering, and exposure completion."""
         dut = self.dut
-        scanline_ticks = self.laz_tim["scanline_ticks"]
+        n_bits = max(1, self.laz_tim["scanline_ticks"] // 3)
 
         # Write full-on scanline and synchronize
-        one_line = [1] * scanline_ticks
-        zero_line = [0] * scanline_ticks
-        random_line = [randint(0, 1) for _ in range(scanline_ticks)]
+        one_line = [1] * n_bits
+        zero_line = [0] * n_bits
+        random_line = [randint(0, 1) for _ in range(n_bits)]
         lines = [one_line, zero_line, random_line]
         for line in lines:
             await self.write_line(line)
@@ -292,7 +292,7 @@ class SinglelineTest(BaseTest):
         self.assertTrue(sim.get(dut.synchronized))
 
         # Write a random line and an empty line
-        random_line = [randint(0, 1) for _ in range(scanline_ticks)]
+        random_line = [randint(0, 1) for _ in range(n_bits)]
         empty_line = []
 
         self.assertFalse(sim.get(dut.expose_finished))
@@ -660,6 +660,66 @@ class Upperedge(Loweredge):
 
     FRAGMENT_UNDER_TEST = DiodeSimulator
     FRAGMENT_ARGUMENTS: ClassVar[dict[str, Any]] = {"plf_cfg": plf_cfg}
+
+
+class GrayscalePDMTest(BaseTest):
+    """Test 1st-order Sigma-Delta PDM grayscale modulation over a full 256-tick period."""
+
+    plf_cfg = PlatformConfig(test=True)
+    laz_tim = plf_cfg.laser_timing
+    laz_tim.update(
+        {
+            "facet_ticks": 500,
+            "scanline_ticks": 256,
+        }
+    )
+    plf_cfg.update_laser_timing()
+    plf_cfg.hdl_cfg.mem_depth = 128
+
+    FRAGMENT_UNDER_TEST = DiodeSimulator
+    FRAGMENT_ARGUMENTS: ClassVar[dict[str, Any]] = {"plf_cfg": plf_cfg}
+
+    async def initialize_signals(self, sim):
+        """Initialize signals and host configuration for simulation."""
+        self.sim = sim
+        self.host = MockHost(fifo_full=None, sim=None)
+        self.host.cfg.laser_timing = self.plf_cfg.laser_timing
+        self.host.cfg.hdl_cfg.single_line = False
+        sim.set(self.dut.pd_db.raw, 1)
+        await sim.tick()
+
+    @async_test_case
+    async def test_sigma_delta_pdm_duty_cycles(self, sim):
+        """Verify 8-bit intensities (0, 64, 85, 128, 192, 255) produce exact PDM duty cycles."""
+        dut = self.dut
+        test_intensities = [0, 64, 85, 128, 192, 255]
+
+        for val in test_intensities:
+            await self.write_events([(0, val)], steps_per_line=0)
+        await self.write_events(None)
+
+        await self.pulse(dut.expose_start)
+        sim.set(dut.synchronize, 1)
+
+        scanline_ticks = self.laz_tim["scanline_ticks"]
+        for val in test_intensities:
+            await self.wait_until_state("DATA_RUN")
+            await sim.tick()
+            on_count = 0
+            for tick in range(scanline_ticks):
+                l0 = sim.get(dut.lh_rec.lasers[0])
+                l1 = sim.get(dut.lh_rec.lasers[1])
+                self.assertEqual(l0, l1, f"Channel skew at tick {tick} for intensity={val}")
+                on_count += l0
+                await sim.tick()
+            self.assertEqual(
+                on_count,
+                scanline_ticks if val == 255 else val,
+                f"Unexpected active tick count for intensity={val}: {on_count}/{scanline_ticks}",
+            )
+
+        await self.check_line([])
+        self.assertEqual(sim.get(dut.error), 0)
 
 
 # NOTE: new class is created to reset settings

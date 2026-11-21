@@ -25,9 +25,10 @@ VALID_MODES = ("auto", "vector", "raster")
 class ExposureEngine:
     """Unified façade and dispatcher for converting patterns into FPGA exposure files.
 
-    Routes vector designs (``.svg``) to :class:`VectorExposure` and raster images
-    (``.png``, ``.jpg``, ``.ps``, ...) to :class:`RasterExposure` when ``mode="auto"``,
-    or forces a specific backend via ``mode="vector"`` or ``mode="raster"``.
+    Routes vector designs (``.svg``) to :class:`VectorExposure`, true bitmaps
+    (``.png``, ``.jpg``, etc.) to native-resolution scanline slicing via
+    :meth:`RasterExposure.slice_bitmap`, and PostScript / explicitly rasterized vectors
+    to the ``samplegridsize`` fallback in :class:`RasterExposure`.
     """
 
     def __init__(
@@ -39,6 +40,9 @@ class ExposureEngine:
         intensity: int = 255,
         placement: SubstratePlacement | None = None,
         machine: MachineFrame | None = None,
+        grayscale: bool = False,
+        gray_levels: int = 32,
+        intensity_lut: np.ndarray | list[int] | None = None,
     ):
         if mode not in VALID_MODES:
             raise ValueError(
@@ -53,6 +57,9 @@ class ExposureEngine:
             machine if machine is not None else MachineFrame.from_config(self.cfg)
         )
         self.default_intensity = max(1, min(255, int(intensity)))
+        self.grayscale = bool(grayscale)
+        self.gray_levels = int(gray_levels)
+        self.intensity_lut = intensity_lut
         self.bitorder = "big"
         self._vector: VectorExposure | None = None
         self._raster: RasterExposure | None = None
@@ -85,6 +92,9 @@ class ExposureEngine:
                 mount=self.mount,
                 placement=self.placement,
                 machine=self.machine,
+                grayscale=self.grayscale,
+                gray_levels=self.gray_levels,
+                intensity_lut=self.intensity_lut,
             )
         return self._raster
 
@@ -128,6 +138,8 @@ class ExposureEngine:
         suffix = Path(input_path).suffix.lower()
         is_svg = suffix == ".svg"
         if effective == "auto":
+            if self.grayscale:
+                return "raster"
             return "vector" if is_svg else "raster"
         if effective == "vector" and not is_svg:
             raise ValueError(
@@ -209,16 +221,24 @@ class ExposureEngine:
             },
         }
 
-    def readbin(self, filename: str | Path | None = None) -> dict:
-        """Read back an event-driven ``.bin``/``.pat`` file into unpacked bits and metadata."""
+    def readbin(
+        self, filename: str | Path | None = None, grayscale: bool | None = None
+    ) -> dict:
+        """Read back an event-driven ``.bin``/``.pat`` file into unpacked bits or 8-bit intensities."""
         in_path = self._resolve_bin_path(filename)
+        use_gray = self.grayscale if grayscale is None else bool(grayscale)
 
-        facets, lanes, width, data_bytes = io.read_binary_file(
-            in_path, self.cfg.laser_timing, int(self.params["bitsinscanline"])
-        )
-        data_bits = np.unpackbits(data_bytes, bitorder=self.bitorder)
+        if use_gray:
+            facets, lanes, width, data = io.read_grayscale_binary_file(
+                in_path, self.cfg.laser_timing, int(self.params["bitsinscanline"])
+            )
+        else:
+            facets, lanes, width, data_bytes = io.read_binary_file(
+                in_path, self.cfg.laser_timing, int(self.params["bitsinscanline"])
+            )
+            data = np.unpackbits(data_bytes, bitorder=self.bitorder)
         return {
-            "data": data_bits,
+            "data": data,
             "metadata": {
                 "lanes": lanes,
                 "lanewidth": width,

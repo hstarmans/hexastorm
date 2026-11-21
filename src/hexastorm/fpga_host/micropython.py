@@ -348,8 +348,8 @@ class ESP32Host(BaseHost):
             counts[f_id] += 1
             facet_id[sample] = f_id
             facet_ms[sample] = f_ticks / (laz_tim["crystal_hz"] / 1000)
-            delay = randint(int(0.5 * dt_facet_ms), dt_facet_ms)
-            await sleep_ms(dt_facet_ms)
+            delay = randint(dt_facet_ms + 1, 2 * dt_facet_ms)
+            await sleep_ms(delay)
         logger.error("Measurement fails")
         return facet_ms, facet_id
 

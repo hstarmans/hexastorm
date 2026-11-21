@@ -83,3 +83,16 @@ def test_tick_native_laser_timing():
     assert laz_tim["photodiode_rearm_ticks"] == 480
     for legacy_key in ("laser_hz", "laser_ticks", "scanline_length"):
         assert legacy_key not in laz_tim
+
+
+def test_raster_grid_derived_from_samplegridsize():
+    """Verify bitsinscanline scales inversely with physical samplegridsize (default 10 um)."""
+    assert not hasattr(PlatformConfig, "DEFAULT_RASTER_SAMPLES")
+    cfg = PlatformConfig(test=False)
+    params_10um = cfg.get_optical_params(samplegridsize=0.01)
+    assert params_10um["samplegridsize"] == 0.01
+    assert params_10um["bitsinscanline"] == 560
+
+    params_5um = cfg.get_optical_params(samplegridsize=0.005)
+    assert params_5um["samplegridsize"] == 0.005
+    assert params_5um["bitsinscanline"] == 1120

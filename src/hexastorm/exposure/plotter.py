@@ -25,10 +25,16 @@ def _ellipse_kernel(kernel_size: int) -> np.ndarray:
 
 
 def laser_compensation(
-    layerarr: np.ndarray, params: Any, erode: bool = False
+    layerarr: np.ndarray,
+    params: Any,
+    erode: bool = False,
+    pixel_size_mm: float | None = None,
 ) -> np.ndarray:
     """Apply elliptical laser-spot morphology (erosion or dilation) using pure NumPy."""
-    pixel_radius = params["laser_radius_mm"] / params["samplegridsize"]
+    pitch_mm = (
+        float(params["samplegridsize"]) if pixel_size_mm is None else float(pixel_size_mm)
+    )
+    pixel_radius = params["laser_radius_mm"] / pitch_mm
     kernel_size = round(pixel_radius * 2)
 
     logger.debug(
@@ -166,11 +172,15 @@ def plot_pattern(
     logger.debug(f"Plotting Image: {width}x{height} pixels (view={view})")
 
     canvas = np.zeros((height, width), dtype=np.uint8)
+    is_grayscale = bool(bits_plot.size and np.any(bits_plot > 1))
     val_even = 100
     val_odd = 200
     val_all = 255
 
-    if color_lanes:
+    if is_grayscale:
+        active_mask = bits_plot > 0
+        canvas[row_plot[active_mask], x_plot[active_mask]] = bits_plot[active_mask]
+    elif color_lanes:
         num_lanes = int(local_params.get("lanes", 1))
         samples_per_lane = len(x_plot) // num_lanes
         for i in range(num_lanes):
@@ -189,7 +199,9 @@ def plot_pattern(
     canvas_dilated = laser_compensation(canvas, local_params, erode=False)
 
     rgb_canvas = np.zeros((height, width, 3), dtype=np.uint8)
-    if color_lanes:
+    if is_grayscale:
+        rgb_canvas[:] = canvas_dilated[:, :, None]
+    elif color_lanes:
         rgb_canvas[canvas_dilated == val_even] = (255, 200, 100)
         rgb_canvas[canvas_dilated == val_odd] = (255, 255, 255)
     else:

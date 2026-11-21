@@ -170,6 +170,22 @@ class Laserhead(Elaboratable):
         next_event = Signal(32)
         has_next_event = Signal()
         line_tick = Signal(24)
+        cur_intensity = Signal(8)
+        sd_acc = Signal(8)
+
+        # 1st-order Sigma-Delta PDM for 8-bit grayscale (0=off, 255=constant on, 1..254=PDM)
+        event_hit = Signal()
+        eff_intensity = Signal(8)
+        sd_sum = Signal(9)
+        pdm_on = Signal()
+        m.d.comb += [
+            event_hit.eq(line_tick == cur_event[8:32]),
+            eff_intensity.eq(Mux(event_hit, cur_event[0:8], cur_intensity)),
+            sd_sum.eq(sd_acc + eff_intensity),
+            pdm_on.eq(
+                Mux(eff_intensity == 255, 1, Mux(eff_intensity == 0, 0, sd_sum[8]))
+            ),
+        ]
 
         with m.FSM(init="RESET") as laserfsm:
             with m.State("RESET"):
@@ -196,6 +212,8 @@ class Laserhead(Elaboratable):
                     words_left.eq(0),
                     has_next_event.eq(0),
                     line_tick.eq(0),
+                    cur_intensity.eq(0),
+                    sd_acc.eq(0),
                     self.read_en.eq(0),
                     self.read_commit.eq(0),
                     self.read_discard.eq(0),
@@ -339,6 +357,8 @@ class Laserhead(Elaboratable):
                 m.d.sync += [
                     tickcounter.eq(tickcounter + 1),
                     line_tick.eq(0),
+                    cur_intensity.eq(0),
+                    sd_acc.eq(0),
                     lasers.eq(0),
                 ]
                 start_threshold = int(laz_tim["start_frac"] * laz_tim["facet_ticks"])
@@ -369,7 +389,11 @@ class Laserhead(Elaboratable):
                 ]
 
                 with m.If(line_tick >= scanline_ticks):
-                    m.d.sync += lasers.eq(0)
+                    m.d.sync += [
+                        lasers.eq(0),
+                        cur_intensity.eq(0),
+                        sd_acc.eq(0),
+                    ]
 
                     with m.If(words_left > 0):
                         m.d.sync += [
@@ -394,9 +418,21 @@ class Laserhead(Elaboratable):
                         with m.Else():
                             m.d.sync += stepcnt.eq(stepcnt + 1)
 
-                    # Event-driven laser switching at full FPGA clock resolution
-                    with m.If(line_tick == cur_event[8:32]):
-                        m.d.sync += lasers.eq(Mux(cur_event[0:8].any(), 0b11, 0b00))
+                    # Apply active intensity via 1st-order Sigma-Delta PDM (0=off, 255=constant on)
+                    m.d.sync += [
+                        cur_intensity.eq(eff_intensity),
+                        sd_acc.eq(
+                            Mux(
+                                (eff_intensity == 0) | (eff_intensity == 255),
+                                0,
+                                sd_sum[:8],
+                            )
+                        ),
+                        lasers.eq(Mux(pdm_on, 0b11, 0b00)),
+                    ]
+
+                    # Advance event queue at matching FPGA clock tick
+                    with m.If(event_hit):
                         with m.If(has_next_event):
                             m.d.sync += [
                                 cur_event.eq(next_event),

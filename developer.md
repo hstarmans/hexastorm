@@ -99,7 +99,7 @@ Wait-free variable-length event stream processed by `Laserhead` ([src/hexastorm/
   * Event 1 in bits `32..63`: `[8-bit intensity (32..39) | 24-bit tick (40..63)]`
   * Unused trailing slot (when event count is odd): sentinel `tick = 0xFFFFFF`, `intensity = 0` (`0xFFFFFF00`).
 
-During `DATA_RUN`, `line_tick` starts at `0` at `start_frac × facet_ticks` and increments at the full FPGA clock (`24 MHz`, up to `scanline_ticks = 42 000`). Both event-driven laser switching (`line_tick == cur_event.tick`) and orthogonal stage stepping (`stephalfperiod`) run directly at `24 MHz` with no legacy pixel divider.
+During `DATA_RUN`, `line_tick` starts at `0` at `start_frac × facet_ticks` and increments at the full FPGA clock (`24 MHz`, up to `scanline_ticks = 42 000`). Both event-driven laser switching and orthogonal stage stepping (`stephalfperiod`) run directly at `24 MHz`. Each event's 8-bit `intensity` drives both laser outputs synchronously via a 1st-order `24 MHz` Sigma-Delta PDM stage: `0` holds the diodes off, `255` holds them continuously ON (100% binary, zero switching), and `1..254` modulates at `24 MHz` (`intensity / 256` duty cycle, suited for fast laser switches such as the iC-Haus iC-HKB).
 
 ### `4` — `last_scanline` (1 word)
 
@@ -130,11 +130,11 @@ Default production values in [src/hexastorm/config.py](src/hexastorm/config.py):
 | `spinup_time` | `1.5` s | Spin-up wait before enabling the sync laser |
 | `stable_time` | `1.125` s | Initial photodiode lock timeout |
 | `hfosc_div` | `1` | Internal iCE40 `SB_HFOSC` divider (`24 MHz` clock → `120 000` ticks/facet) |
-| `DEFAULT_RASTER_SAMPLES` | `1000` | Host-only software grid (`bitsinscanline`) for `RasterExposure` fallback and `plotter.py` |
+| `samplegridsize` | `0.01` mm | Vector-to-raster fallback pitch (`.ps` / rasterized `.svg`) and debug-plot resolution (`10 µm` → `bitsinscanline = 560`, padded to a multiple of 8). True bitmaps use their native `pixelsize` (or embedded DPI) directly. |
 | `single_line` | `False` | Repeat the buffered line(s) continuously when FIFO hits empty |
 | `singlefacet` | `False` | Expose on only one facet per revolution |
 
-> **Tick-native timing:** Both `VectorExposure` (`PrismCurve.u_to_tick()`) and `Laserhead` laser switching and step generation operate directly in `24 MHz` FPGA clock ticks (`41.7 ns` resolution) across `scanline_ticks = round(facet_ticks × (end_frac − start_frac))`. `DEFAULT_RASTER_SAMPLES = 1000` is purely a host-side sampling resolution for the frozen `RasterExposure` bitmap fallback and debug plotting.
+> **Tick-native timing, native bitmaps & fallback raster grid:** `VectorExposure` (`PrismCurve.u_to_tick()`), direct bitmap slicing (`RasterExposure.slice_bitmap()`), and `Laserhead` laser modulation and step generation all operate directly in `24 MHz` FPGA clock ticks (`41.7 ns` resolution) across `scanline_ticks = round(facet_ticks × (end_frac − start_frac))`. True bitmaps (`.png`, `.jpg`, etc.) are never resized onto `samplegridsize`; their scanlines intersect native `pixelsize` boundaries and emit `(tick, intensity)` RLE events on transitions (binary by default, or opt-in `grayscale=True` / `gray_levels = 32` / `intensity_lut`). `samplegridsize` (`10 µm` → `560` samples/line) applies only to the vector-to-raster fallback (`.ps`/`.eps`, `.svg` with `mode="raster"` or `grayscale=True`) and PC debug reconstruction (`plotter.py` / `readbin()`).
 
 ---
 
@@ -144,7 +144,7 @@ Default production values in [src/hexastorm/config.py](src/hexastorm/config.py):
 
 Implemented in [src/hexastorm/fpga_host/micropython.py](src/hexastorm/fpga_host/micropython.py), backed by [src/hexastorm/lasers.py](src/hexastorm/lasers.py) and [src/hexastorm/fpga_host/interface.py](src/hexastorm/fpga_host/interface.py).
 
-On every valid synchronized photodiode pulse in `Laserhead` (`WAIT_STABLE`), the FPGA latches `facet_period_ticks = Cat(facetcnt, tickcounter)` and exposes `[ticks_per_facet, facet_id]` via `Spi.Commands.debug` (`BaseHost.read_facet_ticks_and_id()`). `ESP32Host.measure_facet_period_ms(samples=200)` converts measured ticks to milliseconds and inserts a randomized pause (`0 .. 4 × dt_facet_ms`) every 25 samples so sampling does not alias with prism rotation.
+On every valid synchronized photodiode pulse in `Laserhead` (`WAIT_STABLE`), the FPGA latches `facet_period_ticks = Cat(facetcnt, tickcounter)` and exposes `[ticks_per_facet, facet_id]` via `Spi.Commands.debug` (`BaseHost.read_facet_ticks_and_id()`). `ESP32Host.measure_facet_period_ms(samples=200)` converts measured ticks to milliseconds and sleeps for a randomized interval (`dt_facet_ms + 1 .. 2 × dt_facet_ms` ms, plus `0 .. 4 × dt_facet_ms` ms every 25 samples) so every read captures a fresh facet measurement without aliasing with prism rotation.
 
 `ESP32Host.test_laserhead(shift=0, ref_facet_means=None)` maps raw hardware facet indices to logical facets via `(f_id + shift) % num_facets` and decomposes timing variance into static facet cut/geometry differences, motor speed jitter, and photodiode/timer noise across two stages:
 
@@ -166,7 +166,7 @@ Implemented in [src/hexastorm/calibration/analyzer.py](src/hexastorm/calibration
 
 Because optical bench verification uses a stationary camera sensor (no moving stage or photoresist needed), calibration and 2D validation follow a four-step closed loop:
 
-1. **Camera Visibility Scan (`DynamicTests.scan_visibility`):** Sweeps a single lit position across the software scanline grid (`bitsinscanline = 1000`, default stride `10`), captures frames with `picture_line`, runs `get_dots()`, and records which grid indices fall inside the camera viewport in `output/calibration/scan_visibility.json`.
+1. **Camera Visibility Scan (`DynamicTests.scan_visibility`):** Sweeps a single lit position across the `10 µm` software scanline grid (`bitsinscanline = 560`, default stride `10`), captures frames with `picture_line`, runs `get_dots()`, and records which grid indices fall inside the camera viewport in `output/calibration/scan_visibility.json`.
 2. **1D Dot-Pattern Measurement (`DynamicTests.baseline_calibration_cycle` + `analyzer.py`):**
    * Bypasses the slicer via `direct_pattern()` (`[1] + [0]×39` repeated across `bitsinscanline`) and captures `facet{f}_iter{it}.jpg` per facet across `iterations = 10` runs alongside live photodiode facet means (`host.cur_facet_means`).
    * `get_dots()` applies Otsu thresholding (minimum floor `50`), dynamic morphological closing (`min_diameter_um` scaled by camera pixel pitch), contour area filtering (`10–200 µm` default for baseline 1D lines), moment centroids, and `cv.fitEllipse` for major/minor axes and eccentricity.

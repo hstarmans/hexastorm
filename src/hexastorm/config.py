@@ -174,8 +174,6 @@ class PlatformConfig:
     Holds platform configuration.
     """
 
-    DEFAULT_RASTER_SAMPLES = 1000
-
     def __init__(self, test=False):
         """
         Initialization follows one of two routes:
@@ -323,12 +321,17 @@ class PlatformConfig:
             }
         return correction_dict
 
-    def get_optical_params(self, correction=False, exposures=4):
+    def get_optical_params(
+        self, correction=False, exposures=4, samplegridsize=0.01
+    ):
         """
         Returns a dictionary of physical parameters, including calculated Lanewidth.
 
         correction: If True, loads empirically derived corrections from calibration_history.json.
         exposures: Number of exposures per facet, used to calculate stepsperline for stage speed.
+        samplegridsize: Fallback software raster pitch in mm (default 0.01 mm = 10 um) used
+            for vector-to-raster fallback (.svg/.ps) and debug plot reconstruction. True bitmaps
+            use their native physical pixelsize directly.
         """
         if correction is True:
             correction_data = self.load_latest_calibration()
@@ -342,12 +345,6 @@ class PlatformConfig:
 
         # need steps per line to calculate stage speed
         params = {"stepsperline": 1 / exposures}  # 0.25 is four exposures per line
-
-        raster_samples = (
-            self.DEFAULT_RASTER_SAMPLES
-            if laz_tim["scanline_ticks"] >= self.DEFAULT_RASTER_SAMPLES
-            else int(laz_tim["scanline_ticks"])
-        )
 
         params.update(
             {
@@ -375,7 +372,7 @@ class PlatformConfig:
                 "samplexsize": 0.0,
                 "sampleysize": 0.0,
                 # Optical resolution / Grid size [mm]
-                "samplegridsize": 0.01,
+                "samplegridsize": float(samplegridsize),
                 "facetsinlane": 0.0,
                 # Stage Speed [mm/s]: Derived from RPM and Facets to ensure correct aspect ratio
                 "stagespeed": (
@@ -386,18 +383,27 @@ class PlatformConfig:
                     * (laz_tim["rpm"] / 60)
                     * laz_tim["facets"]
                 ),
-                # Host-only software raster grid resolution for RasterExposure / plotter
-                "bitsinscanline": raster_samples,
                 "downsamplefactor": 1.0,
                 # resist
                 "positiveresist": 0.0,
             }
         )
 
-        params["lanewidth"] = abs(
+        lanewidth = abs(
             displacement_at_frac(laz_tim["end_frac"], params)
             - displacement_at_frac(laz_tim["start_frac"], params)
         )
+        params["lanewidth"] = lanewidth
+
+        # Derive software raster sample count from physical samplegridsize (10 um -> 560 samples)
+        raw_samples = max(1, ceil(lanewidth / float(samplegridsize)))
+        if laz_tim["scanline_ticks"] >= 8:
+            raster_samples = min(
+                ((raw_samples + 7) // 8) * 8, int(laz_tim["scanline_ticks"])
+            )
+        else:
+            raster_samples = int(laz_tim["scanline_ticks"])
+        params["bitsinscanline"] = int(raster_samples)
 
         num_facets = int(laz_tim["facets"])
 

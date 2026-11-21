@@ -94,52 +94,49 @@ def calc_step_half_period(steps_line: float, scanline_ticks: int) -> int:
     return int(half_period)
 
 
-def bits_to_events(laser_bits, scanline_ticks: int) -> list[tuple[int, int]]:
-    """Convert a 1D binary sequence into (tick, intensity) transitions over ``[0, scanline_ticks)``.
-
-    Assumes the laser starts OFF (0) at tick 0 of the active scanline window.
-    """
+def _rle_to_events(values, scanline_ticks: int, is_binary: bool) -> list[tuple[int, int]]:
+    """Run-length encode a 1D binary or 8-bit intensity array into (tick, intensity) events."""
     total_ticks = int(scanline_ticks)
-    n = len(laser_bits)
+    n = len(values)
     if n == 0:
         return []
     if n > total_ticks:
-        raise ValueError(
-            f"laser_bits length ({n}) exceeds scanline_ticks ({total_ticks})"
-        )
+        raise ValueError(f"Sequence length ({n}) exceeds scanline_ticks ({total_ticks})")
 
-    if not IS_MICROPYTHON and isinstance(laser_bits, np.ndarray):
-        arr = np.asarray(laser_bits, dtype=np.uint8) != 0
+    if not IS_MICROPYTHON and isinstance(values, np.ndarray):
+        if is_binary:
+            arr = np.where(np.asarray(values) != 0, 255, 0).astype(np.uint8)
+        else:
+            arr = np.clip(np.asarray(values), 0, 255).astype(np.uint8)
         prev = np.empty_like(arr)
-        prev[0] = False
+        prev[0] = 0
         prev[1:] = arr[:-1]
         change_idx = np.flatnonzero(arr != prev)
         if change_idx.size == 0:
             return []
         ticks = ((change_idx.astype(np.int64) * total_ticks) + n - 1) // n
-        intensities = np.where(arr[change_idx], 255, 0)
-        return list(zip(ticks.tolist(), intensities.tolist()))
+        return list(zip(ticks.tolist(), arr[change_idx].tolist()))
 
     events = []
-    state = False
-    for idx, bit in enumerate(laser_bits):
-        b = bool(bit)
-        if b != state:
+    prev_val = 0
+    for idx, raw in enumerate(values):
+        val = (255 if raw else 0) if is_binary else max(0, min(255, int(raw)))
+        if val != prev_val:
             tick = ((idx * total_ticks) + n - 1) // n
-            events.append((tick, 255 if b else 0))
-            state = b
+            events.append((tick, val))
+            prev_val = val
     return events
 
 
-def events_to_bits(
-    events: list[tuple[int, int]], num_bits: int, scanline_ticks: int
+def _events_to_rle(
+    events: list[tuple[int, int]], num_samples: int, scanline_ticks: int, is_binary: bool
 ) -> list[int]:
-    """Reconstruct a binary 0/1 list of length ``num_bits`` from FPGA tick events."""
-    n = int(num_bits)
+    """Reconstruct a binary 0/1 or 8-bit 0..255 list of length ``num_samples`` from events."""
+    n = int(num_samples)
     total_ticks = int(scanline_ticks)
-    bits = [0] * n
+    out = [0] * n
     if not events or n <= 0 or total_ticks <= 0:
-        return bits
+        return out
 
     valid_events = [(int(t), int(v)) for t, v in events if 0 <= int(t) < SENTINEL_TICK]
     for i, (tick, intensity) in enumerate(valid_events):
@@ -150,10 +147,34 @@ def events_to_bits(
             end_px = min(n, (valid_events[i + 1][0] * n) // total_ticks)
         else:
             end_px = n
-        bit_val = 1 if intensity > 0 else 0
+        fill_val = (1 if intensity > 0 else 0) if is_binary else max(0, min(255, intensity))
         for px in range(start_px, end_px):
-            bits[px] = bit_val
-    return bits
+            out[px] = fill_val
+    return out
+
+
+def bits_to_events(laser_bits, scanline_ticks: int) -> list[tuple[int, int]]:
+    """Convert a 1D binary sequence into ``(tick, intensity)`` transitions over ``[0, scanline_ticks)``."""
+    return _rle_to_events(laser_bits, scanline_ticks, is_binary=True)
+
+
+def events_to_bits(
+    events: list[tuple[int, int]], num_bits: int, scanline_ticks: int
+) -> list[int]:
+    """Reconstruct a binary 0/1 list of length ``num_bits`` from FPGA tick events."""
+    return _events_to_rle(events, num_bits, scanline_ticks, is_binary=True)
+
+
+def intensities_to_events(intensities, scanline_ticks: int) -> list[tuple[int, int]]:
+    """Run-length encode 8-bit ``0..255`` intensity samples into ``(tick, intensity)`` events."""
+    return _rle_to_events(intensities, scanline_ticks, is_binary=False)
+
+
+def events_to_intensities(
+    events: list[tuple[int, int]], num_samples: int, scanline_ticks: int
+) -> list[int]:
+    """Reconstruct 8-bit ``0..255`` intensity samples of length ``num_samples`` from tick events."""
+    return _events_to_rle(events, num_samples, scanline_ticks, is_binary=False)
 
 
 def pack_scanline_events(
