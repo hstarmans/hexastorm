@@ -11,12 +11,20 @@ import logging
 import sys
 from collections import OrderedDict
 from math import ceil, pi, radians
-from typing import ClassVar
+
+try:
+    from typing import TYPE_CHECKING
+except ImportError:
+    TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from typing import ClassVar
 
 if sys.implementation.name == "micropython":
     from ulab import numpy as np
 
     MICROPYTHON = True
+    _NP_FLOAT = np.float
 else:
     import json
     from pathlib import Path
@@ -24,6 +32,7 @@ else:
     import numpy as np
 
     MICROPYTHON = False
+    _NP_FLOAT = float
 
 try:
     from camera import FrameSize, GrabMode, PixelFormat
@@ -47,7 +56,7 @@ class Spi:
 
     command_bytes = 1
     word_bytes = 8
-    move_instruction: ClassVar[dict[str, int]] = {"instruction": 1, "ticks": 7}
+    move_instruction: "ClassVar[dict[str, int]]" = {"instruction": 1, "ticks": 7}
 
     class Commands:
         """SPI protocol command. Each command is followed by a word."""
@@ -92,7 +101,7 @@ class Spi:
 class Camera:
     """Central hardware and optical specs for supported cameras (OV2640, OV2311)."""
 
-    OV2640: ClassVar[dict] = {
+    OV2640: "ClassVar[dict]" = {
         "name": "OV2640",
         "width": 1600,
         "height": 1200,
@@ -126,7 +135,7 @@ class Camera:
         },
     }
 
-    OV2311: ClassVar[dict] = {
+    OV2311: "ClassVar[dict]" = {
         "name": "OV2311",
         "width": 1600,
         "height": 1300,
@@ -309,7 +318,7 @@ class PlatformConfig:
         Returns:
             dict: Correction dictionary formatted for `get_optical_params(correction=...)`.
         """
-        periods = np.array(facet_period_ms, dtype=float)
+        periods = np.array(facet_period_ms, dtype=_NP_FLOAT)
         p_median = float(np.median(periods))
         delta_t_ms = periods - p_median
 

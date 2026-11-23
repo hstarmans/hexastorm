@@ -19,7 +19,9 @@ else:
     _NP_FLOAT = float
 
 
-def _displacement_scalar(frac: float, facets: float, inradius: float, n: float) -> float:
+def _displacement_scalar(
+    frac: float, facets: float, inradius: float, n: float
+) -> float:
     """Compute scalar Snell's-law prism displacement [mm] at facet fraction."""
     i_max = 180.0 / facets
     angle = math.radians(-2.0 * i_max * frac + i_max)
@@ -59,6 +61,8 @@ class PrismCurveLite:
             raw_u.append(self.sin_tilt * disp)
             ticks.append(alpha * float(self.total_ticks))
 
+        self.disp_last = disp_vals[0]
+        self.disp_first = disp_vals[-1]
         self.raw_u_last = raw_u[0]
         self.raw_u_first = raw_u[-1]
         self.xstart_val = abs(self.raw_u_last + self.f0_scan)
@@ -126,6 +130,11 @@ def _median_list(values: list[float]) -> float:
     if n % 2 == 1:
         return float(s[mid])
     return 0.5 * (float(s[mid - 1]) + float(s[mid]))
+
+
+def _hypot(dx: float, dy: float) -> float:
+    """MicroPython-safe Euclidean norm (MicroPython math lacks math.hypot)."""
+    return math.sqrt(dx * dx + dy * dy)
 
 
 def subtract_dark_frame_u8(img, dark_frame=None):
@@ -273,7 +282,9 @@ def get_dots_ulab(
                     if pr[0] - gap_tol <= x1 and pr[1] + gap_tol >= x0:
                         proot = find_root(pr[2])
                         matched_root = (
-                            proot if matched_root < 0 else union_cids(matched_root, proot)
+                            proot
+                            if matched_root < 0
+                            else union_cids(matched_root, proot)
                         )
 
             if matched_root < 0:
@@ -423,7 +434,7 @@ def calculate_facet_shifts_ulab(
             best_pt = None
             best_d = max_shift_px + 1.0
             for px, py in facets_pts[f_idx]:
-                dist = math.hypot(px - ax, py - ay)
+                dist = _hypot(px - ax, py - ay)
                 if dist <= max_shift_px and dist < best_d:
                     best_d = dist
                     best_pt = (px, py)
@@ -471,38 +482,16 @@ def calculate_facet_shifts_ulab(
     return facet_data, ref_arr
 
 
-def analyze_facets_ulab(
-    facet_frames,
-    dark_frame=None,
+def summarize_facet_dots_ulab(
+    raw_dots: list,
+    spot_metrics: list[dict],
     pixelsize: float = 4.4,
     compute_rotation: bool = True,
     rotation_angle_deg: float | None = None,
-    min_diameter_um: float = 10.0,
-    max_diameter_um: float = 250.0,
     max_shift_um: float = 250.0,
-):
-    """Analyze facet frames in RAM using unified global median rotation & virtual reference."""
-    raw_dots = []
-    spot_metrics = []
-    ind_angles = []
-
-    for idx, frame in enumerate(facet_frames):
-        dots, metrics = get_dots_ulab(
-            frame,
-            dark_frame=dark_frame,
-            pixelsize=pixelsize,
-            min_diameter_um=min_diameter_um,
-            max_diameter_um=max_diameter_um,
-        )
-        if dots.shape[0] < 2:
-            raise ValueError(
-                f"Facet {idx}: insufficient calibration dots detected ({dots.shape[0]})."
-            )
-        raw_dots.append(dots)
-        spot_metrics.append(metrics)
-        if compute_rotation:
-            ind_angles.append(compute_angle_ulab(dots))
-
+) -> dict:
+    """Rectify detected per-facet dot arrays and compute facet Shift/Error summary."""
+    ind_angles = [compute_angle_ulab(d) for d in raw_dots] if compute_rotation else []
     if compute_rotation:
         global_angle = _median_list(ind_angles)
         rect_dots = [rotate_dots_ulab(d, global_angle) for d in raw_dots]
@@ -518,14 +507,14 @@ def analyze_facets_ulab(
     )
 
     results = {}
-    for idx in range(len(facet_frames)):
+    for idx in range(len(raw_dots)):
         f_key = str(idx)
         s_um = float(shift_data[f_key]["Scan_shift_um"])
         o_um = float(shift_data[f_key]["Orth_shift_um"])
         results[f_key] = {
             "Scan_shift_um": round(s_um, 2),
             "Orth_shift_um": round(o_um, 2),
-            "Total_error_um": round(math.hypot(s_um, o_um), 2),
+            "Total_error_um": round(_hypot(s_um, o_um), 2),
             "rotation_angle_deg": round(
                 float(ind_angles[idx]) if compute_rotation else global_angle, 4
             ),
@@ -538,6 +527,45 @@ def analyze_facets_ulab(
             "dots_matched": shift_data[f_key]["dots_matched"],
         }
     return results
+
+
+def analyze_facets_ulab(
+    facet_frames,
+    dark_frame=None,
+    pixelsize: float = 4.4,
+    compute_rotation: bool = True,
+    rotation_angle_deg: float | None = None,
+    min_diameter_um: float = 10.0,
+    max_diameter_um: float = 250.0,
+    max_shift_um: float = 250.0,
+):
+    """Analyze facet frames in RAM using unified global median rotation & virtual reference."""
+    raw_dots = []
+    spot_metrics = []
+
+    for idx, frame in enumerate(facet_frames):
+        dots, metrics = get_dots_ulab(
+            frame,
+            dark_frame=dark_frame,
+            pixelsize=pixelsize,
+            min_diameter_um=min_diameter_um,
+            max_diameter_um=max_diameter_um,
+        )
+        if dots.shape[0] < 2:
+            raise ValueError(
+                f"Facet {idx}: insufficient calibration dots detected ({dots.shape[0]})."
+            )
+        raw_dots.append(dots)
+        spot_metrics.append(metrics)
+
+    return summarize_facet_dots_ulab(
+        raw_dots,
+        spot_metrics,
+        pixelsize=pixelsize,
+        compute_rotation=compute_rotation,
+        rotation_angle_deg=rotation_angle_deg,
+        max_shift_um=max_shift_um,
+    )
 
 
 def make_dot_centers_mm(
@@ -642,7 +670,9 @@ def slice_dot_grid_events(
     r = 0.5 * float(dot_diameter_mm)
     margin_mm = max(0.25, float(dot_diameter_mm))
 
-    xs = make_dot_centers_mm(u_min_mm, u_max_mm, num_dots=num_dots_x, margin_mm=margin_mm)
+    xs = make_dot_centers_mm(
+        u_min_mm, u_max_mm, num_dots=num_dots_x, margin_mm=margin_mm
+    )
     y_offset = 0.15
     spacing_y = max(float(dot_diameter_mm) * 2.5, 0.20)
     dots = [
@@ -694,6 +724,7 @@ class VirtualStackerUlab:
         px_size_um: float = 4.4,
         steps_mm: float = 100.0,
         rotation_angle_deg: float = 0.0,
+        frame_shape: tuple[int, int] | None = None,
     ):
         self.expected_total_steps = max(1, int(expected_total_steps))
         self.step_px = (
@@ -705,6 +736,8 @@ class VirtualStackerUlab:
         self.canvas = None
         self.offset_x = 0
         self.offset_y = 0
+        if frame_shape is not None:
+            self._init_canvas(frame_shape[0], frame_shape[1])
 
     def _init_canvas(self, h: int, w: int) -> None:
         total_dx = abs(self.step_dx * self.expected_total_steps)
@@ -717,8 +750,7 @@ class VirtualStackerUlab:
         self.canvas = np.zeros((ch, cw), dtype=np.uint8)
 
     def add_exposure(self, img, num_steps: int, dark_frame=None) -> None:
-        clean = subtract_dark_frame_u8(img, dark_frame)
-        h, w = clean.shape
+        h, w = img.shape
         if self.canvas is None:
             self._init_canvas(h, w)
 
@@ -736,10 +768,26 @@ class VirtualStackerUlab:
         ix0 = x0 - sx
         iy0 = y0 - sy
         ix1 = ix0 + (x1 - x0)
-        iy1 = iy0 + (y1 - y0)
-        self.canvas[y0:y1, x0:x1] = np.maximum(
-            self.canvas[y0:y1, x0:x1], clean[iy0:iy1, ix0:ix1]
-        )
+
+        has_dark = dark_frame is not None and dark_frame.shape == img.shape
+        strip_rows = 64
+        span_y = y1 - y0
+        for dy in range(0, span_y, strip_rows):
+            dy_end = min(span_y, dy + strip_rows)
+            img_strip = img[iy0 + dy : iy0 + dy_end, ix0:ix1]
+            if has_dark:
+                dark_strip = dark_frame[iy0 + dy : iy0 + dy_end, ix0:ix1]
+                clean_strip = np.maximum(img_strip, dark_strip) - dark_strip
+            else:
+                clean_strip = img_strip
+            self.canvas[y0 + dy : y0 + dy_end, x0:x1] = np.maximum(
+                self.canvas[y0 + dy : y0 + dy_end, x0:x1], clean_strip
+            )
+
+    def reset(self) -> None:
+        """Clear accumulated canvas pixels in-place so the buffer can be reused."""
+        if self.canvas is not None:
+            self.canvas[:] = 0
 
     def get_result(self):
         """Return accumulated 2D uint8 grayscale stacked canvas."""

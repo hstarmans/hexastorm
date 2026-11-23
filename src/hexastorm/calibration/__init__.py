@@ -33,19 +33,43 @@ from .core import (
 from .core import (
     subtract_dark_frame_u8 as subtract_dark_frame_u8,
 )
+from .core import (
+    summarize_facet_dots_ulab as summarize_facet_dots_ulab,
+)
+from .vector_lite import (
+    HAS_VECTOR_CORE as HAS_VECTOR_CORE,
+)
+from .vector_lite import (
+    circle_polygon as circle_polygon,
+)
+from .vector_lite import (
+    decode_spi_scanlines as decode_spi_scanlines,
+)
+from .vector_lite import (
+    slice_dot_grid_vector_core as slice_dot_grid_vector_core,
+)
+from .vector_lite import (
+    slice_polygons_to_spi as slice_polygons_to_spi,
+)
 
 __all__ = [
+    "HAS_VECTOR_CORE",
     "PrismCurveLite",
     "VirtualStackerUlab",
     "analyze_facets_ulab",
     "calculate_facet_shifts_ulab",
+    "circle_polygon",
     "compute_angle_ulab",
+    "decode_spi_scanlines",
     "get_dots_ulab",
     "make_dot_centers_mm",
     "make_tick_dot_events",
     "rotate_dots_ulab",
     "slice_dot_grid_events",
+    "slice_dot_grid_vector_core",
+    "slice_polygons_to_spi",
     "subtract_dark_frame_u8",
+    "summarize_facet_dots_ulab",
 ]
 
 if sys.implementation.name != "micropython":
