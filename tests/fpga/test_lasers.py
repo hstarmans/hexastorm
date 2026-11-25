@@ -65,7 +65,6 @@ class BaseTest(LunaGatewareTestCase):
         single -- in single line mode dut.empty is not
                   a good measure
         """
-        # TODO: replace with logic from movement.py and process lines
         sim = self.sim
         dut = self.dut
         count = 0
@@ -130,8 +129,6 @@ class BaseTest(LunaGatewareTestCase):
         # read the line number
         await self.pulse(sim, dut.read_en_2)
         data_out = [sim.get(dut.read_data_2)]
-        # TODO: THIS CODE IS HALFWAY COMMIT
-        # print(data_out)
         for _ in range(0, total_bytes, Spi.word_bytes):
             await self.pulse(sim, dut.read_en_2)
             data_out.append(sim.get(dut.read_data_2))
