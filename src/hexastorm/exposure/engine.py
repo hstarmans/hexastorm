@@ -14,6 +14,7 @@ from .coordinates import (
     MachineFrame,
     SubstratePlacement,
 )
+from .esp32_client import Esp32WebClient, load_calibration_file
 from .raster import RasterExposure
 from .vector import VectorExposure
 
@@ -43,6 +44,7 @@ class ExposureEngine:
         grayscale: bool = False,
         gray_levels: int = 32,
         intensity_lut: np.ndarray | list[int] | None = None,
+        positiveresist: bool = False,
     ):
         if mode not in VALID_MODES:
             raise ValueError(
@@ -60,6 +62,7 @@ class ExposureEngine:
         self.grayscale = bool(grayscale)
         self.gray_levels = int(gray_levels)
         self.intensity_lut = intensity_lut
+        self.positiveresist = bool(positiveresist)
         self.bitorder = "big"
         self._vector: VectorExposure | None = None
         self._raster: RasterExposure | None = None
@@ -80,6 +83,7 @@ class ExposureEngine:
                 placement=self.placement,
                 machine=self.machine,
             )
+            self._vector.params["positiveresist"] = 1.0 if self.positiveresist else 0.0
         return self._vector
 
     @property
@@ -96,6 +100,7 @@ class ExposureEngine:
                 gray_levels=self.gray_levels,
                 intensity_lut=self.intensity_lut,
             )
+            self._raster.params["positiveresist"] = 1.0 if self.positiveresist else 0.0
         return self._raster
 
     def set_optical_params(
@@ -108,14 +113,18 @@ class ExposureEngine:
         self.params = self.cfg.get_optical_params(
             correction=self.correction, exposures=self.exposures
         )
+        pos_val = 1.0 if self.positiveresist else 0.0
+        self.params["positiveresist"] = pos_val
         if self._vector is not None:
             self._vector.set_optical_params(
                 correction=self.correction, exposures=self.exposures
             )
+            self._vector.params["positiveresist"] = pos_val
         if self._raster is not None:
             self._raster.set_optical_params(
                 correction=self.correction, exposures=self.exposures
             )
+            self._raster.params["positiveresist"] = pos_val
 
     def px_to_mm(self, px: int) -> float:
         """Map a software scanline pixel index to physical scan-axis distance in mm."""
@@ -275,8 +284,16 @@ def _cli(
     input_file: str = "combined_grid_test.svg",
     output_file: str | None = None,
     mode: str = "auto",
-    correction: bool = False,
+    correction: bool | None = None,
+    calibration: str | None = None,
+    esp32: str | None = None,
+    password: str | None = None,
+    upload: bool = False,
     exposures: int = 1,
+    positiveresist: bool = False,
+    mirror_x: bool = False,
+    mirror_y: bool = False,
+    rotation: float = 0.0,
     plot: bool = True,
     align: str = "laserhead",
 ):
@@ -284,20 +301,53 @@ def _cli(
     from ..log_setup import configure_logging
 
     configure_logging(logging.DEBUG)
+
+    if upload and not esp32:
+        raise ValueError("--upload requires --esp32=<url>")
+    if calibration is not None and correction is False:
+        raise ValueError("Cannot combine --calibration with --correction=False")
+
+    client: Esp32WebClient | None = None
+    effective_correction: bool | dict
+    if calibration is not None:
+        effective_correction = load_calibration_file(calibration)
+    elif esp32 is not None and correction is not False:
+        client = Esp32WebClient(
+            str(esp32), password=None if password is None else str(password)
+        )
+        effective_correction = client.fetch_calibration()
+    else:
+        effective_correction = bool(correction)
+
     engine = ExposureEngine(
-        correction=correction,
+        correction=effective_correction,
         exposures=exposures,
         mode=mode,
-        placement=SubstratePlacement(align=align),
+        placement=SubstratePlacement(
+            align=align,
+            rotation_deg=float(rotation),
+            mirror_x=bool(mirror_x),
+            mirror_y=bool(mirror_y),
+        ),
+        positiveresist=bool(positiveresist),
     )
     duration = engine.generate(input_file, output_path=output_file)
     logger.info(
         f"Exposure complete (mode={engine._last_mode}, duration={duration:.2f} min): "
         f"{engine._last_output_path}"
     )
-    pattern_data = engine.readbin()
     if plot:
+        pattern_data = engine.readbin()
         engine.plot(pattern_data)
+    if upload:
+        if engine._last_output_path is None:
+            raise RuntimeError("No generated output file to upload")
+        if client is None:
+            client = Esp32WebClient(
+                str(esp32), password=None if password is None else str(password)
+            )
+        resp = client.upload_file(engine._last_output_path)
+        logger.info(f"Uploaded {engine._last_output_path.name} to ESP32: {resp}")
 
 
 def main():

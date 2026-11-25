@@ -112,10 +112,12 @@ The ESP32-S3 (`src/hexastorm/fpga_host/`) streams 9-byte SPI frames (`1 command 
    uv run pytest -vv tests/fpga/test_core.py
    uv run ruff check src tests
    ```
-5. Generate patterns and `.pat` exposure files:
+5. Generate patterns and `.pat` exposure files (optionally pulling live calibration from an ESP32-S3 controller and uploading directly):
    ```console
    uv run pat_machine
    uv run exposure
+   uv run exposure pcb_fcu.svg --esp32 http://192.168.1.249 --exposures 4 --upload
+   # Useful PCB options: --positiveresist --mirror-x --mirror-y --rotation 90 --calibration config.json --password hex (or HEXASTORM_PASSWORD)
    ```
 
 Optical calibration workflows, camera setups (onboard ESP32-S3 OV2640 and legacy Raspberry Pi OV2311), and wire-level SPI/FIFO instruction formats are documented in [developer.md](./developer.md).
